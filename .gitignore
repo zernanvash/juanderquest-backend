@@ -1,39 +1,5 @@
-# OS
-Thumbs.db
-.DS_Store
-
-# IDE
-.idea/
-*.iml
-.vscode/
-
-# Node
-backend/node_modules/
-backend/dist/
-dashboard/node_modules/
-dashboard/dist/
-*.env
-
-# Flutter
-juanderquest_app/build/
-juanderquest_app/.dart_tool/
-juanderquest_app/.packages
-juanderquest_app/.flutter-plugins
-juanderquest_app/.flutter-plugins-dependencies
-juanderquest_app/android/.gradle/
-juanderquest_app/android/local.properties
-juanderquest_app/android/key.properties
-juanderquest_app/android/app/build/
-juanderquest_app/ios/.symlinks/
-juanderquest_app/ios/Pods/
-juanderquest_app/ios/Runner.xcworkspace/xcuserdata/
-juanderquest_app/.pub-cache/
-
-# Brain
-.brain/.obsidian/workspace.json
-.brain/.obsidian/cache/
-
-# Secrets
-**/secrets/
-**/credentials/
-*.pem
+node_modules/
+dist/
+.env
+coverage/
+*.log
