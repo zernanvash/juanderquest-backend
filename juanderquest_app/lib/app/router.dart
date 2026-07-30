@@ -33,6 +33,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/',
         builder: (context, state) => const DemoLoginScreen(),
       ),
+      GoRoute(
+        path: '/vote',
+        builder: (context, state) => const VoteScreen(),
+      ),
+      GoRoute(
+        path: '/vote/proposals',
+        builder: (context, state) => const VoteScreen(showProposalsModal: true),
+      ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) => MainShell(navigationShell: navigationShell),
         branches: [

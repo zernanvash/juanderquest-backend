@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../providers/profile_stats_provider.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -10,6 +11,7 @@ class ProfileScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(authProvider).user;
+    final stats = ref.watch(profileStatsProvider);
 
     return Scaffold(
       backgroundColor: const Color(0xFFFAF9F5),
@@ -72,53 +74,29 @@ class ProfileScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 24),
 
-            // Off-Chain Demo Points Card
+            // Computed Traveler Statistics Card
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFFFB703)),
+                border: Border.all(color: const Color(0xFFD5C4AC).withValues(alpha: 0.4)),
                 boxShadow: [
                   BoxShadow(
-                    color: const Color(0xFFFFB703).withValues(alpha: 0.15),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
+                    color: Colors.black.withValues(alpha: 0.03),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
                   ),
                 ],
               ),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'PROTOTYPE REWARDS',
-                        style: GoogleFonts.plusJakartaSans(color: const Color(0xFF837560), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.8),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Demo Points Balance',
-                        style: GoogleFonts.epilogue(color: const Color(0xFF582F0E), fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      Image.asset(
-                        'assets/images/jdq-token.png',
-                        width: 32,
-                        height: 32,
-                        errorBuilder: (_, __, ___) => const Icon(Icons.stars, color: Color(0xFFFFB703), size: 32),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '${user?.demoPoints ?? 0}',
-                        style: GoogleFonts.epilogue(color: const Color(0xFF7D5800), fontSize: 28, fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
+                  _buildStatItem('Completed', '${stats.completedQuestsCount}', Icons.check_circle_outline, const Color(0xFF2D6A4F)),
+                  const SizedBox(width: 8),
+                  _buildStatItem('Pending', '${stats.pendingSubmissionsCount}', Icons.hourglass_top_rounded, const Color(0xFFFFB703)),
+                  const SizedBox(width: 8),
+                  _buildStatItem('Points', '${stats.totalPointsEarned}', Icons.stars, const Color(0xFF7D5800)),
                 ],
               ),
             ),
@@ -157,7 +135,7 @@ class ProfileScreen extends ConsumerWidget {
 
             const SizedBox(height: 24),
 
-            // Achievement Section Card
+            // Live Achievements Section Card
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -172,18 +150,18 @@ class ProfileScreen extends ConsumerWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'Achievements',
+                        'Explorer Badges',
                         style: GoogleFonts.epilogue(color: const Color(0xFF582F0E), fontWeight: FontWeight.bold, fontSize: 16),
                       ),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFEFEEEA),
+                          color: const Color(0xFFBEEAD1),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
-                          'FUTURE FEATURE',
-                          style: GoogleFonts.plusJakartaSans(color: const Color(0xFF837560), fontSize: 9, fontWeight: FontWeight.bold),
+                          'LIVE PROGRESS',
+                          style: GoogleFonts.plusJakartaSans(color: const Color(0xFF436B58), fontSize: 9, fontWeight: FontWeight.bold),
                         ),
                       ),
                     ],
@@ -192,9 +170,9 @@ class ProfileScreen extends ConsumerWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
-                      _buildBadgeItem(Icons.eco, 'Eco Pioneer'),
-                      _buildBadgeItem(Icons.museum, 'Heritage Keeper'),
-                      _buildBadgeItem(Icons.restaurant, 'Food Explorer'),
+                      _buildAchievementBadge(Icons.eco, 'Eco Pioneer', stats.ecoPioneerUnlocked),
+                      _buildAchievementBadge(Icons.museum, 'Heritage Keeper', stats.heritageKeeperUnlocked),
+                      _buildAchievementBadge(Icons.restaurant, 'Food Explorer', stats.foodExplorerUnlocked),
                     ],
                   ),
                 ],
@@ -207,6 +185,7 @@ class ProfileScreen extends ConsumerWidget {
             ElevatedButton.icon(
               onPressed: () {
                 ref.read(authProvider.notifier).logout();
+                context.go('/');
               },
               icon: const Icon(Icons.logout),
               label: Text('Logout', style: GoogleFonts.epilogue(fontWeight: FontWeight.bold)),
@@ -221,29 +200,88 @@ class ProfileScreen extends ConsumerWidget {
           ],
         ),
       ),
-
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: const Color(0xFFD5C4AC).withValues(alpha: 0.4))),
+        ),
+        child: BottomNavigationBar(
+          backgroundColor: Colors.white,
+          selectedItemColor: const Color(0xFF3F6653),
+          unselectedItemColor: const Color(0xFF837560),
+          currentIndex: 4,
+          type: BottomNavigationBarType.fixed,
+          elevation: 0,
+          onTap: (index) {
+            if (index == 0) context.go('/quests');
+            if (index == 1) context.go('/map');
+            if (index == 2) context.go('/vote');
+            if (index == 3) context.go('/shop');
+          },
+          items: const [
+            BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Home'),
+            BottomNavigationBarItem(icon: Icon(Icons.map_rounded), label: 'Map'),
+            BottomNavigationBarItem(icon: Icon(Icons.how_to_vote_rounded), label: 'Vote'),
+            BottomNavigationBarItem(icon: Icon(Icons.storefront_rounded), label: 'Shop'),
+            BottomNavigationBarItem(icon: Icon(Icons.person_rounded), label: 'Profile'),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _buildBadgeItem(IconData icon, String label) {
-    return Column(
-      children: [
-        Container(
-          width: 54,
-          height: 54,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: const Color(0xFFEFEEEA),
-            border: Border.all(color: const Color(0xFFD5C4AC)),
+  Widget _buildStatItem(String label, String value, IconData icon, Color color) {
+    return Expanded(
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 22),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: GoogleFonts.epilogue(color: const Color(0xFF582F0E), fontSize: 18, fontWeight: FontWeight.bold),
           ),
-          child: Icon(icon, color: const Color(0xFF837560), size: 26),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          label,
-          style: GoogleFonts.plusJakartaSans(color: const Color(0xFF514532), fontSize: 11, fontWeight: FontWeight.w600),
-        ),
-      ],
+          Text(
+            label,
+            style: GoogleFonts.plusJakartaSans(color: const Color(0xFF837560), fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAchievementBadge(IconData icon, String label, bool isUnlocked) {
+    return Expanded(
+      child: Column(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isUnlocked ? const Color(0xFFFFB703).withValues(alpha: 0.2) : const Color(0xFFEFEEEA),
+              border: Border.all(
+                color: isUnlocked ? const Color(0xFFFFB703) : const Color(0xFFD5C4AC),
+                width: isUnlocked ? 2 : 1,
+              ),
+            ),
+            child: Icon(
+              icon,
+              color: isUnlocked ? const Color(0xFF7D5800) : const Color(0xFF837560).withValues(alpha: 0.5),
+              size: 26,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.plusJakartaSans(
+              color: isUnlocked ? const Color(0xFF1B1C1A) : const Color(0xFF837560),
+              fontSize: 11,
+              fontWeight: isUnlocked ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

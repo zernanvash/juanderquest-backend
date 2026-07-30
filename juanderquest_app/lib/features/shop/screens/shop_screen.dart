@@ -1,10 +1,156 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../auth/providers/auth_provider.dart';
 
 class ShopScreen extends ConsumerWidget {
   const ShopScreen({super.key});
+
+  void _showVoucherConfirmationDialog({
+    required BuildContext context,
+    required String merchantName,
+    required String offerTitle,
+    required int costPoints,
+    required int userPoints,
+  }) {
+    final remainingPoints = userPoints - costPoints;
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        backgroundColor: const Color(0xFFFAF9F5),
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 60,
+                height: 60,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFBEEAD1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.confirmation_number_rounded, color: Color(0xFF2D6A4F), size: 32),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Redeem Voucher?',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.epilogue(
+                  color: const Color(0xFF582F0E),
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'You are about to redeem "$offerTitle" from $merchantName.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.plusJakartaSans(
+                  color: const Color(0xFF514532),
+                  fontSize: 13,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFD5C4AC).withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Cost Deduction:',
+                      style: GoogleFonts.plusJakartaSans(color: const Color(0xFF837560), fontSize: 12),
+                    ),
+                    Text(
+                      '-$costPoints PTS',
+                      style: GoogleFonts.plusJakartaSans(
+                        color: const Color(0xFFBC4749),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFD5C4AC).withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Remaining Balance:',
+                      style: GoogleFonts.plusJakartaSans(color: const Color(0xFF837560), fontSize: 12),
+                    ),
+                    Text(
+                      '$remainingPoints PTS',
+                      style: GoogleFonts.plusJakartaSans(
+                        color: const Color(0xFF7D5800),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(dialogCtx).pop(),
+                      style: OutlinedButton.styleFrom(
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        side: const BorderSide(color: Color(0xFFD5C4AC)),
+                      ),
+                      child: Text('Cancel', style: GoogleFonts.epilogue(color: const Color(0xFF514532))),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.of(dialogCtx).pop();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Voucher "$offerTitle" redeemed! Present code JDQ-VOUCHER-2026 to merchant.',
+                              style: GoogleFonts.plusJakartaSans(),
+                            ),
+                            backgroundColor: const Color(0xFF2D6A4F),
+                          ),
+                        );
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFFB703),
+                        foregroundColor: const Color(0xFF6B4B00),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: Text('Confirm', style: GoogleFonts.epilogue(fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -31,7 +177,7 @@ class ShopScreen extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Points Balance Card
+            // Points Balance Banner
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -49,28 +195,30 @@ class ShopScreen extends ConsumerWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'AVAILABLE REWARDS',
-                        style: GoogleFonts.plusJakartaSans(
-                          color: const Color(0xFF837560),
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1.0,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'AVAILABLE REWARDS',
+                          style: GoogleFonts.plusJakartaSans(
+                            color: const Color(0xFF837560),
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.0,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Demo Points Balance',
-                        style: GoogleFonts.epilogue(
-                          color: const Color(0xFF582F0E),
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
+                        const SizedBox(height: 2),
+                        Text(
+                          'Demo Points Balance',
+                          style: GoogleFonts.epilogue(
+                            color: const Color(0xFF582F0E),
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                   Row(
                     children: [
@@ -135,6 +283,33 @@ class ShopScreen extends ConsumerWidget {
               category: 'TRADE & CRAFTS',
               location: 'Bolinao, Pangasinan',
             ),
+          ],
+        ),
+      ),
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: const Color(0xFFD5C4AC).withValues(alpha: 0.4))),
+        ),
+        child: BottomNavigationBar(
+          backgroundColor: Colors.white,
+          selectedItemColor: const Color(0xFF3F6653),
+          unselectedItemColor: const Color(0xFF837560),
+          currentIndex: 3,
+          type: BottomNavigationBarType.fixed,
+          elevation: 0,
+          onTap: (index) {
+            if (index == 0) context.go('/quests');
+            if (index == 1) context.go('/map');
+            if (index == 2) context.go('/vote');
+            if (index == 4) context.go('/profile');
+          },
+          items: const [
+            BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Home'),
+            BottomNavigationBarItem(icon: Icon(Icons.map_rounded), label: 'Map'),
+            BottomNavigationBarItem(icon: Icon(Icons.how_to_vote_rounded), label: 'Vote'),
+            BottomNavigationBarItem(icon: Icon(Icons.storefront_rounded), label: 'Shop'),
+            BottomNavigationBarItem(icon: Icon(Icons.person_rounded), label: 'Profile'),
           ],
         ),
       ),
@@ -222,17 +397,13 @@ class ShopScreen extends ConsumerWidget {
           const SizedBox(height: 14),
           ElevatedButton(
             onPressed: canAfford
-                ? () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Voucher "$offerTitle" redeemed! Show QR code to merchant.',
-                          style: GoogleFonts.plusJakartaSans(),
-                        ),
-                        backgroundColor: const Color(0xFF2D6A4F),
-                      ),
-                    );
-                  }
+                ? () => _showVoucherConfirmationDialog(
+                      context: context,
+                      merchantName: merchantName,
+                      offerTitle: offerTitle,
+                      costPoints: costPoints,
+                      userPoints: userPoints,
+                    )
                 : null,
             style: ElevatedButton.styleFrom(
               minimumSize: const Size.fromHeight(42),

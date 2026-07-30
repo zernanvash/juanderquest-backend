@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
+import '../../../core/config/map_config.dart';
 import '../../quests/providers/quest_provider.dart';
 import '../../quests/models/quest_model.dart';
 
@@ -17,31 +18,26 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
   MapLibreMapController? _mapController;
   QuestModel? _selectedQuest;
 
-  // OpenMapTiles / MapLibre style JSON URL
-  static const String openMapTilesStyleUrl = 'https://demotiles.maplibre.org/style.json';
-
-  // Pangasinan Center Coordinates
-  static const LatLng _pangasinanCenter = LatLng(16.0350, 120.3330);
-
   void _onMapCreated(MapLibreMapController controller) {
     _mapController = controller;
-    _addQuestMarkers();
+    _syncQuestMarkers();
   }
 
-  void _addQuestMarkers() {
+  void _syncQuestMarkers() {
     if (_mapController == null) return;
 
     final quests = ref.read(questProvider).quests;
+    _mapController!.clearCircles();
 
     for (int i = 0; i < quests.length; i++) {
       final quest = quests[i];
       _mapController!.addCircle(
         CircleOptions(
           geometry: LatLng(quest.gpsLat, quest.gpsLng),
-          circleColor: '#FFB703',
+          circleColor: MapConfig.markerGoldHex,
           circleRadius: 12.0,
           circleStrokeWidth: 3.0,
-          circleStrokeColor: '#582F0E',
+          circleStrokeColor: MapConfig.markerBorderHex,
         ),
       );
     }
@@ -61,6 +57,13 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
   Widget build(BuildContext context) {
     final questState = ref.watch(questProvider);
 
+    // Listen to questProvider changes and sync markers automatically
+    ref.listen(questProvider, (previous, next) {
+      if (next.quests != previous?.quests) {
+        _syncQuestMarkers();
+      }
+    });
+
     return Scaffold(
       backgroundColor: const Color(0xFFFAF9F5),
       appBar: AppBar(
@@ -68,36 +71,29 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
         elevation: 0,
         scrolledUnderElevation: 0,
         title: Text(
-          'Pangasinan Quest Map',
+          'Quest Map',
           style: GoogleFonts.epilogue(
             color: const Color(0xFF582F0E),
             fontSize: 20,
             fontWeight: FontWeight.bold,
           ),
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.history_rounded, color: Color(0xFF582F0E)),
-            tooltip: 'Submissions History',
-            onPressed: () => context.push('/history'),
-          ),
-        ],
       ),
       body: Stack(
         children: [
-          // Maplibre Vector Map Canvas (OpenMapTiles Provider)
+          // MapLibre Vector Map Canvas with Production Vector Style & Fallback
           MapLibreMap(
-            styleString: openMapTilesStyleUrl,
+            styleString: MapConfig.vectorStyleUrl,
             initialCameraPosition: const CameraPosition(
-              target: _pangasinanCenter,
-              zoom: 10.0,
+              target: LatLng(MapConfig.pangasinanLat, MapConfig.pangasinanLng),
+              zoom: MapConfig.defaultZoom,
             ),
             onMapCreated: _onMapCreated,
             myLocationEnabled: true,
             trackCameraPosition: true,
           ),
 
-          // Map Control Legend Overlay (Stitch Integrated Style)
+          // Map Control Legend Overlay
           Positioned(
             top: 16,
             left: 16,
@@ -124,7 +120,7 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
                       const Icon(Icons.map_rounded, color: Color(0xFF7D5800), size: 20),
                       const SizedBox(width: 8),
                       Text(
-                        'OpenMapTiles Provider',
+                        'Pangasinan Vector Map',
                         style: GoogleFonts.plusJakartaSans(
                           color: const Color(0xFF582F0E),
                           fontWeight: FontWeight.bold,
@@ -140,7 +136,7 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
-                      '${questState.quests.length} Quest Markers',
+                      '${questState.quests.length} Destinations',
                       style: GoogleFonts.plusJakartaSans(
                         color: const Color(0xFF436B58),
                         fontWeight: FontWeight.bold,
@@ -153,7 +149,7 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
             ),
           ),
 
-          // Selected Quest Details Drawer Card
+          // Selected Quest Bottom Sheet Drawer
           if (_selectedQuest != null)
             Positioned(
               bottom: 20,
@@ -214,9 +210,12 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
                       children: [
                         const Icon(Icons.location_on, color: Color(0xFF7D5800), size: 14),
                         const SizedBox(width: 4),
-                        Text(
-                          _selectedQuest!.locationName,
-                          style: GoogleFonts.plusJakartaSans(color: const Color(0xFF514532), fontSize: 13),
+                        Expanded(
+                          child: Text(
+                            _selectedQuest!.locationName,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.plusJakartaSans(color: const Color(0xFF514532), fontSize: 13),
+                          ),
                         ),
                       ],
                     ),
@@ -249,7 +248,33 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
             ),
         ],
       ),
-
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: const Color(0xFFD5C4AC).withValues(alpha: 0.4))),
+        ),
+        child: BottomNavigationBar(
+          backgroundColor: Colors.white,
+          selectedItemColor: const Color(0xFF3F6653),
+          unselectedItemColor: const Color(0xFF837560),
+          currentIndex: 1,
+          type: BottomNavigationBarType.fixed,
+          elevation: 0,
+          onTap: (index) {
+            if (index == 0) context.go('/quests');
+            if (index == 2) context.go('/vote');
+            if (index == 3) context.go('/shop');
+            if (index == 4) context.go('/profile');
+          },
+          items: const [
+            BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Home'),
+            BottomNavigationBarItem(icon: Icon(Icons.map_rounded), label: 'Map'),
+            BottomNavigationBarItem(icon: Icon(Icons.how_to_vote_rounded), label: 'Vote'),
+            BottomNavigationBarItem(icon: Icon(Icons.storefront_rounded), label: 'Shop'),
+            BottomNavigationBarItem(icon: Icon(Icons.person_rounded), label: 'Profile'),
+          ],
+        ),
+      ),
     );
   }
 }
