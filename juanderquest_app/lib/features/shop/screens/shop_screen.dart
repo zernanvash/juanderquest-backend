@@ -1,0 +1,252 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
+import '../../auth/providers/auth_provider.dart';
+
+class ShopScreen extends ConsumerWidget {
+  const ShopScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final user = ref.watch(authProvider).user;
+    final points = user?.demoPoints ?? 0;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFFAF9F5),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFFAF9F5),
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: Text(
+          'Merchant Voucher Store',
+          style: GoogleFonts.epilogue(
+            color: const Color(0xFF582F0E),
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Points Balance Card
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFFFFB703)),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFFFB703).withValues(alpha: 0.15),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'AVAILABLE REWARDS',
+                        style: GoogleFonts.plusJakartaSans(
+                          color: const Color(0xFF837560),
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Demo Points Balance',
+                        style: GoogleFonts.epilogue(
+                          color: const Color(0xFF582F0E),
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      Image.asset(
+                        'assets/images/jdq-token.png',
+                        width: 28,
+                        height: 28,
+                        errorBuilder: (_, __, ___) => const Icon(Icons.stars, color: Color(0xFFFFB703), size: 28),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '$points PTS',
+                        style: GoogleFonts.epilogue(
+                          color: const Color(0xFF7D5800),
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            Text(
+              'Pangasinan Partner Merchants',
+              style: GoogleFonts.epilogue(
+                color: const Color(0xFF0D1B2A),
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            _buildVoucherCard(
+              context: context,
+              merchantName: 'Dagupan Bangus Grill & Restaurant',
+              offerTitle: '₱100 Meal Discount Voucher',
+              costPoints: 50,
+              userPoints: points,
+              category: 'FOOD & DINING',
+              location: 'Dagupan City, Pangasinan',
+            ),
+            const SizedBox(height: 12),
+            _buildVoucherCard(
+              context: context,
+              merchantName: 'Hundred Islands Boatmen Association',
+              offerTitle: '15% Off Island Hopping Tour',
+              costPoints: 75,
+              userPoints: points,
+              category: 'ECO-TOURISM',
+              location: 'Alaminos City, Pangasinan',
+            ),
+            const SizedBox(height: 12),
+            _buildVoucherCard(
+              context: context,
+              merchantName: 'Bolinao Souvenirs & Crafts',
+              offerTitle: 'Free Heritage Gift Token',
+              costPoints: 40,
+              userPoints: points,
+              category: 'TRADE & CRAFTS',
+              location: 'Bolinao, Pangasinan',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVoucherCard({
+    required BuildContext context,
+    required String merchantName,
+    required String offerTitle,
+    required int costPoints,
+    required int userPoints,
+    required String category,
+    required String location,
+  }) {
+    final canAfford = userPoints >= costPoints;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFD5C4AC).withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF3F6653).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  category,
+                  style: GoogleFonts.plusJakartaSans(
+                    color: const Color(0xFF3F6653),
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              Row(
+                children: [
+                  Image.asset(
+                    'assets/images/jdq-token.png',
+                    width: 16,
+                    height: 16,
+                    errorBuilder: (_, __, ___) => const Icon(Icons.stars, color: Color(0xFFFFB703), size: 14),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '$costPoints PTS',
+                    style: GoogleFonts.plusJakartaSans(
+                      color: const Color(0xFF7D5800),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            offerTitle,
+            style: GoogleFonts.epilogue(
+              color: const Color(0xFF582F0E),
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            merchantName,
+            style: GoogleFonts.plusJakartaSans(color: const Color(0xFF1B1C1A), fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+          Text(
+            location,
+            style: GoogleFonts.plusJakartaSans(color: const Color(0xFF837560), fontSize: 12),
+          ),
+          const SizedBox(height: 14),
+          ElevatedButton(
+            onPressed: canAfford
+                ? () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'Voucher "$offerTitle" redeemed! Show QR code to merchant.',
+                          style: GoogleFonts.plusJakartaSans(),
+                        ),
+                        backgroundColor: const Color(0xFF2D6A4F),
+                      ),
+                    );
+                  }
+                : null,
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size.fromHeight(42),
+              backgroundColor: const Color(0xFFFFB703),
+              foregroundColor: const Color(0xFF6B4B00),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: Text(
+              canAfford ? 'Redeem Voucher' : 'Insufficient Demo Points',
+              style: GoogleFonts.epilogue(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

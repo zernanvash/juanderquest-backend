@@ -15,7 +15,6 @@ class QuestListScreen extends ConsumerStatefulWidget {
 
 class _QuestListScreenState extends ConsumerState<QuestListScreen> {
   String? _selectedCategory;
-  String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -58,6 +57,11 @@ class _QuestListScreenState extends ConsumerState<QuestListScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.history_rounded, color: Color(0xFF7D5800)),
+            tooltip: 'Submissions History',
+            onPressed: () => context.push('/history'),
+          ),
           Container(
             margin: const EdgeInsets.only(right: 16),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -144,7 +148,6 @@ class _QuestListScreenState extends ConsumerState<QuestListScreen> {
                   // Search Bar
                   TextField(
                     controller: _searchController,
-                    onChanged: (value) => setState(() => _searchQuery = value.toLowerCase()),
                     decoration: InputDecoration(
                       hintText: 'Search quests in Pangasinan...',
                       hintStyle: GoogleFonts.plusJakartaSans(color: const Color(0xFF837560), fontSize: 14),
@@ -211,25 +214,27 @@ class _QuestListScreenState extends ConsumerState<QuestListScreen> {
                         child: CircularProgressIndicator(color: Color(0xFFFFB703)),
                       ),
                     )
-                  else if (questState.error != null)
+                  else if (questState.quests.isEmpty)
                     Container(
                       padding: const EdgeInsets.all(32),
                       child: Center(
-                        child: Column(
-                          children: [
-                            const Icon(Icons.cloud_off, color: Color(0xFFBC4749), size: 32),
-                            const SizedBox(height: 8),
-                            Text(
-                              questState.error!,
-                              textAlign: TextAlign.center,
-                              style: GoogleFonts.plusJakartaSans(color: const Color(0xFFBC4749)),
-                            ),
-                          ],
+                        child: Text(
+                          'No quests found in this category.',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.plusJakartaSans(color: const Color(0xFF837560)),
                         ),
                       ),
                     )
                   else
-                    _buildQuestFeed(questState),
+                    ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: questState.quests.length,
+                      itemBuilder: (context, index) {
+                        final quest = questState.quests[index];
+                        return _buildQuestItemCard(context, quest);
+                      },
+                    ),
                 ],
               ),
             ),
@@ -246,24 +251,20 @@ class _QuestListScreenState extends ConsumerState<QuestListScreen> {
           selectedItemColor: const Color(0xFF3F6653),
           unselectedItemColor: const Color(0xFF837560),
           currentIndex: 0,
+          type: BottomNavigationBarType.fixed,
           elevation: 0,
           onTap: (index) {
-            if (index == 1) context.go('/history');
-            if (index == 2) context.go('/profile');
+            if (index == 1) context.go('/map');
+            if (index == 2) context.go('/vote');
+            if (index == 3) context.go('/shop');
+            if (index == 4) context.go('/profile');
           },
           items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.explore),
-              label: 'Quests',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.history),
-              label: 'Submissions',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person),
-              label: 'Profile',
-            ),
+            BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Home'),
+            BottomNavigationBarItem(icon: Icon(Icons.map_rounded), label: 'Map'),
+            BottomNavigationBarItem(icon: Icon(Icons.how_to_vote_rounded), label: 'Vote'),
+            BottomNavigationBarItem(icon: Icon(Icons.storefront_rounded), label: 'Shop'),
+            BottomNavigationBarItem(icon: Icon(Icons.person_rounded), label: 'Profile'),
           ],
         ),
       ),
@@ -336,7 +337,6 @@ class _QuestListScreenState extends ConsumerState<QuestListScreen> {
         ),
         child: Stack(
           children: [
-            // Dark Gradient Overlay
             Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
@@ -441,50 +441,6 @@ class _QuestListScreenState extends ConsumerState<QuestListScreen> {
     );
   }
 
-  Widget _buildQuestFeed(QuestState qs) {
-    final filtered = qs.quests.where((q) =>
-      _searchQuery.isEmpty ||
-      q.title.toLowerCase().contains(_searchQuery) ||
-      q.locationName.toLowerCase().contains(_searchQuery)
-    ).toList();
-
-    if (filtered.isEmpty && _searchQuery.isNotEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(32),
-        child: Center(
-          child: Text(
-            'No quests match "$_searchQuery".',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.plusJakartaSans(color: const Color(0xFF837560)),
-          ),
-        ),
-      );
-    }
-
-    if (filtered.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(32),
-        child: Center(
-          child: Text(
-            'No quests found in this category.',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.plusJakartaSans(color: const Color(0xFF837560)),
-          ),
-        ),
-      );
-    }
-
-    return ListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: filtered.length,
-      itemBuilder: (context, index) {
-        final quest = filtered[index];
-        return _buildQuestItemCard(context, quest);
-      },
-    );
-  }
-
   Widget _buildQuestItemCard(BuildContext context, QuestModel quest) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -509,7 +465,6 @@ class _QuestListScreenState extends ConsumerState<QuestListScreen> {
             padding: const EdgeInsets.all(14.0),
             child: Row(
               children: [
-                // Icon Thumbnail Box
                 Container(
                   width: 60,
                   height: 60,
@@ -521,7 +476,6 @@ class _QuestListScreenState extends ConsumerState<QuestListScreen> {
                 ),
                 const SizedBox(width: 14),
 
-                // Quest Title & Details
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

@@ -8,6 +8,9 @@ import '../features/quests/models/quest_model.dart';
 import '../features/ar_experience/screens/ar_experience_screen.dart';
 import '../features/submissions/screens/submission_history_screen.dart';
 import '../features/profile/screens/profile_screen.dart';
+import '../features/map/screens/map_view_screen.dart';
+import '../features/vote/screens/vote_screen.dart';
+import '../features/shop/screens/shop_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authProvider);
@@ -40,6 +43,22 @@ final routerProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(
+        path: '/map',
+        builder: (context, state) => const MapViewScreen(),
+      ),
+      GoRoute(
+        path: '/vote',
+        builder: (context, state) => const VoteScreen(),
+      ),
+      GoRoute(
+        path: '/shop',
+        builder: (context, state) => const ShopScreen(),
+      ),
+      GoRoute(
+        path: '/profile',
+        builder: (context, state) => const ProfileScreen(),
+      ),
+      GoRoute(
         path: '/ar',
         builder: (context, state) {
           final quest = state.extra as QuestModel?;
@@ -51,10 +70,20 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/history',
         builder: (context, state) => const SubmissionHistoryScreen(),
       ),
-      GoRoute(
-        path: '/profile',
-        builder: (context, state) => const ProfileScreen(),
-      ),
     ],
   );
 });
+
+// Backward compatibility router instance
+final appRouter = GoRouter(
+  initialLocation: '/',
+  routes: [
+    GoRoute(path: '/', builder: (context, state) => const DemoLoginScreen()),
+    GoRoute(path: '/quests', builder: (context, state) => const QuestListScreen()),
+    GoRoute(path: '/map', builder: (context, state) => const MapViewScreen()),
+    GoRoute(path: '/vote', builder: (context, state) => const VoteScreen()),
+    GoRoute(path: '/shop', builder: (context, state) => const ShopScreen()),
+    GoRoute(path: '/profile', builder: (context, state) => const ProfileScreen()),
+    GoRoute(path: '/history', builder: (context, state) => const SubmissionHistoryScreen()),
+  ],
+);
