@@ -212,10 +212,12 @@ class _QuestListScreenState extends ConsumerState<QuestListScreen> {
                   else if (questState.quests.isEmpty)
                     Container(
                       padding: const EdgeInsets.all(32),
-                      textAlign: TextAlign.center,
-                      child: Text(
-                        'No quests found in this category.',
-                        style: GoogleFonts.plusJakartaSans(color: const Color(0xFF837560)),
+                      child: Center(
+                        child: Text(
+                          'No quests found in this category.',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.plusJakartaSans(color: const Color(0xFF837560)),
+                        ),
                       ),
                     )
                   else
