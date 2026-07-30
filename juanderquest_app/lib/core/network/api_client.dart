@@ -3,7 +3,7 @@ import 'package:dio/dio.dart';
 class ApiClient {
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:4000/api/v1',
+    defaultValue: 'https://jdq.zernanvash.dev/api/v1',
   );
 
   late final Dio dio;
