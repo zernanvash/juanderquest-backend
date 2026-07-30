@@ -76,21 +76,36 @@ class _ARExperienceScreenState extends ConsumerState<ARExperienceScreen> with Si
         return;
       }
 
-      final pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 10),
-      );
+      // Try acquiring position with fallback to last known location
+      Position? pos;
+      try {
+        pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.medium,
+          timeLimit: const Duration(seconds: 8),
+        );
+      } catch (_) {
+        pos = await Geolocator.getLastKnownPosition();
+      }
 
-      if (mounted) {
-        setState(() {
-          _currentPosition = pos;
-          _isCapturingGPS = false;
-        });
+      if (pos != null) {
+        if (mounted) {
+          setState(() {
+            _currentPosition = pos;
+            _isCapturingGPS = false;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _gpsError = 'Unable to acquire GPS fix. Please ensure location services are ON.';
+            _isCapturingGPS = false;
+          });
+        }
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _gpsError = 'Failed to acquire real GPS location: ${e.toString()}';
+          _gpsError = 'GPS error: ${e.toString()}';
           _isCapturingGPS = false;
         });
       }
