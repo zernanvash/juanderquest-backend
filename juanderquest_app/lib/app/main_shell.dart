@@ -13,15 +13,25 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   DateTime? _lastBackPress;
+  int _previousIndex = 0;
+
+  @override
+  void didUpdateWidget(MainShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.navigationShell.currentIndex != widget.navigationShell.currentIndex) {
+      _previousIndex = oldWidget.navigationShell.currentIndex;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final currentIndex = widget.navigationShell.currentIndex;
+    final isForward = currentIndex >= _previousIndex;
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-
-        final currentIndex = widget.navigationShell.currentIndex;
 
         if (currentIndex != 0) {
           widget.navigationShell.goBranch(0);
@@ -42,7 +52,43 @@ class _MainShellState extends State<MainShell> {
         }
       },
       child: Scaffold(
-        body: widget.navigationShell,
+        body: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 280),
+          switchInCurve: Curves.easeInOutCubic,
+          switchOutCurve: Curves.easeInOutCubic,
+          transitionBuilder: (child, animation) {
+            final slideInOffset = isForward ? const Offset(1.0, 0.0) : const Offset(-1.0, 0.0);
+            final slideOutOffset = isForward ? const Offset(-0.3, 0.0) : const Offset(0.3, 0.0);
+
+            if (child.key == ValueKey<int>(currentIndex)) {
+              return SlideTransition(
+                position: Tween<Offset>(
+                  begin: slideInOffset,
+                  end: Offset.zero,
+                ).animate(animation),
+                child: FadeTransition(
+                  opacity: animation,
+                  child: child,
+                ),
+              );
+            } else {
+              return SlideTransition(
+                position: Tween<Offset>(
+                  begin: Offset.zero,
+                  end: slideOutOffset,
+                ).animate(animation),
+                child: FadeTransition(
+                  opacity: animation,
+                  child: child,
+                ),
+              );
+            }
+          },
+          child: KeyedSubtree(
+            key: ValueKey<int>(currentIndex),
+            child: widget.navigationShell,
+          ),
+        ),
         bottomNavigationBar: Container(
           decoration: BoxDecoration(
             color: Colors.white,
@@ -52,11 +98,11 @@ class _MainShellState extends State<MainShell> {
             backgroundColor: Colors.white,
             selectedItemColor: const Color(0xFF3F6653),
             unselectedItemColor: const Color(0xFF837560),
-            currentIndex: widget.navigationShell.currentIndex,
+            currentIndex: currentIndex,
             type: BottomNavigationBarType.fixed,
             elevation: 0,
             onTap: (index) {
-              if (index == widget.navigationShell.currentIndex) {
+              if (index == currentIndex) {
                 widget.navigationShell.goBranch(index, initialLocation: true);
               } else {
                 widget.navigationShell.goBranch(index);

@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../features/auth/providers/auth_provider.dart';
@@ -12,6 +13,37 @@ import '../features/map/screens/map_view_screen.dart';
 import '../features/vote/screens/vote_screen.dart';
 import '../features/shop/screens/shop_screen.dart';
 import 'main_shell.dart';
+
+CustomTransitionPage buildDirectionalSlidePage<T>({
+  required BuildContext context,
+  required GoRouterState state,
+  required Widget child,
+}) {
+  return CustomTransitionPage<T>(
+    key: state.pageKey,
+    child: child,
+    transitionDuration: const Duration(milliseconds: 300),
+    reverseTransitionDuration: const Duration(milliseconds: 250),
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      const begin = Offset(1.0, 0.0);
+      const end = Offset.zero;
+      final curve = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
+      );
+      final tween = Tween(begin: begin, end: end).chain(CurveTween(curve: Curves.easeOutCubic));
+
+      return SlideTransition(
+        position: animation.drive(tween),
+        child: FadeTransition(
+          opacity: curve,
+          child: child,
+        ),
+      );
+    },
+  );
+}
 
 final routerProvider = Provider<GoRouter>((ref) {
   final refreshNotifier = ref.watch(authRefreshProvider);
@@ -34,12 +66,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const DemoLoginScreen(),
       ),
       GoRoute(
-        path: '/vote',
-        builder: (context, state) => const VoteScreen(),
-      ),
-      GoRoute(
         path: '/vote/proposals',
-        builder: (context, state) => const VoteScreen(showProposalsModal: true),
+        pageBuilder: (context, state) => buildDirectionalSlidePage(
+          context: context,
+          state: state,
+          child: const VoteScreen(showProposalsModal: true),
+        ),
       ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) => MainShell(navigationShell: navigationShell),
@@ -52,18 +84,30 @@ final routerProvider = Provider<GoRouter>((ref) {
                 routes: [
                   GoRoute(
                     path: ':id',
-                    builder: (context, state) {
+                    pageBuilder: (context, state) {
                       final quest = state.extra as QuestModel?;
-                      if (quest != null) return QuestDetailScreen(quest: quest);
-                      return QuestDetailScreen(questId: state.pathParameters['id'] ?? '');
+                      final widget = quest != null
+                          ? QuestDetailScreen(quest: quest)
+                          : QuestDetailScreen(questId: state.pathParameters['id'] ?? '');
+                      return buildDirectionalSlidePage(
+                        context: context,
+                        state: state,
+                        child: widget,
+                      );
                     },
                     routes: [
                       GoRoute(
                         path: 'ar',
-                        builder: (context, state) {
+                        pageBuilder: (context, state) {
                           final quest = state.extra as QuestModel?;
-                          if (quest != null) return ARExperienceScreen(quest: quest);
-                          return QuestDetailScreen(questId: state.pathParameters['id'] ?? '');
+                          final widget = quest != null
+                              ? ARExperienceScreen(quest: quest)
+                              : QuestDetailScreen(questId: state.pathParameters['id'] ?? '');
+                          return buildDirectionalSlidePage(
+                            context: context,
+                            state: state,
+                            child: widget,
+                          );
                         },
                       ),
                     ],
@@ -108,7 +152,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/history',
-        builder: (context, state) => const SubmissionHistoryScreen(),
+        pageBuilder: (context, state) => buildDirectionalSlidePage(
+          context: context,
+          state: state,
+          child: const SubmissionHistoryScreen(),
+        ),
       ),
     ],
   );

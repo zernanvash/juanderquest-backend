@@ -272,33 +272,6 @@ class _VoteScreenState extends State<VoteScreen> {
           ],
         ),
       ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: const Color(0xFFD5C4AC).withValues(alpha: 0.4))),
-        ),
-        child: BottomNavigationBar(
-          backgroundColor: Colors.white,
-          selectedItemColor: const Color(0xFF3F6653),
-          unselectedItemColor: const Color(0xFF837560),
-          currentIndex: 2,
-          type: BottomNavigationBarType.fixed,
-          elevation: 0,
-          onTap: (index) {
-            if (index == 0) context.go('/quests');
-            if (index == 1) context.go('/map');
-            if (index == 3) context.go('/shop');
-            if (index == 4) context.go('/profile');
-          },
-          items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Home'),
-            BottomNavigationBarItem(icon: Icon(Icons.map_rounded), label: 'Map'),
-            BottomNavigationBarItem(icon: Icon(Icons.how_to_vote_rounded), label: 'Vote'),
-            BottomNavigationBarItem(icon: Icon(Icons.storefront_rounded), label: 'Shop'),
-            BottomNavigationBarItem(icon: Icon(Icons.person_rounded), label: 'Profile'),
-          ],
-        ),
-      ),
     );
   }
 

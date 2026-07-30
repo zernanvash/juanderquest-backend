@@ -241,7 +241,6 @@ class _QuestListScreenState extends ConsumerState<QuestListScreen> {
           ),
         ],
       ),
-
     );
   }
 
