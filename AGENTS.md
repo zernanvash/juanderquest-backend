@@ -117,9 +117,9 @@ JuanderQuest/
 
 ## Workflow notes
 
+- **Log every change immediately:** EVERY time a bug is fixed, a feature is added, or an architecture change is performed, ALL AI agents MUST append a detailed entry to `docs/dev-journal.md` with date heading.
 - **RTK (Rust Token Killer):** ALL agentic coding assistants (Antigravity, Claude Code, Gemini CLI, etc.) working in this codebase MUST use `rtk` to prefix shell commands (e.g. `rtk git status`, `rtk flutter analyze`, `rtk npm test`) to filter command output and save context tokens (see `.agents/rules/antigravity-rtk-rules.md`).
 - **Plan first:** Implementation plans go in `implementation_plans/` before execution.
-- **Log changes:** Append to `docs/dev-journal.md` with date heading.
 - **Documentation-first still applies** for new features. Prototype code preceded some docs; catch up docs before expanding scope.
 - When the backend is updated, push to VM: `git push vm master` then SSH and rebuild.
 - `.brain/` should be updated when significant architecture changes occur.

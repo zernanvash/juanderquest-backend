@@ -1,5 +1,16 @@
 # Dev Journal
 
+## 2026-07-30 — Navigation, Map Fixes, RTK & Visual Polishing
+
+- **Black Map Render Bug Fix (`lib/features/map/screens/map_view_screen.dart`):** Replaced HTTP 403 restricted OpenMapTiles URL with MapLibre's public demotiles vector style (`https://demotiles.maplibre.org/style.json`). Layered a fallback Pangasinan region interactive canvas behind `MapLibreMap` to guarantee the map never renders pitch black.
+- **Duplicated Navigation Panel Fix:** Centralized `BottomNavigationBar` inside `MainShell`. Removed local scaffold bottom bars from child screens (`QuestListScreen`, `MapViewScreen`, `VoteScreen`, `ShopScreen`, `ProfileScreen`).
+- **Directional Page Slide Animations (`lib/app/main_shell.dart` & `router.dart`):**
+  - Tab switches: Compares current vs. previous tab index (`isForward` slide in from right-to-left for higher index, left-to-right for lower index).
+  - Sub-routes (`/quests/:id`, `/history`, `/ar`, `/vote/proposals`): Directional `CustomTransitionPage` sliding right-to-left on push and left-to-right on pop.
+- **RTK (Rust Token Killer) Global Hook Setup:** Initialized RTK with `--auto-patch` flag (`rtk init -g --auto-patch`). Updated `AGENTS.md` to require all AI agents to use `rtk` on shell operations.
+- **Admin Web Dashboard 100% Mobile Alignment (`dashboard/src/App.tsx`):** Added **Community Votes** and **Merchant Vouchers** tabs to align dashboard 100% with mobile app features. Pushed to `juanderquest-web.git`.
+- **Android Debug APK Built:** Successfully assembled `app-debug.apk` (`51.4s`).
+
 ## 2026-07-30 — Navigation overhaul + map migration
 
 - Replaced inline `BottomNavigationBar` in every screen with shared `MainShell` + `StatefulShellRoute.indexedStack` (5 tabs: Home, Map, Vote, Shop, Profile).
