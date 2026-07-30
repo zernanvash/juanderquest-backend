@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '../db/index.js';
 import { authenticateToken, requireAdmin, AuthRequest } from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
+import { governanceStore } from './proposals.js';
 
 const router = Router();
 
@@ -54,6 +55,9 @@ router.patch('/admin/submissions/:id', validateRequest(reviewSchema), (req: Auth
 
   const { submission: updatedSub, alreadyReviewed } = result;
   const quest = db.findQuestById(updatedSub.quest_id);
+  if (action === 'approve' && !alreadyReviewed && quest) {
+    governanceStore.creditQuestReward(updatedSub.user_id, quest.id, updatedSub.id, quest.reward_points, adminId);
+  }
 
   return res.status(200).json({
     success: true,

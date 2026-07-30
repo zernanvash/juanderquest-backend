@@ -165,4 +165,80 @@ describe('JuanderQuest Backend REST API & QA Rules', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.title).toBe('Balingasay River Eco Cruise');
   });
+
+  it('GET governance overview and tokenomics exposes reconciled admin controls', async () => {
+    const overview = await request(app)
+      .get('/api/v1/admin/governance/overview')
+      .set('Authorization', `Bearer ${adminToken}`);
+    const tokenomics = await request(app)
+      .get('/api/v1/admin/tokenomics/analytics')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(overview.status).toBe(200);
+    expect(overview.body.data.screening_backlog).toBeGreaterThan(0);
+    expect(overview.body.data.configuration.burn_bps).toBe(2000);
+    expect(tokenomics.status).toBe(200);
+    expect(tokenomics.body.data.reconciliation_difference_mjdq).toBe(0);
+  });
+
+  it('admin screening locks the 25 JDQ organizer bond with an audit trail', async () => {
+    const res = await request(app)
+      .post('/api/v1/admin/governance/proposals/prop_1/screen')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        decision: 'approve',
+        reason: 'Identity, safety, location, budget, recipients, and consent checks completed.',
+        evidence_reference: 'SCREEN-2026-001',
+        checklist_complete: true,
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.state).toBe('voting');
+    expect(res.body.data.bond_status).toBe('locked');
+    expect(res.body.data.organizer_bond_mjdq).toBe(25000);
+  });
+
+  it('paid proposal vote burns 20%, escrows 80%, and is idempotent', async () => {
+    const voteBody = {
+      choice: 'yes',
+      idempotency_key: 'governance-vote-user-1-prop-1',
+    };
+    const first = await request(app)
+      .post('/api/v1/proposals/prop_1/votes')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(voteBody);
+    const repeat = await request(app)
+      .post('/api/v1/proposals/prop_1/votes')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(voteBody);
+
+    expect(first.status).toBe(200);
+    expect(first.body.data.charged_mjdq).toBe(5000);
+    expect(first.body.data.burned_mjdq).toBe(1000);
+    expect(first.body.data.escrowed_mjdq).toBe(4000);
+    expect(repeat.status).toBe(200);
+    expect(repeat.body.data.proposal.votes).toBe(1);
+
+    const analytics = await request(app)
+      .get('/api/v1/admin/tokenomics/analytics')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(analytics.body.data.reconciliation_difference_mjdq).toBe(0);
+  });
+
+  it('blocks a second paid vote by the same eligible user', async () => {
+    const res = await request(app)
+      .post('/api/v1/proposals/prop_1/votes')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ choice: 'no', idempotency_key: 'governance-vote-user-1-prop-1-second' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('ALREADY_VOTED');
+  });
+
+  it('requires admin role for tokenomics analytics', async () => {
+    const res = await request(app)
+      .get('/api/v1/admin/tokenomics/analytics')
+      .set('Authorization', `Bearer ${userToken}`);
+    expect(res.status).toBe(403);
+  });
 });

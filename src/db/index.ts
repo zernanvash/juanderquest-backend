@@ -168,7 +168,23 @@ const mockQuests: QuestRow[] = [
   },
 ];
 
-const mockSubmissions: SubmissionRow[] = [];
+const mockSubmissions: SubmissionRow[] = [
+  {
+    id: 'sub-seeded-governance-eligibility',
+    idempotency_key: 'seeded-governance-eligibility',
+    user_id: '11111111-1111-1111-1111-111111111111',
+    quest_id: 'q5555555-5555-5555-5555-555555555555',
+    scanned_marker_code: 'MARKER_DAGUPAN_BANGUS_01',
+    captured_lat: 16.0433,
+    captured_lng: 120.3334,
+    captured_accuracy: 5,
+    status: 'approved',
+    reviewed_by: '22222222-2222-2222-2222-222222222222',
+    reviewed_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+];
 
 const mockProposals: ProposalRow[] = [
   {
