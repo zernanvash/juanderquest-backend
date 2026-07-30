@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../../../core/widgets/error_dialog.dart';
 import '../models/quest_model.dart';
 
 class QuestDetailScreen extends StatelessWidget {
@@ -19,14 +20,14 @@ class QuestDetailScreen extends StatelessWidget {
       }
     } else {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Camera and Location permissions are required for quest verification.',
-              style: GoogleFonts.plusJakartaSans(),
-            ),
-            backgroundColor: const Color(0xFFBC4749),
-          ),
+        GlobalErrorDialog.show(
+          context,
+          title: 'Permissions Required',
+          message: 'JuanderQuest uses your camera to recognize destination markers and location services to verify quest completion radius.',
+          icon: Icons.security_rounded,
+          iconColor: const Color(0xFFBC4749),
+          buttonText: 'Open Device Settings',
+          onPressed: () => openAppSettings(),
         );
       }
     }

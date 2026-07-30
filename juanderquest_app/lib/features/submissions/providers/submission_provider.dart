@@ -10,12 +10,14 @@ class SubmissionState {
   final bool isSubmitting;
   final bool isLoading;
   final String? error;
+  final String? errorCode;
 
   SubmissionState({
     this.submissions = const [],
     this.isSubmitting = false,
     this.isLoading = false,
     this.error,
+    this.errorCode,
   });
 }
 
@@ -52,15 +54,17 @@ class SubmissionNotifier extends StateNotifier<SubmissionState> {
         return true;
       } else {
         final msg = response.data['error']?['message'] ?? 'Submission rejected.';
-        state = SubmissionState(submissions: state.submissions, error: msg);
+        final errCode = response.data['error']?['code'] ?? 'REJECTED';
+        state = SubmissionState(submissions: state.submissions, error: msg, errorCode: errCode);
         return false;
       }
     } on DioException catch (e) {
       final msg = e.response?.data['error']?['message'] ?? 'Network error: ${e.message}';
-      state = SubmissionState(submissions: state.submissions, error: msg);
+      final errCode = e.response?.data['error']?['code'] ?? 'NETWORK_ERROR';
+      state = SubmissionState(submissions: state.submissions, error: msg, errorCode: errCode);
       return false;
     } catch (e) {
-      state = SubmissionState(submissions: state.submissions, error: 'Unexpected error during submission.');
+      state = SubmissionState(submissions: state.submissions, error: 'Unexpected error during submission.', errorCode: 'UNKNOWN');
       return false;
     }
   }

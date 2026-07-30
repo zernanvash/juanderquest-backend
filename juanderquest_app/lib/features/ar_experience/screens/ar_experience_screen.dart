@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../quests/models/quest_model.dart';
 import '../../submissions/providers/submission_provider.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../../core/widgets/error_dialog.dart';
 
 class ARExperienceScreen extends ConsumerStatefulWidget {
   final QuestModel quest;
@@ -119,7 +120,18 @@ class _ARExperienceScreenState extends ConsumerState<ARExperienceScreen> with Si
   }
 
   Future<void> _submitProof() async {
-    if (_currentPosition == null) return;
+    if (_currentPosition == null) {
+      GlobalErrorDialog.show(
+        context,
+        title: 'GPS Signal Required',
+        message: 'Your current location could not be acquired. Please ensure location services (GPS) are turned ON on your device.',
+        icon: Icons.gps_off_rounded,
+        iconColor: const Color(0xFFBC4749),
+        buttonText: 'Retry GPS',
+        onPressed: _captureRealGPS,
+      );
+      return;
+    }
 
     final messenger = ScaffoldMessenger.of(context);
     final router = GoRouter.of(context);
@@ -134,21 +146,61 @@ class _ARExperienceScreenState extends ConsumerState<ARExperienceScreen> with Si
 
     if (success) {
       await ref.read(authProvider.notifier).refreshProfile();
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Proof submitted successfully! Awaiting admin verification.'),
-          backgroundColor: Color(0xFF10B981),
-        ),
-      );
-      router.go('/history');
+      if (mounted) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Proof submitted successfully! Awaiting admin verification.'),
+            backgroundColor: Color(0xFF2D6A4F),
+          ),
+        );
+        router.go('/history');
+      }
     } else {
-      final err = ref.read(submissionProvider).error;
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(err ?? 'Submission failed due to network error.'),
-          backgroundColor: const Color(0xFFF43F5E),
-        ),
-      );
+      final subState = ref.read(submissionProvider);
+      final err = subState.error;
+      final errCode = subState.errorCode;
+
+      if (mounted) {
+        if (errCode == 'OUT_OF_RANGE') {
+          GlobalErrorDialog.show(
+            context,
+            title: 'Outside Quest Radius',
+            message: err ?? 'You are outside the required location radius for this quest. Please travel to the physical destination in Pangasinan.',
+            icon: Icons.location_off_rounded,
+            iconColor: const Color(0xFFBC4749),
+            buttonText: 'Got It',
+          );
+        } else if (errCode == 'ALREADY_COMPLETED') {
+          GlobalErrorDialog.show(
+            context,
+            title: 'Quest Already Completed',
+            message: 'You have already completed this quest and earned your demo points reward.',
+            icon: Icons.check_circle_outline,
+            iconColor: const Color(0xFF3F6653),
+            buttonText: 'View History',
+            onPressed: () => router.go('/history'),
+          );
+        } else if (errCode == 'SUBMISSION_PENDING') {
+          GlobalErrorDialog.show(
+            context,
+            title: 'Submission Awaiting Review',
+            message: 'You already have a proof submission pending administrator verification for this quest.',
+            icon: Icons.hourglass_top_rounded,
+            iconColor: const Color(0xFFFFB703),
+            buttonText: 'View History',
+            onPressed: () => router.go('/history'),
+          );
+        } else {
+          GlobalErrorDialog.show(
+            context,
+            title: 'Submission Failed',
+            message: err ?? 'Could not submit quest proof due to a network or server error.',
+            icon: Icons.error_outline_rounded,
+            iconColor: const Color(0xFFBC4749),
+            buttonText: 'Try Again',
+          );
+        }
+      }
     }
   }
 
