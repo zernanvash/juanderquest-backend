@@ -20,6 +20,23 @@
 - Backpack decision notes.
 - Deployed commit `d2e1666`.
 
+### Refined UI Enhancements (Plan 03-ui-enhancements.md Fully Executed)
+
+- **Map Config (`lib/core/config/map_config.dart`):** Created centralized MapConfig with production vector style URL, fallback style URL, Pangasinan default LatLng (`16.0350, 120.3330`), and gold/brown pin hex colors.
+- **Quest Map Screen Refinements (`lib/features/map/screens/map_view_screen.dart`):**
+  - Renamed header title to **"Quest Map"**.
+  - Removed History button from Map header bar to keep map focused on destination exploration.
+  - Implemented dynamic marker loading & sync listening to `questProvider` state so circle markers update, clear, and render automatically when quests finish loading.
+- **Shop Voucher Confirmation Modal (`lib/features/shop/screens/shop_screen.dart`):** Added interactive confirmation dialog confirming point cost deduction (`-50 PTS`), remaining balance, and voucher code generation (`JDQ-VOUCHER-2026`).
+- **Tourism Spot Voting (`lib/features/vote/screens/vote_screen.dart`):**
+  - Replaced "DAO Governance" wording with **"Tourism Spot Voting"** for student thesis evaluation clarity.
+  - Added sub-routing & draggable sheet modal for viewing detailed community proposals at `/vote/proposals`.
+- **Profile Computed Stats & Real Achievements (`lib/features/profile/`):**
+  - Created `ProfileStatsModel` and `profileStatsProvider` (`lib/features/profile/providers/profile_stats_provider.dart`) to compute real traveler metrics from submission state.
+  - Replaced static NFT placeholders with live unlocked/locked badges (*Eco Pioneer*, *Heritage Keeper*, *Food Explorer*).
+- **Text Overflow Fixes:** Applied `Flexible` wrappers and `SingleChildScrollView` layout bounds across list cards and header text.
+- **Verification & Sync:** Pushed commit `1347d86` to GitHub (`juanderquest-mobile.git`).
+
 ## 2026-07-28 — Thesis showcase
 
 - Application exhibited live to panelists on an Android device.
