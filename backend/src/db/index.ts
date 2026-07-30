@@ -46,6 +46,19 @@ export interface SubmissionRow {
   updated_at: string;
 }
 
+export interface ProposalRow {
+  id: string;
+  title: string;
+  location_name: string;
+  category: 'eco' | 'cultural' | 'food_trade';
+  description: string;
+  proposed_lat?: number;
+  proposed_lng?: number;
+  submitted_by: string;
+  votes: number;
+  created_at: string;
+}
+
 // Memory Store Seed Data
 const mockUsers: UserRow[] = [
   {
@@ -157,6 +170,39 @@ const mockQuests: QuestRow[] = [
 
 const mockSubmissions: SubmissionRow[] = [];
 
+const mockProposals: ProposalRow[] = [
+  {
+    id: 'prop_1',
+    title: 'Patar White Beach Eco Trail',
+    location_name: 'Bolinao, Pangasinan',
+    category: 'eco',
+    description: 'Feature golden sand beaches and coral rock formations along Bolinao coast.',
+    submitted_by: 'Juan Dela Cruz',
+    votes: 210,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'prop_2',
+    title: 'Tayug Sunflower Maze Quest',
+    location_name: 'Tayug, Pangasinan',
+    category: 'eco',
+    description: 'Promote agri-tourism maze and flower farms in Tayug.',
+    submitted_by: 'Maria Santos',
+    votes: 142,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'prop_3',
+    title: 'San Fabian Beach Heritage Trail',
+    location_name: 'San Fabian, Pangasinan',
+    category: 'cultural',
+    description: 'Feature WWII historic landing sites along San Fabian beach park.',
+    submitted_by: 'Juan Dela Cruz',
+    votes: 98,
+    created_at: new Date().toISOString(),
+  },
+];
+
 // Haversine Distance Calculation helper
 export function calculateHaversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371000; // Earth radius in meters
@@ -173,6 +219,30 @@ export class MemoryDb {
   users = mockUsers;
   quests = mockQuests;
   submissions = mockSubmissions;
+  proposals = mockProposals;
+
+  listProposals(): ProposalRow[] {
+    return [...this.proposals].sort((a, b) => b.votes - a.votes);
+  }
+
+  createProposal(payload: Omit<ProposalRow, 'id' | 'votes' | 'created_at'>): ProposalRow {
+    const newProp: ProposalRow = {
+      ...payload,
+      id: `prop_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      votes: 1,
+      created_at: new Date().toISOString(),
+    };
+    this.proposals.unshift(newProp);
+    return newProp;
+  }
+
+  voteProposal(id: string): ProposalRow | undefined {
+    const prop = this.proposals.find((p) => p.id === id);
+    if (prop) {
+      prop.votes += 1;
+    }
+    return prop;
+  }
 
   findUserBySeed(seedId: string): UserRow | undefined {
     return this.users.find((u) => u.seed_id === seedId);
