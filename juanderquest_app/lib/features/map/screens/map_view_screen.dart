@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:maplibre_gl/maplibre_gl.dart';
 import '../../quests/providers/quest_provider.dart';
 import '../../quests/models/quest_model.dart';
 
@@ -13,7 +14,48 @@ class MapViewScreen extends ConsumerStatefulWidget {
 }
 
 class _MapViewScreenState extends ConsumerState<MapViewScreen> {
+  MaplibreMapController? _mapController;
   QuestModel? _selectedQuest;
+
+  // OpenMapTiles / MapLibre style JSON URL
+  static const String openMapTilesStyleUrl = 'https://demotiles.maplibre.org/style.json';
+
+  // Pangasinan Center Coordinates
+  static const LatLng _pangasinanCenter = LatLng(16.0350, 120.3330);
+
+  void _onMapCreated(MaplibreMapController controller) {
+    _mapController = controller;
+    _addQuestMarkers();
+  }
+
+  void _addQuestMarkers() {
+    if (_mapController == null) return;
+
+    final quests = ref.read(questProvider).quests;
+
+    for (int i = 0; i < quests.length; i++) {
+      final quest = quests[i];
+      _mapController!.addCircle(
+        CircleOptions(
+          geometry: LatLng(quest.gpsLat, quest.gpsLng),
+          circleColor: '#FFB703',
+          circleRadius: 12.0,
+          circleStrokeWidth: 3.0,
+          circleStrokeColor: '#582F0E',
+        ),
+      );
+    }
+
+    _mapController!.onCircleTapped.add((circle) {
+      final quests = ref.read(questProvider).quests;
+      final match = quests.firstWhere(
+        (q) => (q.gpsLat - circle.options.geometry!.latitude).abs() < 0.01 &&
+            (q.gpsLng - circle.options.geometry!.longitude).abs() < 0.01,
+        orElse: () => quests.first,
+      );
+      setState(() => _selectedQuest = match);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -36,72 +78,26 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.history_rounded, color: Color(0xFF582F0E)),
-            tooltip: 'Submission History',
+            tooltip: 'Submissions History',
             onPressed: () => context.push('/history'),
           ),
         ],
       ),
       body: Stack(
         children: [
-          // Map Canvas Placeholder (Pangasinan Tourist Map)
-          Container(
-            width: double.infinity,
-            height: double.infinity,
-            decoration: const BoxDecoration(
-              color: Color(0xFFE9E8E4),
-              image: DecorationImage(
-                image: AssetImage('assets/images/pangasinan_banner.png'),
-                fit: BoxFit.cover,
-                colorFilter: ColorFilter.mode(Colors.black26, BlendMode.darken),
-              ),
+          // Maplibre Vector Map Canvas (OpenMapTiles Provider)
+          MaplibreMap(
+            styleString: openMapTilesStyleUrl,
+            initialCameraPosition: const CameraPosition(
+              target: _pangasinanCenter,
+              zoom: 10.0,
             ),
-            child: Stack(
-              children: [
-                // Interactive Quest Map Pins
-                Positioned(
-                  top: 180,
-                  left: 120,
-                  child: _buildMapPin(
-                    questTitle: 'Hundred Islands Eco Trek',
-                    category: 'eco',
-                    onTap: () {
-                      if (questState.quests.isNotEmpty) {
-                        setState(() => _selectedQuest = questState.quests.first);
-                      }
-                    },
-                  ),
-                ),
-                Positioned(
-                  top: 100,
-                  right: 90,
-                  child: _buildMapPin(
-                    questTitle: 'Bolinao Lighthouse',
-                    category: 'cultural',
-                    onTap: () {
-                      if (questState.quests.length > 1) {
-                        setState(() => _selectedQuest = questState.quests[1]);
-                      }
-                    },
-                  ),
-                ),
-                Positioned(
-                  bottom: 220,
-                  left: 160,
-                  child: _buildMapPin(
-                    questTitle: 'Manaoag Shrine',
-                    category: 'cultural',
-                    onTap: () {
-                      if (questState.quests.length > 2) {
-                        setState(() => _selectedQuest = questState.quests[2]);
-                      }
-                    },
-                  ),
-                ),
-              ],
-            ),
+            onMapCreated: _onMapCreated,
+            myLocationEnabled: true,
+            trackCameraPosition: true,
           ),
 
-          // Map Legend Banner
+          // Map Control Legend Overlay (Stitch Integrated Style)
           Positioned(
             top: 16,
             left: 16,
@@ -111,10 +107,10 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.95),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFD5C4AC).withValues(alpha: 0.4)),
+                border: Border.all(color: const Color(0xFFD5C4AC).withValues(alpha: 0.5)),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
+                    color: Colors.black.withValues(alpha: 0.08),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
                   ),
@@ -128,11 +124,11 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
                       const Icon(Icons.map_rounded, color: Color(0xFF7D5800), size: 20),
                       const SizedBox(width: 8),
                       Text(
-                        'Pangasinan Region',
+                        'OpenMapTiles Provider',
                         style: GoogleFonts.plusJakartaSans(
                           color: const Color(0xFF582F0E),
                           fontWeight: FontWeight.bold,
-                          fontSize: 13,
+                          fontSize: 12,
                         ),
                       ),
                     ],
@@ -144,7 +140,7 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
-                      '${questState.quests.length} Active Destinations',
+                      '${questState.quests.length} Quest Markers',
                       style: GoogleFonts.plusJakartaSans(
                         color: const Color(0xFF436B58),
                         fontWeight: FontWeight.bold,
@@ -157,7 +153,7 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
             ),
           ),
 
-          // Selected Quest Card Bottom Sheet
+          // Selected Quest Details Drawer Card
           if (_selectedQuest != null)
             Positioned(
               bottom: 20,
@@ -168,10 +164,10 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: const Color(0xFFFFB703)),
+                  border: Border.all(color: const Color(0xFFFFB703), width: 1.5),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.1),
+                      color: Colors.black.withValues(alpha: 0.12),
                       blurRadius: 16,
                       offset: const Offset(0, 4),
                     ),
@@ -253,47 +249,32 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
             ),
         ],
       ),
-    );
-  }
-
-  Widget _buildMapPin({
-    required String questTitle,
-    required String category,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFB703),
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2.5),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.25),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
-            child: const Icon(Icons.place_rounded, color: Color(0xFF582F0E), size: 24),
-          ),
-          const SizedBox(height: 4),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.75),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              questTitle,
-              style: GoogleFonts.plusJakartaSans(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: const Color(0xFFD5C4AC).withValues(alpha: 0.4))),
+        ),
+        child: BottomNavigationBar(
+          backgroundColor: Colors.white,
+          selectedItemColor: const Color(0xFF3F6653),
+          unselectedItemColor: const Color(0xFF837560),
+          currentIndex: 1,
+          type: BottomNavigationBarType.fixed,
+          elevation: 0,
+          onTap: (index) {
+            if (index == 0) context.go('/quests');
+            if (index == 2) context.go('/vote');
+            if (index == 3) context.go('/shop');
+            if (index == 4) context.go('/profile');
+          },
+          items: const [
+            BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Home'),
+            BottomNavigationBarItem(icon: Icon(Icons.map_rounded), label: 'Map'),
+            BottomNavigationBarItem(icon: Icon(Icons.how_to_vote_rounded), label: 'Vote'),
+            BottomNavigationBarItem(icon: Icon(Icons.storefront_rounded), label: 'Shop'),
+            BottomNavigationBarItem(icon: Icon(Icons.person_rounded), label: 'Profile'),
+          ],
+        ),
       ),
     );
   }
