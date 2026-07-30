@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../providers/submission_provider.dart';
 import '../models/submission_model.dart';
 
@@ -25,23 +26,43 @@ class _SubmissionHistoryScreenState extends ConsumerState<SubmissionHistoryScree
     final subState = ref.watch(submissionProvider);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0F1D),
+      backgroundColor: const Color(0xFFFAF9F5),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF131B2E),
+        backgroundColor: const Color(0xFFFAF9F5),
         elevation: 0,
-        title: const Text('My Submissions History', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+        scrolledUnderElevation: 0,
+        title: Text(
+          'Submission History',
+          style: GoogleFonts.epilogue(color: const Color(0xFF582F0E), fontSize: 20, fontWeight: FontWeight.bold),
+        ),
       ),
       body: subState.isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF00F2FE)))
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFFFFB703)))
           : subState.submissions.isEmpty
-              ? const Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.history_rounded, size: 64, color: Color(0xFF64748B)),
-                      SizedBox(height: 12),
-                      Text('No submissions yet', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 16)),
-                    ],
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.history_rounded, size: 64, color: Color(0xFF837560)),
+                        const SizedBox(height: 16),
+                        Text(
+                          'You have not submitted any quests yet.',
+                          style: GoogleFonts.plusJakartaSans(color: const Color(0xFF514532), fontSize: 15),
+                        ),
+                        const SizedBox(height: 20),
+                        ElevatedButton(
+                          onPressed: () => context.go('/quests'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFFFB703),
+                            foregroundColor: const Color(0xFF6B4B00),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          child: Text('Explore Quests', style: GoogleFonts.epilogue(fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
                   ),
                 )
               : ListView.builder(
@@ -52,46 +73,64 @@ class _SubmissionHistoryScreenState extends ConsumerState<SubmissionHistoryScree
                     return _buildSubmissionCard(sub);
                   },
                 ),
-      bottomNavigationBar: BottomNavigationBar(
-        backgroundColor: const Color(0xFF131B2E),
-        selectedItemColor: const Color(0xFF00F2FE),
-        unselectedItemColor: const Color(0xFF64748B),
-        currentIndex: 1,
-        onTap: (index) {
-          if (index == 0) context.go('/quests');
-          if (index == 2) context.go('/profile');
-        },
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.map), label: 'Quests'),
-          BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Submissions'),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
-        ],
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: const Color(0xFFD5C4AC).withValues(alpha: 0.4))),
+        ),
+        child: BottomNavigationBar(
+          backgroundColor: Colors.white,
+          selectedItemColor: const Color(0xFF3F6653),
+          unselectedItemColor: const Color(0xFF837560),
+          currentIndex: 1,
+          elevation: 0,
+          onTap: (index) {
+            if (index == 0) context.go('/quests');
+            if (index == 2) context.go('/profile');
+          },
+          items: const [
+            BottomNavigationBarItem(icon: Icon(Icons.explore), label: 'Quests'),
+            BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Submissions'),
+            BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildSubmissionCard(SubmissionModel sub) {
-    Color statusColor;
+    Color statusBg;
+    Color statusTextColor;
     String statusLabel;
 
     if (sub.status == 'approved') {
-      statusColor = const Color(0xFF10B981);
-      statusLabel = 'APPROVED (+${sub.rewardPoints} PTS)';
+      statusBg = const Color(0xFF2D6A4F).withValues(alpha: 0.15);
+      statusTextColor = const Color(0xFF2D6A4F);
+      statusLabel = 'Quest approved — +${sub.rewardPoints} points awarded';
     } else if (sub.status == 'rejected') {
-      statusColor = const Color(0xFFF43F5E);
-      statusLabel = 'REJECTED';
+      statusBg = const Color(0xFFBC4749).withValues(alpha: 0.15);
+      statusTextColor = const Color(0xFFBC4749);
+      statusLabel = 'Proof rejected';
     } else {
-      statusColor = const Color(0xFFFFB703);
-      statusLabel = 'PENDING ADMIN REVIEW';
+      statusBg = const Color(0xFFFFB703).withValues(alpha: 0.2);
+      statusTextColor = const Color(0xFF6B4B00);
+      statusLabel = 'Awaiting administrator review';
     }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF1C273E),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFD5C4AC).withValues(alpha: 0.4)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -99,39 +138,41 @@ class _SubmissionHistoryScreenState extends ConsumerState<SubmissionHistoryScree
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                sub.questTitle,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+              Expanded(
+                child: Text(
+                  sub.questTitle,
+                  style: GoogleFonts.epilogue(color: const Color(0xFF582F0E), fontWeight: FontWeight.bold, fontSize: 16),
+                ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.15),
+                  color: statusBg,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
                   statusLabel,
-                  style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 10),
+                  style: GoogleFonts.plusJakartaSans(color: statusTextColor, fontWeight: FontWeight.bold, fontSize: 10),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 8),
           Text(
-            'Submitted: ${sub.createdAt.substring(0, 10)}',
-            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+            'Submitted: ${sub.createdAt.length >= 10 ? sub.createdAt.substring(0, 10) : sub.createdAt}',
+            style: GoogleFonts.plusJakartaSans(color: const Color(0xFF837560), fontSize: 12),
           ),
           if (sub.rejectionReason != null) ...[
             const SizedBox(height: 8),
             Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: const Color(0xFFF43F5E).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(6),
+                color: const Color(0xFFBC4749).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
                 'Reason: ${sub.rejectionReason}',
-                style: const TextStyle(color: Color(0xFFF43F5E), fontSize: 12),
+                style: GoogleFonts.plusJakartaSans(color: const Color(0xFFBC4749), fontSize: 12),
               ),
             ),
           ],
