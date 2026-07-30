@@ -14,7 +14,7 @@ class MapViewScreen extends ConsumerStatefulWidget {
 }
 
 class _MapViewScreenState extends ConsumerState<MapViewScreen> {
-  MaplibreMapController? _mapController;
+  MapLibreMapController? _mapController;
   QuestModel? _selectedQuest;
 
   // OpenMapTiles / MapLibre style JSON URL
@@ -23,7 +23,7 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
   // Pangasinan Center Coordinates
   static const LatLng _pangasinanCenter = LatLng(16.0350, 120.3330);
 
-  void _onMapCreated(MaplibreMapController controller) {
+  void _onMapCreated(MapLibreMapController controller) {
     _mapController = controller;
     _addQuestMarkers();
   }
@@ -86,7 +86,7 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
       body: Stack(
         children: [
           // Maplibre Vector Map Canvas (OpenMapTiles Provider)
-          MaplibreMap(
+          MapLibreMap(
             styleString: openMapTilesStyleUrl,
             initialCameraPosition: const CameraPosition(
               target: _pangasinanCenter,
@@ -249,33 +249,7 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
             ),
         ],
       ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: const Color(0xFFD5C4AC).withValues(alpha: 0.4))),
-        ),
-        child: BottomNavigationBar(
-          backgroundColor: Colors.white,
-          selectedItemColor: const Color(0xFF3F6653),
-          unselectedItemColor: const Color(0xFF837560),
-          currentIndex: 1,
-          type: BottomNavigationBarType.fixed,
-          elevation: 0,
-          onTap: (index) {
-            if (index == 0) context.go('/quests');
-            if (index == 2) context.go('/vote');
-            if (index == 3) context.go('/shop');
-            if (index == 4) context.go('/profile');
-          },
-          items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Home'),
-            BottomNavigationBarItem(icon: Icon(Icons.map_rounded), label: 'Map'),
-            BottomNavigationBarItem(icon: Icon(Icons.how_to_vote_rounded), label: 'Vote'),
-            BottomNavigationBarItem(icon: Icon(Icons.storefront_rounded), label: 'Shop'),
-            BottomNavigationBarItem(icon: Icon(Icons.person_rounded), label: 'Profile'),
-          ],
-        ),
-      ),
+
     );
   }
 }

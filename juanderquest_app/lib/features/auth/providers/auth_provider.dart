@@ -1,9 +1,16 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 import '../../../core/network/api_client.dart';
 import '../models/user_model.dart';
 
 final apiClientProvider = Provider<ApiClient>((ref) => ApiClient());
+
+class AuthRefreshNotifier extends ChangeNotifier {
+  void notify() => notifyListeners();
+}
+
+final authRefreshProvider = ChangeNotifierProvider<AuthRefreshNotifier>((ref) => AuthRefreshNotifier());
 
 class AuthState {
   final UserModel? user;
@@ -23,8 +30,9 @@ class AuthState {
 
 class AuthNotifier extends StateNotifier<AuthState> {
   final ApiClient _apiClient;
+  final AuthRefreshNotifier _refreshNotifier;
 
-  AuthNotifier(this._apiClient) : super(AuthState());
+  AuthNotifier(this._apiClient, this._refreshNotifier) : super(AuthState());
 
   Future<bool> loginWithSeed(String seedId) async {
     state = AuthState(isLoading: true);
@@ -41,6 +49,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
         _apiClient.setAuthToken(token);
         state = AuthState(user: user, token: token);
+        _refreshNotifier.notify();
         return true;
       } else {
         final msg = response.data['error']?['message'] ?? 'Authentication failed.';
@@ -73,10 +82,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
   void logout() {
     _apiClient.setAuthToken(null);
     state = AuthState();
+    _refreshNotifier.notify();
   }
 }
 
 final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
   final apiClient = ref.watch(apiClientProvider);
-  return AuthNotifier(apiClient);
+  final refreshNotifier = ref.watch(authRefreshProvider.notifier);
+  return AuthNotifier(apiClient, refreshNotifier);
 });

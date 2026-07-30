@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/auth_provider.dart';
 
@@ -159,14 +158,8 @@ class _DemoLoginScreenState extends ConsumerState<DemoLoginScreen> {
                 ElevatedButton(
                   onPressed: authState.isLoading
                       ? null
-                      : () async {
-                          final router = GoRouter.of(context);
-                          final success = await ref
-                              .read(authProvider.notifier)
-                              .loginWithSeed(_selectedSeed);
-                          if (success) {
-                            router.go('/quests');
-                          }
+                      : () {
+                          ref.read(authProvider.notifier).loginWithSeed(_selectedSeed);
                         },
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),

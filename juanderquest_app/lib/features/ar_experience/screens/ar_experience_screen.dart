@@ -134,7 +134,6 @@ class _ARExperienceScreenState extends ConsumerState<ARExperienceScreen> with Si
     }
 
     final messenger = ScaffoldMessenger.of(context);
-    final router = GoRouter.of(context);
 
     final success = await ref.read(submissionProvider.notifier).submitProof(
           questId: widget.quest.id,
@@ -153,7 +152,7 @@ class _ARExperienceScreenState extends ConsumerState<ARExperienceScreen> with Si
             backgroundColor: Color(0xFF2D6A4F),
           ),
         );
-        router.go('/history');
+        context.push('/history');
       }
     } else {
       final subState = ref.read(submissionProvider);
@@ -178,7 +177,7 @@ class _ARExperienceScreenState extends ConsumerState<ARExperienceScreen> with Si
             icon: Icons.check_circle_outline,
             iconColor: const Color(0xFF3F6653),
             buttonText: 'View History',
-            onPressed: () => router.go('/history'),
+            onPressed: () => context.push('/history'),
           );
         } else if (errCode == 'SUBMISSION_PENDING') {
           GlobalErrorDialog.show(
@@ -188,7 +187,7 @@ class _ARExperienceScreenState extends ConsumerState<ARExperienceScreen> with Si
             icon: Icons.hourglass_top_rounded,
             iconColor: const Color(0xFFFFB703),
             buttonText: 'View History',
-            onPressed: () => router.go('/history'),
+            onPressed: () => context.push('/history'),
           );
         } else {
           GlobalErrorDialog.show(

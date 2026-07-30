@@ -11,13 +11,16 @@ import '../features/profile/screens/profile_screen.dart';
 import '../features/map/screens/map_view_screen.dart';
 import '../features/vote/screens/vote_screen.dart';
 import '../features/shop/screens/shop_screen.dart';
+import 'main_shell.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authProvider);
+  final refreshNotifier = ref.watch(authRefreshProvider);
 
   return GoRouter(
     initialLocation: '/',
+    refreshListenable: refreshNotifier,
     redirect: (context, state) {
+      final authState = ref.read(authProvider);
       final loggedIn = authState.isAuthenticated;
       final onLogin = state.matchedLocation == '/';
 
@@ -30,41 +33,70 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/',
         builder: (context, state) => const DemoLoginScreen(),
       ),
-      GoRoute(
-        path: '/quests',
-        builder: (context, state) => const QuestListScreen(),
-      ),
-      GoRoute(
-        path: '/quests/:id',
-        builder: (context, state) {
-          final quest = state.extra as QuestModel?;
-          if (quest == null) return const QuestListScreen();
-          return QuestDetailScreen(quest: quest);
-        },
-      ),
-      GoRoute(
-        path: '/map',
-        builder: (context, state) => const MapViewScreen(),
-      ),
-      GoRoute(
-        path: '/vote',
-        builder: (context, state) => const VoteScreen(),
-      ),
-      GoRoute(
-        path: '/shop',
-        builder: (context, state) => const ShopScreen(),
-      ),
-      GoRoute(
-        path: '/profile',
-        builder: (context, state) => const ProfileScreen(),
-      ),
-      GoRoute(
-        path: '/ar',
-        builder: (context, state) {
-          final quest = state.extra as QuestModel?;
-          if (quest == null) return const QuestListScreen();
-          return ARExperienceScreen(quest: quest);
-        },
+      StatefulShellRoute.indexedStack(
+        builder: (context, state, navigationShell) => MainShell(navigationShell: navigationShell),
+        branches: [
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/quests',
+                builder: (context, state) => const QuestListScreen(),
+                routes: [
+                  GoRoute(
+                    path: ':id',
+                    builder: (context, state) {
+                      final quest = state.extra as QuestModel?;
+                      if (quest != null) return QuestDetailScreen(quest: quest);
+                      return QuestDetailScreen(questId: state.pathParameters['id'] ?? '');
+                    },
+                    routes: [
+                      GoRoute(
+                        path: 'ar',
+                        builder: (context, state) {
+                          final quest = state.extra as QuestModel?;
+                          if (quest != null) return ARExperienceScreen(quest: quest);
+                          return QuestDetailScreen(questId: state.pathParameters['id'] ?? '');
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/map',
+                builder: (context, state) => const MapViewScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/vote',
+                builder: (context, state) => const VoteScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/shop',
+                builder: (context, state) => const ShopScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/profile',
+                builder: (context, state) => const ProfileScreen(),
+              ),
+            ],
+          ),
+        ],
       ),
       GoRoute(
         path: '/history',
@@ -73,17 +105,3 @@ final routerProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
-
-// Backward compatibility router instance
-final appRouter = GoRouter(
-  initialLocation: '/',
-  routes: [
-    GoRoute(path: '/', builder: (context, state) => const DemoLoginScreen()),
-    GoRoute(path: '/quests', builder: (context, state) => const QuestListScreen()),
-    GoRoute(path: '/map', builder: (context, state) => const MapViewScreen()),
-    GoRoute(path: '/vote', builder: (context, state) => const VoteScreen()),
-    GoRoute(path: '/shop', builder: (context, state) => const ShopScreen()),
-    GoRoute(path: '/profile', builder: (context, state) => const ProfileScreen()),
-    GoRoute(path: '/history', builder: (context, state) => const SubmissionHistoryScreen()),
-  ],
-);

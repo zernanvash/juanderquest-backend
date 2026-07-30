@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'router.dart';
+import 'lifecycle_coordinator.dart';
 
 class JuanderQuestApp extends ConsumerWidget {
   const JuanderQuestApp({super.key});
@@ -26,35 +27,37 @@ class JuanderQuestApp extends ConsumerWidget {
       labelLarge: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600, color: deepInk),
     );
 
-    return MaterialApp.router(
-      title: 'JuanderQuest',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.light,
-        scaffoldBackgroundColor: backgroundWarm,
-        primaryColor: primaryGold,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: primaryGold,
-          primary: primaryGold,
-          secondary: secondaryGreen,
-          surface: backgroundWarm,
-          surfaceContainer: const Color(0xFFEFEEEA),
-        ),
-        textTheme: textTheme,
-        appBarTheme: AppBarTheme(
-          backgroundColor: backgroundWarm,
-          elevation: 0,
-          scrolledUnderElevation: 0.5,
-          titleTextStyle: GoogleFonts.epilogue(
-            color: woodBrown,
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
+    return LifecycleCoordinator(
+      child: MaterialApp.router(
+        title: 'JuanderQuest',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          useMaterial3: true,
+          brightness: Brightness.light,
+          scaffoldBackgroundColor: backgroundWarm,
+          primaryColor: primaryGold,
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: primaryGold,
+            primary: primaryGold,
+            secondary: secondaryGreen,
+            surface: backgroundWarm,
+            surfaceContainer: const Color(0xFFEFEEEA),
           ),
-          iconTheme: const IconThemeData(color: woodBrown),
+          textTheme: textTheme,
+          appBarTheme: AppBarTheme(
+            backgroundColor: backgroundWarm,
+            elevation: 0,
+            scrolledUnderElevation: 0.5,
+            titleTextStyle: GoogleFonts.epilogue(
+              color: woodBrown,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+            iconTheme: const IconThemeData(color: woodBrown),
+          ),
         ),
+        routerConfig: router,
       ),
-      routerConfig: router,
     );
   }
 }

@@ -12,21 +12,31 @@
 lib/
 ├── app/
 │   ├── app.dart        # Theme tokens & typography pairing
-│   └── router.dart     # GoRouter configuration
+│   └── router.dart     # GoRouter (5-tab shell + standalone routes)
 ├── core/
-│   └── network/
-│       └── api_client.dart
+│   ├── network/
+│   │   └── api_client.dart
+│   └── widgets/
+│       └── error_dialog.dart # Global popup dialog (OUT_OF_RANGE, permissions)
 └── features/
     ├── auth/          # Demo Login with role cards (Traveler/Admin) & token balance
-    ├── quests/        # Pangasinan quest list, category filters, featured event hero & detail screens
-    ├── submissions/   # Proof creation, idempotency UUID, status language history
-    └── ar_experience/ # Camera view, marker tracking, 3D gold coin overlay, GPS capture
+    ├── quests/        # Home Tab — Pangasinan quest list, category filters & detail
+    ├── map/           # Map Tab — Interactive destination pins & bottom sheet
+    ├── vote/          # Vote Tab — DAO Governance destination proposals & voting
+    ├── shop/          # Shop Tab — Partner merchant voucher store & redemption
+    ├── profile/       # Profile Tab — Traveler avatar, points balance & history action
+    ├── submissions/   # Submissions History Function — Standalone review status view
+    └── ar_experience/ # AR Camera view, reticle target, 3D coin overlay, GPS HUD
 ```
 
-## Screen Flow
-1. **Demo Login Screen:** Role cards (Traveler `user-1` vs Admin `admin-1`), logo header, product summary, prototype disclosure footer.
-2. **Quest List Screen:** Top bar with `1,250 PTS` token badge, greeting, search input, category filters (`All`, `Eco`, `Cultural`, `Food & Trade`), featured discovery banner, adventure list.
-3. **Quest Detail Screen:** Banner image, reward badge, 3-step instructions card, GPS radius validation check, AR trigger button.
-4. **AR Experience Screen:** Reticle target, 3D rotating gold coin, simulated marker scan, live GPS accuracy HUD.
-5. **Submission History Screen:** Clear status language (`Awaiting administrator review`, `Quest approved — +50 points awarded`, `Proof rejected`).
-6. **Profile Screen:** Traveler avatar, off-chain demo points balance card, future NFT achievement placeholders (`Eco Pioneer`, `Heritage Keeper`, `Food Explorer`).
+## 5-Tab Navigation System
+1. **Home Tab (`/quests`):** Existing Quest Discovery Feed with category filters & featured event card. Top bar includes **Submissions History** icon action button.
+2. **Map Tab (`/map`):** Interactive Pangasinan tourist map with destination pins and quick-view bottom sheets.
+3. **Vote Tab (`/vote`):** Community DAO governance for voting on future Pangasinan quest proposals.
+4. **Shop Tab (`/shop`):** Merchant voucher redemption store to spend demo points on food, tour, and craft discounts.
+5. **Profile Tab (`/profile`):** Traveler profile with Demo Points balance, Submissions History tile, and NFT achievement placeholders.
+
+## Standalone Action Routes
+- **`/history`:** Submissions & Proof History standalone view.
+- **`/ar`:** Live AR Camera experience with real GPS capture.
+- **`/quests/:id`:** Destination details & 3-step objective guide.

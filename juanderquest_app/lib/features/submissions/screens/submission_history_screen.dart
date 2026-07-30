@@ -73,28 +73,7 @@ class _SubmissionHistoryScreenState extends ConsumerState<SubmissionHistoryScree
                     return _buildSubmissionCard(sub);
                   },
                 ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: const Color(0xFFD5C4AC).withValues(alpha: 0.4))),
-        ),
-        child: BottomNavigationBar(
-          backgroundColor: Colors.white,
-          selectedItemColor: const Color(0xFF3F6653),
-          unselectedItemColor: const Color(0xFF837560),
-          currentIndex: 1,
-          elevation: 0,
-          onTap: (index) {
-            if (index == 0) context.go('/quests');
-            if (index == 2) context.go('/profile');
-          },
-          items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.explore), label: 'Quests'),
-            BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Submissions'),
-            BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
-          ],
-        ),
-      ),
+
     );
   }
 
