@@ -33,43 +33,11 @@ class QuestNotifier extends StateNotifier<QuestState> {
             .map((q) => QuestModel.fromJson(q))
             .toList();
         state = QuestState(quests: list, selectedCategory: category);
+      } else {
+        state = QuestState(error: 'Failed to load quests', selectedCategory: category);
       }
     } catch (e) {
-      // Fallback mock quests if server unreachable
-      final mockList = [
-        QuestModel(
-          id: 'q1111111-1111-1111-1111-111111111111',
-          title: 'Hundred Islands Eco Trek',
-          description: "Visit Governor's Island viewing deck in Alaminos City and scan the eco-marker.",
-          category: 'eco',
-          locationName: 'Alaminos City, Pangasinan',
-          gpsLat: 16.2063,
-          gpsLng: 119.9706,
-          radiusMeters: 150,
-          rewardPoints: 50,
-          markerCode: 'MARKER_HUNDRED_ISLANDS_01',
-          markerImageUrl: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/hundred_islands.png',
-        ),
-        QuestModel(
-          id: 'q2222222-2222-2222-2222-222222222222',
-          title: 'Bolinao Lighthouse Cultural Heritage',
-          description: 'Explore Cape Bolinao Lighthouse built in 1905 and scan the heritage marker.',
-          category: 'cultural',
-          locationName: 'Bolinao, Pangasinan',
-          gpsLat: 16.3885,
-          gpsLng: 119.9095,
-          radiusMeters: 200,
-          rewardPoints: 75,
-          markerCode: 'MARKER_BOLINAO_LIGHTHOUSE_01',
-          markerImageUrl: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/bolinao_lighthouse.png',
-        ),
-      ];
-
-      final filtered = category != null
-          ? mockList.where((q) => q.category == category).toList()
-          : mockList;
-
-      state = QuestState(quests: filtered, selectedCategory: category);
+      state = QuestState(error: 'Could not connect to server', selectedCategory: category);
     }
   }
 }

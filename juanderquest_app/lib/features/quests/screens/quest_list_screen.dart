@@ -15,6 +15,7 @@ class QuestListScreen extends ConsumerStatefulWidget {
 
 class _QuestListScreenState extends ConsumerState<QuestListScreen> {
   String? _selectedCategory;
+  String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -143,6 +144,7 @@ class _QuestListScreenState extends ConsumerState<QuestListScreen> {
                   // Search Bar
                   TextField(
                     controller: _searchController,
+                    onChanged: (value) => setState(() => _searchQuery = value.toLowerCase()),
                     decoration: InputDecoration(
                       hintText: 'Search quests in Pangasinan...',
                       hintStyle: GoogleFonts.plusJakartaSans(color: const Color(0xFF837560), fontSize: 14),
@@ -209,27 +211,25 @@ class _QuestListScreenState extends ConsumerState<QuestListScreen> {
                         child: CircularProgressIndicator(color: Color(0xFFFFB703)),
                       ),
                     )
-                  else if (questState.quests.isEmpty)
+                  else if (questState.error != null)
                     Container(
                       padding: const EdgeInsets.all(32),
                       child: Center(
-                        child: Text(
-                          'No quests found in this category.',
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.plusJakartaSans(color: const Color(0xFF837560)),
+                        child: Column(
+                          children: [
+                            const Icon(Icons.cloud_off, color: Color(0xFFBC4749), size: 32),
+                            const SizedBox(height: 8),
+                            Text(
+                              questState.error!,
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.plusJakartaSans(color: const Color(0xFFBC4749)),
+                            ),
+                          ],
                         ),
                       ),
                     )
                   else
-                    ListView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: questState.quests.length,
-                      itemBuilder: (context, index) {
-                        final quest = questState.quests[index];
-                        return _buildQuestItemCard(context, quest);
-                      },
-                    ),
+                    _buildQuestFeed(questState),
                 ],
               ),
             ),
@@ -438,6 +438,50 @@ class _QuestListScreenState extends ConsumerState<QuestListScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildQuestFeed(QuestState qs) {
+    final filtered = qs.quests.where((q) =>
+      _searchQuery.isEmpty ||
+      q.title.toLowerCase().contains(_searchQuery) ||
+      q.locationName.toLowerCase().contains(_searchQuery)
+    ).toList();
+
+    if (filtered.isEmpty && _searchQuery.isNotEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(32),
+        child: Center(
+          child: Text(
+            'No quests match "$_searchQuery".',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.plusJakartaSans(color: const Color(0xFF837560)),
+          ),
+        ),
+      );
+    }
+
+    if (filtered.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(32),
+        child: Center(
+          child: Text(
+            'No quests found in this category.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.plusJakartaSans(color: const Color(0xFF837560)),
+          ),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: filtered.length,
+      itemBuilder: (context, index) {
+        final quest = filtered[index];
+        return _buildQuestItemCard(context, quest);
+      },
     );
   }
 

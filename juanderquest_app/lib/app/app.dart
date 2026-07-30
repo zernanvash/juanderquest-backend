@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'router.dart';
 
-class JuanderQuestApp extends StatelessWidget {
+class JuanderQuestApp extends ConsumerWidget {
   const JuanderQuestApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final router = ref.watch(routerProvider);
+
     const primaryGold = Color(0xFFFFB703);
     const secondaryGreen = Color(0xFF3F6653);
     const backgroundWarm = Color(0xFFFAF9F5);
@@ -51,7 +54,7 @@ class JuanderQuestApp extends StatelessWidget {
           iconTheme: const IconThemeData(color: woodBrown),
         ),
       ),
-      routerConfig: appRouter,
+      routerConfig: router,
     );
   }
 }

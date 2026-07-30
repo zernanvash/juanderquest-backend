@@ -47,6 +47,7 @@ export function App() {
   const [selectedSub, setSelectedSub] = useState<Submission | null>(null);
   const [rejectionReason, setRejectionReason] = useState<string>('');
   const [showRejectModal, setShowRejectModal] = useState<boolean>(false);
+  const [loginError, setLoginError] = useState<string>('');
 
   const API_BASE = '/api/v1';
 
@@ -54,6 +55,7 @@ export function App() {
   const handleLogin = async () => {
     try {
       setLoading(true);
+      setLoginError('');
       const res = await fetch(`${API_BASE}/auth/demo-login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -63,9 +65,11 @@ export function App() {
       if (data.success) {
         setToken(data.data.token);
         localStorage.setItem('admin_token', data.data.token);
+      } else {
+        setLoginError(data.error?.message || 'Login failed');
       }
     } catch (err) {
-      console.error('Login error:', err);
+      setLoginError('Network error - cannot reach server');
     } finally {
       setLoading(false);
     }
@@ -85,6 +89,7 @@ export function App() {
       const res = await fetch(`${API_BASE}/admin/submissions${statusQuery}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (res.status === 401 || res.status === 403) { handleLogout(); return; }
       const data = await res.json();
       if (data.success) {
         setSubmissions(data.data);
@@ -121,6 +126,7 @@ export function App() {
 
   // Review Submission
   const handleReview = async (id: string, action: 'approve' | 'reject', reason?: string) => {
+    if (loading) return;
     try {
       setLoading(true);
       const res = await fetch(`${API_BASE}/admin/submissions/${id}`, {
@@ -134,6 +140,12 @@ export function App() {
           rejection_reason: reason,
         }),
       });
+      if (res.status === 401 || res.status === 403) { handleLogout(); return; }
+      if (!res.ok) {
+        const data = await res.json();
+        console.error('Review failed:', data.error?.message || res.statusText);
+        return;
+      }
       const data = await res.json();
       if (data.success) {
         setShowRejectModal(false);
@@ -166,6 +178,9 @@ export function App() {
             Administrator portal for reviewing GPS-backed quest proof and moderating Pangasinan tourism destinations.
           </p>
 
+          {loginError && (
+            <p style={{ color: '#bc4749', fontSize: '12px', marginBottom: '12px' }}>{loginError}</p>
+          )}
           <button
             onClick={handleLogin}
             disabled={loading}
@@ -173,8 +188,8 @@ export function App() {
               width: '100%',
               padding: '16px',
               borderRadius: '14px',
-              background: '#ffb703',
-              color: '#6b4b00',
+              background: loading ? '#e9e8e4' : '#ffb703',
+              color: loading ? '#837560' : '#6b4b00',
               fontWeight: 700,
               fontSize: '16px',
               boxShadow: '0 4px 16px rgba(255, 183, 3, 0.3)',
@@ -348,7 +363,8 @@ export function App() {
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '12px' }}>
                         <button
                           onClick={() => handleReview(sub.id, 'approve')}
-                          style={{ padding: '12px', borderRadius: '10px', background: '#2d6a4f', color: '#fff', fontWeight: 700, fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                          disabled={loading}
+                          style={{ padding: '12px', borderRadius: '10px', background: loading ? '#e9e8e4' : '#2d6a4f', color: loading ? '#837560' : '#fff', fontWeight: 700, fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', cursor: loading ? 'not-allowed' : 'pointer' }}
                         >
                           <Check size={16} /> Approve
                         </button>
@@ -358,7 +374,8 @@ export function App() {
                             setSelectedSub(sub);
                             setShowRejectModal(true);
                           }}
-                          style={{ padding: '12px', borderRadius: '10px', background: 'rgba(188, 71, 73, 0.15)', border: '1px solid #bc4749', color: '#bc4749', fontWeight: 700, fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                          disabled={loading}
+                          style={{ padding: '12px', borderRadius: '10px', background: 'rgba(188, 71, 73, 0.15)', border: '1px solid #bc4749', color: loading ? '#837560' : '#bc4749', fontWeight: 700, fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', cursor: loading ? 'not-allowed' : 'pointer' }}
                         >
                           <X size={16} /> Reject
                         </button>
