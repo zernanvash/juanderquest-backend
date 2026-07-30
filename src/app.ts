@@ -6,6 +6,7 @@ import authRouter from './routes/auth.js';
 import questsRouter from './routes/quests.js';
 import submissionsRouter from './routes/submissions.js';
 import adminRouter from './routes/admin.js';
+import { proposalsRouter } from './routes/proposals.js';
 import { errorHandler } from './middleware/error.js';
 
 export const app = express();
@@ -19,6 +20,7 @@ app.use('/api/v1', authRouter);
 app.use('/api/v1', questsRouter);
 app.use('/api/v1', submissionsRouter);
 app.use('/api/v1', adminRouter);
+app.use('/api/v1/proposals', proposalsRouter);
 
 // Global Error Handler
 app.use(errorHandler);

@@ -142,4 +142,27 @@ describe('JuanderQuest Backend REST API & QA Rules', () => {
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
   });
+
+  it('GET /api/v1/proposals returns destination proposals', async () => {
+    const res = await request(app).get('/api/v1/proposals');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.length).toBeGreaterThan(0);
+  });
+
+  it('POST /api/v1/proposals creates new tourism location proposal', async () => {
+    const res = await request(app)
+      .post('/api/v1/proposals')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({
+        title: 'Balingasay River Eco Cruise',
+        location_name: 'Bolinao, Pangasinan',
+        category: 'eco',
+        description: 'Explore the cleanest river in Region 1 with mangrove kayaking.',
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.title).toBe('Balingasay River Eco Cruise');
+  });
 });
