@@ -11,7 +11,10 @@ import {
   Check,
   X,
   Compass,
-  Sparkles
+  Sparkles,
+  Vote,
+  Store,
+  ThumbsUp
 } from 'lucide-react';
 
 interface Submission {
@@ -38,9 +41,25 @@ interface Quest {
   marker_code: string;
 }
 
+interface Proposal {
+  id: string;
+  title: string;
+  location: string;
+  category: string;
+  votes: number;
+}
+
+interface Voucher {
+  id: string;
+  merchant_name: string;
+  offer_title: string;
+  cost_points: number;
+  category: string;
+}
+
 export function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('admin_token'));
-  const [activeTab, setActiveTab] = useState<'pending' | 'all' | 'quests'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'all' | 'quests' | 'proposals' | 'vouchers'>('pending');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [quests, setQuests] = useState<Quest[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -48,6 +67,18 @@ export function App() {
   const [rejectionReason, setRejectionReason] = useState<string>('');
   const [showRejectModal, setShowRejectModal] = useState<boolean>(false);
   const [loginError, setLoginError] = useState<string>('');
+
+  const proposals: Proposal[] = [
+    { id: 'prop_3', title: 'Patar White Beach Eco Trail', location: 'Bolinao, Pangasinan', category: 'ECO-TOURISM', votes: 210 },
+    { id: 'prop_1', title: 'Tayug Sunflower Maze Quest', location: 'Tayug, Pangasinan', category: 'AGRI-TOURISM', votes: 142 },
+    { id: 'prop_2', title: 'San Fabian Beach Heritage Trail', location: 'San Fabian, Pangasinan', category: 'HERITAGE', votes: 98 },
+  ];
+
+  const vouchers: Voucher[] = [
+    { id: 'v1', merchant_name: 'Dagupan Bangus Grill & Restaurant', offer_title: '₱100 Meal Discount Voucher', cost_points: 50, category: 'FOOD & DINING' },
+    { id: 'v2', merchant_name: 'Hundred Islands Boatmen Association', offer_title: '15% Off Island Hopping Tour', cost_points: 75, category: 'ECO-TOURISM' },
+    { id: 'v3', merchant_name: 'Bolinao Souvenirs & Crafts', offer_title: 'Free Heritage Gift Token', cost_points: 40, category: 'TRADE & CRAFTS' },
+  ];
 
   const API_BASE = '/api/v1';
 
@@ -118,7 +149,7 @@ export function App() {
     if (token) {
       if (activeTab === 'quests') {
         fetchQuests();
-      } else {
+      } else if (activeTab === 'pending' || activeTab === 'all') {
         fetchSubmissions();
       }
     }
@@ -224,8 +255,8 @@ export function App() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <img src="/logo.png" alt="Logo" style={{ height: '40px', width: 'auto' }} />
           <div>
-            <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#582f0e' }}>JuanderQuest Dashboard</h2>
-            <p style={{ fontSize: '12px', color: '#514532' }}>Pangasinan Destination Moderation & Verification</p>
+            <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#582f0e' }}>JuanderQuest Control Room</h2>
+            <p style={{ fontSize: '12px', color: '#514532' }}>Pangasinan Destination Moderation & Verification Portal</p>
           </div>
         </div>
 
@@ -243,7 +274,7 @@ export function App() {
       {/* Container */}
       <main style={{ maxWidth: '1200px', width: '100%', margin: '0 auto', padding: '32px 20px', flex: 1 }}>
         {/* Navigation Tabs */}
-        <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', borderBottom: '1px solid #d5c4ac', paddingBottom: '12px' }}>
+        <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', borderBottom: '1px solid #d5c4ac', paddingBottom: '12px', flexWrap: 'wrap' }}>
           <button
             onClick={() => setActiveTab('pending')}
             style={{
@@ -294,10 +325,44 @@ export function App() {
           >
             <MapPin size={16} /> Pangasinan Quests
           </button>
+
+          <button
+            onClick={() => setActiveTab('proposals')}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '20px',
+              background: activeTab === 'proposals' ? '#ffb703' : '#e9e8e4',
+              color: activeTab === 'proposals' ? '#6b4b00' : '#514532',
+              fontWeight: 700,
+              fontSize: '13px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+          >
+            <Vote size={16} /> Community Votes
+          </button>
+
+          <button
+            onClick={() => setActiveTab('vouchers')}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '20px',
+              background: activeTab === 'vouchers' ? '#ffb703' : '#e9e8e4',
+              color: activeTab === 'vouchers' ? '#6b4b00' : '#514532',
+              fontWeight: 700,
+              fontSize: '13px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+          >
+            <Store size={16} /> Merchant Vouchers
+          </button>
         </div>
 
-        {/* Content Section */}
-        {activeTab !== 'quests' ? (
+        {/* Pending & All Submissions Tab */}
+        {(activeTab === 'pending' || activeTab === 'all') && (
           <div>
             {submissions.length === 0 ? (
               <div className="stitch-panel" style={{ padding: '48px', textAlign: 'center', color: '#837560' }}>
@@ -386,7 +451,10 @@ export function App() {
               </div>
             )}
           </div>
-        ) : (
+        )}
+
+        {/* Quests Tab */}
+        {activeTab === 'quests' && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
             {quests.map((q) => (
               <div key={q.id} className="stitch-card" style={{ padding: '20px' }}>
@@ -398,6 +466,48 @@ export function App() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', background: '#efeeea', padding: '10px 14px', borderRadius: '10px' }}>
                   <span>Reward: <strong style={{ color: '#7d5800' }}>+{q.reward_points} PTS</strong></span>
                   <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#582f0e', fontWeight: 700 }}>{q.marker_code}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Community Proposals & Votes Tab */}
+        {activeTab === 'proposals' && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
+            {proposals.map((p) => (
+              <div key={p.id} className="stitch-card" style={{ padding: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', padding: '4px 8px', borderRadius: '6px', background: '#efeeea', color: '#837560' }}>
+                    {p.category}
+                  </span>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#7d5800', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <ThumbsUp size={14} /> {p.votes} Votes
+                  </span>
+                </div>
+                <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#582f0e', marginBottom: '4px' }}>{p.title}</h3>
+                <p style={{ fontSize: '13px', color: '#514532', marginBottom: '14px' }}>{p.location}</p>
+                <div style={{ background: '#beead1', padding: '8px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 700, color: '#436b58' }}>
+                  Top Voted Candidate for Next Quest Update
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Merchant Vouchers Tab */}
+        {activeTab === 'vouchers' && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
+            {vouchers.map((v) => (
+              <div key={v.id} className="stitch-card" style={{ padding: '20px' }}>
+                <span style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', padding: '4px 8px', borderRadius: '6px', background: 'rgba(63, 102, 83, 0.12)', color: '#3f6653', marginBottom: '8px', display: 'inline-block' }}>
+                  {v.category}
+                </span>
+                <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#582f0e', marginBottom: '4px' }}>{v.offer_title}</h3>
+                <p style={{ fontSize: '13px', fontWeight: 600, color: '#1b1c1a', marginBottom: '14px' }}>{v.merchant_name}</p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', background: '#efeeea', padding: '10px 14px', borderRadius: '10px' }}>
+                  <span>Cost: <strong style={{ color: '#7d5800' }}>{v.cost_points} PTS</strong></span>
+                  <span style={{ fontSize: '11px', color: '#2d6a4f', fontWeight: 700 }}>ACTIVE MERCHANT</span>
                 </div>
               </div>
             ))}
