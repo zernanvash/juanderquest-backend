@@ -5,6 +5,6 @@ import 'package:juanderquest_app/app/app.dart';
 void main() {
   testWidgets('App renders without error', (WidgetTester tester) async {
     await tester.pumpWidget(const ProviderScope(child: JuanderQuestApp()));
-    expect(find.text('JuanderQuest'), findsWidgets);
+    expect(find.text('Start Demo Experience'), findsOneWidget);
   });
 }
