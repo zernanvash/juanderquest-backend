@@ -1,6 +1,7 @@
 # UI/UX Specification & Flow Map — JuanderQuest Prototype
 
 **Target Platforms:** Android 8.0+ (API 26+) & Web Admin Dashboard  
+**Interactive Figma Prototype:** [JuanDerQuest Figma Prototype](https://www.figma.com/proto/iMNm3VkAJBUous8NLoZHSj/JuanDerQuest?node-id=70-251)  
 
 ---
 
