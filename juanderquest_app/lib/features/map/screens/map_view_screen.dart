@@ -17,6 +17,7 @@ class MapViewScreen extends ConsumerStatefulWidget {
 class _MapViewScreenState extends ConsumerState<MapViewScreen> {
   MapLibreMapController? _mapController;
   QuestModel? _selectedQuest;
+  bool _mapError = false;
 
   void _onMapCreated(MapLibreMapController controller) {
     _mapController = controller;
@@ -26,38 +27,42 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
   void _syncQuestMarkers() {
     if (_mapController == null) return;
 
-    final quests = ref.read(questProvider).quests;
-    _mapController!.clearCircles();
-
-    for (int i = 0; i < quests.length; i++) {
-      final quest = quests[i];
-      _mapController!.addCircle(
-        CircleOptions(
-          geometry: LatLng(quest.gpsLat, quest.gpsLng),
-          circleColor: MapConfig.markerGoldHex,
-          circleRadius: 12.0,
-          circleStrokeWidth: 3.0,
-          circleStrokeColor: MapConfig.markerBorderHex,
-        ),
-      );
-    }
-
-    _mapController!.onCircleTapped.add((circle) {
+    try {
       final quests = ref.read(questProvider).quests;
-      final match = quests.firstWhere(
-        (q) => (q.gpsLat - circle.options.geometry!.latitude).abs() < 0.01 &&
-            (q.gpsLng - circle.options.geometry!.longitude).abs() < 0.01,
-        orElse: () => quests.first,
-      );
-      setState(() => _selectedQuest = match);
-    });
+      _mapController!.clearCircles();
+
+      for (int i = 0; i < quests.length; i++) {
+        final quest = quests[i];
+        _mapController!.addCircle(
+          CircleOptions(
+            geometry: LatLng(quest.gpsLat, quest.gpsLng),
+            circleColor: MapConfig.markerGoldHex,
+            circleRadius: 12.0,
+            circleStrokeWidth: 3.0,
+            circleStrokeColor: MapConfig.markerBorderHex,
+          ),
+        );
+      }
+
+      _mapController!.onCircleTapped.add((circle) {
+        final quests = ref.read(questProvider).quests;
+        final match = quests.firstWhere(
+          (q) => (q.gpsLat - circle.options.geometry!.latitude).abs() < 0.01 &&
+              (q.gpsLng - circle.options.geometry!.longitude).abs() < 0.01,
+          orElse: () => quests.first,
+        );
+        setState(() => _selectedQuest = match);
+      });
+    } catch (_) {
+      // Graceful fallback to interactive map layout if GL fails
+      setState(() => _mapError = true);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final questState = ref.watch(questProvider);
 
-    // Listen to questProvider changes and sync markers automatically
     ref.listen(questProvider, (previous, next) {
       if (next.quests != previous?.quests) {
         _syncQuestMarkers();
@@ -81,17 +86,75 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
       ),
       body: Stack(
         children: [
-          // MapLibre Vector Map Canvas with Production Vector Style & Fallback
-          MapLibreMap(
-            styleString: MapConfig.vectorStyleUrl,
-            initialCameraPosition: const CameraPosition(
-              target: LatLng(MapConfig.pangasinanLat, MapConfig.pangasinanLng),
-              zoom: MapConfig.defaultZoom,
+          // Fallback Pangasinan Region Interactive Map Layout
+          Container(
+            width: double.infinity,
+            height: double.infinity,
+            decoration: const BoxDecoration(
+              color: Color(0xFFE9E8E4),
+              image: DecorationImage(
+                image: AssetImage('assets/images/pangasinan_banner.png'),
+                fit: BoxFit.cover,
+                colorFilter: ColorFilter.mode(Colors.black38, BlendMode.darken),
+              ),
             ),
-            onMapCreated: _onMapCreated,
-            myLocationEnabled: true,
-            trackCameraPosition: true,
+            child: Stack(
+              children: [
+                Positioned(
+                  top: 180,
+                  left: 120,
+                  child: _buildMapPin(
+                    questTitle: 'Hundred Islands Eco Trek',
+                    onTap: () {
+                      if (questState.quests.isNotEmpty) {
+                        setState(() => _selectedQuest = questState.quests.first);
+                      }
+                    },
+                  ),
+                ),
+                Positioned(
+                  top: 100,
+                  right: 90,
+                  child: _buildMapPin(
+                    questTitle: 'Bolinao Lighthouse',
+                    onTap: () {
+                      if (questState.quests.length > 1) {
+                        setState(() => _selectedQuest = questState.quests[1]);
+                      }
+                    },
+                  ),
+                ),
+                Positioned(
+                  bottom: 220,
+                  left: 160,
+                  child: _buildMapPin(
+                    questTitle: 'Manaoag Shrine',
+                    onTap: () {
+                      if (questState.quests.length > 2) {
+                        setState(() => _selectedQuest = questState.quests[2]);
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
+
+          // MapLibre Vector Map Overlay (renders if GL initialized properly)
+          if (!_mapError)
+            MapLibreMap(
+              styleString: MapConfig.vectorStyleUrl,
+              initialCameraPosition: const CameraPosition(
+                target: LatLng(MapConfig.pangasinanLat, MapConfig.pangasinanLng),
+                zoom: MapConfig.defaultZoom,
+              ),
+              onMapCreated: _onMapCreated,
+              myLocationEnabled: false,
+              trackCameraPosition: true,
+              onStyleLoadedCallback: () {
+                _syncQuestMarkers();
+              },
+            ),
 
           // Map Control Legend Overlay
           Positioned(
@@ -246,6 +309,48 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
                 ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMapPin({
+    required String questTitle,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFB703),
+              shape: BoxShape.circle,
+              border: Border.all(color: const Color(0xFF582F0E), width: 2.5),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.25),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: const Icon(Icons.place_rounded, color: Color(0xFF582F0E), size: 24),
+          ),
+          const SizedBox(height: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.8),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              questTitle,
+              style: GoogleFonts.plusJakartaSans(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+            ),
+          ),
         ],
       ),
     );

@@ -1,6 +1,6 @@
 class MapConfig {
-  static const String vectorStyleUrl = 'https://tiles.openmaptiles.org/styles/klokantech-basic/style.json';
-  static const String fallbackStyleUrl = 'https://demotiles.maplibre.org/style.json';
+  static const String vectorStyleUrl = 'https://demotiles.maplibre.org/style.json';
+  static const String fallbackStyleUrl = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json';
 
   // Pangasinan Default Coordinates
   static const double pangasinanLat = 16.0350;
