@@ -1,3 +1,4 @@
+import type { Pool } from 'pg';
 import { env } from '../config/env.js';
 
 export interface UserRow {
@@ -56,6 +57,33 @@ export interface ProposalRow {
   proposed_lng?: number;
   submitted_by: string;
   votes: number;
+  created_at: string;
+}
+
+export interface MerchantRow {
+  id: string;
+  name: string;
+  location: string;
+  description: string;
+  created_at: string;
+}
+
+export interface VoucherRow {
+  id: string;
+  merchant_id: string;
+  title: string;
+  description: string;
+  cost_points: number;
+  is_active: boolean;
+}
+
+export interface RedemptionRow {
+  id: string;
+  voucher_id: string;
+  user_id: string;
+  code: string;
+  cost_points: number;
+  idempotency_key: string;
   created_at: string;
 }
 
@@ -219,6 +247,18 @@ const mockProposals: ProposalRow[] = [
   },
 ];
 
+const mockMerchants: MerchantRow[] = [
+  { id: 'm1', name: 'Bangus Street Grill', location: 'Dagupan City, Pangasinan', description: 'Local grill house serving the famous Dagupan bangus (milkfish).', created_at: new Date().toISOString() },
+  { id: 'm2', name: 'Bolinao Lighthouse Cafe', location: 'Bolinao, Pangasinan', description: 'Cafe beside Cape Bolinao Lighthouse with coastal views.', created_at: new Date().toISOString() },
+  { id: 'm3', name: 'Alaminos Souvenir Hub', location: 'Alaminos City, Pangasinan', description: 'Souvenir shop near the Hundred Islands ferry port.', created_at: new Date().toISOString() },
+];
+
+const mockVouchers: VoucherRow[] = [
+  { id: 'v1', merchant_id: 'm1', title: 'P50 Off Bangus Meal', description: 'Discount voucher valid for one meal at Bangus Street Grill.', cost_points: 100, is_active: true },
+  { id: 'v2', merchant_id: 'm2', title: 'Free Iced Coffee', description: 'Free iced coffee at Bolinao Lighthouse Cafe.', cost_points: 60, is_active: true },
+  { id: 'v3', merchant_id: 'm3', title: '15% Off Souvenirs', description: '15% discount on a single souvenir item at Alaminos Souvenir Hub.', cost_points: 80, is_active: true },
+];
+
 // Haversine Distance Calculation helper
 export function calculateHaversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371000; // Earth radius in meters
@@ -236,6 +276,107 @@ export class MemoryDb {
   quests = mockQuests;
   submissions = mockSubmissions;
   proposals = mockProposals;
+  merchants = mockMerchants;
+  vouchers = mockVouchers;
+  redemptions: RedemptionRow[] = [];
+
+  private pg: Pool | null = null;
+
+  // Hydrates the in-memory arrays from PostgreSQL and attaches the pool for write-through.
+  async hydrateFromPg(pool: Pool) {
+    this.pg = pool;
+    const toIso = (value: Date | string) => new Date(value).toISOString();
+    const { rows: users } = await pool.query('SELECT * FROM users ORDER BY created_at');
+    this.users = users.map((row: any) => ({
+      id: row.id, seed_id: row.seed_id, display_name: row.display_name, email: row.email,
+      avatar_url: row.avatar_url, role: row.role, demo_points: row.demo_points,
+      created_at: toIso(row.created_at), updated_at: toIso(row.updated_at),
+    }));
+    const { rows: quests } = await pool.query('SELECT * FROM quests ORDER BY created_at');
+    this.quests = quests.map((row: any) => ({
+      id: row.id, title: row.title, description: row.description, category: row.category,
+      location_name: row.location_name, gps_lat: row.gps_lat, gps_lng: row.gps_lng,
+      radius_meters: row.radius_meters, reward_points: row.reward_points, marker_code: row.marker_code,
+      marker_image_url: row.marker_image_url, is_active: row.is_active,
+      created_at: toIso(row.created_at), updated_at: toIso(row.updated_at),
+    }));
+    const { rows: submissions } = await pool.query('SELECT * FROM submissions ORDER BY created_at');
+    this.submissions = submissions.map((row: any) => ({
+      id: row.id, idempotency_key: row.idempotency_key, user_id: row.user_id, quest_id: row.quest_id,
+      scanned_marker_code: row.scanned_marker_code, captured_lat: row.captured_lat, captured_lng: row.captured_lng,
+      captured_accuracy: row.captured_accuracy, status: row.status, rejection_reason: row.rejection_reason,
+      reviewed_by: row.reviewed_by, reviewed_at: row.reviewed_at ? toIso(row.reviewed_at) : null,
+      created_at: toIso(row.created_at), updated_at: toIso(row.updated_at),
+    }));
+    const { rows: merchants } = await pool.query('SELECT * FROM merchants ORDER BY created_at');
+    this.merchants = merchants.map((row: any) => ({
+      id: row.id, name: row.name, location: row.location, description: row.description,
+      created_at: toIso(row.created_at),
+    }));
+    const { rows: vouchers } = await pool.query('SELECT * FROM vouchers ORDER BY id');
+    this.vouchers = vouchers.map((row: any) => ({
+      id: row.id, merchant_id: row.merchant_id, title: row.title, description: row.description,
+      cost_points: row.cost_points, is_active: row.is_active,
+    }));
+    const { rows: redemptions } = await pool.query('SELECT * FROM redemptions ORDER BY created_at');
+    this.redemptions = redemptions.map((row: any) => ({
+      id: row.id, voucher_id: row.voucher_id, user_id: row.user_id, code: row.code,
+      cost_points: row.cost_points, idempotency_key: row.idempotency_key, created_at: toIso(row.created_at),
+    }));
+  }
+
+  private async persist(query: string, params: unknown[]) {
+    if (!this.pg) return;
+    try {
+      await this.pg.query(query, params);
+    } catch (error) {
+      console.error('[db] write-through failed:', (error as Error).message);
+    }
+  }
+
+  // Writes a quest row (insert or update). Used by the governance store when it schedules community quests.
+  upsertQuest(quest: QuestRow) {
+    const existing = this.quests.find((item) => item.id === quest.id);
+    if (existing) Object.assign(existing, quest);
+    else this.quests.push(quest);
+    this.persist(
+      `INSERT INTO quests (id, title, description, category, location_name, gps_lat, gps_lng, radius_meters, reward_points, marker_code, marker_image_url, is_active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, description=EXCLUDED.description, category=EXCLUDED.category,
+         location_name=EXCLUDED.location_name, gps_lat=EXCLUDED.gps_lat, gps_lng=EXCLUDED.gps_lng,
+         radius_meters=EXCLUDED.radius_meters, reward_points=EXCLUDED.reward_points, marker_code=EXCLUDED.marker_code,
+         marker_image_url=EXCLUDED.marker_image_url, is_active=EXCLUDED.is_active, updated_at=NOW()`,
+      [quest.id, quest.title, quest.description, quest.category, quest.location_name, quest.gps_lat, quest.gps_lng,
+        quest.radius_meters, quest.reward_points, quest.marker_code, quest.marker_image_url, quest.is_active]
+    );
+  }
+
+  private persistSubmission(sub: SubmissionRow) {
+    this.persist(
+      `INSERT INTO submissions (id, idempotency_key, user_id, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
+      [sub.id, sub.idempotency_key, sub.user_id, sub.quest_id, sub.scanned_marker_code, sub.captured_lat, sub.captured_lng, sub.captured_accuracy, sub.status]
+    );
+  }
+
+  private persistReview(sub: SubmissionRow) {
+    this.persist(
+      `UPDATE submissions SET status=$2, rejection_reason=$3, reviewed_by=$4, reviewed_at=NOW(), updated_at=NOW() WHERE id=$1`,
+      [sub.id, sub.status, sub.rejection_reason ?? null, sub.reviewed_by ?? null]
+    );
+  }
+
+  private persistUserPoints(userId: string, demoPoints: number) {
+    this.persist('UPDATE users SET demo_points=$2, updated_at=NOW() WHERE id=$1', [userId, demoPoints]);
+  }
+
+  private persistRedemption(redemption: RedemptionRow) {
+    this.persist(
+      `INSERT INTO redemptions (id, voucher_id, user_id, code, cost_points, idempotency_key)
+       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (user_id, idempotency_key) DO NOTHING`,
+      [redemption.id, redemption.voucher_id, redemption.user_id, redemption.code, redemption.cost_points, redemption.idempotency_key]
+    );
+  }
 
   listProposals(): ProposalRow[] {
     return [...this.proposals].sort((a, b) => b.votes - a.votes);
@@ -294,6 +435,7 @@ export class MemoryDb {
       updated_at: new Date().toISOString(),
     };
     this.submissions.push(newSub);
+    this.persistSubmission(newSub);
     return newSub;
   }
 
@@ -331,12 +473,13 @@ export class MemoryDb {
           target_lat: quest?.gps_lat || 0,
           target_lng: quest?.gps_lng || 0,
           distance_meters,
+          quest_radius_meters: quest?.radius_meters || 0,
         };
       });
   }
 
   // Idempotent state transition & single point award (Fix 4.5 & 4.7)
-  reviewSubmission(id: string, action: 'approve' | 'reject', adminId: string, reason?: string): { submission: SubmissionRow; alreadyReviewed: boolean } | undefined {
+  reviewSubmission(id: string, action: 'approve' | 'reject', adminId: string, reason?: string): { submission: SubmissionRow; alreadyReviewed: boolean; conflicting: boolean } | undefined {
     const sub = this.submissions.find((s) => s.id === id);
     if (!sub) return undefined;
 
@@ -344,17 +487,18 @@ export class MemoryDb {
 
     // Idempotent check: if already in target status, return without re-adding points
     if (sub.status === targetStatus) {
-      return { submission: sub, alreadyReviewed: true };
+      return { submission: sub, alreadyReviewed: true, conflicting: false };
     }
 
-    // Only allow transition from pending
+    // Conflicting terminal state (e.g. reject after approve): explicit conflict, not silent success
     if (sub.status !== 'pending') {
-      return { submission: sub, alreadyReviewed: true };
+      return { submission: sub, alreadyReviewed: true, conflicting: true };
     }
 
     sub.status = action === 'approve' ? 'approved' : 'rejected';
     sub.reviewed_by = adminId;
     sub.reviewed_at = new Date().toISOString();
+    sub.updated_at = sub.reviewed_at;
     if (action === 'reject' && reason) {
       sub.rejection_reason = reason;
     }
@@ -364,10 +508,68 @@ export class MemoryDb {
       const quest = this.findQuestById(sub.quest_id);
       if (user && quest) {
         user.demo_points += quest.reward_points;
+        user.updated_at = sub.updated_at;
+        this.persistUserPoints(user.id, user.demo_points);
       }
     }
 
-    return { submission: sub, alreadyReviewed: false };
+    this.persistReview(sub);
+
+    return { submission: sub, alreadyReviewed: false, conflicting: false };
+  }
+
+  listVouchers(): Array<VoucherRow & { merchant_name: string }> {
+    return this.vouchers
+      .filter((voucher) => voucher.is_active)
+      .map((voucher) => ({
+        ...voucher,
+        merchant_name: this.merchants.find((merchant) => merchant.id === voucher.merchant_id)?.name || 'Unknown Merchant',
+      }));
+  }
+
+  findVoucherById(id: string): VoucherRow | undefined {
+    return this.vouchers.find((voucher) => voucher.id === id && voucher.is_active);
+  }
+
+  findRedemptionByIdempotency(key: string, userId: string): RedemptionRow | undefined {
+    return this.redemptions.find((redemption) => redemption.idempotency_key === key && redemption.user_id === userId);
+  }
+
+  // Redeems a voucher: atomic points deduction, unique code, user-scoped idempotent replay.
+  redeemVoucher(
+    voucherId: string,
+    userId: string,
+    idempotencyKey: string
+  ): { redemption: RedemptionRow; replayed: boolean } | { error: 'NOT_FOUND' | 'INSUFFICIENT_POINTS' | 'ALREADY_REDEEMED' } {
+    const replay = this.findRedemptionByIdempotency(idempotencyKey, userId);
+    if (replay) return { redemption: replay, replayed: true };
+
+    const voucher = this.findVoucherById(voucherId);
+    if (!voucher) return { error: 'NOT_FOUND' };
+
+    if (this.redemptions.some((redemption) => redemption.user_id === userId && redemption.voucher_id === voucherId)) {
+      return { error: 'ALREADY_REDEEMED' };
+    }
+
+    const user = this.findUserById(userId);
+    if (!user || user.demo_points < voucher.cost_points) return { error: 'INSUFFICIENT_POINTS' };
+
+    const code = `JDQ-${Math.random().toString(36).slice(2, 6).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    const redemption: RedemptionRow = {
+      id: `rdm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      voucher_id: voucherId,
+      user_id: userId,
+      code,
+      cost_points: voucher.cost_points,
+      idempotency_key: idempotencyKey,
+      created_at: new Date().toISOString(),
+    };
+    user.demo_points -= voucher.cost_points;
+    user.updated_at = redemption.created_at;
+    this.redemptions.push(redemption);
+    this.persistRedemption(redemption);
+    this.persistUserPoints(userId, user.demo_points);
+    return { redemption, replayed: false };
   }
 }
 

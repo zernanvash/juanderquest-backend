@@ -5,7 +5,9 @@ const router = Router();
 
 router.get('/quests', (req: Request, res: Response) => {
   const category = req.query.category as string | undefined;
-  const quests = db.listQuests(category);
+  // ponytail: marker_code stays on GET /quests/:id only (simulated AR needs it client-side);
+  // the list must not leak markers.
+  const quests = db.listQuests(category).map(({ marker_code, ...quest }) => quest);
 
   return res.status(200).json({
     success: true,

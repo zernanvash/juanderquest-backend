@@ -1,3 +1,4 @@
+import type { Pool } from 'pg';
 import type { MemoryDb } from '../db/index.js';
 
 export const MJDQ_PER_JDQ = 1000;
@@ -40,6 +41,8 @@ export interface GovernanceProposal {
   organizer_bond_mjdq: number;
   bond_status: 'not_locked' | 'locked' | 'refunded' | 'slashed_50' | 'slashed_100';
   eligible_voter_snapshot: number;
+  // Snapshot of eligible voter ids captured when voting opens (one eligible user, one vote).
+  eligible_voter_ids?: string[];
   quorum_required: number;
   yes_votes: number;
   no_votes: number;
@@ -126,6 +129,8 @@ export class GovernanceStore {
   readonly voteWindowDays = 7;
   readonly defaultQuestDays = 30;
   readonly feedbackWindowDays = 7;
+  // ponytail: quorum floor is 1 so the single seeded eligible user can demonstrate the full vote lifecycle.
+  readonly quorumFloor = 1;
 
   private proposals: GovernanceProposal[] = [];
   private votes: VoteRecord[] = [];
@@ -145,6 +150,7 @@ export class GovernanceStore {
     updated_by: 'system',
     updated_at: now(),
   };
+  private pg: Pool | null = null;
 
   constructor(private readonly db: MemoryDb) {
     for (const user of db.users) {
@@ -198,6 +204,74 @@ export class GovernanceStore {
     }));
   }
 
+  // ---- Durability: JSONB snapshot of the whole governance state, written after every mutation. ----
+  attachPg(pool: Pool) {
+    this.pg = pool;
+  }
+
+  snapshot() {
+    return {
+      proposals: this.proposals,
+      votes: this.votes,
+      feedbackVotes: this.feedbackVotes,
+      balances: Object.fromEntries(this.balances),
+      ledger: this.ledger,
+      audit: this.audit,
+      burnedMjdq: this.burnedMjdq,
+      treasuryMjdq: this.treasuryMjdq,
+      issuedMjdq: this.issuedMjdq,
+      idempotency: [...this.idempotency.entries()],
+      controls: this.controls,
+    };
+  }
+
+  private restore(data: ReturnType<GovernanceStore['snapshot']>) {
+    this.proposals = data.proposals;
+    this.votes = data.votes;
+    this.feedbackVotes = data.feedbackVotes;
+    this.balances = new Map(Object.entries(data.balances));
+    this.ledger = data.ledger;
+    this.audit = data.audit;
+    this.burnedMjdq = data.burnedMjdq;
+    this.treasuryMjdq = data.treasuryMjdq;
+    this.issuedMjdq = data.issuedMjdq;
+    this.idempotency = new Map(data.idempotency);
+    this.controls = data.controls;
+  }
+
+  // Rebuilds user balances from demo_points. Invariant: user balance always equals demo_points * MJDQ_PER_JDQ.
+  refreshBalances() {
+    this.balances.clear();
+    this.issuedMjdq = 0;
+    for (const user of this.db.users) {
+      const balance = user.demo_points * MJDQ_PER_JDQ;
+      this.balances.set(user.id, balance);
+      this.issuedMjdq += balance;
+    }
+  }
+
+  async hydrateFromPg(pool: Pool) {
+    this.attachPg(pool);
+    try {
+      const { rows } = await pool.query<{ data: ReturnType<GovernanceStore['snapshot']> }>(
+        'SELECT data FROM governance_snapshot WHERE id = 1'
+      );
+      if (rows[0]?.data) this.restore(rows[0].data);
+    } catch (error) {
+      console.warn('[governance] snapshot hydrate failed - starting fresh.', (error as Error).message);
+    }
+    this.refreshBalances();
+  }
+
+  private persist() {
+    if (!this.pg) return;
+    void this.pg
+      .query('INSERT INTO governance_snapshot (id, data) VALUES (1, $1) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()', [
+        JSON.stringify(this.snapshot()),
+      ])
+      .catch((error) => console.error('[governance] snapshot persist failed:', error.message));
+  }
+
   listProposals() {
     return [...this.proposals].sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
@@ -227,6 +301,9 @@ export class GovernanceStore {
           duty: 'Quest planning, coordination, and reporting',
           share_bps: 10000,
         }];
+    for (const recipient of recipients) {
+      if (!this.db.findUserById(recipient.user_id)) throw new Error('RECIPIENT_NOT_FOUND');
+    }
     const organizers = recipients.filter((recipient) => recipient.role === 'organizer' && recipient.user_id === user.id);
     if (recipients.reduce((sum, recipient) => sum + recipient.share_bps, 0) !== 10000 || organizers.length !== 1) {
       throw new Error('INVALID_PAYOUT_SHARES');
@@ -257,6 +334,7 @@ export class GovernanceStore {
     };
     this.proposals.push(proposal);
     this.addAudit('proposal.created', user.id, 'proposal', proposal.id);
+    this.persist();
     return proposal;
   }
 
@@ -266,6 +344,7 @@ export class GovernanceStore {
     proposal.state = 'screening';
     proposal.updated_at = now();
     this.addAudit('proposal.submitted', userId, 'proposal', proposal.id);
+    this.persist();
     return proposal;
   }
 
@@ -292,8 +371,10 @@ export class GovernanceStore {
       this.recordTransfer('bond_lock', proposal.submitted_by_id, 'bond_escrow', this.organizerBond, 'proposal', proposal.id, adminId);
       proposal.bond_status = 'locked';
       proposal.state = 'voting';
-      proposal.eligible_voter_snapshot = this.eligibleGovernanceUsers().length;
-      proposal.quorum_required = Math.max(5, Math.ceil(proposal.eligible_voter_snapshot * 0.1));
+      const eligible = this.eligibleGovernanceUsers();
+      proposal.eligible_voter_snapshot = eligible.length;
+      proposal.eligible_voter_ids = eligible.map((eligibleUser) => eligibleUser.id);
+      proposal.quorum_required = Math.max(this.quorumFloor, Math.ceil(proposal.eligible_voter_snapshot * 0.1));
       proposal.voting_opens_at = now();
       proposal.voting_closes_at = addDays(new Date(), this.voteWindowDays);
       proposal.screening_reason = reason;
@@ -301,6 +382,7 @@ export class GovernanceStore {
     }
     proposal.updated_at = now();
     this.addAudit(`proposal.screened.${decision}`, adminId, 'proposal', proposal.id, reason, evidenceReference, { checklist_complete: checklistComplete });
+    this.persist();
     return proposal;
   }
 
@@ -313,7 +395,7 @@ export class GovernanceStore {
     if (proposal.state !== 'voting' || !proposal.voting_closes_at || new Date(proposal.voting_closes_at) <= new Date()) {
       throw new Error('VOTING_CLOSED');
     }
-    if (!this.eligibleGovernanceUsers().some((user) => user.id === userId)) throw new Error('NOT_ELIGIBLE');
+    if (!proposal.eligible_voter_ids?.includes(userId)) throw new Error('NOT_ELIGIBLE');
     if (this.votes.some((vote) => vote.proposal_id === proposalId && vote.user_id === userId)) throw new Error('ALREADY_VOTED');
 
     const burn = Math.floor(this.proposalVoteFee * this.burnBps / 10000);
@@ -333,6 +415,7 @@ export class GovernanceStore {
 
     const response = { proposal, charged_mjdq: this.proposalVoteFee, burned_mjdq: burn, escrowed_mjdq: escrow, balance_mjdq: this.balanceOf(userId) };
     this.idempotency.set(idempotencyKey, { fingerprint, response });
+    this.persist();
     return response;
   }
 
@@ -373,6 +456,7 @@ export class GovernanceStore {
     this.addAudit('proposal.feedback_cast', userId, 'proposal', proposal.id, undefined, undefined, { choice: 'private', rating, fee_mjdq: this.feedbackVoteFee });
     const response = { proposal, charged_mjdq: this.feedbackVoteFee, burned_mjdq: burn, escrowed_mjdq: escrow, balance_mjdq: this.balanceOf(userId) };
     this.idempotency.set(idempotencyKey, { fingerprint, response });
+    this.persist();
     return response;
   }
 
@@ -393,6 +477,7 @@ export class GovernanceStore {
     }
     proposal.updated_at = now();
     this.addAudit('proposal.voting_closed', adminId, 'proposal', proposal.id, undefined, undefined, { passed, force, quorum_met: passedQuorum });
+    this.persist();
     return proposal;
   }
 
@@ -406,6 +491,7 @@ export class GovernanceStore {
     proposal.state = passed ? 'payout_pending' : 'disputed';
     proposal.updated_at = now();
     this.addAudit('proposal.feedback_closed', adminId, 'proposal', proposal.id, undefined, undefined, { passed, force, quorum_met: quorumMet });
+    this.persist();
     return proposal;
   }
 
@@ -422,6 +508,7 @@ export class GovernanceStore {
     proposal.state = 'completed';
     proposal.updated_at = now();
     this.addAudit('proposal.payout_finalized', adminId, 'proposal', proposal.id, 'Community feedback passed; full locked payout released.');
+    this.persist();
     return proposal;
   }
 
@@ -440,7 +527,7 @@ export class GovernanceStore {
       proposal.quest_starts_at = timestamp.toISOString();
       proposal.quest_ends_at = addDays(timestamp, this.defaultQuestDays);
       if (!this.db.quests.some((quest) => quest.id === proposal.id)) {
-        this.db.quests.push({
+        this.db.upsertQuest({
           id: proposal.id,
           title: proposal.title,
           description: proposal.description,
@@ -463,6 +550,7 @@ export class GovernanceStore {
       if (quest) {
         quest.is_active = true;
         quest.updated_at = now();
+        this.db.upsertQuest(quest);
       }
     }
     if (target === 'feedback') {
@@ -470,16 +558,18 @@ export class GovernanceStore {
       if (quest) {
         quest.is_active = false;
         quest.updated_at = now();
+        this.db.upsertQuest(quest);
       }
       proposal.feedback_opens_at = timestamp.toISOString();
       proposal.feedback_closes_at = addDays(timestamp, this.feedbackWindowDays);
       const participants = this.db.submissions.filter((submission) => submission.quest_id === proposal.id && submission.status === 'approved');
       proposal.feedback_eligible_snapshot = new Set(participants.map((submission) => submission.user_id)).size;
-      proposal.feedback_quorum_required = Math.max(5, Math.ceil(proposal.feedback_eligible_snapshot * 0.1));
+      proposal.feedback_quorum_required = Math.max(this.quorumFloor, Math.ceil(proposal.feedback_eligible_snapshot * 0.1));
     }
     proposal.state = target;
     proposal.updated_at = now();
     this.addAudit(`proposal.transition.${target}`, adminId, 'proposal', proposal.id);
+    this.persist();
     return proposal;
   }
 
@@ -510,6 +600,7 @@ export class GovernanceStore {
     proposal.state = 'completed';
     proposal.updated_at = now();
     this.addAudit('proposal.dispute_resolved', adminId, 'proposal', proposal.id, reason, evidenceReference, { release_percent: releasePercent, bond_action: bondAction });
+    this.persist();
     return proposal;
   }
 
@@ -571,6 +662,7 @@ export class GovernanceStore {
     if (!reason) throw new Error('REASON_REQUIRED');
     this.controls = { ...this.controls, ...updates, updated_by: adminId, updated_at: now() };
     this.addAudit('governance.controls_updated', adminId, 'system', 'governance', reason, undefined, updates);
+    this.persist();
     return this.controls;
   }
 
@@ -584,7 +676,7 @@ export class GovernanceStore {
       default_quest_days: this.defaultQuestDays,
       feedback_window_days: this.feedbackWindowDays,
       quorum_percent: 10,
-      quorum_floor: 5,
+      quorum_floor: this.quorumFloor,
       vote_power: 'one_eligible_user_one_vote',
       settlement: 'off_chain_prototype',
     };
@@ -611,6 +703,19 @@ export class GovernanceStore {
     this.issuedMjdq += amount;
     this.recordTransfer('quest_reward_credit', 'reward_issuance', userId, amount, 'submission', submissionId, actorId);
     this.addAudit('quest.reward_issued', actorId, 'quest', questId, undefined, undefined, { submission_id: submissionId, amount_mjdq: amount });
+    this.persist();
+  }
+
+  // Consumes demo points for an off-chain voucher redemption and records the ledger debit.
+  consumePoints(userId: string, points: number, voucherId: string, redemptionId: string) {
+    const amount = points * MJDQ_PER_JDQ;
+    if (this.balanceOf(userId) < amount) throw new Error('INSUFFICIENT_JDQ');
+    this.balances.set(userId, this.balanceOf(userId) - amount);
+    const user = this.db.findUserById(userId);
+    if (user) user.demo_points = Math.floor(this.balanceOf(userId) / MJDQ_PER_JDQ);
+    this.recordTransfer('voucher_redemption_debit', userId, 'merchant_settlement', amount, 'voucher', voucherId, userId);
+    this.addAudit('voucher.redeemed', userId, 'voucher', voucherId, undefined, undefined, { redemption_id: redemptionId, points });
+    this.persist();
   }
 
   private eligibleGovernanceUsers() {

@@ -72,3 +72,7 @@ INSERT INTO quests (id, title, description, category, location_name, gps_lat, gp
   'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/dagupan_bangus.png'
 )
 ON CONFLICT (marker_code) DO NOTHING;
+
+INSERT INTO submissions (id, idempotency_key, user_id, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy, status, reviewed_by, reviewed_at) VALUES
+('sub-seeded-governance-eligibility', 'seeded-governance-eligibility', '11111111-1111-1111-1111-111111111111', 'q5555555-5555-5555-5555-555555555555', 'MARKER_DAGUPAN_BANGUS_01', 16.0433, 120.3334, 5, 'approved', '22222222-2222-2222-2222-222222222222', NOW())
+ON CONFLICT (id) DO NOTHING;

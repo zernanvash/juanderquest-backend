@@ -241,4 +241,113 @@ describe('JuanderQuest Backend REST API & QA Rules', () => {
       .set('Authorization', `Bearer ${userToken}`);
     expect(res.status).toBe(403);
   });
+
+  it('GET /quests does not leak marker_code in the list', async () => {
+    const res = await request(app).get('/api/v1/quests');
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+    for (const quest of res.body.data) {
+      expect(quest.marker_code).toBeUndefined();
+    }
+  });
+
+  it('GET /quests/:id keeps marker_code for the simulated AR flow', async () => {
+    const res = await request(app).get('/api/v1/quests/q1111111-1111-1111-1111-111111111111');
+    expect(res.status).toBe(200);
+    expect(res.body.data.marker_code).toBe('MARKER_HUNDRED_ISLANDS_01');
+  });
+
+  it('admin submission listing includes quest_radius_meters', async () => {
+    const res = await request(app)
+      .get('/api/v1/admin/submissions')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+    for (const submission of res.body.data) {
+      expect(typeof submission.quest_radius_meters).toBe('number');
+    }
+  });
+
+  it('reject-after-approve returns 409 STATE_CONFLICT (no silent success)', async () => {
+    const listRes = await request(app)
+      .get('/api/v1/admin/submissions?status=approved')
+      .set('Authorization', `Bearer ${adminToken}`);
+    const subId = listRes.body.data[0].id;
+
+    const res = await request(app)
+      .patch(`/api/v1/admin/submissions/${subId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ action: 'reject', rejection_reason: 'Late attempt to override.' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('STATE_CONFLICT');
+  });
+
+  it('GET /vouchers lists seeded merchant vouchers', async () => {
+    const res = await request(app).get('/api/v1/vouchers');
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThanOrEqual(3);
+    expect(res.body.data[0]).toHaveProperty('merchant_name');
+  });
+
+  it('voucher redemption deducts points, replays idempotently, and blocks repeat with a new key', async () => {
+    const before = await request(app).get('/api/v1/auth/me').set('Authorization', `Bearer ${userToken}`);
+    const pointsBefore = before.body.data.demo_points;
+
+    const first = await request(app)
+      .post('/api/v1/vouchers/v1/redeem')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ idempotency_key: 'voucher-redeem-key-1' });
+
+    expect(first.status).toBe(201);
+    expect(first.body.data.code).toMatch(/^JDQ-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+    expect(first.body.data.cost_points).toBe(100);
+
+    const afterFirst = await request(app).get('/api/v1/auth/me').set('Authorization', `Bearer ${userToken}`);
+    expect(afterFirst.body.data.demo_points).toBe(pointsBefore - 100);
+
+    const replay = await request(app)
+      .post('/api/v1/vouchers/v1/redeem')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ idempotency_key: 'voucher-redeem-key-1' });
+
+    expect(replay.status).toBe(200);
+    expect(replay.body.data.code).toBe(first.body.data.code);
+
+    const afterReplay = await request(app).get('/api/v1/auth/me').set('Authorization', `Bearer ${userToken}`);
+    expect(afterReplay.body.data.demo_points).toBe(pointsBefore - 100);
+
+    const repeat = await request(app)
+      .post('/api/v1/vouchers/v1/redeem')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ idempotency_key: 'voucher-redeem-key-2' });
+
+    expect(repeat.status).toBe(409);
+    expect(repeat.body.error.code).toBe('ALREADY_REDEEMED');
+  });
+
+  it('voucher redemption rejects with 409 INSUFFICIENT_POINTS when points run out', async () => {
+    const res = await request(app)
+      .post('/api/v1/vouchers/v2/redeem')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ idempotency_key: 'voucher-redeem-user-1-poor' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('INSUFFICIENT_POINTS');
+  });
+
+  it('unknown API route returns JSON 404', async () => {
+    const res = await request(app).get('/api/v1/does-not-exist');
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
+  });
+
+  it('malformed JSON body returns 400 INVALID_JSON', async () => {
+    const res = await request(app)
+      .post('/api/v1/auth/demo-login')
+      .set('Content-Type', 'application/json')
+      .send('{"seed_id": broken');
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('INVALID_JSON');
+  });
 });
