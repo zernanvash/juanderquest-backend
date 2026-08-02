@@ -5,6 +5,7 @@ import { db } from '../db/index.js';
 import { env } from '../config/env.js';
 import { validateRequest } from '../middleware/validate.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
+import { rateLimit } from '../middleware/rateLimit.js';
 
 const router = Router();
 
@@ -14,7 +15,7 @@ const loginSchema = z.object({
   }),
 });
 
-router.post('/auth/demo-login', validateRequest(loginSchema), (req, res) => {
+router.post('/auth/demo-login', rateLimit({ windowMs: 60_000, max: 20 }), validateRequest(loginSchema), (req, res) => {
   const { seed_id } = req.body;
   const user = db.findUserBySeed(seed_id);
 

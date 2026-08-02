@@ -10,6 +10,7 @@ import { proposalsRouter } from './routes/proposals.js';
 import governanceAdminRouter from './routes/governanceAdmin.js';
 import communityQuestsRouter from './routes/communityQuests.js';
 import walletRouter from './routes/wallet.js';
+import vouchersRouter from './routes/vouchers.js';
 import { errorHandler } from './middleware/error.js';
 
 export const app = express();
@@ -27,6 +28,26 @@ app.use('/api/v1/proposals', proposalsRouter);
 app.use('/api/v1', governanceAdminRouter);
 app.use('/api/v1', communityQuestsRouter);
 app.use('/api/v1', walletRouter);
+app.use('/api/v1', vouchersRouter);
+
+// JSON parse errors -> 400 instead of 500
+app.use((err: Error & { type?: string }, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_JSON', message: 'Malformed JSON in request body.' },
+    });
+  }
+  next(err);
+});
+
+// API 404 in JSON
+app.use('/api/v1', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: { code: 'NOT_FOUND', message: `Route ${req.method} ${req.path} not found.` },
+  });
+});
 
 // Global Error Handler
 app.use(errorHandler);

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db, calculateHaversineDistance } from '../db/index.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
+import { rateLimit } from '../middleware/rateLimit.js';
 
 const router = Router();
 
@@ -17,7 +18,7 @@ const submissionSchema = z.object({
   }),
 });
 
-router.post('/submissions', authenticateToken, validateRequest(submissionSchema), (req: AuthRequest, res: Response) => {
+router.post('/submissions', rateLimit({ windowMs: 60_000, max: 30 }), authenticateToken, validateRequest(submissionSchema), (req: AuthRequest, res: Response) => {
   const userId = req.user!.id;
   const { idempotency_key, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy } = req.body;
 

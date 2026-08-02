@@ -53,7 +53,19 @@ router.patch('/admin/submissions/:id', validateRequest(reviewSchema), (req: Auth
     });
   }
 
-  const { submission: updatedSub, alreadyReviewed } = result;
+  const { submission: updatedSub, alreadyReviewed, conflicting } = result;
+
+  // Conflicting terminal state (e.g. reject after approve) is an explicit 409, not silent success.
+  if (conflicting) {
+    return res.status(409).json({
+      success: false,
+      error: {
+        code: 'STATE_CONFLICT',
+        message: `Submission '${id}' has already been reviewed as '${updatedSub.status}' and cannot transition.`,
+      },
+    });
+  }
+
   const quest = db.findQuestById(updatedSub.quest_id);
   if (action === 'approve' && !alreadyReviewed && quest) {
     governanceStore.creditQuestReward(updatedSub.user_id, quest.id, updatedSub.id, quest.reward_points, adminId);
