@@ -1,10 +1,12 @@
 -- Initial Database Migration for JuanderQuest Prototype
 -- NOTE: id/idempotency_key columns are TEXT (not UUID) so seeded demo ids
 -- like 'q1111111-1111-1111-1111-111111111111' work verbatim.
+-- NOTE: CREATE TYPE has no IF NOT EXISTS; enum creation is guarded below so
+-- the migration is re-runnable on every boot.
 
-CREATE TYPE user_role AS ENUM ('user', 'admin');
-CREATE TYPE quest_category AS ENUM ('eco', 'cultural', 'food_trade');
-CREATE TYPE submission_status AS ENUM ('pending', 'approved', 'rejected');
+DO $$ BEGIN CREATE TYPE user_role AS ENUM ('user', 'admin'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE quest_category AS ENUM ('eco', 'cultural', 'food_trade'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE submission_status AS ENUM ('pending', 'approved', 'rejected'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
