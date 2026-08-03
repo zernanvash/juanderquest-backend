@@ -31,6 +31,23 @@ describe('JuanderQuest Backend REST API & QA Rules', () => {
     userToken = res.body.data.token;
   });
 
+  it('creates a temporary traveler through simulated wallet login', async () => {
+    const login = await request(app)
+      .post('/api/v1/auth/simulated-wallet-login')
+      .send({ username: 'Automated Scout', password: 'temporary-password' });
+
+    expect(login.status).toBe(200);
+    expect(login.body.data.user.display_name).toBe('Automated Scout');
+    expect(login.body.data.user.demo_points).toBe(100);
+    expect(login.body.data.simulated_wallet_address).toMatch(/^0x[0-9a-f]{40}$/);
+
+    const profile = await request(app)
+      .get('/api/v1/auth/me')
+      .set('Authorization', `Bearer ${login.body.data.token}`);
+    expect(profile.status).toBe(200);
+    expect(profile.body.data.id).toBe(login.body.data.user.id);
+  });
+
   it('POST /api/v1/auth/demo-login for admin-1', async () => {
     const res = await request(app)
       .post('/api/v1/auth/demo-login')
