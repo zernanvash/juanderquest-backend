@@ -15,7 +15,10 @@ import { errorHandler } from './middleware/error.js';
 
 export const app = express();
 
-app.use(cors({ origin: env.CORS_ORIGIN }));
+export const parseCorsOrigin = (value: string) =>
+  value === '*' ? value : value.split(',').map((origin) => origin.trim()).filter(Boolean);
+
+app.use(cors({ origin: parseCorsOrigin(env.CORS_ORIGIN) }));
 app.use(express.json());
 
 // Routes
