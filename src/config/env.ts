@@ -10,4 +10,12 @@ export const env = cleanEnv(process.env, {
   // Fail fast in production when the real secret is missing; dev/test get a throwaway default.
   JWT_SECRET: process.env.NODE_ENV === 'production' ? str() : str({ default: 'dev_only_jwt_secret_do_not_use_in_production' }),
   CORS_ORIGIN: str({ default: '*' }),
+  WALLET_AUTH_MODE: str({
+    choices: ['local', 'signature'],
+    default: process.env.NODE_ENV === 'production' ? 'signature' : 'local',
+  }),
 });
+
+if (env.NODE_ENV === 'production' && env.WALLET_AUTH_MODE === 'local') {
+  throw new Error('WALLET_AUTH_MODE=local is forbidden when NODE_ENV=production');
+}

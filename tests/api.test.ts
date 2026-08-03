@@ -19,6 +19,26 @@ describe('JuanderQuest Backend REST API & QA Rules', () => {
     expect(res.body.status).toBe('ok');
   });
 
+  it('supports the explicit local wallet authentication mode', async () => {
+    const config = await request(app).get('/api/v1/auth/wallet/config');
+    expect(config.status).toBe(200);
+    expect(config.body.data.mode).toBe('local');
+
+    const login = await request(app).post('/api/v1/auth/wallet/local-login').send({ address: 'dev-wallet-42' });
+    expect(login.status).toBe(200);
+    expect(login.body.data.auth_method).toBe('local_bypass');
+    expect(login.body.data.user.seed_id).toBe('wallet:dev-wallet-42');
+    expect(login.body.data.token).toBeDefined();
+  });
+
+  it('does not expose signature challenges in local mode', async () => {
+    const res = await request(app).post('/api/v1/auth/wallet/challenge').send({
+      address: '0x0000000000000000000000000000000000000001',
+    });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('AUTH_MODE_MISMATCH');
+  });
+
   it('POST /api/v1/auth/demo-login for user-1', async () => {
     const res = await request(app)
       .post('/api/v1/auth/demo-login')

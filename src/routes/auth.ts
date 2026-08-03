@@ -6,8 +6,99 @@ import { env } from '../config/env.js';
 import { validateRequest } from '../middleware/validate.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
+import { randomUUID } from 'crypto';
+import { getAddress, verifyMessage } from 'ethers';
 
 const router = Router();
+
+const walletChallenges = new Map<string, { message: string; expiresAt: number }>();
+const walletAddressSchema = z.string().transform((value, ctx) => {
+  try {
+    return getAddress(value);
+  } catch {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'A valid EVM wallet address is required' });
+    return z.NEVER;
+  }
+});
+const localWalletIdentifierSchema = z.coerce.string().trim().min(1).max(100);
+
+const issueToken = (user: (typeof db.users)[number]) => jwt.sign(
+  { id: user.id, seed_id: user.seed_id, role: user.role },
+  env.JWT_SECRET,
+  { expiresIn: '24h' },
+);
+
+const findOrCreateWalletUser = (identifier: string) => {
+  const normalized = identifier.toLowerCase();
+  const seedId = `wallet:${normalized}`;
+  let user = db.findUserBySeed(seedId);
+  if (user) return user;
+  const now = new Date().toISOString();
+  user = {
+    id: randomUUID(),
+    seed_id: seedId,
+    display_name: `Traveler ${identifier.slice(0, 6)}...${identifier.slice(-4)}`,
+    email: `${Buffer.from(normalized).toString('hex').slice(0, 20)}@wallet.juanderquest.local`,
+    avatar_url: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(normalized)}`,
+    role: 'user',
+    demo_points: 100,
+    created_at: now,
+    updated_at: now,
+  };
+  db.users.push(user);
+  return user;
+};
+
+router.get('/auth/wallet/config', (_req, res) => res.status(200).json({
+  success: true,
+  data: { mode: env.WALLET_AUTH_MODE },
+}));
+
+router.post('/auth/wallet/challenge', rateLimit({ windowMs: 60_000, max: 20 }), validateRequest(z.object({
+  body: z.object({ address: walletAddressSchema }),
+})), (req, res) => {
+  if (env.WALLET_AUTH_MODE !== 'signature') {
+    return res.status(409).json({ success: false, error: { code: 'AUTH_MODE_MISMATCH', message: 'Wallet signatures are disabled in local auth mode.' } });
+  }
+  const address = getAddress(req.body.address);
+  const nonce = randomUUID();
+  const message = ['Sign in to JuanDerQuest', '', `Wallet: ${address}`, `Nonce: ${nonce}`, 'This request does not trigger a blockchain transaction or cost gas.'].join('\n');
+  walletChallenges.set(address.toLowerCase(), { message, expiresAt: Date.now() + 5 * 60_000 });
+  return res.status(200).json({ success: true, data: { message, expires_in_seconds: 300 } });
+});
+
+router.post('/auth/wallet/login', rateLimit({ windowMs: 60_000, max: 20 }), validateRequest(z.object({
+  body: z.object({ address: walletAddressSchema, signature: z.string().min(1) }),
+})), (req, res) => {
+  if (env.WALLET_AUTH_MODE !== 'signature') {
+    return res.status(409).json({ success: false, error: { code: 'AUTH_MODE_MISMATCH', message: 'Use the local wallet bypass in local auth mode.' } });
+  }
+  const address = getAddress(req.body.address);
+  const key = address.toLowerCase();
+  const challenge = walletChallenges.get(key);
+  walletChallenges.delete(key);
+  if (!challenge || challenge.expiresAt <= Date.now()) {
+    return res.status(401).json({ success: false, error: { code: 'INVALID_CHALLENGE', message: 'Wallet challenge is missing, expired, or already used.' } });
+  }
+  try {
+    if (getAddress(verifyMessage(challenge.message, req.body.signature)) !== address) throw new Error('Address mismatch');
+  } catch {
+    return res.status(401).json({ success: false, error: { code: 'INVALID_SIGNATURE', message: 'The wallet signature could not be verified.' } });
+  }
+  const user = findOrCreateWalletUser(address);
+  return res.status(200).json({ success: true, data: { token: issueToken(user), user, wallet_address: address } });
+});
+
+router.post('/auth/wallet/local-login', rateLimit({ windowMs: 60_000, max: 20 }), validateRequest(z.object({
+  body: z.object({ address: localWalletIdentifierSchema }),
+})), (req, res) => {
+  if (env.NODE_ENV === 'production' || env.WALLET_AUTH_MODE !== 'local') {
+    return res.status(403).json({ success: false, error: { code: 'LOCAL_AUTH_DISABLED', message: 'Local wallet bypass is disabled.' } });
+  }
+  const identifier = String(req.body.address).trim();
+  const user = findOrCreateWalletUser(identifier);
+  return res.status(200).json({ success: true, data: { token: issueToken(user), user, wallet_address: identifier, auth_method: 'local_bypass' } });
+});
 
 const loginSchema = z.object({
   body: z.object({
