@@ -1,10 +1,17 @@
 import request from 'supertest';
-import { app } from '../src/app';
+import { app, parseCorsOrigin } from '../src/app';
 
 describe('JuanderQuest Backend REST API & QA Rules', () => {
   let userToken: string;
   let adminToken: string;
   const testIdempotencyKey = 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d';
+
+  it('supports comma-separated CORS origins for local web development', () => {
+    expect(parseCorsOrigin('https://jdq.zernanvash.dev, http://localhost:3000')).toEqual([
+      'https://jdq.zernanvash.dev',
+      'http://localhost:3000',
+    ]);
+  });
 
   it('GET /api/v1/health should return ok', async () => {
     const res = await request(app).get('/api/v1/health');
