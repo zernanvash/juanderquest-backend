@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-import { cleanEnv, str, port } from 'envalid';
+import { bool, cleanEnv, str, port } from 'envalid';
 
 dotenv.config();
 
@@ -14,8 +14,9 @@ export const env = cleanEnv(process.env, {
     choices: ['local', 'signature'],
     default: process.env.NODE_ENV === 'production' ? 'signature' : 'local',
   }),
+  ALLOW_INSECURE_LOCAL_WALLET_AUTH: bool({ default: false }),
 });
 
-if (env.NODE_ENV === 'production' && env.WALLET_AUTH_MODE === 'local') {
-  throw new Error('WALLET_AUTH_MODE=local is forbidden when NODE_ENV=production');
+if (env.NODE_ENV === 'production' && env.WALLET_AUTH_MODE === 'local' && !env.ALLOW_INSECURE_LOCAL_WALLET_AUTH) {
+  throw new Error('Production local wallet auth requires ALLOW_INSECURE_LOCAL_WALLET_AUTH=true');
 }

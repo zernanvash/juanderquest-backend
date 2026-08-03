@@ -92,7 +92,10 @@ router.post('/auth/wallet/login', rateLimit({ windowMs: 60_000, max: 20 }), vali
 router.post('/auth/wallet/local-login', rateLimit({ windowMs: 60_000, max: 20 }), validateRequest(z.object({
   body: z.object({ address: localWalletIdentifierSchema }),
 })), (req, res) => {
-  if (env.NODE_ENV === 'production' || env.WALLET_AUTH_MODE !== 'local') {
+  if (
+    env.WALLET_AUTH_MODE !== 'local' ||
+    (env.NODE_ENV === 'production' && !env.ALLOW_INSECURE_LOCAL_WALLET_AUTH)
+  ) {
     return res.status(403).json({ success: false, error: { code: 'LOCAL_AUTH_DISABLED', message: 'Local wallet bypass is disabled.' } });
   }
   const identifier = String(req.body.address).trim();
