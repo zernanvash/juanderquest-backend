@@ -11,11 +11,15 @@ import governanceAdminRouter from './routes/governanceAdmin.js';
 import communityQuestsRouter from './routes/communityQuests.js';
 import walletRouter from './routes/wallet.js';
 import vouchersRouter from './routes/vouchers.js';
+import campaignsRouter from './routes/campaigns.js';
 import { errorHandler } from './middleware/error.js';
 
 export const app = express();
 
-app.use(cors({ origin: env.CORS_ORIGIN }));
+export const parseCorsOrigin = (value: string) =>
+  value === '*' ? value : value.split(',').map((origin) => origin.trim()).filter(Boolean);
+
+app.use(cors({ origin: parseCorsOrigin(env.CORS_ORIGIN) }));
 app.use(express.json());
 
 // Routes
@@ -29,6 +33,7 @@ app.use('/api/v1', governanceAdminRouter);
 app.use('/api/v1', communityQuestsRouter);
 app.use('/api/v1', walletRouter);
 app.use('/api/v1', vouchersRouter);
+app.use('/api/v1', campaignsRouter);
 
 // JSON parse errors -> 400 instead of 500
 app.use((err: Error & { type?: string }, _req: express.Request, res: express.Response, next: express.NextFunction) => {

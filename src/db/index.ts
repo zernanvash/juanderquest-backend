@@ -8,7 +8,10 @@ export interface UserRow {
   email: string;
   avatar_url: string;
   role: 'user' | 'admin';
-  demo_points: number;
+  demo_points: number;            // Backwards-compatible formatted value (100 JDQ)
+  mjdq_balance: number;           // Integer milli-JDQ balance (100,000 mJDQ = 100 JDQ)
+  jdq_governance_balance: number; // JDQ Governance Token count (15 JDQ)
+  scout_reputation: number;       // Non-inflationary reputation for casual spot discovery
   created_at: string;
   updated_at: string;
 }
@@ -22,12 +25,33 @@ export interface QuestRow {
   gps_lat: number;
   gps_lng: number;
   radius_meters: number;
-  reward_points: number;
+  base_reward_php: number;
+  difficulty_factor: number;
+  geo_multiplier: number;
+  reward_points: number;          // reward_mjdq (e.g. 50,000 mJDQ / 50 JDQ)
   marker_code: string;
   marker_image_url: string;
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface CampaignRow {
+  id: string;
+  host_id: string;
+  host_name: string;
+  title: string;
+  category: 'eco' | 'cultural' | 'food_trade';
+  location_name: string;
+  description: string;
+  total_budget_mjdq: number;
+  reward_per_participant_mjdq: number;
+  max_participants: number;
+  reserved_participants: number;
+  completed_participants: number;
+  unspent_refund_mjdq: number;
+  status: 'active' | 'completed' | 'cancelled';
+  created_at: string;
 }
 
 export interface SubmissionRow {
@@ -73,7 +97,8 @@ export interface VoucherRow {
   merchant_id: string;
   title: string;
   description: string;
-  cost_points: number;
+  cost_points: number;            // cost in mJDQ (e.g. 100,000 mJDQ = 100 JDQ)
+  fiat_floor_php: number;
   is_active: boolean;
 }
 
@@ -87,6 +112,24 @@ export interface RedemptionRow {
   created_at: string;
 }
 
+export interface TreasuryRow {
+  growth_pool_mjdq: number;
+  total_burned_mjdq: number;
+  community_treasury_mjdq: number;
+  oracle_rate_php_per_jdq: number;
+}
+
+export interface LedgerEntryRow {
+  id: string;
+  user_id: string;
+  entry_type: 'poa_reward' | 'campaign_reward' | 'voucher_redemption' | 'proposal_vote_fee' | 'feedback_vote_fee' | 'event_creation_fee';
+  mjdq_delta: number;
+  jdq_delta: number;
+  burned_mjdq: number;
+  description: string;
+  created_at: string;
+}
+
 // Memory Store Seed Data
 const mockUsers: UserRow[] = [
   {
@@ -97,6 +140,9 @@ const mockUsers: UserRow[] = [
     avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Juan',
     role: 'user',
     demo_points: 100,
+    mjdq_balance: 100000,          // 100,000 mJDQ = 100.00 JDQ
+    jdq_governance_balance: 15,    // 15 JDQ
+    scout_reputation: 250,         // Scout Reputation
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -108,8 +154,48 @@ const mockUsers: UserRow[] = [
     avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Admin',
     role: 'admin',
     demo_points: 0,
+    mjdq_balance: 0,
+    jdq_governance_balance: 50,
+    scout_reputation: 1000,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
+  },
+];
+
+const mockCampaigns: CampaignRow[] = [
+  {
+    id: 'camp_1',
+    host_id: '22222222-2222-2222-2222-222222222222',
+    host_name: 'Pangasinan Tourism Office',
+    title: 'Bolinao Coastal Eco-Cleanup Raid',
+    category: 'eco',
+    location_name: 'Bolinao, Pangasinan',
+    description: 'Join local residents and travelers to clean up Patar beach front. Earn 250,000 mJDQ (250 JDQ value) plus Soulbound Civic Badge.',
+    total_budget_mjdq: 50000000,          // 50,000,000 mJDQ (50,000 JDQ value)
+    reward_per_participant_mjdq: 250000, // 250,000 mJDQ (250 JDQ value)
+    max_participants: 200,
+    reserved_participants: 45,
+    completed_participants: 12,
+    unspent_refund_mjdq: 0,
+    status: 'active',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'camp_2',
+    host_id: '22222222-2222-2222-2222-222222222222',
+    host_name: 'Dagupan Heritage Foundation',
+    title: 'Bangus Festival Cultural Photo Raid',
+    category: 'cultural',
+    location_name: 'Dagupan City, Pangasinan',
+    description: 'Document traditional milkfish street dancing and culinary displays for the municipal archive.',
+    total_budget_mjdq: 25000000,          // 25,000,000 mJDQ
+    reward_per_participant_mjdq: 150000, // 150,000 mJDQ
+    max_participants: 166,
+    reserved_participants: 30,
+    completed_participants: 8,
+    unspent_refund_mjdq: 0,
+    status: 'active',
+    created_at: new Date().toISOString(),
   },
 ];
 
@@ -123,7 +209,10 @@ const mockQuests: QuestRow[] = [
     gps_lat: 16.2063,
     gps_lng: 119.9706,
     radius_meters: 150,
-    reward_points: 50,
+    base_reward_php: 25.0,
+    difficulty_factor: 1.0,
+    geo_multiplier: 2.0, // LGU priority zone surge
+    reward_points: 50,  // (25 * 1.0 * 2.0) / 1.0
     marker_code: 'MARKER_HUNDRED_ISLANDS_01',
     marker_image_url: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/hundred_islands.png',
     is_active: true,
@@ -139,6 +228,9 @@ const mockQuests: QuestRow[] = [
     gps_lat: 16.3885,
     gps_lng: 119.9095,
     radius_meters: 200,
+    base_reward_php: 30.0,
+    difficulty_factor: 1.5,
+    geo_multiplier: 1.6667,
     reward_points: 75,
     marker_code: 'MARKER_BOLINAO_LIGHTHOUSE_01',
     marker_image_url: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/bolinao_lighthouse.png',
@@ -155,6 +247,9 @@ const mockQuests: QuestRow[] = [
     gps_lat: 16.0436,
     gps_lng: 120.4867,
     radius_meters: 100,
+    base_reward_php: 30.0,
+    difficulty_factor: 1.0,
+    geo_multiplier: 2.0,
     reward_points: 60,
     marker_code: 'MARKER_MANAOAG_SHRINE_01',
     marker_image_url: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/manaoag.png',
@@ -171,6 +266,9 @@ const mockQuests: QuestRow[] = [
     gps_lat: 16.0232,
     gps_lng: 120.2312,
     radius_meters: 250,
+    base_reward_php: 20.0,
+    difficulty_factor: 1.0,
+    geo_multiplier: 2.0,
     reward_points: 40,
     marker_code: 'MARKER_LINGAYEN_CAPITOL_01',
     marker_image_url: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/lingayen.png',
@@ -187,6 +285,9 @@ const mockQuests: QuestRow[] = [
     gps_lat: 16.0433,
     gps_lng: 120.3334,
     radius_meters: 150,
+    base_reward_php: 25.0,
+    difficulty_factor: 1.0,
+    geo_multiplier: 2.0,
     reward_points: 50,
     marker_code: 'MARKER_DAGUPAN_BANGUS_01',
     marker_image_url: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/dagupan_bangus.png',
@@ -254,10 +355,21 @@ const mockMerchants: MerchantRow[] = [
 ];
 
 const mockVouchers: VoucherRow[] = [
-  { id: 'v1', merchant_id: 'm1', title: 'P50 Off Bangus Meal', description: 'Discount voucher valid for one meal at Bangus Street Grill.', cost_points: 100, is_active: true },
-  { id: 'v2', merchant_id: 'm2', title: 'Free Iced Coffee', description: 'Free iced coffee at Bolinao Lighthouse Cafe.', cost_points: 60, is_active: true },
-  { id: 'v3', merchant_id: 'm3', title: '15% Off Souvenirs', description: '15% discount on a single souvenir item at Alaminos Souvenir Hub.', cost_points: 80, is_active: true },
+  { id: 'v1', merchant_id: 'm1', title: 'P50 Off Bangus Meal', description: 'Discount voucher valid for one meal at Bangus Street Grill.', cost_points: 100, fiat_floor_php: 50.0, is_active: true },
+  { id: 'v2', merchant_id: 'm2', title: 'Free Iced Coffee', description: 'Free iced coffee at Bolinao Lighthouse Cafe.', cost_points: 60, fiat_floor_php: 60.0, is_active: true },
+  { id: 'v3', merchant_id: 'm3', title: '15% Off Souvenirs', description: '15% discount on a single souvenir item at Alaminos Souvenir Hub.', cost_points: 80, fiat_floor_php: 80.0, is_active: true },
 ];
+
+// Oracled Proof-of-Activity (PoA) reward calculation helper
+export function computeOracledReward(
+  quest: { base_reward_php: number; difficulty_factor: number; geo_multiplier: number },
+  oracleRate: number = 1.0
+): number {
+  const base = quest.base_reward_php || 25.0;
+  const difficulty = quest.difficulty_factor || 1.0;
+  const geo = quest.geo_multiplier || 1.0;
+  return Math.round((base * difficulty * geo) / oracleRate);
+}
 
 // Haversine Distance Calculation helper
 export function calculateHaversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -274,11 +386,30 @@ export function calculateHaversineDistance(lat1: number, lon1: number, lat2: num
 export class MemoryDb {
   users = mockUsers;
   quests = mockQuests;
+  campaigns = mockCampaigns;
   submissions = mockSubmissions;
   proposals = mockProposals;
   merchants = mockMerchants;
   vouchers = mockVouchers;
   redemptions: RedemptionRow[] = [];
+  treasury: TreasuryRow = {
+    growth_pool_mjdq: 50000000,       // 50,000,000 mJDQ (50,000 JDQ initial Growth Pool)
+    total_burned_mjdq: 250000,        // 250,000 mJDQ (250 JDQ total burned)
+    community_treasury_mjdq: 1000000, // 1,000,000 mJDQ (1,000 JDQ treasury)
+    oracle_rate_php_per_jdq: 1.0,     // 1 JDQ = ₱1.00 Floor
+  };
+  ledger: LedgerEntryRow[] = [
+    {
+      id: 'ledg-1',
+      user_id: '11111111-1111-1111-1111-111111111111',
+      entry_type: 'poa_reward',
+      mjdq_delta: 50000, // 50,000 mJDQ (50 JDQ)
+      jdq_delta: 0,
+      burned_mjdq: 0,
+      description: 'PoA Reward: Dagupan Bangus Taste & Trade Trail (D=1.0, G=2.0)',
+      created_at: new Date().toISOString(),
+    },
+  ];
 
   private pg: Pool | null = null;
 
@@ -290,13 +421,20 @@ export class MemoryDb {
     this.users = users.map((row: any) => ({
       id: row.id, seed_id: row.seed_id, display_name: row.display_name, email: row.email,
       avatar_url: row.avatar_url, role: row.role, demo_points: row.demo_points,
+      mjdq_balance: row.mjdq_balance ?? row.demo_points * 1000,
+      jdq_governance_balance: row.jdq_governance_balance ?? 15,
+      scout_reputation: row.scout_reputation ?? 100,
       created_at: toIso(row.created_at), updated_at: toIso(row.updated_at),
     }));
     const { rows: quests } = await pool.query('SELECT * FROM quests ORDER BY created_at');
     this.quests = quests.map((row: any) => ({
       id: row.id, title: row.title, description: row.description, category: row.category,
       location_name: row.location_name, gps_lat: row.gps_lat, gps_lng: row.gps_lng,
-      radius_meters: row.radius_meters, reward_points: row.reward_points, marker_code: row.marker_code,
+      radius_meters: row.radius_meters,
+      base_reward_php: row.base_reward_php ?? 25.0,
+      difficulty_factor: row.difficulty_factor ?? 1.0,
+      geo_multiplier: row.geo_multiplier ?? 2.0,
+      reward_points: row.reward_points, marker_code: row.marker_code,
       marker_image_url: row.marker_image_url, is_active: row.is_active,
       created_at: toIso(row.created_at), updated_at: toIso(row.updated_at),
     }));
@@ -316,7 +454,7 @@ export class MemoryDb {
     const { rows: vouchers } = await pool.query('SELECT * FROM vouchers ORDER BY id');
     this.vouchers = vouchers.map((row: any) => ({
       id: row.id, merchant_id: row.merchant_id, title: row.title, description: row.description,
-      cost_points: row.cost_points, is_active: row.is_active,
+      cost_points: row.cost_points, fiat_floor_php: row.fiat_floor_php ?? 50.0, is_active: row.is_active,
     }));
     const { rows: redemptions } = await pool.query('SELECT * FROM redemptions ORDER BY created_at');
     this.redemptions = redemptions.map((row: any) => ({
