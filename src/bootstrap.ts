@@ -1,6 +1,8 @@
 import { initPostgres, getPool } from './db/pool.js';
 import { db } from './db/index.js';
 import { governanceStore } from './routes/proposals.js';
+import { spotStore } from './spots/store.js';
+import { assetStore } from './spots/asset-store.js';
 
 // Boot orchestration: connect PostgreSQL (when available), hydrate memory + governance, fall back to in-memory.
 export async function bootstrap() {
@@ -9,6 +11,8 @@ export async function bootstrap() {
   if (pool) {
     await db.hydrateFromPg(pool);
     await governanceStore.hydrateFromPg(pool);
+    await spotStore.hydrateFromPg(pool);
+    await assetStore.hydrateFromPg(pool);
   } else {
     governanceStore.refreshBalances();
   }

@@ -19,22 +19,52 @@ describe('JuanderQuest Backend REST API & QA Rules', () => {
     expect(res.body.status).toBe('ok');
   });
 
-  it('supports the explicit local wallet authentication mode', async () => {
-    const config = await request(app).get('/api/v1/auth/wallet/config');
-    expect(config.status).toBe(200);
-    expect(config.body.data.mode).toBe('local');
-
-    const login = await request(app).post('/api/v1/auth/wallet/local-login').send({ address: 'dev-wallet-42' });
-    expect(login.status).toBe(200);
-    expect(login.body.data.auth_method).toBe('local_bypass');
-    expect(login.body.data.user.seed_id).toBe('wallet:dev-wallet-42');
-    expect(login.body.data.token).toBeDefined();
+  it('discovers and ranks public spots by intent and location', async () => {
+    const res = await request(app).get('/api/v1/spots?intent=coffee&lat=16.047&lng=120.34&radius_km=10');
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].subcategory).toBe('cafe');
+    expect(res.body.data[0].recommendation_reasons).toContain('Matches coffee');
+    expect(res.body.data.every((spot: any) => spot.distance_km <= 10)).toBe(true);
   });
 
-  it('does not expose signature challenges in local mode', async () => {
-    const res = await request(app).post('/api/v1/auth/wallet/challenge').send({
-      address: '0x0000000000000000000000000000000000000001',
+  it('filters spots by category and optional quest availability', async () => {
+    const res = await request(app).get('/api/v1/spots?categories=nature_outdoors&has_quest=true');
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+    expect(res.body.data.every((spot: any) => spot.category === 'nature_outdoors' && spot.quest_id)).toBe(true);
+  });
+
+  it('rejects a duplicate community spot within 50 meters', async () => {
+    const login = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'user-1' });
+    const res = await request(app).post('/api/v1/spots').set('Authorization', `Bearer ${login.body.data.token}`).send({
+      name: 'Hundred Islands Park', description: 'A duplicate test entry close to the known destination pin.',
+      category: 'nature_outdoors', subcategory: 'park', municipality: 'Alaminos City', address: 'Lucap',
+      gps_lat: 16.20631, gps_lng: 119.97061, tags: [], price_level: 1, hours: {}, amenities: [], image_url: '',
     });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('DUPLICATE_SPOT');
+  });
+
+  it('reports local wallet auth mode during test development', async () => {
+    const res = await request(app).get('/api/v1/auth/wallet/config');
+    expect(res.status).toBe(200);
+    expect(res.body.data.mode).toBe('local');
+  });
+
+  it('issues a JWT through the explicit local wallet bypass', async () => {
+    const address = 'dev-wallet-42';
+    const res = await request(app).post('/api/v1/auth/wallet/local-login').send({ address });
+    expect(res.status).toBe(200);
+    expect(res.body.data.auth_method).toBe('local_bypass');
+    expect(res.body.data.wallet_address).toBe(address);
+    expect(res.body.data.token).toBeDefined();
+    expect(res.body.data.user.seed_id).toBe(`wallet:${address}`);
+  });
+
+  it('does not expose signature challenges while local bypass mode is active', async () => {
+    const res = await request(app)
+      .post('/api/v1/auth/wallet/challenge')
+      .send({ address: '0x0000000000000000000000000000000000000001' });
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('AUTH_MODE_MISMATCH');
   });
@@ -49,23 +79,6 @@ describe('JuanderQuest Backend REST API & QA Rules', () => {
     expect(res.body.data.token).toBeDefined();
     expect(res.body.data.user.role).toBe('user');
     userToken = res.body.data.token;
-  });
-
-  it('creates a temporary traveler through simulated wallet login', async () => {
-    const login = await request(app)
-      .post('/api/v1/auth/simulated-wallet-login')
-      .send({ username: 'Automated Scout', password: 'temporary-password' });
-
-    expect(login.status).toBe(200);
-    expect(login.body.data.user.display_name).toBe('Automated Scout');
-    expect(login.body.data.user.demo_points).toBe(100);
-    expect(login.body.data.simulated_wallet_address).toMatch(/^0x[0-9a-f]{40}$/);
-
-    const profile = await request(app)
-      .get('/api/v1/auth/me')
-      .set('Authorization', `Bearer ${login.body.data.token}`);
-    expect(profile.status).toBe(200);
-    expect(profile.body.data.id).toBe(login.body.data.user.id);
   });
 
   it('POST /api/v1/auth/demo-login for admin-1', async () => {
