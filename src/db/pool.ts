@@ -4,7 +4,7 @@ import { join } from 'path';
 import { env } from '../config/env.js';
 
 const rootDir = join(__dirname, '..', '..');
-const MIGRATIONS = ['001_init.sql', '002_runtime.sql', '003_spot_discovery.sql', '004_spot_photos.sql'];
+const MIGRATIONS = ['001_init.sql', '002_runtime.sql', '003_spot_discovery.sql', '004_spot_photos.sql', '005_crowd_diversion.sql'];
 
 let pool: Pool | null = null;
 

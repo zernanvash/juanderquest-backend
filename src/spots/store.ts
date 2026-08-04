@@ -4,6 +4,10 @@ import { randomUUID } from 'crypto';
 export type SpotCategory = 'eat_drink' | 'nature_outdoors' | 'culture_heritage' | 'activities_wellness' | 'shopping_local' | 'stay';
 export type SpotTrust = 'lgu_verified' | 'editorial' | 'open_data' | 'community';
 export type SpotSource = 'lgu' | 'editorial' | 'open_data' | 'community';
+export type CrowdCapacityBand = 'low' | 'medium' | 'high';
+export type CrowdStatus = 'quiet' | 'moderate' | 'estimated_busy' | 'unknown';
+type ActivityType = 'view' | 'directions' | 'save' | 'visit';
+interface ActivityEvent { id:string; user_id:string; spot_id:string; activity_type:ActivityType; created_at:string; }
 
 export interface Spot {
   id: string; slug: string; name: string; description: string;
@@ -13,6 +17,7 @@ export interface Spot {
   image_url: string; asset_ids?: string[]; source_type: SpotSource; source_name: string; source_url?: string;
   trust_level: SpotTrust; status: 'published' | 'needs_review' | 'unpublished';
   quest_id?: string; created_by?: string; created_at: string; updated_at: string;
+  crowd_capacity_band?: CrowdCapacityBand; reviewed_by?: string; reviewed_at?: string; recommendation_suppressed?: boolean;
 }
 
 export interface DiscoveryPreferences {
@@ -52,17 +57,20 @@ export class SpotStore {
   spots = [...seeds];
   preferences = new Map<string, DiscoveryPreferences>();
   interactions = new Map<string, Set<string>>();
+  activityEvents: ActivityEvent[] = [];
   private pg: Pool | null = null;
 
   async hydrateFromPg(pool: Pool) {
     this.pg = pool;
-    const { rows } = await pool.query('SELECT * FROM spots WHERE status = $1 ORDER BY created_at', ['published']);
+    const { rows } = await pool.query('SELECT * FROM spots ORDER BY created_at');
     if (rows.length) this.spots = rows.map((r:any)=>({...r,tags:r.tags||[],amenities:r.amenities||[],hours:r.hours||{},created_at:new Date(r.created_at).toISOString(),updated_at:new Date(r.updated_at).toISOString()}));
     else for (const spot of this.spots) await this.persistSpot(spot);
     const { rows: preferences } = await pool.query('SELECT * FROM discovery_preferences');
     for (const p of preferences) this.preferences.set(p.user_id, { categories:p.categories||[],tags:p.tags||[],occasions:p.occasions||[],price_levels:p.price_levels||[],radius_km:p.radius_km,onboarding_state:p.onboarding_state });
     const { rows: interactions } = await pool.query('SELECT * FROM spot_interactions');
     for (const item of interactions) { const values=this.interactions.get(item.user_id)||new Set<string>();values.add(`${item.spot_id}:${item.interaction_type}`);this.interactions.set(item.user_id,values); }
+    const { rows: activity } = await pool.query("SELECT id,user_id,spot_id,activity_type,created_at FROM spot_activity_events WHERE created_at >= NOW() - INTERVAL '24 hours'");
+    this.activityEvents = activity.map((item:any)=>({...item,created_at:new Date(item.created_at).toISOString()}));
   }
 
   private async persistSpot(s: Spot) {
@@ -75,6 +83,40 @@ export class SpotStore {
   interact(userId:string,spotId:string,type:string,enabled=true) { const key=`${spotId}:${type}`; const set=this.interactions.get(userId)||new Set<string>(); enabled?set.add(key):set.delete(key); this.interactions.set(userId,set);if(this.pg){const query=enabled?'INSERT INTO spot_interactions(user_id,spot_id,interaction_type) VALUES($1,$2,$3) ON CONFLICT DO NOTHING':'DELETE FROM spot_interactions WHERE user_id=$1 AND spot_id=$2 AND interaction_type=$3';this.pg.query(query,[userId,spotId,type]).catch(()=>{});} return enabled; }
   isSaved(userId:string|undefined,spotId:string){return !!userId&&this.interactions.get(userId)?.has(`${spotId}:save`);}
   trend(spotId:string){let score=0;for(const values of this.interactions.values()){if(values.has(`${spotId}:visit`))score+=5;if(values.has(`${spotId}:directions`))score+=3;if(values.has(`${spotId}:save`))score+=2;if(values.has(`${spotId}:helpful`))score+=2;if(values.has(`${spotId}:view`))score+=.25;}return score;}
+
+  recordActivity(userId:string,spotId:string,type:ActivityType) {
+    if(!this.spots.some(s=>s.id===spotId))return false;
+    const now=Date.now();const dedupeMs={view:30*60000,directions:2*3600000,save:24*3600000,visit:12*3600000}[type];
+    this.activityEvents=this.activityEvents.filter(e=>now-Date.parse(e.created_at)<=86400000);
+    if(this.activityEvents.some(e=>e.user_id===userId&&e.spot_id===spotId&&e.activity_type===type&&now-Date.parse(e.created_at)<dedupeMs))return false;
+    const event:ActivityEvent={id:randomUUID(),user_id:userId,spot_id:spotId,activity_type:type,created_at:new Date(now).toISOString()};this.activityEvents.push(event);
+    if(this.pg)this.pg.query('INSERT INTO spot_activity_events(id,user_id,spot_id,activity_type,created_at) VALUES($1,$2,$3,$4,$5)',[event.id,event.user_id,event.spot_id,event.activity_type,event.created_at]).catch(()=>{});
+    return true;
+  }
+
+  crowd(spot:Spot,now=Date.now()) {
+    const events=this.activityEvents.filter(e=>e.spot_id===spot.id&&now-Date.parse(e.created_at)<=86400000);
+    if(!events.length)return {crowd_status:'unknown' as CrowdStatus,crowd_confidence:'none',crowd_updated_at:null,pressure_score:0};
+    const weights:Record<ActivityType,number>={view:.25,directions:3,save:2,visit:5};
+    const score=events.reduce((sum,e)=>sum+weights[e.activity_type]*Math.pow(.5,(now-Date.parse(e.created_at))/21600000),0);
+    const [moderate,busy]={low:[3,8],medium:[6,15],high:[12,30]}[spot.crowd_capacity_band||'medium'];
+    const unique=new Set(events.map(e=>e.user_id)).size;
+    const status:CrowdStatus=score>=busy?'estimated_busy':score>=moderate?'moderate':'quiet';
+    return {crowd_status:status,crowd_confidence:unique>=8?'high':unique>=3?'medium':'low',crowd_updated_at:new Date(Math.max(...events.map(e=>Date.parse(e.created_at)))).toISOString(),pressure_score:Number(score.toFixed(2))};
+  }
+
+  alternatives(source:Spot,userId?:string,limit=3) {
+    const prefs=userId?this.getPreferences(userId):undefined;
+    const candidates=(radius:number)=>this.spots.filter(s=>s.id!==source.id&&s.status==='published'&&!s.recommendation_suppressed&&distanceKm(source.gps_lat,source.gps_lng,s.gps_lat,s.gps_lng)<=radius&&this.crowd(s).crowd_status!=='estimated_busy').map(s=>{
+      const shared=s.tags.filter(t=>source.tags.includes(t));const tagScore=shared.length/Math.max(new Set([...source.tags,...s.tags]).size,1);const categoryScore=s.subcategory===source.subcategory?1:s.category===source.category?.65:0;if(!shared.length&&!categoryScore)return null;
+      const distance=distanceKm(source.gps_lat,source.gps_lng,s.gps_lat,s.gps_lng);const trust={lgu_verified:1,editorial:.9,open_data:.75,community:.6}[s.trust_level];const pressure=this.crowd(s);const pressureScore=pressure.crowd_status==='quiet'?1:pressure.crowd_status==='moderate'?.55:.7;const pref=prefs&&[...prefs.categories,...prefs.tags].some(v=>v===s.category||s.tags.includes(v))?1:0;
+      const score=tagScore*.4+categoryScore*.15+Math.max(0,1-distance/radius)*.15+trust*.1+pressureScore*.15+pref*.05;const reasons=[shared.length?`Similar ${shared.slice(0,2).join(' and ').replaceAll('_',' ')}`:`Similar ${s.subcategory.replaceAll('_',' ')}`,`${distance.toFixed(1)} km away`,pressure.crowd_status==='quiet'?'Lower estimated activity':'Alternative visitor option'];
+      return {...s,...pressure,distance_km:Number(distance.toFixed(2)),alternative_score:Number(score.toFixed(4)),recommendation_reasons:reasons};
+    }).filter(Boolean) as any[];
+    let ranked=candidates(10);if(ranked.length<limit)ranked=candidates(25);return ranked.sort((a,b)=>b.alternative_score-a.alternative_score).slice(0,Math.min(limit,5));
+  }
+
+  review(spotId:string,adminId:string,status:'published'|'needs_review'|'unpublished',band:CrowdCapacityBand,suppressed=false){const spot=this.spots.find(s=>s.id===spotId);if(!spot)return undefined;spot.status=status;spot.crowd_capacity_band=band;spot.recommendation_suppressed=suppressed;spot.reviewed_by=adminId;spot.reviewed_at=new Date().toISOString();spot.updated_at=spot.reviewed_at;if(this.pg)this.pg.query('UPDATE spots SET status=$1,crowd_capacity_band=$2,recommendation_suppressed=$3,reviewed_by=$4,reviewed_at=$5,updated_at=$5 WHERE id=$6',[status,band,suppressed,adminId,spot.reviewed_at,spot.id]).catch(()=>{});return spot;}
 
   list(q:{search?:string;categories?:string[];tags?:string[];municipality?:string;lat?:number;lng?:number;radius?:number;intent?:string;sort?:string;hasQuest?:boolean;userId?:string}) {
     const prefs=q.userId?this.getPreferences(q.userId):undefined;
@@ -90,7 +132,7 @@ export class SpotStore {
       const freshness=Math.max(0,1-ageDays/30);
       const score=intentMatch*.30+prefMatch*.20+distanceScore*.20+trust*.15+trend*.10+freshness*.05;
       const reasons:string[]=[];if(distance!==undefined)reasons.push(`${distance<1?Math.round(distance*1000)+' m':distance.toFixed(1)+' km'} away`);if(intentMatch)reasons.push(`Matches ${q.intent}`);if(s.trust_level==='lgu_verified')reasons.push('LGU verified');if(trend>.25)reasons.push(`Trending in ${s.municipality}`);
-      return {...s,distance_km:distance,recommendation_score:Number(score.toFixed(4)),recommendation_reasons:reasons,saved:this.isSaved(q.userId,s.id),trend_score:this.trend(s.id)};
+      return {...s,...this.crowd(s),distance_km:distance,recommendation_score:Number(score.toFixed(4)),recommendation_reasons:reasons,saved:this.isSaved(q.userId,s.id),trend_score:this.trend(s.id)};
     }).filter(s=>(!q.search||`${s.name} ${s.description} ${s.tags.join(' ')}`.toLowerCase().includes(q.search.toLowerCase()))&&(!q.categories?.length||q.categories.includes(s.category))&&(!q.tags?.length||q.tags.some(t=>s.tags.includes(t)))&&(!q.municipality||s.municipality.toLowerCase()===q.municipality.toLowerCase())&&(!q.hasQuest||!!s.quest_id)&&(s.distance_km===undefined||!q.radius||s.distance_km<=q.radius)).sort((a,b)=>q.sort==='nearest'?(a.distance_km??999)-(b.distance_km??999):q.sort==='newest'?Date.parse(b.created_at)-Date.parse(a.created_at):q.sort==='trending'?b.trend_score-a.trend_score:b.recommendation_score-a.recommendation_score);
   }
 
@@ -98,7 +140,7 @@ export class SpotStore {
     const duplicate=this.spots.find(s=>distanceKm(input.gps_lat,input.gps_lng,s.gps_lat,s.gps_lng)<.05&&s.name.toLowerCase().includes(input.name.toLowerCase().slice(0,5)));
     if(duplicate) return {duplicate};
     const timestamp=new Date().toISOString();const slug=`${input.name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')}-${randomUUID().slice(0,6)}`;
-    const spot:Spot={...input,id:randomUUID(),slug,source_type:'community',source_name:'JuanDerQuest Community',trust_level:'community',status:'published',created_by:userId,created_at:timestamp,updated_at:timestamp};this.spots.push(spot);this.persistSpot(spot).catch(()=>{});return {spot};
+    const spot:Spot={...input,id:randomUUID(),slug,source_type:'community',source_name:'JuanDerQuest Community',trust_level:'community',status:'needs_review',crowd_capacity_band:'medium',recommendation_suppressed:false,created_by:userId,created_at:timestamp,updated_at:timestamp};this.spots.push(spot);this.persistSpot(spot).catch(()=>{});return {spot};
   }
 }
 

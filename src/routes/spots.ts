@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
-import { authenticateToken, optionalAuthenticateToken, AuthRequest } from '../middleware/auth.js';
+import { authenticateToken, optionalAuthenticateToken, requireAdmin, AuthRequest } from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { env } from '../config/env.js';
-import { spotStore, taxonomy } from '../spots/store.js';
+import { distanceKm, spotStore, taxonomy } from '../spots/store.js';
 import { assetStore } from '../spots/asset-store.js';
 import { getSpotPhotoStorageProvider } from '../storage/spot-photos.js';
 import { detectValidatedImageMime } from '../utils/image-mime.js';
@@ -38,20 +38,35 @@ router.get('/spots', optionalAuthenticateToken, (req: AuthRequest, res) => {
 
 router.get('/spots/trending', optionalAuthenticateToken, (req: AuthRequest, res) => res.json({ success: true, data: spotStore.list({ municipality: req.query.municipality as string | undefined, sort: 'trending', userId: req.user?.id }).slice(0, 10) }));
 
+router.get('/spots/:slug/alternatives', optionalAuthenticateToken, (req: AuthRequest, res) => {
+  const source=spotStore.spots.find(s=>s.slug===req.params.slug&&s.status==='published');
+  if(!source)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
+  const requested=numeric(req.query.limit);const limit=requested===undefined?3:Math.max(1,Math.min(5,Math.floor(requested)));
+  return res.json({success:true,data:spotStore.alternatives(source,req.user?.id,limit),meta:{source_spot_id:source.id,radius_strategy_km:[10,25],estimated_not_live:true}});
+});
+
 router.get('/spots/:slug', optionalAuthenticateToken, (req: AuthRequest, res) => {
   const spot = spotStore.spots.find(s => s.slug === req.params.slug && s.status === 'published');
   if (!spot) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
   const attached = Array.from(assetStore.assets.values()).filter(a => a.spot_id === spot.id && a.status === 'attached');
-  return res.json({ success: true, data: { ...spot, saved: spotStore.isSaved(req.user?.id, spot.id), trend_score: spotStore.trend(spot.id), attached_assets: attached } });
+  return res.json({ success: true, data: { ...spot, ...spotStore.crowd(spot), saved: spotStore.isSaved(req.user?.id, spot.id), trend_score: spotStore.trend(spot.id), attached_assets: attached } });
 });
 
 router.get('/me/discovery-preferences', authenticateToken, (req: AuthRequest, res) => res.json({ success: true, data: spotStore.getPreferences(req.user!.id) }));
 const preferencesSchema = z.object({ body: z.object({ categories: z.array(z.string()).max(10).default([]), tags: z.array(z.string()).max(20).default([]), occasions: z.array(z.string()).max(10).default([]), price_levels: z.array(z.number().int().min(0).max(4)).max(5).default([]), radius_km: z.number().int().min(1).max(200).default(25), onboarding_state: z.enum(['pending', 'completed', 'skipped']).default('completed') }) });
 router.put('/me/discovery-preferences', authenticateToken, validateRequest(preferencesSchema), (req: AuthRequest, res) => res.json({ success: true, data: spotStore.setPreferences(req.user!.id, req.body) }));
 
-router.put('/spots/:id/save', authenticateToken, (req: AuthRequest, res) => res.json({ success: true, data: { saved: spotStore.interact(req.user!.id, req.params.id, 'save', true) } }));
+router.put('/spots/:id/save', authenticateToken, (req: AuthRequest, res) => { const saved=spotStore.interact(req.user!.id,req.params.id,'save',true);spotStore.recordActivity(req.user!.id,req.params.id,'save');return res.json({success:true,data:{saved}}); });
 router.delete('/spots/:id/save', authenticateToken, (req: AuthRequest, res) => res.json({ success: true, data: { saved: spotStore.interact(req.user!.id, req.params.id, 'save', false) } }));
-router.post('/spots/:id/interactions', authenticateToken, validateRequest(z.object({ body: z.object({ type: z.enum(['view', 'directions', 'helpful', 'visit']) }) })), (req: AuthRequest, res) => res.status(201).json({ success: true, data: { recorded: spotStore.interact(req.user!.id, req.params.id, req.body.type, true) } }));
+router.post('/spots/:id/interactions', authenticateToken, validateRequest(z.object({ body: z.object({ type: z.enum(['view', 'directions', 'helpful', 'visit']), captured_lat:z.number().min(-90).max(90).optional(), captured_lng:z.number().min(-180).max(180).optional() }) })), (req: AuthRequest, res) => {
+  const spot=spotStore.spots.find(item=>item.id===req.params.id);if(!spot)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
+  if(req.body.type==='visit'&&(req.body.captured_lat===undefined||req.body.captured_lng===undefined||distanceKm(req.body.captured_lat,req.body.captured_lng,spot.gps_lat,spot.gps_lng)>.25))return res.status(422).json({success:false,error:{code:'VISIT_NOT_VERIFIED',message:'A visit must include coordinates within 250 meters of the destination.'}});
+  const recorded=spotStore.interact(req.user!.id,req.params.id,req.body.type,true);if(req.body.type!=='helpful')spotStore.recordActivity(req.user!.id,req.params.id,req.body.type);return res.status(201).json({success:true,data:{recorded}});
+});
+
+const spotReviewSchema=z.object({body:z.object({status:z.enum(['published','needs_review','unpublished']),crowd_capacity_band:z.enum(['low','medium','high']),recommendation_suppressed:z.boolean().default(false)})});
+router.get('/admin/spots',authenticateToken,requireAdmin,(_req,res)=>res.json({success:true,data:spotStore.spots.map(s=>({...s,...spotStore.crowd(s)}))}));
+router.patch('/admin/spots/:id',authenticateToken,requireAdmin,validateRequest(spotReviewSchema),(req:AuthRequest,res)=>{const spot=spotStore.review(req.params.id,req.user!.id,req.body.status,req.body.crowd_capacity_band,req.body.recommendation_suppressed);if(!spot)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});return res.json({success:true,data:{...spot,...spotStore.crowd(spot)}});});
 
 // POST /api/v1/spot-photos - Authenticated photo upload
 router.post('/spot-photos', authenticateToken, uploadRateLimiter, (req: AuthRequest, res) => {

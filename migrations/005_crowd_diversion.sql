@@ -1,0 +1,13 @@
+ALTER TABLE spots ADD COLUMN IF NOT EXISTS crowd_capacity_band VARCHAR(20) NOT NULL DEFAULT 'medium';
+ALTER TABLE spots ADD COLUMN IF NOT EXISTS reviewed_by TEXT REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE spots ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+ALTER TABLE spots ADD COLUMN IF NOT EXISTS recommendation_suppressed BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE TABLE IF NOT EXISTS spot_activity_events (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  spot_id TEXT NOT NULL REFERENCES spots(id) ON DELETE CASCADE,
+  activity_type VARCHAR(30) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_spot_activity_recent ON spot_activity_events(spot_id, created_at DESC);
