@@ -15,8 +15,17 @@ export const env = cleanEnv(process.env, {
     default: process.env.NODE_ENV === 'production' ? 'signature' : 'local',
   }),
   ALLOW_INSECURE_LOCAL_WALLET_AUTH: bool({ default: false }),
+  SPOT_PHOTO_STORAGE: str({ choices: ['local', 'azure'], default: 'local' }),
+  AZURE_STORAGE_CONNECTION_STRING: str({ default: '' }),
+  AZURE_STORAGE_CONTAINER_NAME: str({ default: 'spot-photos' }),
+  LOCAL_UPLOAD_DIR: str({ default: 'uploads/spot-photos' }),
 });
 
 if (env.NODE_ENV === 'production' && env.WALLET_AUTH_MODE === 'local' && !env.ALLOW_INSECURE_LOCAL_WALLET_AUTH) {
   throw new Error('Production local wallet auth requires ALLOW_INSECURE_LOCAL_WALLET_AUTH=true');
 }
+
+if (env.SPOT_PHOTO_STORAGE === 'azure' && !env.AZURE_STORAGE_CONNECTION_STRING) {
+  throw new Error('AZURE_STORAGE_CONNECTION_STRING is required when SPOT_PHOTO_STORAGE=azure');
+}
+

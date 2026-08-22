@@ -12,6 +12,13 @@ export interface AuthRequest extends Request {
   user?: AuthenticatedUser;
 }
 
+export const optionalAuthenticateToken = (req: AuthRequest, _res: Response, next: NextFunction) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return next();
+  try { req.user = jwt.verify(token, env.JWT_SECRET) as AuthenticatedUser; } catch { /* Continue as guest. */ }
+  next();
+};
+
 export const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];

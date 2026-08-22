@@ -12,7 +12,11 @@ import communityQuestsRouter from './routes/communityQuests.js';
 import walletRouter from './routes/wallet.js';
 import vouchersRouter from './routes/vouchers.js';
 import campaignsRouter from './routes/campaigns.js';
+import spotsRouter from './routes/spots.js';
+import appVersionRouter from './routes/appVersion.js';
 import { errorHandler } from './middleware/error.js';
+
+import path from 'path';
 
 export const app = express();
 
@@ -21,6 +25,14 @@ export const parseCorsOrigin = (value: string) =>
 
 app.use(cors({ origin: parseCorsOrigin(env.CORS_ORIGIN) }));
 app.use(express.json());
+
+// Serve local upload files
+const uploadDir = path.resolve(process.cwd(), env.LOCAL_UPLOAD_DIR || 'uploads/spot-photos');
+app.use('/api/v1/uploads/spot-photos', express.static(uploadDir));
+
+// Serve local downloads folder if present
+const downloadsDir = path.resolve(process.cwd(), 'downloads');
+app.use('/downloads', express.static(downloadsDir));
 
 // Routes
 app.use('/api/v1', healthRouter);
@@ -34,6 +46,8 @@ app.use('/api/v1', communityQuestsRouter);
 app.use('/api/v1', walletRouter);
 app.use('/api/v1', vouchersRouter);
 app.use('/api/v1', campaignsRouter);
+app.use('/api/v1', spotsRouter);
+app.use('/api/v1', appVersionRouter);
 
 // JSON parse errors -> 400 instead of 500
 app.use((err: Error & { type?: string }, _req: express.Request, res: express.Response, next: express.NextFunction) => {

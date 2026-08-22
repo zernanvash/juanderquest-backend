@@ -19,6 +19,32 @@ describe('JuanderQuest Backend REST API & QA Rules', () => {
     expect(res.body.status).toBe('ok');
   });
 
+  it('discovers and ranks public spots by intent and location', async () => {
+    const res = await request(app).get('/api/v1/spots?intent=coffee&lat=16.047&lng=120.34&radius_km=10');
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].subcategory).toBe('cafe');
+    expect(res.body.data[0].recommendation_reasons).toContain('Matches coffee');
+    expect(res.body.data.every((spot: any) => spot.distance_km <= 10)).toBe(true);
+  });
+
+it('filters spots by category and optional quest availability', async () => {
+    const res = await request(app).get('/api/v1/spots?categories=nature_outdoors&has_quest=true');
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+    expect(res.body.data.every((spot: any) => spot.category === 'nature_outdoors' && spot.quest_id)).toBe(true);
+  });
+
+  it('rejects a duplicate community spot within 50 meters', async () => {
+    const login = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'user-1' });
+    const res = await request(app).post('/api/v1/spots').set('Authorization', `Bearer ${login.body.data.token}`).send({
+      name: 'Hundred Islands Park', description: 'A duplicate test entry close to the known destination pin.',
+      category: 'nature_outdoors', subcategory: 'park', municipality: 'Alaminos City', address: 'Lucap',
+      gps_lat: 16.20631, gps_lng: 119.97061, tags: [], price_level: 1, hours: {}, amenities: [], image_url: '',
+    });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('DUPLICATE_SPOT');
+  });
+
   it('reports local wallet auth mode during test development', async () => {
     const res = await request(app).get('/api/v1/auth/wallet/config');
     expect(res.status).toBe(200);
@@ -381,4 +407,19 @@ describe('JuanderQuest Backend REST API & QA Rules', () => {
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('INVALID_JSON');
   });
+});
+
+it('returns explainable reviewed alternatives for a public spot', async () => {
+  const res = await request(app).get('/api/v1/spots/lingayen-baywalk/alternatives');
+  expect(res.status).toBe(200);
+  expect(res.body.meta.radius_strategy_km).toEqual([10, 25]);
+  expect(res.body.data.some((spot: any) => spot.slug === 'pangasinan-provincial-capitol')).toBe(true);
+  expect(res.body.data.every((spot: any) => spot.crowd_status !== 'estimated_busy')).toBe(true);
+});
+
+it('does not count an unverified visit as crowd activity', async () => {
+  const login = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'user-1' });
+  const res = await request(app).post('/api/v1/spots/spot-hundred-islands/interactions').set('Authorization', `Bearer ${login.body.data.token}`).send({ type: 'visit' });
+  expect(res.status).toBe(422);
+  expect(res.body.error.code).toBe('VISIT_NOT_VERIFIED');
 });
