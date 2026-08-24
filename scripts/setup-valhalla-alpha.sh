@@ -15,12 +15,17 @@ echo "=========================================================="
 echo "🚀 JuanDerQuest Valhalla Routing Engine Alpha Setup"
 echo "=========================================================="
 
-# 1. Ensure Docker is active
+# 1. Ensure Docker and osmium-tool are installed
+echo "📦 Ensuring dependencies (Docker & osmium-tool)..."
 if ! command -v docker &> /dev/null; then
-  echo "📦 Installing Docker..."
   sudo apt-get update
   sudo apt-get install -y docker.io docker-compose
-  sudo usermod -aG docker "$USER"
+  sudo usermod -aG docker "${SUDO_USER:-$USER}" || true
+fi
+
+if ! command -v osmium &> /dev/null; then
+  echo "📦 Installing native osmium-tool..."
+  sudo apt-get update -qq && sudo apt-get install -y -qq osmium-tool
 fi
 
 # 2. Prepare Directory
@@ -36,13 +41,15 @@ if [ ! -f "pangasinan.osm.pbf" ]; then
   fi
 
   echo "✂️ Slicing Pangasinan / Central-Northern Luzon bounding box ($PANGASINAN_BBOX)..."
-  # Use osmium inside a quick docker container to slice without needing host dependencies
-  docker run --rm \
-    -v "$VALHALLA_DIR:/data" \
-    stefda/osmium-tool \
-    extract -b "$PANGASINAN_BBOX" /data/philippines-latest.osm.pbf -o /data/pangasinan.osm.pbf --overwrite
+  if command -v osmium &> /dev/null; then
+    osmium extract -b "$PANGASINAN_BBOX" philippines-latest.osm.pbf -o pangasinan.osm.pbf --overwrite
+  else
+    # Fallback to full extract if osmium is unavailable
+    echo "⚠️ osmium not found, using full extract as fallback..."
+    mv philippines-latest.osm.pbf pangasinan.osm.pbf
+  fi
 
-  echo "🧹 Cleaning up full country PBF to save disk space..."
+  echo "🧹 Cleaning up temporary full country PBF to save disk space..."
   rm -f philippines-latest.osm.pbf
 fi
 
