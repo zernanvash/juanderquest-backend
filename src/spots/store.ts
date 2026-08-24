@@ -101,8 +101,9 @@ export class SpotStore {
     const score=events.reduce((sum,e)=>sum+weights[e.activity_type]*Math.pow(.5,(now-Date.parse(e.created_at))/21600000),0);
     const [moderate,busy]={low:[3,8],medium:[6,15],high:[12,30]}[spot.crowd_capacity_band||'medium'];
     const unique=new Set(events.map(e=>e.user_id)).size;
-    const status:CrowdStatus=score>=busy?'estimated_busy':score>=moderate?'moderate':'quiet';
-    return {crowd_status:status,crowd_confidence:unique>=8?'high':unique>=3?'medium':'low',crowd_updated_at:new Date(Math.max(...events.map(e=>Date.parse(e.created_at)))).toISOString(),pressure_score:Number(score.toFixed(2))};
+    const roundedScore = Number(score.toFixed(2));
+    const status:CrowdStatus=roundedScore>=busy?'estimated_busy':roundedScore>=moderate?'moderate':'quiet';
+    return {crowd_status:status,crowd_confidence:unique>=8?'high':unique>=3?'medium':'low',crowd_updated_at:new Date(Math.max(...events.map(e=>Date.parse(e.created_at)))).toISOString(),pressure_score:roundedScore};
   }
 
   alternatives(source:Spot,userId?:string,limit=3) {

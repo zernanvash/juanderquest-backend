@@ -19,6 +19,7 @@ export const env = cleanEnv(process.env, {
   AZURE_STORAGE_CONNECTION_STRING: str({ default: '' }),
   AZURE_STORAGE_CONTAINER_NAME: str({ default: 'spot-photos' }),
   LOCAL_UPLOAD_DIR: str({ default: 'uploads/spot-photos' }),
+  VALHALLA_URL: str({ default: 'http://127.0.0.1:8002' }),
 });
 
 if (env.NODE_ENV === 'production' && env.WALLET_AUTH_MODE === 'local' && !env.ALLOW_INSECURE_LOCAL_WALLET_AUTH) {

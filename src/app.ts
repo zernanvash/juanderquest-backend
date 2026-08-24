@@ -14,6 +14,7 @@ import vouchersRouter from './routes/vouchers.js';
 import campaignsRouter from './routes/campaigns.js';
 import spotsRouter from './routes/spots.js';
 import appVersionRouter from './routes/appVersion.js';
+import routesRouter from './routes/routes.js';
 import { errorHandler } from './middleware/error.js';
 
 import path from 'path';
@@ -48,6 +49,7 @@ app.use('/api/v1', vouchersRouter);
 app.use('/api/v1', campaignsRouter);
 app.use('/api/v1', spotsRouter);
 app.use('/api/v1', appVersionRouter);
+app.use('/api/v1', routesRouter);
 
 // JSON parse errors -> 400 instead of 500
 app.use((err: Error & { type?: string }, _req: express.Request, res: express.Response, next: express.NextFunction) => {
