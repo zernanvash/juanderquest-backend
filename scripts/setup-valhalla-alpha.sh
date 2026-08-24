@@ -63,7 +63,7 @@ if docker ps -a --format '{{.Names}}' | grep -Eq "^juanderquest_valhalla$"; then
 fi
 
 # 5. Run Valhalla Docker Container
-echo "🏗️ Starting Valhalla container (gisops/valhalla:latest)..."
+echo "🏗️ Starting Valhalla container (ghcr.io/gis-ops/docker-valhalla/valhalla:latest)..."
 docker run -d \
   --name juanderquest_valhalla \
   --restart unless-stopped \
@@ -72,7 +72,7 @@ docker run -d \
   -e build_elevation=False \
   -e build_admins=True \
   -e build_time_zones=False \
-  gisops/valhalla:latest
+  ghcr.io/gis-ops/docker-valhalla/valhalla:latest
 
 echo "⏳ Waiting for Valhalla tile build & daemon initialization..."
 sleep 15
