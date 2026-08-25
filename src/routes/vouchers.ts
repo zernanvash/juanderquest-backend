@@ -10,14 +10,12 @@ const router = Router();
 const redeemSchema = z.object({
   body: z.object({
     idempotency_key: z.string().min(8, 'Idempotency key is required'),
+    voucher_id: z.string().optional(),
+    id: z.string().optional(),
   }),
 });
 
-router.get('/vouchers', (_req, res: Response) => {
-  res.json({ success: true, data: db.listVouchers() });
-});
-
-router.post('/vouchers/:id/redeem', authenticateToken, validateRequest(redeemSchema), (req: AuthRequest, res: Response) => {
+function handleRedemption(voucherId: string, req: AuthRequest, res: Response) {
   if (governanceStore.getControls().pause_vouchers) {
     return res.status(403).json({
       success: false,
@@ -25,12 +23,12 @@ router.post('/vouchers/:id/redeem', authenticateToken, validateRequest(redeemSch
     });
   }
 
-  const result = db.redeemVoucher(req.params.id, req.user!.id, req.body.idempotency_key);
+  const result = db.redeemVoucher(voucherId, req.user!.id, req.body.idempotency_key);
 
   if ('error' in result) {
     const responses = {
       NOT_FOUND: () =>
-        res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: `Voucher '${req.params.id}' not found or inactive.` } }),
+        res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: `Voucher '${voucherId}' not found or inactive.` } }),
       INSUFFICIENT_POINTS: () =>
         res.status(409).json({ success: false, error: { code: 'INSUFFICIENT_POINTS', message: 'You do not have enough demo points for this voucher.' } }),
       ALREADY_REDEEMED: () =>
@@ -58,6 +56,25 @@ router.post('/vouchers/:id/redeem', authenticateToken, validateRequest(redeemSch
       merchant_name: db.merchants.find((merchant) => merchant.id === voucher?.merchant_id)?.name || 'Unknown Merchant',
     },
   });
+}
+
+router.get('/vouchers', (_req, res: Response) => {
+  res.json({ success: true, data: db.listVouchers() });
+});
+
+router.post('/vouchers/:id/redeem', authenticateToken, validateRequest(redeemSchema), (req: AuthRequest, res: Response) => {
+  return handleRedemption(req.params.id, req, res);
+});
+
+router.post('/vouchers/redeem', authenticateToken, validateRequest(redeemSchema), (req: AuthRequest, res: Response) => {
+  const voucherId = req.body.voucher_id || req.body.id;
+  if (!voucherId) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_REQUEST', message: 'voucher_id is required.' },
+    });
+  }
+  return handleRedemption(voucherId, req, res);
 });
 
 export default router;
