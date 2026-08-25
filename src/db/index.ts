@@ -41,17 +41,40 @@ export interface CampaignRow {
   host_id: string;
   host_name: string;
   title: string;
-  category: 'eco' | 'cultural' | 'food_trade';
+  category: 'eco' | 'cultural' | 'food_trade' | 'sports_adventure';
   location_name: string;
+  municipality?: string;
+  banner_image_url?: string;
   description: string;
+  event_date: string;
+  start_date: string;
+  end_date: string;
   total_budget_mjdq: number;
   reward_per_participant_mjdq: number;
+  referral_bounty_mjdq: number;
   max_participants: number;
   reserved_participants: number;
   completed_participants: number;
   unspent_refund_mjdq: number;
+  pre_quest_requirements?: string[];
+  gps_lat?: number;
+  gps_lng?: number;
+  gps_radius_meters?: number;
   status: 'active' | 'completed' | 'cancelled';
   created_at: string;
+}
+
+export interface CampaignReservationRow {
+  id: string;
+  campaign_id: string;
+  user_id: string;
+  user_display_name: string;
+  referred_by_user_id?: string | null;
+  referred_by_name?: string | null;
+  ticket_code: string;
+  status: 'reserved' | 'completed' | 'cancelled';
+  created_at: string;
+  completed_at?: string | null;
 }
 
 export interface SubmissionRow {
@@ -169,14 +192,24 @@ const mockCampaigns: CampaignRow[] = [
     host_name: 'Pangasinan Tourism Office',
     title: 'Bolinao Coastal Eco-Cleanup Raid',
     category: 'eco',
-    location_name: 'Bolinao, Pangasinan',
-    description: 'Join local residents and travelers to clean up Patar beach front. Earn 250,000 mJDQ (250 JDQ value) plus Soulbound Civic Badge.',
+    location_name: 'Patar White Beach, Bolinao',
+    municipality: 'Bolinao',
+    banner_image_url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1400&q=80',
+    description: 'Join local residents and travelers to clean up Patar beach front before sunset. Earn 250,000 mJDQ (250 JDQ value) plus the exclusive Bolinao Coastal Steward Civic Badge.',
+    event_date: '2026-09-12T08:00:00.000Z',
+    start_date: '2026-09-12T08:00:00.000Z',
+    end_date: '2026-09-12T17:00:00.000Z',
     total_budget_mjdq: 50000000,          // 50,000,000 mJDQ (50,000 JDQ value)
     reward_per_participant_mjdq: 250000, // 250,000 mJDQ (250 JDQ value)
+    referral_bounty_mjdq: 50000,         // 50,000 mJDQ (50 JDQ) per referred attendee
     max_participants: 200,
     reserved_participants: 45,
     completed_participants: 12,
     unspent_refund_mjdq: 0,
+    pre_quest_requirements: ['Visit Cape Bolinao Lighthouse', 'Log GPS check-in at Patar Arch'],
+    gps_lat: 16.3025,
+    gps_lng: 119.7824,
+    gps_radius_meters: 250,
     status: 'active',
     created_at: new Date().toISOString(),
   },
@@ -184,16 +217,80 @@ const mockCampaigns: CampaignRow[] = [
     id: 'camp_2',
     host_id: '22222222-2222-2222-2222-222222222222',
     host_name: 'Dagupan Heritage Foundation',
-    title: 'Bangus Festival Cultural Photo Raid',
+    title: 'Bangus Festival Street Dance & Photo Raid',
     category: 'cultural',
-    location_name: 'Dagupan City, Pangasinan',
-    description: 'Document traditional milkfish street dancing and culinary displays for the municipal archive.',
-    total_budget_mjdq: 25000000,          // 25,000,000 mJDQ
-    reward_per_participant_mjdq: 150000, // 150,000 mJDQ
-    max_participants: 166,
-    reserved_participants: 30,
-    completed_participants: 8,
+    location_name: 'Downtown Commercial Strip, Dagupan City',
+    municipality: 'Dagupan City',
+    banner_image_url: 'https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?auto=format&fit=crop&w=1400&q=80',
+    description: 'Document traditional milkfish street dancing and culinary street grills for the municipal cultural archive. Earn 150,000 mJDQ and free seafood voucher.',
+    event_date: '2026-09-20T09:00:00.000Z',
+    start_date: '2026-09-20T09:00:00.000Z',
+    end_date: '2026-09-20T21:00:00.000Z',
+    total_budget_mjdq: 30000000,
+    reward_per_participant_mjdq: 150000,
+    referral_bounty_mjdq: 30000,
+    max_participants: 200,
+    reserved_participants: 68,
+    completed_participants: 15,
     unspent_refund_mjdq: 0,
+    pre_quest_requirements: ['Explore Dagupan Fish Port Market'],
+    gps_lat: 16.0433,
+    gps_lng: 120.3334,
+    gps_radius_meters: 300,
+    status: 'active',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'camp_3',
+    host_id: '22222222-2222-2222-2222-222222222222',
+    host_name: 'Lingayen Eco-Sports Alliance',
+    title: 'Lingayen Gulf Beach Sports & Coastal Tour',
+    category: 'sports_adventure',
+    location_name: 'Capitol Beachfront Park, Lingayen',
+    municipality: 'Lingayen',
+    banner_image_url: 'https://images.unsplash.com/photo-1612872087720-bb876e2e67d1?auto=format&fit=crop&w=1400&q=80',
+    description: 'Participate in beach volleyball exhibition and heritage monument walking tour around the historic Provincial Capitol grounds.',
+    event_date: '2026-09-28T07:30:00.000Z',
+    start_date: '2026-09-28T07:30:00.000Z',
+    end_date: '2026-09-28T18:00:00.000Z',
+    total_budget_mjdq: 20000000,
+    reward_per_participant_mjdq: 200000,
+    referral_bounty_mjdq: 40000,
+    max_participants: 100,
+    reserved_participants: 28,
+    completed_participants: 6,
+    unspent_refund_mjdq: 0,
+    pre_quest_requirements: ['Visit Pangasinan Provincial Capitol Building'],
+    gps_lat: 16.0218,
+    gps_lng: 120.2319,
+    gps_radius_meters: 200,
+    status: 'active',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'camp_4',
+    host_id: '22222222-2222-2222-2222-222222222222',
+    host_name: 'Dasol Salt Producers Cooperative',
+    title: 'Dasol Pacific Salt Bed Heritage Tour',
+    category: 'food_trade',
+    location_name: 'Dasol Salt Farm Basin, Dasol',
+    municipality: 'Dasol',
+    banner_image_url: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1400&q=80',
+    description: 'Experience authentic Pangasinan artisanal salt harvesting methods. Capture harvest photos and earn 180,000 mJDQ with free souvenir salt pouch.',
+    event_date: '2026-10-05T08:30:00.000Z',
+    start_date: '2026-10-05T08:30:00.000Z',
+    end_date: '2026-10-05T16:30:00.000Z',
+    total_budget_mjdq: 18000000,
+    reward_per_participant_mjdq: 180000,
+    referral_bounty_mjdq: 35000,
+    max_participants: 100,
+    reserved_participants: 19,
+    completed_participants: 3,
+    unspent_refund_mjdq: 0,
+    pre_quest_requirements: ['Visit Dasol Municipal Plaza'],
+    gps_lat: 15.9892,
+    gps_lng: 119.8806,
+    gps_radius_meters: 350,
     status: 'active',
     created_at: new Date().toISOString(),
   },
@@ -392,6 +489,19 @@ export class MemoryDb {
   merchants = mockMerchants;
   vouchers = mockVouchers;
   redemptions: RedemptionRow[] = [];
+  campaign_reservations: CampaignReservationRow[] = [
+    {
+      id: 'res_1',
+      campaign_id: 'camp_1',
+      user_id: '11111111-1111-1111-1111-111111111111',
+      user_display_name: 'Juan Dela Cruz',
+      referred_by_user_id: null,
+      referred_by_name: null,
+      ticket_code: 'TICKET-BOLINAO-8821',
+      status: 'reserved',
+      created_at: new Date().toISOString(),
+    },
+  ];
   treasury: TreasuryRow = {
     growth_pool_mjdq: 50000000,       // 50,000,000 mJDQ (50,000 JDQ initial Growth Pool)
     total_burned_mjdq: 250000,        // 250,000 mJDQ (250 JDQ total burned)
