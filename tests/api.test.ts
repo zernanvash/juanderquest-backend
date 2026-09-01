@@ -412,7 +412,9 @@ it('filters spots by category and optional quest availability', async () => {
 it('returns explainable reviewed alternatives for a public spot', async () => {
   const res = await request(app).get('/api/v1/spots/lingayen-baywalk/alternatives');
   expect(res.status).toBe(200);
-  expect(res.body.meta.radius_strategy_km).toEqual([10, 25]);
+  expect(res.body.meta.catalog_scope).toBe('pangasinan_alpha');
+  expect(res.body.meta.ranking_scope).toBe('catalog_wide');
+  expect(res.body.meta.expansion_ready).toBe('philippines');
   expect(res.body.data.some((spot: any) => spot.slug === 'pangasinan-provincial-capitol')).toBe(true);
   expect(res.body.data.every((spot: any) => spot.crowd_status !== 'estimated_busy')).toBe(true);
 });

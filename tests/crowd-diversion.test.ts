@@ -31,6 +31,27 @@ describe('crowd diversion recommendations', () => {
     expect(store.alternatives(source).some(spot => spot.id === candidate.id)).toBe(false);
   });
 
+  test('ranks catalog-wide quality matches without a local radius ceiling', () => {
+    const store = new SpotStore();
+    const source = store.spots.find(spot => spot.slug === 'patar-white-beach')!;
+    store.spots.push({
+      ...source,
+      id: 'future-national-beach',
+      slug: 'future-national-beach',
+      name: 'Future National Beach',
+      municipality: 'National catalog fixture',
+      gps_lat: 11.9674,
+      gps_lng: 121.9248,
+      quest_id: undefined,
+    });
+
+    const recommendation = store.alternatives(source, undefined, 5)
+      .find(spot => spot.id === 'future-national-beach');
+    expect(recommendation).toBeDefined();
+    expect(recommendation.recommendation_kind).toBe('similar_place');
+    expect(recommendation.sponsored).toBe(false);
+  });
+
   test('holds community contributions for review', () => {
     const store = new SpotStore();
     const result = store.create({name:'Local Pocket Park',description:'A quiet neighborhood green space.',category:'nature_outdoors',subcategory:'park',tags:['quiet'],municipality:'Dagupan City',address:'Test Street',gps_lat:16.08,gps_lng:120.39,price_level:0,hours:{},amenities:[],image_url:''}, 'user-1');

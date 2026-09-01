@@ -43,7 +43,7 @@ router.get('/spots/:slug/alternatives', optionalAuthenticateToken, (req: AuthReq
   const source=spotStore.spots.find(s=>s.slug===req.params.slug&&s.status==='published');
   if(!source)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
   const requested=numeric(req.query.limit);const limit=requested===undefined?3:Math.max(1,Math.min(5,Math.floor(requested)));
-  return res.json({success:true,data:spotStore.alternatives(source,req.user?.id,limit),meta:{source_spot_id:source.id,radius_strategy_km:[10,25],estimated_not_live:true}});
+  return res.json({success:true,data:spotStore.alternatives(source,req.user?.id,limit),meta:{source_spot_id:source.id,catalog_scope:'pangasinan_alpha',ranking_scope:'catalog_wide',expansion_ready:'philippines',personalized:Boolean(req.user),estimated_not_live:true}});
 });
 
 router.get('/spots/:slug', optionalAuthenticateToken, (req: AuthRequest, res) => {

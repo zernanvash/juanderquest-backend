@@ -115,13 +115,15 @@ export class SpotStore {
 
   alternatives(source:Spot,userId?:string,limit=3) {
     const prefs=userId?this.getPreferences(userId):undefined;
-    const candidates=(radius:number)=>this.spots.filter(s=>s.id!==source.id&&s.status==='published'&&!s.recommendation_suppressed&&distanceKm(source.gps_lat,source.gps_lng,s.gps_lat,s.gps_lng)<=radius&&this.crowd(s).crowd_status!=='estimated_busy').map(s=>{
+    const candidates=this.spots.filter(s=>s.id!==source.id&&s.status==='published'&&!s.recommendation_suppressed&&this.crowd(s).crowd_status!=='estimated_busy').map(s=>{
       const shared=s.tags.filter(t=>source.tags.includes(t));const tagScore=shared.length/Math.max(new Set([...source.tags,...s.tags]).size,1);const categoryScore=s.subcategory===source.subcategory?1:s.category===source.category?.65:0;if(!shared.length&&!categoryScore)return null;
-      const distance=distanceKm(source.gps_lat,source.gps_lng,s.gps_lat,s.gps_lng);const trust={lgu_verified:1,editorial:.9,open_data:.75,community:.6}[s.trust_level];const pressure=this.crowd(s);const pressureScore=pressure.crowd_status==='quiet'?1:pressure.crowd_status==='moderate'?.55:.7;const pref=prefs&&[...prefs.categories,...prefs.tags].some(v=>v===s.category||s.tags.includes(v))?1:0;
-      const score=tagScore*.4+categoryScore*.15+Math.max(0,1-distance/radius)*.15+trust*.1+pressureScore*.15+pref*.05;const reasons=[shared.length?`Similar ${shared.slice(0,2).join(' and ').replaceAll('_',' ')}`:`Similar ${s.subcategory.replaceAll('_',' ')}`,`${distance.toFixed(1)} km away`,pressure.crowd_status==='quiet'?'Lower estimated activity':'Alternative visitor option'];
-      return {...s,...pressure,distance_km:Number(distance.toFixed(2)),alternative_score:Number(score.toFixed(4)),recommendation_reasons:reasons};
+      const distance=distanceKm(source.gps_lat,source.gps_lng,s.gps_lat,s.gps_lng);const trust={lgu_verified:1,editorial:.9,open_data:.75,community:.6}[s.trust_level];const pressure=this.crowd(s);const pressureScore=pressure.crowd_status==='quiet'?1:pressure.crowd_status==='moderate'?.55:.7;const pref=prefs&&[...prefs.categories,...prefs.tags,...prefs.occasions].some(v=>v===s.category||s.tags.includes(v))?1:0;
+      // Quality and preference similarity intentionally outweigh proximity. This keeps
+      // the contract usable when the catalog expands from Pangasinan nationwide.
+      const distanceScore=Math.max(0,1-distance/500);const score=tagScore*.35+categoryScore*.25+pref*.15+trust*.1+pressureScore*.1+distanceScore*.05;const reasons=[shared.length?`Similar ${shared.slice(0,2).join(' and ').replaceAll('_',' ')}`:`Similar ${s.subcategory.replaceAll('_',' ')}`,pref?'Matches your travel preferences':'Matches this destination',`${s.municipality} alternative`];
+      return {...s,...pressure,distance_km:Number(distance.toFixed(2)),alternative_score:Number(score.toFixed(4)),recommendation_kind:'similar_place',sponsored:false,recommendation_reasons:reasons};
     }).filter(Boolean) as any[];
-    let ranked=candidates(10);if(ranked.length<limit)ranked=candidates(25);return ranked.sort((a,b)=>b.alternative_score-a.alternative_score).slice(0,Math.min(limit,5));
+    return candidates.sort((a,b)=>b.alternative_score-a.alternative_score).slice(0,Math.min(limit,5));
   }
 
   review(spotId:string,adminId:string,status:'published'|'needs_review'|'unpublished',band:CrowdCapacityBand,suppressed=false){const spot=this.spots.find(s=>s.id===spotId);if(!spot)return undefined;spot.status=status;spot.crowd_capacity_band=band;spot.recommendation_suppressed=suppressed;spot.reviewed_by=adminId;spot.reviewed_at=new Date().toISOString();spot.updated_at=spot.reviewed_at;if(this.pg)this.pg.query('UPDATE spots SET status=$1,crowd_capacity_band=$2,recommendation_suppressed=$3,reviewed_by=$4,reviewed_at=$5,updated_at=$5 WHERE id=$6',[status,band,suppressed,adminId,spot.reviewed_at,spot.id]).catch(()=>{});return spot;}
