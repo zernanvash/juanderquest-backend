@@ -1,5 +1,12 @@
 import type { Pool } from 'pg';
 import { env } from '../config/env.js';
+import { isDevelopmentSeedEnabled } from './policy.js';
+
+const developmentFixturesEnabled = isDevelopmentSeedEnabled({
+  nodeEnv: env.NODE_ENV,
+  allowInMemoryFallback: env.ALLOW_IN_MEMORY_FALLBACK,
+  seedDevelopmentData: env.SEED_DEVELOPMENT_DATA,
+});
 
 export interface UserRow {
   id: string;
@@ -151,6 +158,15 @@ export interface LedgerEntryRow {
   burned_mjdq: number;
   description: string;
   created_at: string;
+}
+
+export interface WebAnalyticsEventRow {
+  id: string;
+  event_type: 'page_view' | 'cta_click';
+  path: string;
+  label?: string | null;
+  session_id: string;
+  occurred_at: string;
 }
 
 // Memory Store Seed Data
@@ -481,15 +497,15 @@ export function calculateHaversineDistance(lat1: number, lon1: number, lat2: num
 }
 
 export class MemoryDb {
-  users = mockUsers;
-  quests = mockQuests;
-  campaigns = mockCampaigns;
-  submissions = mockSubmissions;
-  proposals = mockProposals;
-  merchants = mockMerchants;
-  vouchers = mockVouchers;
+  users = developmentFixturesEnabled ? [...mockUsers] : [];
+  quests = developmentFixturesEnabled ? [...mockQuests] : [];
+  campaigns = developmentFixturesEnabled ? [...mockCampaigns] : [];
+  submissions = developmentFixturesEnabled ? [...mockSubmissions] : [];
+  proposals = developmentFixturesEnabled ? [...mockProposals] : [];
+  merchants = developmentFixturesEnabled ? [...mockMerchants] : [];
+  vouchers = developmentFixturesEnabled ? [...mockVouchers] : [];
   redemptions: RedemptionRow[] = [];
-  campaign_reservations: CampaignReservationRow[] = [
+  campaign_reservations: CampaignReservationRow[] = developmentFixturesEnabled ? [
     {
       id: 'res_1',
       campaign_id: 'camp_1',
@@ -501,14 +517,19 @@ export class MemoryDb {
       status: 'reserved',
       created_at: new Date().toISOString(),
     },
-  ];
-  treasury: TreasuryRow = {
+  ] : [];
+  treasury: TreasuryRow = developmentFixturesEnabled ? {
     growth_pool_mjdq: 50000000,       // 50,000,000 mJDQ (50,000 JDQ initial Growth Pool)
     total_burned_mjdq: 250000,        // 250,000 mJDQ (250 JDQ total burned)
     community_treasury_mjdq: 1000000, // 1,000,000 mJDQ (1,000 JDQ treasury)
     oracle_rate_php_per_jdq: 1.0,     // 1 JDQ = ₱1.00 Floor
+  } : {
+    growth_pool_mjdq: 0,
+    total_burned_mjdq: 0,
+    community_treasury_mjdq: 0,
+    oracle_rate_php_per_jdq: 1.0,
   };
-  ledger: LedgerEntryRow[] = [
+  ledger: LedgerEntryRow[] = developmentFixturesEnabled ? [
     {
       id: 'ledg-1',
       user_id: '11111111-1111-1111-1111-111111111111',
@@ -519,7 +540,8 @@ export class MemoryDb {
       description: 'PoA Reward: Dagupan Bangus Taste & Trade Trail (D=1.0, G=2.0)',
       created_at: new Date().toISOString(),
     },
-  ];
+  ] : [];
+  web_analytics_events: WebAnalyticsEventRow[] = [];
 
   private pg: Pool | null = null;
 
@@ -571,6 +593,8 @@ export class MemoryDb {
       id: row.id, voucher_id: row.voucher_id, user_id: row.user_id, code: row.code,
       cost_points: row.cost_points, idempotency_key: row.idempotency_key, created_at: toIso(row.created_at),
     }));
+    const { rows: analytics } = await pool.query('SELECT * FROM web_analytics_events WHERE occurred_at >= NOW() - INTERVAL \'90 days\' ORDER BY occurred_at');
+    this.web_analytics_events = analytics.map((row: any) => ({ id: row.id, event_type: row.event_type, path: row.path, label: row.label, session_id: row.session_id, occurred_at: toIso(row.occurred_at) }));
   }
 
   private async persist(query: string, params: unknown[]) {
@@ -580,6 +604,22 @@ export class MemoryDb {
     } catch (error) {
       console.error('[db] write-through failed:', (error as Error).message);
     }
+  }
+
+  recordWebAnalyticsEvent(event: WebAnalyticsEventRow) {
+    this.web_analytics_events.push(event);
+    if (this.web_analytics_events.length > 20000) this.web_analytics_events.splice(0, this.web_analytics_events.length - 20000);
+    this.persist('INSERT INTO web_analytics_events (id,event_type,path,label,session_id,occurred_at) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING', [event.id, event.event_type, event.path, event.label ?? null, event.session_id, event.occurred_at]);
+  }
+
+  getWebAnalyticsSummary(days: number) {
+    const cutoff = Date.now() - days * 86400000;
+    const events = this.web_analytics_events.filter((event) => Date.parse(event.occurred_at) >= cutoff);
+    const views = events.filter((event) => event.event_type === 'page_view');
+    const clicks = events.filter((event) => event.event_type === 'cta_click');
+    const count = (items: WebAnalyticsEventRow[], key: 'path' | 'label') => Object.entries(items.reduce<Record<string, number>>((acc, item) => { const value = item[key] || 'unknown'; acc[value] = (acc[value] || 0) + 1; return acc; }, {})).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    const daily = Object.entries(views.reduce<Record<string, { views: number; sessions: Set<string> }>>((acc, event) => { const date = event.occurred_at.slice(0, 10); acc[date] ||= { views: 0, sessions: new Set() }; acc[date].views += 1; acc[date].sessions.add(event.session_id); return acc; }, {})).sort(([a], [b]) => a.localeCompare(b)).map(([date, value]) => ({ date, views: value.views, sessions: value.sessions.size }));
+    return { days, totalViews: views.length, uniqueSessions: new Set(views.map((event) => event.session_id)).size, ctaClicks: clicks.length, topPages: count(views, 'path').map(([path, total]) => ({ path, views: total })), topCtas: count(clicks, 'label').map(([label, total]) => ({ label, clicks: total })), daily };
   }
 
   // Writes a quest row (insert or update). Used by the governance store when it schedules community quests.

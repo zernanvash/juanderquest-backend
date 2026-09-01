@@ -4,19 +4,23 @@ import { randomUUID } from 'crypto';
 import imageSize from 'image-size';
 import { BlobServiceClient } from '@azure/storage-blob';
 import { env } from '../config/env.js';
+import { MediaType } from '../utils/media-mime.js';
 
-export interface SpotPhotoSaveResult {
+export interface SpotMediaSaveResult {
   object_key: string;
   url: string;
   size_bytes: number;
   mime_type: string;
+  media_type: MediaType;
   width: number;
   height: number;
 }
 
+export type SpotPhotoSaveResult = SpotMediaSaveResult;
+
 export interface SpotPhotoStorageProvider {
   readonly name: 'local' | 'azure';
-  savePhoto(buffer: Buffer, mimeType: string, extension: string): Promise<SpotPhotoSaveResult>;
+  savePhoto(buffer: Buffer, mimeType: string, extension: string, mediaType?: MediaType): Promise<SpotMediaSaveResult>;
   deletePhoto(objectKey: string): Promise<void>;
 }
 
@@ -41,10 +45,16 @@ export class LocalStorageProvider implements SpotPhotoStorageProvider {
     return this.ensureUploadDir();
   }
 
-  async savePhoto(buffer: Buffer, mimeType: string, extension: string): Promise<SpotPhotoSaveResult> {
+  async savePhoto(
+    buffer: Buffer,
+    mimeType: string,
+    extension: string,
+    mediaType: MediaType = 'image'
+  ): Promise<SpotMediaSaveResult> {
     const dir = this.getUploadDir();
-    const cleanExt = extension.replace(/^\.+/, '') || 'jpg';
-    const objectKey = `spot_photo_${randomUUID()}.${cleanExt}`;
+    const cleanExt = extension.replace(/^\.+/, '') || (mediaType === 'video' ? 'mp4' : 'jpg');
+    const prefix = mediaType === 'video' ? 'spot_video' : 'spot_photo';
+    const objectKey = `${prefix}_${randomUUID()}.${cleanExt}`;
     const filePath = path.resolve(dir, objectKey);
 
     // Prevent path traversal
@@ -56,12 +66,14 @@ export class LocalStorageProvider implements SpotPhotoStorageProvider {
 
     let width = 0;
     let height = 0;
-    try {
-      const dimensions = imageSize(buffer);
-      width = dimensions.width || 0;
-      height = dimensions.height || 0;
-    } catch (e) {
-      // Fallback 0 dimensions if header parsing fails
+    if (mediaType === 'image') {
+      try {
+        const dimensions = imageSize(buffer);
+        width = dimensions.width || 0;
+        height = dimensions.height || 0;
+      } catch (e) {
+        // Fallback 0 dimensions if image header parsing fails
+      }
     }
 
     const url = `/api/v1/uploads/spot-photos/${objectKey}`;
@@ -71,6 +83,7 @@ export class LocalStorageProvider implements SpotPhotoStorageProvider {
       url,
       size_bytes: buffer.length,
       mime_type: mimeType,
+      media_type: mediaType,
       width,
       height,
     };
@@ -103,13 +116,19 @@ export class AzureBlobStorageProvider implements SpotPhotoStorageProvider {
     this.containerName = env.AZURE_STORAGE_CONTAINER_NAME || 'spot-photos';
   }
 
-  async savePhoto(buffer: Buffer, mimeType: string, extension: string): Promise<SpotPhotoSaveResult> {
+  async savePhoto(
+    buffer: Buffer,
+    mimeType: string,
+    extension: string,
+    mediaType: MediaType = 'image'
+  ): Promise<SpotMediaSaveResult> {
     const blobServiceClient = BlobServiceClient.fromConnectionString(this.connectionString);
     const containerClient = blobServiceClient.getContainerClient(this.containerName);
     await containerClient.createIfNotExists({ access: 'blob' });
 
-    const cleanExt = extension.replace(/^\.+/, '') || 'jpg';
-    const objectKey = `spot_photo_${randomUUID()}.${cleanExt}`;
+    const cleanExt = extension.replace(/^\.+/, '') || (mediaType === 'video' ? 'mp4' : 'jpg');
+    const prefix = mediaType === 'video' ? 'spot_video' : 'spot_photo';
+    const objectKey = `${prefix}_${randomUUID()}.${cleanExt}`;
     const blockBlobClient = containerClient.getBlockBlobClient(objectKey);
 
     await blockBlobClient.uploadData(buffer, {
@@ -118,12 +137,14 @@ export class AzureBlobStorageProvider implements SpotPhotoStorageProvider {
 
     let width = 0;
     let height = 0;
-    try {
-      const dimensions = imageSize(buffer);
-      width = dimensions.width || 0;
-      height = dimensions.height || 0;
-    } catch (e) {
-      // Fallback 0
+    if (mediaType === 'image') {
+      try {
+        const dimensions = imageSize(buffer);
+        width = dimensions.width || 0;
+        height = dimensions.height || 0;
+      } catch (e) {
+        // Fallback 0
+      }
     }
 
     return {
@@ -131,6 +152,7 @@ export class AzureBlobStorageProvider implements SpotPhotoStorageProvider {
       url: blockBlobClient.url,
       size_bytes: buffer.length,
       mime_type: mimeType,
+      media_type: mediaType,
       width,
       height,
     };

@@ -30,8 +30,23 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
     0x00, 0xfe, 0xfb, 0xfd, 0x50, 0x00,
   ]);
 
+  const validMp4Buffer = Buffer.from([
+    0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x02, 0x00, 0x69, 0x73,
+    0x6f, 0x6d, 0x69, 0x73, 0x6f, 0x32,
+  ]);
+
+  const validWebmBuffer = Buffer.from([
+    0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01, 0x42, 0xf7, 0x81, 0x01, 0x42, 0xf2, 0x81, 0x04,
+  ]);
+
   const fakeImageBuffer = Buffer.from('<html><body>Fake Image Content</body></html>');
-  const oversizedBuffer = Buffer.alloc(8 * 1024 * 1024 + 100);
+  const oversizedImageBuffer = Buffer.alloc(8 * 1024 * 1024 + 100);
+  validJpegBuffer.copy(oversizedImageBuffer, 0, 0, validJpegBuffer.length);
+
+  const oversizedVideoBuffer = Buffer.alloc(30 * 1024 * 1024 + 100);
+  validMp4Buffer.copy(oversizedVideoBuffer, 0, 0, validMp4Buffer.length);
+
+
 
   beforeAll(async () => {
     const res1 = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'user-1' });
@@ -86,9 +101,39 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.data.mime_type).toBe('image/webp');
+    expect(res.body.data.media_type).toBe('image');
   });
 
-  it('rejects fake MIME / invalid image content', async () => {
+  it('successfully uploads valid MP4 video clip via POST /api/v1/spot-media', async () => {
+    const res = await request(app)
+      .post('/api/v1/spot-media')
+      .set('Authorization', `Bearer ${user1Token}`)
+      .attach('media', validMp4Buffer, 'clip.mp4');
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.asset_id).toBeDefined();
+    expect(res.body.data.url).toMatch(/^\/api\/v1\/uploads\/spot-photos\/spot_video_/);
+    expect(res.body.data.mime_type).toBe('video/mp4');
+    expect(res.body.data.media_type).toBe('video');
+
+    const asset = assetStore.getAssetById(res.body.data.asset_id);
+    expect(asset).toBeDefined();
+    expect(asset?.media_type).toBe('video');
+  });
+
+  it('successfully uploads valid WebM video clip via POST /api/v1/spot-photos (backward-compat)', async () => {
+    const res = await request(app)
+      .post('/api/v1/spot-photos')
+      .set('Authorization', `Bearer ${user1Token}`)
+      .attach('photo', validWebmBuffer, 'clip.webm');
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.mime_type).toBe('video/webm');
+    expect(res.body.data.media_type).toBe('video');
+  });
+
+  it('rejects fake MIME / invalid image or video content', async () => {
     const res = await request(app)
       .post('/api/v1/spot-photos')
       .set('Authorization', `Bearer ${user1Token}`)
@@ -98,15 +143,27 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
     expect(res.body.error.code).toBe('INVALID_IMAGE_CONTENT');
   });
 
-  it('rejects oversized files exceeding 8 MB', async () => {
+
+  it('rejects oversized image files exceeding 8 MB', async () => {
     const res = await request(app)
       .post('/api/v1/spot-photos')
       .set('Authorization', `Bearer ${user1Token}`)
-      .attach('photo', oversizedBuffer, 'huge.jpg');
+      .attach('photo', oversizedImageBuffer, 'huge.jpg');
 
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('FILE_TOO_LARGE');
   });
+
+  it('rejects oversized video files exceeding 30 MB', async () => {
+    const res = await request(app)
+      .post('/api/v1/spot-media')
+      .set('Authorization', `Bearer ${user1Token}`)
+      .attach('media', oversizedVideoBuffer, 'huge.mp4');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('FILE_TOO_LARGE');
+  });
+
 
   it('prevents path traversal during local storage operations', async () => {
     const provider = new LocalStorageProvider();

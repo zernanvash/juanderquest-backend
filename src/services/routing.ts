@@ -29,6 +29,12 @@ export interface RouteSummary {
 }
 
 export interface RouteResponse {
+  degraded: boolean;
+  navigationMode: 'turn_by_turn' | 'straight_line_estimate';
+  warning?: {
+    code: 'STRAIGHT_LINE_FALLBACK';
+    message: string;
+  };
   summary: RouteSummary;
   coordinates: [number, number][]; // [lat, lng] pairs for GeoJSON / Leaflet
   maneuvers: RouteManeuver[];
@@ -204,6 +210,8 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
     const durationSeconds = Math.round(trip.summary?.time || 0);
 
     return {
+      degraded: false,
+      navigationMode: 'turn_by_turn',
       summary: {
         distanceKm,
         durationSeconds,
@@ -215,8 +223,9 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
       coordinates: decodedCoords,
       maneuvers,
     };
-  } catch (error: any) {
-    // 4. Graceful Fallback if Valhalla daemon is offline/indexing
+  } catch {
+    // 4. Explicit degraded estimate if Valhalla is offline/indexing. This is
+    // intentionally not represented as maneuver guidance or turn-by-turn navigation.
     const directDistance = computeHaversineDistanceKm(
       req.startLat,
       req.startLng,
@@ -228,6 +237,12 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
     const estSeconds = Math.round((directDistance / speedKmh) * 3600);
 
     return {
+      degraded: true,
+      navigationMode: 'straight_line_estimate',
+      warning: {
+        code: 'STRAIGHT_LINE_FALLBACK',
+        message: 'Routing is degraded. This is a straight-line distance estimate only; turn-by-turn guidance is unavailable.',
+      },
       summary: {
         distanceKm: directDistance,
         durationSeconds: estSeconds,
@@ -240,13 +255,7 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
         [req.startLat, req.startLng],
         [req.endLat, req.endLng],
       ],
-      maneuvers: [
-        {
-          instruction: `Head directly toward destination (${directDistance} km)`,
-          distanceMeters: Math.round(directDistance * 1000),
-          timeSeconds: estSeconds,
-        },
-      ],
+      maneuvers: [],
     };
   }
 }

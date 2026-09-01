@@ -1,5 +1,7 @@
 import type { Pool } from 'pg';
 import { randomUUID } from 'crypto';
+import { env } from '../config/env.js';
+import { isDevelopmentSeedEnabled } from '../db/policy.js';
 
 export type SpotCategory = 'eat_drink' | 'nature_outdoors' | 'culture_heritage' | 'activities_wellness' | 'shopping_local' | 'stay';
 export type SpotTrust = 'lgu_verified' | 'editorial' | 'open_data' | 'community';
@@ -35,6 +37,11 @@ export const taxonomy = [
 ] as const;
 
 const now = new Date().toISOString();
+const developmentFixturesEnabled = isDevelopmentSeedEnabled({
+  nodeEnv: env.NODE_ENV,
+  allowInMemoryFallback: env.ALLOW_IN_MEMORY_FALLBACK,
+  seedDevelopmentData: env.SEED_DEVELOPMENT_DATA,
+});
 const seeds: Spot[] = [
   { id:'spot-hundred-islands',slug:'hundred-islands-national-park',name:'Hundred Islands National Park',description:'Island-hopping, viewpoints, swimming, and family adventures across the iconic Alaminos archipelago.',category:'nature_outdoors',subcategory:'park',tags:['island','family','scenic','water_activity'],municipality:'Alaminos City',address:'Lucap, Alaminos City, Pangasinan',gps_lat:16.2063,gps_lng:119.9706,price_level:2,hours:{daily:'06:00-17:00'},amenities:['parking','restroom','boat_rental'],image_url:'https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?auto=format&fit=crop&w=1200&q=80',source_type:'lgu',source_name:'Alaminos City Tourism',trust_level:'lgu_verified',status:'published',quest_id:'q1111111-1111-1111-1111-111111111111',created_at:now,updated_at:now },
   { id:'spot-patar',slug:'patar-white-beach',name:'Patar White Beach',description:'A broad public beach known for golden sunsets, limestone scenery, and relaxed group trips.',category:'nature_outdoors',subcategory:'beach',tags:['beach','sunset','friends','scenic'],municipality:'Bolinao',address:'Patar, Bolinao, Pangasinan',gps_lat:16.3204,gps_lng:119.7847,price_level:1,hours:{daily:'05:00-20:00'},amenities:['parking','restroom','food_stalls'],image_url:'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80',source_type:'lgu',source_name:'Bolinao Tourism Office',trust_level:'lgu_verified',status:'published',created_at:now,updated_at:now },
@@ -54,7 +61,7 @@ export const distanceKm = (aLat:number,aLng:number,bLat:number,bLng:number) => {
 };
 
 export class SpotStore {
-  spots = [...seeds];
+  spots = developmentFixturesEnabled ? [...seeds] : [];
   preferences = new Map<string, DiscoveryPreferences>();
   interactions = new Map<string, Set<string>>();
   activityEvents: ActivityEvent[] = [];

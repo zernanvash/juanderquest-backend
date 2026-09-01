@@ -3,10 +3,16 @@ import { bool, cleanEnv, str, port } from 'envalid';
 
 dotenv.config();
 
+const isLocalRuntime = process.env.NODE_ENV !== 'production';
+
 export const env = cleanEnv(process.env, {
   PORT: port({ default: 4000 }),
   NODE_ENV: str({ choices: ['development', 'test', 'production'], default: 'development' }),
   DATABASE_URL: str({ default: 'postgres://postgres:postgres@localhost:5432/juanderquest' }),
+  // Local development/test keeps the prototype fallback; production always fails closed.
+  ALLOW_IN_MEMORY_FALLBACK: bool({ default: isLocalRuntime }),
+  // Prototype fixtures are local-only and can never be enabled in production.
+  SEED_DEVELOPMENT_DATA: bool({ default: isLocalRuntime }),
   // Fail fast in production when the real secret is missing; dev/test get a throwaway default.
   JWT_SECRET: process.env.NODE_ENV === 'production' ? str() : str({ default: 'dev_only_jwt_secret_do_not_use_in_production' }),
   CORS_ORIGIN: str({ default: '*' }),
@@ -24,6 +30,14 @@ export const env = cleanEnv(process.env, {
 
 if (env.NODE_ENV === 'production' && env.WALLET_AUTH_MODE === 'local' && !env.ALLOW_INSECURE_LOCAL_WALLET_AUTH) {
   throw new Error('Production local wallet auth requires ALLOW_INSECURE_LOCAL_WALLET_AUTH=true');
+}
+
+if (env.NODE_ENV === 'production' && env.ALLOW_IN_MEMORY_FALLBACK) {
+  throw new Error('ALLOW_IN_MEMORY_FALLBACK cannot be enabled in production');
+}
+
+if (env.NODE_ENV === 'production' && env.SEED_DEVELOPMENT_DATA) {
+  throw new Error('SEED_DEVELOPMENT_DATA cannot be enabled in production');
 }
 
 if (env.SPOT_PHOTO_STORAGE === 'azure' && !env.AZURE_STORAGE_CONNECTION_STRING) {

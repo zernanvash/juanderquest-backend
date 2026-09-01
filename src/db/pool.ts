@@ -2,6 +2,11 @@ import { Pool } from 'pg';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { env } from '../config/env.js';
+import {
+  DatabaseRuntimePolicy,
+  isDevelopmentSeedEnabled,
+  isInMemoryFallbackAllowed,
+} from './policy.js';
 
 const rootDir = join(__dirname, '..', '..');
 const MIGRATIONS = ['001_init.sql', '002_runtime.sql', '003_spot_discovery.sql', '004_spot_photos.sql', '005_crowd_diversion.sql'];
@@ -12,25 +17,60 @@ export function getPool(): Pool | null {
   return pool;
 }
 
-// Tries to connect to PostgreSQL and applies migrations + seed. Returns true when PG is active.
-export async function initPostgres(): Promise<boolean> {
-  if (env.NODE_ENV === 'test') return false;
-  const candidate = new Pool({
+export interface InitPostgresOptions {
+  policy?: DatabaseRuntimePolicy;
+  poolFactory?: () => Pool;
+}
+
+function runtimePolicy(): DatabaseRuntimePolicy {
+  return {
+    nodeEnv: env.NODE_ENV,
+    allowInMemoryFallback: env.ALLOW_IN_MEMORY_FALLBACK,
+    seedDevelopmentData: env.SEED_DEVELOPMENT_DATA,
+  };
+}
+
+// Connects PostgreSQL and applies migrations before exposing the pool as ready.
+// The only fallback is an explicitly enabled development/test memory fixture.
+export async function initPostgres(options: InitPostgresOptions = {}): Promise<boolean> {
+  const policy = options.policy ?? runtimePolicy();
+  const fallbackAllowed = isInMemoryFallbackAllowed(policy);
+
+  if (policy.nodeEnv === 'test' && fallbackAllowed && !options.poolFactory) return false;
+
+  const candidate = options.poolFactory?.() ?? new Pool({
     connectionString: env.DATABASE_URL,
     connectionTimeoutMillis: 3000,
+    query_timeout: 5000,
     max: 5,
   });
+
   try {
     await candidate.query('SELECT 1');
+    await applyMigrations(candidate);
+    if (isDevelopmentSeedEnabled(policy)) {
+      await seedIfEmpty(candidate);
+    }
+    pool = candidate;
+    return true;
   } catch (error) {
-    console.warn(`[db] PostgreSQL unreachable at ${env.DATABASE_URL} - running with in-memory store.`, (error as Error).message);
-    await candidate.end();
-    return false;
+    pool = null;
+    try {
+      await candidate.end();
+    } catch {
+      // Preserve the initialization failure as the actionable startup error.
+    }
+
+    const reason = error instanceof Error ? error.message : 'unknown PostgreSQL error';
+    if (fallbackAllowed) {
+      console.warn(`[db] PostgreSQL initialization failed; explicit in-memory fallback is active. ${reason}`);
+      return false;
+    }
+
+    throw new Error(`PostgreSQL initialization failed; refusing to start without durable storage. ${reason}`, {
+      cause: error,
+    });
   }
-  pool = candidate;
-  await applyMigrations(pool);
-  await seedIfEmpty(pool);
-  return true;
 }
 
 async function applyMigrations(pg: Pool) {

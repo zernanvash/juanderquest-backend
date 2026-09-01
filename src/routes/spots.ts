@@ -8,18 +8,19 @@ import { env } from '../config/env.js';
 import { distanceKm, spotStore, taxonomy } from '../spots/store.js';
 import { assetStore } from '../spots/asset-store.js';
 import { getSpotPhotoStorageProvider } from '../storage/spot-photos.js';
-import { detectValidatedImageMime } from '../utils/image-mime.js';
+import { detectValidatedMediaMime } from '../utils/media-mime.js';
 
 const router = Router();
 const csv = (value: unknown) => typeof value === 'string' && value ? value.split(',').map(v => v.trim()).filter(Boolean) : [];
 const numeric = (value: unknown) => typeof value === 'string' && value !== '' ? Number(value) : undefined;
 
-const photoUpload = multer({
+const mediaUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 8 * 1024 * 1024 + 1024 }, // Allowed up to 8 MB
+  limits: { fileSize: 30 * 1024 * 1024 + 1024 }, // Allowed up to 30 MB for video clips (8 MB for photos enforced downstream)
 });
 
 const uploadRateLimiter = rateLimit({ windowMs: 60 * 1000, max: env.NODE_ENV === 'test' ? 1000 : 20 });
+
 
 router.get('/spot-taxonomy', (_req, res) => res.json({ success: true, data: {
   categories: taxonomy,
@@ -68,14 +69,18 @@ const spotReviewSchema=z.object({body:z.object({status:z.enum(['published','need
 router.get('/admin/spots',authenticateToken,requireAdmin,(_req,res)=>res.json({success:true,data:spotStore.spots.map(s=>({...s,...spotStore.crowd(s)}))}));
 router.patch('/admin/spots/:id',authenticateToken,requireAdmin,validateRequest(spotReviewSchema),(req:AuthRequest,res)=>{const spot=spotStore.review(req.params.id,req.user!.id,req.body.status,req.body.crowd_capacity_band,req.body.recommendation_suppressed);if(!spot)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});return res.json({success:true,data:{...spot,...spotStore.crowd(spot)}});});
 
-// POST /api/v1/spot-photos - Authenticated photo upload
-router.post('/spot-photos', authenticateToken, uploadRateLimiter, (req: AuthRequest, res) => {
-  photoUpload.single('photo')(req, res, async (err: any) => {
+// Shared handler for photo & rich video media uploads
+const handleMediaUpload = (req: AuthRequest, res: any) => {
+  mediaUpload.fields([
+    { name: 'photo', maxCount: 1 },
+    { name: 'media', maxCount: 1 },
+    { name: 'file', maxCount: 1 },
+  ])(req, res, async (err: any) => {
     if (err) {
       if (err.code === 'LIMIT_FILE_SIZE') {
         return res.status(400).json({
           success: false,
-          error: { code: 'FILE_TOO_LARGE', message: 'File size exceeds maximum limit of 8 MB.' },
+          error: { code: 'FILE_TOO_LARGE', message: 'File size exceeds maximum limit of 30 MB for video clips (8 MB for photos).' },
         });
       }
       return res.status(400).json({
@@ -84,26 +89,39 @@ router.post('/spot-photos', authenticateToken, uploadRateLimiter, (req: AuthRequ
       });
     }
 
-    if (!req.file || !req.file.buffer) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'VALIDATION_ERROR', message: 'No photo file provided in request.' },
-      });
-    }
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+    const uploadedFile =
+      files?.photo?.[0] || files?.media?.[0] || files?.file?.[0] || req.file;
 
-    if (req.file.size > 8 * 1024 * 1024) {
+    if (!uploadedFile || !uploadedFile.buffer) {
       return res.status(400).json({
         success: false,
-        error: { code: 'FILE_TOO_LARGE', message: 'File size exceeds maximum limit of 8 MB.' },
+        error: { code: 'VALIDATION_ERROR', message: 'No photo or video file provided in request.' },
       });
     }
 
     // Validate actual file signatures / magic bytes
-    const detected = detectValidatedImageMime(req.file.buffer);
+    const detected = detectValidatedMediaMime(uploadedFile.buffer);
     if (!detected) {
       return res.status(400).json({
         success: false,
-        error: { code: 'INVALID_IMAGE_CONTENT', message: 'File content does not match a valid image signature (JPEG, PNG, WebP).' },
+        error: { code: 'INVALID_IMAGE_CONTENT', message: 'File content does not match a valid image (JPEG, PNG, WebP) or video (MP4, WebM, QuickTime) signature.' },
+      });
+    }
+
+    // Enforce 8 MB cap specifically for static images
+    if (detected.mediaType === 'image' && uploadedFile.size > 8 * 1024 * 1024) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'FILE_TOO_LARGE', message: 'Photo file size exceeds maximum limit of 8 MB.' },
+      });
+    }
+
+    // Enforce 30 MB cap for video clips
+    if (detected.mediaType === 'video' && uploadedFile.size > 30 * 1024 * 1024) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'FILE_TOO_LARGE', message: 'Video file size exceeds maximum limit of 30 MB.' },
       });
     }
 
@@ -118,7 +136,12 @@ router.post('/spot-photos', authenticateToken, uploadRateLimiter, (req: AuthRequ
     }
 
     try {
-      const saveResult = await storageProvider.savePhoto(req.file.buffer, detected.mime, detected.ext);
+      const saveResult = await storageProvider.savePhoto(
+        uploadedFile.buffer,
+        detected.mime,
+        detected.ext,
+        detected.mediaType
+      );
       const assetRecord = await assetStore.createPendingAsset(req.user!.id, saveResult, storageProvider.name);
 
       return res.status(201).json({
@@ -127,6 +150,7 @@ router.post('/spot-photos', authenticateToken, uploadRateLimiter, (req: AuthRequ
           asset_id: assetRecord.id,
           url: assetRecord.url,
           mime_type: assetRecord.mime_type,
+          media_type: assetRecord.media_type,
           width: assetRecord.width,
           height: assetRecord.height,
           size_bytes: assetRecord.size_bytes,
@@ -139,7 +163,14 @@ router.post('/spot-photos', authenticateToken, uploadRateLimiter, (req: AuthRequ
       });
     }
   });
-});
+};
+
+// POST /api/v1/spot-photos - Authenticated photo upload (backward-compatible)
+router.post('/spot-photos', authenticateToken, uploadRateLimiter, handleMediaUpload);
+
+// POST /api/v1/spot-media - Authenticated rich media upload (photos & videos)
+router.post('/spot-media', authenticateToken, uploadRateLimiter, handleMediaUpload);
+
 
 const contributionSchema = z.object({
   body: z.object({

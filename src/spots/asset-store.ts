@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { randomUUID } from 'crypto';
-import { getSpotPhotoStorageProvider, SpotPhotoSaveResult } from '../storage/spot-photos.js';
+import { getSpotPhotoStorageProvider, SpotMediaSaveResult } from '../storage/spot-photos.js';
+import { MediaType } from '../utils/media-mime.js';
 
 export interface SpotAssetRecord {
   id: string;
@@ -9,6 +10,7 @@ export interface SpotAssetRecord {
   object_key: string;
   url: string;
   mime_type: string;
+  media_type: MediaType;
   width: number;
   height: number;
   size_bytes: number;
@@ -26,8 +28,10 @@ export class SpotAssetStore {
     this.pg = pool;
     const { rows } = await pool.query('SELECT * FROM spot_assets ORDER BY created_at');
     for (const r of rows) {
+      const isVideo = r.mime_type?.startsWith('video/') || r.object_key?.includes('video');
       this.assets.set(r.id, {
         ...r,
+        media_type: r.media_type || (isVideo ? 'video' : 'image'),
         created_at: new Date(r.created_at).toISOString(),
         updated_at: new Date(r.updated_at).toISOString(),
       });
@@ -36,7 +40,7 @@ export class SpotAssetStore {
 
   async createPendingAsset(
     userId: string,
-    saveResult: SpotPhotoSaveResult,
+    saveResult: SpotMediaSaveResult,
     providerName: 'local' | 'azure'
   ): Promise<SpotAssetRecord> {
     const id = randomUUID();
@@ -49,6 +53,7 @@ export class SpotAssetStore {
       object_key: saveResult.object_key,
       url: saveResult.url,
       mime_type: saveResult.mime_type,
+      media_type: saveResult.media_type || 'image',
       width: saveResult.width,
       height: saveResult.height,
       size_bytes: saveResult.size_bytes,
@@ -91,7 +96,7 @@ export class SpotAssetStore {
 
   async attachAssetsToSpot(assetIds: string[], userId: string, spotId: string): Promise<SpotAssetRecord[]> {
     if (assetIds.length > 5) {
-      const err = new Error('A spot can have at most 5 images.');
+      const err = new Error('A spot can have at most 5 media attachments.');
       (err as any).code = 'MAX_IMAGES_EXCEEDED';
       throw err;
     }

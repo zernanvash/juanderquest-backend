@@ -28,6 +28,14 @@ function encodePolyline6(coords: [number, number][]): string {
 }
 
 describe('Valhalla Routing & Polyline Decoder', () => {
+  beforeEach(() => {
+    jest.spyOn(global, 'fetch').mockRejectedValue(new Error('Valhalla unavailable'));
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   test('decodes 6-decimal encoded polyline correctly', () => {
     const testPoints: [number, number][] = [
       [16.043312, 120.333345],
@@ -62,7 +70,7 @@ describe('Valhalla Routing & Polyline Decoder', () => {
   });
 
   describe('API Endpoints /api/v1/routes', () => {
-    test('GET /api/v1/routes returns route calculation or graceful fallback', async () => {
+    test('GET /api/v1/routes labels straight-line fallback as degraded and non-turn-by-turn', async () => {
       const res = await request(app)
         .get('/api/v1/routes')
         .query({
@@ -76,9 +84,46 @@ describe('Valhalla Routing & Polyline Decoder', () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.data).toBeDefined();
+      expect(res.body.data.degraded).toBe(true);
+      expect(res.body.data.navigationMode).toBe('straight_line_estimate');
+      expect(res.body.data.warning).toMatchObject({ code: 'STRAIGHT_LINE_FALLBACK' });
       expect(res.body.data.summary.distanceKm).toBeGreaterThan(0);
       expect(res.body.data.coordinates.length).toBeGreaterThanOrEqual(2);
-      expect(res.body.data.maneuvers.length).toBeGreaterThan(0);
+      expect(res.body.data.maneuvers).toEqual([]);
+    });
+
+    test('GET /api/v1/routes identifies a Valhalla route as turn-by-turn', async () => {
+      const shape = encodePolyline6([
+        [16.0433, 120.3333],
+        [16.0218, 120.2319],
+      ]);
+      jest.mocked(global.fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          trip: {
+            summary: { length: 11.2, time: 900 },
+            legs: [{
+              shape,
+              maneuvers: [{ instruction: 'Continue south', length: 11.2, time: 900 }],
+            }],
+          },
+        }),
+      } as Response);
+
+      const res = await request(app)
+        .get('/api/v1/routes')
+        .query({
+          start_lat: 16.0433,
+          start_lng: 120.3333,
+          end_lat: 16.0218,
+          end_lng: 120.2319,
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.degraded).toBe(false);
+      expect(res.body.data.navigationMode).toBe('turn_by_turn');
+      expect(res.body.data.warning).toBeUndefined();
+      expect(res.body.data.maneuvers).toHaveLength(1);
     });
 
     test('POST /api/v1/routes handles JSON body payload', async () => {
@@ -93,6 +138,8 @@ describe('Valhalla Routing & Polyline Decoder', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
+      expect(res.body.data.degraded).toBe(true);
+      expect(res.body.data.navigationMode).toBe('straight_line_estimate');
       expect(res.body.data.summary.costing).toBe('auto');
       expect(res.body.data.coordinates).toBeDefined();
     });
