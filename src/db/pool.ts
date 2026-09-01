@@ -9,7 +9,14 @@ import {
 } from './policy.js';
 
 const rootDir = join(__dirname, '..', '..');
-const MIGRATIONS = ['001_init.sql', '002_runtime.sql', '003_spot_discovery.sql', '004_spot_photos.sql', '005_crowd_diversion.sql'];
+const MIGRATIONS = [
+  '001_init.sql',
+  '002_runtime.sql',
+  '003_spot_discovery.sql',
+  '004_spot_photos.sql',
+  '005_crowd_diversion.sql',
+  '006_web_analytics.sql',
+];
 
 let pool: Pool | null = null;
 
