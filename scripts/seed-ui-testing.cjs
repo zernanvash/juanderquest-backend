@@ -30,7 +30,7 @@ async function run() {
       const result = await client.query(`INSERT INTO spots
         (id,slug,name,description,category,subcategory,tags,municipality,address,gps_lat,gps_lng,
          price_level,hours,amenities,image_url,source_type,source_name,trust_level,status,created_at)
-        VALUES ($1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'editorial','QA Test Fixtures','community',$15,NOW()-($16 * INTERVAL '1 hour'))
+        VALUES ($1::text,$1::text,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'editorial','QA Test Fixtures','community',$15,NOW()-($16::double precision * INTERVAL '1 hour'))
         ON CONFLICT DO NOTHING`, [id, `[TEST] ${title} ${i + 1} — ${town}`,
         `Synthetic testing post, not a real venue or verified travel recommendation. Approximate test pin only. ${i % 3 === 0 ? 'Long caption scenario: explore the card layout with accessibility information, a family itinerary, local crafts, and community activities. '.repeat(4) : 'Use this post to test bookmarks, map pins, discovery filters, and independent scrolling.'}`,
         category, subcategory, JSON.stringify(['qa_test','family', i % 2 ? 'budget' : 'scenic']), town,
