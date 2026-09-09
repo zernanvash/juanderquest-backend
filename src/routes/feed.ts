@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { optionalAuthenticateToken, AuthRequest } from '../middleware/auth.js';
 import { spotStore, Spot } from '../spots/store.js';
+import { rankedFeedPage } from '../feed-pagination.js';
 
 export const feedRouter = Router();
 
@@ -140,46 +141,24 @@ feedRouter.get('/feed', optionalAuthenticateToken, (req: AuthRequest, res: Respo
   // 4. Municipal Diversity Reranking (Max 2 consecutive from same town)
   const diversifiedItems = applyMunicipalDiversity(scoredItems, 2);
 
-  // 5. Cursor-based Pagination
-  let offset = 0;
-  if (req.query.cursor && typeof req.query.cursor === 'string') {
-    try {
-      const decoded = JSON.parse(Buffer.from(req.query.cursor, 'base64').toString('utf8'));
-      if (decoded.version === 'feed-v1' && typeof decoded.offset === 'number' && decoded.offset >= 0) {
-        offset = decoded.offset;
-      }
-    } catch {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_CURSOR', message: 'Could not decode feed cursor.' },
-      });
-    }
-  }
-
   const requestedLimit = Number(req.query.limit) || 20;
-  const limit = Math.min(50, Math.max(1, requestedLimit));
-  const pageItems = diversifiedItems.slice(offset, offset + limit);
-  const hasMore = offset + limit < diversifiedItems.length;
-
-  let nextCursor: string | null = null;
-  if (hasMore) {
-    nextCursor = Buffer.from(
-      JSON.stringify({ offset: offset + limit, version: 'feed-v1' })
-    ).toString('base64');
+  const limit = Math.min(50, Math.max(1, Math.floor(requestedLimit)));
+  let page;
+  try {
+    page = rankedFeedPage(diversifiedItems, userId || 'guest',
+      typeof req.query.cursor === 'string' ? req.query.cursor : undefined, limit);
+  } catch {
+    return res.status(400).json({ success: false, error: {
+      code: 'INVALID_CURSOR', message: 'This feed session has expired. Refresh to start a new feed.',
+    } });
   }
+  res.setHeader('Cache-Control', 'private, no-store');
 
   return res.status(200).json({
     success: true,
-    data: {
-      items: pageItems,
-      cursor: nextCursor,
-      has_more: hasMore,
-      total: diversifiedItems.length,
-      offset,
-      limit,
-    },
+    data: page,
     meta: {
-      ranking_version: 'feed-v1',
+      ranking_version: 'feed-v2',
       personalized: Boolean(hasUserPrefs),
       guest_mode: !userId,
     },
