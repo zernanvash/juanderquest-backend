@@ -27,6 +27,72 @@ export interface UserRow {
   updated_at: string;
 }
 
+export interface FollowRow {
+  follower_id: string;
+  following_id: string;
+  created_at: string;
+}
+
+export interface PublicTravelerSummary {
+  id: string;
+  display_name: string;
+  handle: string | null;
+  avatar_url: string;
+  bio: string | null;
+  status_text: string | null;
+  scout_reputation: number;
+  follower_count?: number;
+  following_count?: number;
+  is_unavailable?: boolean;
+}
+
+export class InvalidCursorError extends Error {
+  constructor(message: string = 'Invalid or mismatched cursor.') {
+    super(message);
+    this.name = 'InvalidCursorError';
+  }
+}
+
+export interface FollowCursorPayload {
+  target_id: string;
+  direction: 'followers' | 'following';
+  created_at: string;
+  last_id: string;
+  version: 'follow-v1';
+}
+
+export function encodeFollowCursor(payload: FollowCursorPayload): string {
+  return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+}
+
+export function decodeFollowCursor(
+  cursor: string,
+  expectedTargetId: string,
+  expectedDirection: 'followers' | 'following'
+): FollowCursorPayload {
+  try {
+    const raw = Buffer.from(cursor, 'base64url').toString('utf8');
+    const parsed = JSON.parse(raw) as FollowCursorPayload;
+    if (
+      !parsed ||
+      parsed.version !== 'follow-v1' ||
+      parsed.target_id !== expectedTargetId ||
+      parsed.direction !== expectedDirection ||
+      !parsed.created_at ||
+      !parsed.last_id ||
+      isNaN(new Date(parsed.created_at).getTime())
+    ) {
+      throw new InvalidCursorError('Malformed or mismatched follow cursor.');
+    }
+    return parsed;
+  } catch (err: any) {
+    if (err instanceof InvalidCursorError) {
+      throw err;
+    }
+    throw new InvalidCursorError('Malformed pagination cursor.');
+  }
+}
+
 export interface QuestRow {
   id: string;
   title: string;
@@ -246,6 +312,24 @@ const mockUsers: UserRow[] = [
     status_text: 'Hidden',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
+  },
+];
+
+const mockFollows: FollowRow[] = [
+  {
+    follower_id: '11111111-1111-1111-1111-111111111111',
+    following_id: '33333333-3333-3333-3333-333333333333',
+    created_at: new Date(Date.now() - 3600000).toISOString(),
+  },
+  {
+    follower_id: '33333333-3333-3333-3333-333333333333',
+    following_id: '11111111-1111-1111-1111-111111111111',
+    created_at: new Date(Date.now() - 7200000).toISOString(),
+  },
+  {
+    follower_id: '44444444-4444-4444-4444-444444444444',
+    following_id: '11111111-1111-1111-1111-111111111111',
+    created_at: new Date(Date.now() - 10800000).toISOString(),
   },
 ];
 
@@ -553,6 +637,7 @@ export class MemoryDb {
   merchants = developmentFixturesEnabled ? [...mockMerchants] : [];
   vouchers = developmentFixturesEnabled ? [...mockVouchers] : [];
   redemptions: RedemptionRow[] = [];
+  follows: FollowRow[] = developmentFixturesEnabled ? [...mockFollows] : [];
   campaign_reservations: CampaignReservationRow[] = developmentFixturesEnabled ? [
     {
       id: 'res_1',
@@ -647,6 +732,12 @@ export class MemoryDb {
     }));
     const { rows: analytics } = await pool.query('SELECT * FROM web_analytics_events WHERE occurred_at >= NOW() - INTERVAL \'90 days\' ORDER BY occurred_at');
     this.web_analytics_events = analytics.map((row: any) => ({ id: row.id, event_type: row.event_type, path: row.path, label: row.label, session_id: row.session_id, occurred_at: toIso(row.occurred_at) }));
+    try {
+      const { rows: follows } = await pool.query('SELECT * FROM user_follows ORDER BY created_at');
+      this.follows = follows.map((row: any) => ({ follower_id: row.follower_id, following_id: row.following_id, created_at: toIso(row.created_at) }));
+    } catch {
+      // user_follows may not exist yet in dev/fallback
+    }
   }
 
   private async persist(query: string, params: unknown[]) {
@@ -758,23 +849,464 @@ export class MemoryDb {
     return this.users.find((u) => u.is_public && u.handle?.toLowerCase() === clean);
   }
 
-  updateUserProfile(
+  findUserByHandle(handle: string): UserRow | undefined {
+    const clean = handle.replace(/^@/, '').toLowerCase().trim();
+    return this.users.find((u) => u.handle?.toLowerCase() === clean);
+  }
+
+  async updateUserProfile(
     userId: string,
     updates: { is_public?: boolean; handle?: string | null; bio?: string | null; status_text?: string | null; display_name?: string }
-  ): UserRow | undefined {
+  ): Promise<UserRow | undefined> {
     const user = this.findUserById(userId);
     if (!user) return undefined;
+
+    const normalizedHandle = updates.handle !== undefined
+      ? (updates.handle ? updates.handle.replace(/^@/, '').toLowerCase().trim() : null)
+      : undefined;
+
+    if (normalizedHandle) {
+      const conflict = this.users.find(
+        (u) => u.id !== userId && u.handle?.toLowerCase() === normalizedHandle
+      );
+      if (conflict) {
+        const err = new Error('HANDLE_TAKEN');
+        (err as any).code = 'HANDLE_TAKEN';
+        throw err;
+      }
+    }
+
+    if (this.pg) {
+      try {
+        const query = `
+          UPDATE users
+          SET is_public = COALESCE($2, is_public),
+              handle = CASE WHEN $3::text IS NOT NULL THEN NULLIF(LOWER(TRIM($3)), '') ELSE handle END,
+              bio = COALESCE($4, bio),
+              status_text = COALESCE($5, status_text),
+              display_name = COALESCE($6, display_name),
+              updated_at = NOW()
+          WHERE id = $1
+          RETURNING *
+        `;
+        const { rows } = await this.pg.query(query, [
+          userId,
+          updates.is_public !== undefined ? updates.is_public : null,
+          normalizedHandle !== undefined ? normalizedHandle : null,
+          updates.bio !== undefined ? updates.bio : null,
+          updates.status_text !== undefined ? updates.status_text : null,
+          updates.display_name !== undefined ? updates.display_name : null,
+        ]);
+        if (!rows.length) return undefined;
+        const row = rows[0];
+        user.is_public = Boolean(row.is_public);
+        user.handle = row.handle ?? null;
+        user.bio = row.bio ?? null;
+        user.status_text = row.status_text ?? null;
+        user.display_name = row.display_name;
+        user.updated_at = new Date(row.updated_at).toISOString();
+        return user;
+      } catch (err: any) {
+        if (err.code === '23505') {
+          const conflictErr = new Error('HANDLE_TAKEN');
+          (conflictErr as any).code = 'HANDLE_TAKEN';
+          throw conflictErr;
+        }
+        throw err;
+      }
+    }
+
     if (updates.is_public !== undefined) user.is_public = updates.is_public;
-    if (updates.handle !== undefined) user.handle = updates.handle;
+    if (normalizedHandle !== undefined) user.handle = normalizedHandle;
     if (updates.bio !== undefined) user.bio = updates.bio;
     if (updates.status_text !== undefined) user.status_text = updates.status_text;
     if (updates.display_name !== undefined) user.display_name = updates.display_name;
     user.updated_at = new Date().toISOString();
-    this.persist(
-      'UPDATE users SET is_public=$2, handle=$3, bio=$4, status_text=$5, display_name=$6, updated_at=NOW() WHERE id=$1',
-      [user.id, user.is_public, user.handle ?? null, user.bio ?? null, user.status_text ?? null, user.display_name]
-    );
     return user;
+  }
+
+  getFollowCounts(userId: string): { follower_count: number; following_count: number } {
+    const user = this.findUserById(userId);
+    if (!user || !user.is_public) {
+      return { follower_count: 0, following_count: 0 };
+    }
+    const publicUserIds = new Set(this.users.filter((u) => u.is_public).map((u) => u.id));
+    const follower_count = this.follows.filter(
+      (f) => f.following_id === userId && publicUserIds.has(f.follower_id)
+    ).length;
+    const following_count = this.follows.filter(
+      (f) => f.follower_id === userId && publicUserIds.has(f.following_id)
+    ).length;
+    return { follower_count, following_count };
+  }
+
+  getRelationship(actorId: string, targetId: string): {
+    is_following: boolean;
+    follows_you: boolean;
+    can_follow: boolean;
+    reason?: 'PROFILE_VISIBILITY_REQUIRED' | 'CANNOT_FOLLOW_SELF' | 'TARGET_NOT_FOUND';
+  } {
+    const actor = this.findUserById(actorId);
+    const target = this.findUserById(targetId);
+
+    if (!target || !target.is_public) {
+      return {
+        is_following: false,
+        follows_you: false,
+        can_follow: false,
+        reason: 'TARGET_NOT_FOUND',
+      };
+    }
+
+    const is_following = this.follows.some((f) => f.follower_id === actorId && f.following_id === targetId);
+    const follows_you = this.follows.some((f) => f.follower_id === targetId && f.following_id === actorId);
+
+    if (actorId === targetId) {
+      return {
+        is_following: false,
+        follows_you: false,
+        can_follow: false,
+        reason: 'CANNOT_FOLLOW_SELF',
+      };
+    }
+
+    if (!actor || !actor.is_public) {
+      return {
+        is_following,
+        follows_you,
+        can_follow: false,
+        reason: 'PROFILE_VISIBILITY_REQUIRED',
+      };
+    }
+
+    return {
+      is_following,
+      follows_you,
+      can_follow: true,
+    };
+  }
+
+  async followUser(actorId: string, targetId: string): Promise<{
+    success: boolean;
+    error?: 'CANNOT_FOLLOW_SELF' | 'PROFILE_VISIBILITY_REQUIRED' | 'NOT_FOUND';
+    follower_count?: number;
+    following_count?: number;
+  }> {
+    if (actorId === targetId) {
+      return { success: false, error: 'CANNOT_FOLLOW_SELF' };
+    }
+
+    const actor = this.findUserById(actorId);
+    if (!actor || !actor.is_public) {
+      return { success: false, error: 'PROFILE_VISIBILITY_REQUIRED' };
+    }
+
+    const target = this.findUserById(targetId);
+    if (!target || !target.is_public) {
+      return { success: false, error: 'NOT_FOUND' };
+    }
+
+    if (this.pg) {
+      const client = await this.pg.connect();
+      try {
+        await client.query('BEGIN');
+        const [firstId, secondId] = [actorId, targetId].sort();
+        const { rows: locked } = await client.query(
+          'SELECT id, is_public FROM users WHERE id IN ($1, $2) FOR UPDATE',
+          [firstId, secondId]
+        );
+        const lockedActor = locked.find((r: any) => r.id === actorId);
+        const lockedTarget = locked.find((r: any) => r.id === targetId);
+        if (!lockedActor || !lockedActor.is_public) {
+          await client.query('ROLLBACK');
+          return { success: false, error: 'PROFILE_VISIBILITY_REQUIRED' };
+        }
+        if (!lockedTarget || !lockedTarget.is_public) {
+          await client.query('ROLLBACK');
+          return { success: false, error: 'NOT_FOUND' };
+        }
+        await client.query(
+          `INSERT INTO user_follows (follower_id, following_id, created_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (follower_id, following_id) DO NOTHING`,
+          [actorId, targetId]
+        );
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    if (!this.follows.some((f) => f.follower_id === actorId && f.following_id === targetId)) {
+      this.follows.push({
+        follower_id: actorId,
+        following_id: targetId,
+        created_at: nowIso,
+      });
+    }
+
+    const counts = this.getFollowCounts(targetId);
+    return {
+      success: true,
+      follower_count: counts.follower_count,
+      following_count: counts.following_count,
+    };
+  }
+
+  async unfollowUser(actorId: string, targetId: string): Promise<{
+    success: boolean;
+    follower_count: number;
+    following_count: number;
+  }> {
+    if (this.pg) {
+      await this.pg.query(
+        'DELETE FROM user_follows WHERE follower_id = $1 AND following_id = $2',
+        [actorId, targetId]
+      );
+    }
+
+    this.follows = this.follows.filter(
+      (f) => !(f.follower_id === actorId && f.following_id === targetId)
+    );
+
+    const counts = this.getFollowCounts(targetId);
+    return {
+      success: true,
+      follower_count: counts.follower_count,
+      following_count: counts.following_count,
+    };
+  }
+
+  listFollowers(
+    targetId: string,
+    limit: number = 20,
+    cursor?: string
+  ): { items: PublicTravelerSummary[]; next_cursor: string | null; has_more: boolean } | null {
+    const target = this.findUserById(targetId);
+    if (!target || !target.is_public) return null;
+
+    const publicUserIds = new Set(this.users.filter((u) => u.is_public).map((u) => u.id));
+    let candidates = this.follows.filter(
+      (f) => f.following_id === targetId && publicUserIds.has(f.follower_id)
+    );
+
+    candidates.sort((a, b) => {
+      const timeDiff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return b.follower_id.localeCompare(a.follower_id);
+    });
+
+    if (cursor) {
+      const parsed = decodeFollowCursor(cursor, targetId, 'followers');
+      const cursorTime = new Date(parsed.created_at).getTime();
+      candidates = candidates.filter((item) => {
+        const itemTime = new Date(item.created_at).getTime();
+        if (itemTime < cursorTime) return true;
+        if (itemTime === cursorTime && item.follower_id.localeCompare(parsed.last_id) < 0) return true;
+        return false;
+      });
+    }
+
+    const cappedLimit = Math.min(50, Math.max(1, limit));
+    const has_more = candidates.length > cappedLimit;
+    const pageEdges = candidates.slice(0, cappedLimit);
+    const next_cursor =
+      has_more && pageEdges.length > 0
+        ? encodeFollowCursor({
+            target_id: targetId,
+            direction: 'followers',
+            created_at: pageEdges[pageEdges.length - 1].created_at,
+            last_id: pageEdges[pageEdges.length - 1].follower_id,
+            version: 'follow-v1',
+          })
+        : null;
+
+    const byId = new Map(this.users.map((u) => [u.id, u]));
+    const items: PublicTravelerSummary[] = pageEdges.flatMap((edge) => {
+      const u = byId.get(edge.follower_id);
+      if (!u || !u.is_public) return [];
+      const counts = this.getFollowCounts(u.id);
+      return [
+        {
+          id: u.id,
+          display_name: u.display_name,
+          handle: u.handle || null,
+          avatar_url: u.avatar_url,
+          bio: u.bio || null,
+          status_text: u.status_text || null,
+          scout_reputation: u.scout_reputation ?? 0,
+          follower_count: counts.follower_count,
+          following_count: counts.following_count,
+        },
+      ];
+    });
+
+    return { items, next_cursor, has_more };
+  }
+
+  listFollowing(
+    targetId: string,
+    limit: number = 20,
+    cursor?: string
+  ): { items: PublicTravelerSummary[]; next_cursor: string | null; has_more: boolean } | null {
+    const target = this.findUserById(targetId);
+    if (!target || !target.is_public) return null;
+
+    const publicUserIds = new Set(this.users.filter((u) => u.is_public).map((u) => u.id));
+    let candidates = this.follows.filter(
+      (f) => f.follower_id === targetId && publicUserIds.has(f.following_id)
+    );
+
+    candidates.sort((a, b) => {
+      const timeDiff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return b.following_id.localeCompare(a.following_id);
+    });
+
+    if (cursor) {
+      const parsed = decodeFollowCursor(cursor, targetId, 'following');
+      const cursorTime = new Date(parsed.created_at).getTime();
+      candidates = candidates.filter((item) => {
+        const itemTime = new Date(item.created_at).getTime();
+        if (itemTime < cursorTime) return true;
+        if (itemTime === cursorTime && item.following_id.localeCompare(parsed.last_id) < 0) return true;
+        return false;
+      });
+    }
+
+    const cappedLimit = Math.min(50, Math.max(1, limit));
+    const has_more = candidates.length > cappedLimit;
+    const pageEdges = candidates.slice(0, cappedLimit);
+    const next_cursor =
+      has_more && pageEdges.length > 0
+        ? encodeFollowCursor({
+            target_id: targetId,
+            direction: 'following',
+            created_at: pageEdges[pageEdges.length - 1].created_at,
+            last_id: pageEdges[pageEdges.length - 1].following_id,
+            version: 'follow-v1',
+          })
+        : null;
+
+    const byId = new Map(this.users.map((u) => [u.id, u]));
+    const items: PublicTravelerSummary[] = pageEdges.flatMap((edge) => {
+      const u = byId.get(edge.following_id);
+      if (!u || !u.is_public) return [];
+      const counts = this.getFollowCounts(u.id);
+      return [
+        {
+          id: u.id,
+          display_name: u.display_name,
+          handle: u.handle || null,
+          avatar_url: u.avatar_url,
+          bio: u.bio || null,
+          status_text: u.status_text || null,
+          scout_reputation: u.scout_reputation ?? 0,
+          follower_count: counts.follower_count,
+          following_count: counts.following_count,
+        },
+      ];
+    });
+
+    return { items, next_cursor, has_more };
+  }
+
+  listMyFollowing(
+    actorId: string,
+    limit: number = 20,
+    cursor?: string
+  ): { items: PublicTravelerSummary[]; next_cursor: string | null; has_more: boolean } {
+    let candidates = this.follows.filter((f) => f.follower_id === actorId);
+
+    candidates.sort((a, b) => {
+      const timeDiff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return b.following_id.localeCompare(a.following_id);
+    });
+
+    if (cursor) {
+      const parsed = decodeFollowCursor(cursor, actorId, 'following');
+      const cursorTime = new Date(parsed.created_at).getTime();
+      candidates = candidates.filter((item) => {
+        const itemTime = new Date(item.created_at).getTime();
+        if (itemTime < cursorTime) return true;
+        if (itemTime === cursorTime && item.following_id.localeCompare(parsed.last_id) < 0) return true;
+        return false;
+      });
+    }
+
+    const cappedLimit = Math.min(50, Math.max(1, limit));
+    const has_more = candidates.length > cappedLimit;
+    const pageEdges = candidates.slice(0, cappedLimit);
+    const next_cursor =
+      has_more && pageEdges.length > 0
+        ? encodeFollowCursor({
+            target_id: actorId,
+            direction: 'following',
+            created_at: pageEdges[pageEdges.length - 1].created_at,
+            last_id: pageEdges[pageEdges.length - 1].following_id,
+            version: 'follow-v1',
+          })
+        : null;
+
+    const byId = new Map(this.users.map((u) => [u.id, u]));
+    const items: PublicTravelerSummary[] = pageEdges.map((edge) => {
+      const u = byId.get(edge.following_id);
+      if (!u || !u.is_public) {
+        return {
+          id: edge.following_id,
+          display_name: 'Unavailable traveler',
+          handle: null,
+          avatar_url: '',
+          bio: null,
+          status_text: null,
+          scout_reputation: 0,
+          is_unavailable: true,
+        };
+      }
+      const counts = this.getFollowCounts(u.id);
+      return {
+        id: u.id,
+        display_name: u.display_name,
+        handle: u.handle || null,
+        avatar_url: u.avatar_url,
+        bio: u.bio || null,
+        status_text: u.status_text || null,
+        scout_reputation: u.scout_reputation ?? 0,
+        follower_count: counts.follower_count,
+        following_count: counts.following_count,
+        is_unavailable: false,
+      };
+    });
+
+    return { items, next_cursor, has_more };
+  }
+
+  listPublicUsers(limit: number = 3): PublicTravelerSummary[] {
+    const capped = Math.min(6, Math.max(1, limit));
+    const publicUsers = this.users
+      .filter((u) => u.is_public)
+      .sort((a, b) => a.display_name.localeCompare(b.display_name) || a.id.localeCompare(b.id))
+      .slice(0, capped);
+
+    return publicUsers.map((u) => {
+      const counts = this.getFollowCounts(u.id);
+      return {
+        id: u.id,
+        display_name: u.display_name,
+        handle: u.handle || null,
+        avatar_url: u.avatar_url,
+        bio: u.bio || null,
+        status_text: u.status_text || null,
+        scout_reputation: u.scout_reputation ?? 0,
+        follower_count: counts.follower_count,
+        following_count: counts.following_count,
+      };
+    });
   }
 
   findQuestById(id: string): QuestRow | undefined {
