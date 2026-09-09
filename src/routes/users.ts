@@ -141,11 +141,29 @@ usersRouter.patch(
   }
 );
 
+// Owner-only access never changes public visibility or exposes private followers.
+usersRouter.get('/users/me/followers', authenticateToken, publicProfileLimiter, (req: AuthRequest, res: Response) => {
+  res.set('Cache-Control', 'private, no-store');
+  const limit = req.query.limit === undefined ? 20 : Number(req.query.limit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Limit must be an integer from 1 to 50.' } });
+  }
+  try {
+    const result = db.listFollowers(req.user!.id, limit, typeof req.query.cursor === 'string' ? req.query.cursor : undefined, true);
+    if (!result) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Account unavailable.' } });
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    const invalid = err instanceof InvalidCursorError;
+    return res.status(invalid ? 400 : 500).json({ success: false, error: { code: invalid ? 'INVALID_CURSOR' : 'INTERNAL_ERROR', message: invalid ? 'Invalid pagination cursor.' : 'Unable to load followers.' } });
+  }
+});
+
 // GET /users/me/following — Authenticated cleanup of retained outgoing edges
 usersRouter.get(
   '/users/me/following',
   authenticateToken,
   (req: AuthRequest, res: Response) => {
+    res.set('Cache-Control', 'private, no-store');
     const userId = req.user!.id;
     const rawLimit = req.query.limit;
     const parsedLimit = rawLimit ? parseInt(rawLimit as string, 10) : 20;

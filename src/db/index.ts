@@ -1084,10 +1084,11 @@ export class MemoryDb {
   listFollowers(
     targetId: string,
     limit: number = 20,
-    cursor?: string
+    cursor?: string,
+    ownerView = false
   ): { items: PublicTravelerSummary[]; next_cursor: string | null; has_more: boolean } | null {
     const target = this.findUserById(targetId);
-    if (!target || !target.is_public) return null;
+    if (!target || (!target.is_public && !ownerView)) return null;
 
     const publicUserIds = new Set(this.users.filter((u) => u.is_public).map((u) => u.id));
     let candidates = this.follows.filter(

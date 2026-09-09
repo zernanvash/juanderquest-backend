@@ -2,6 +2,7 @@ import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { app } from '../src/app.js';
 import { env } from '../src/config/env.js';
+import { db } from '../src/db/index.js';
 
 describe('Social Follow Graph & Traveler Discovery API (/api/v1/users)', () => {
   const juanId = '11111111-1111-1111-1111-111111111111'; // Public user
@@ -27,6 +28,19 @@ describe('Social Follow Graph & Traveler Discovery API (/api/v1/users)', () => {
   );
 
   describe('GET /api/v1/users (Public Traveler Directory)', () => {
+    it('lets a private owner read connections without exposing them publicly', async () => {
+      const saved = [...db.follows];
+      try {
+        db.follows.push({ follower_id: juanId, following_id: privateId, created_at: new Date().toISOString() });
+        const own = await request(app).get('/api/v1/users/me/followers').set('Authorization', `Bearer ${privateToken}`);
+        expect(own.status).toBe(200);
+        expect(own.body.data.items.some((u: any) => u.id === juanId)).toBe(true);
+        expect(own.headers['cache-control']).toContain('no-store');
+        expect((await request(app).get(`/api/v1/users/${privateId}/followers`)).status).toBe(404);
+        expect((await request(app).get('/api/v1/users/me/followers')).status).toBe(401);
+        expect((await request(app).get('/api/v1/users/me/following').set('Authorization', `Bearer ${privateToken}`)).status).toBe(200);
+      } finally { db.follows = saved; }
+    });
     it('returns a list of public travelers with counts and safe identity fields', async () => {
       const res = await request(app).get('/api/v1/users?limit=3');
       expect(res.status).toBe(200);
