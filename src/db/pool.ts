@@ -16,6 +16,7 @@ const MIGRATIONS = [
   '004_spot_photos.sql',
   '005_crowd_diversion.sql',
   '006_web_analytics.sql',
+  '007_public_profiles.sql',
 ];
 
 let pool: Pool | null = null;

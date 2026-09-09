@@ -30,14 +30,14 @@ const issueToken = (user: (typeof db.users)[number]) => jwt.sign(
   { expiresIn: '24h' }
 );
 
-const findOrCreateWalletUser = (address: string) => {
+const findOrCreateWalletUser = (address: string): (typeof db.users)[number] => {
   const normalized = address.toLowerCase();
   const seedId = `wallet:${normalized}`;
-  let user = db.findUserBySeed(seedId);
-  if (user) return user;
+  const existing = db.findUserBySeed(seedId);
+  if (existing) return existing;
 
   const now = new Date().toISOString();
-  user = {
+  const newUser: (typeof db.users)[number] = {
     id: randomUUID(),
     seed_id: seedId,
     display_name: `Traveler ${address.slice(0, 6)}…${address.slice(-4)}`,
@@ -48,11 +48,15 @@ const findOrCreateWalletUser = (address: string) => {
     mjdq_balance: 100000,
     jdq_governance_balance: 15,
     scout_reputation: 250,
+    is_public: false,
+    handle: null,
+    bio: null,
+    status_text: null,
     created_at: now,
     updated_at: now,
   };
-  db.users.push(user);
-  return user;
+  db.users.push(newUser);
+  return newUser;
 };
 
 router.get('/auth/wallet/config', (_req, res) => res.status(200).json({
@@ -201,7 +205,7 @@ router.post('/auth/simulated-wallet-login', validateRequest(simulatedWalletLogin
 
   if (!user) {
     // Create new simulated Web3 wallet user with Starter Demo Assets!
-    user = {
+    const newUser: (typeof db.users)[number] = {
       id: `usr_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       seed_id: `user-${cleanUsername.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
       display_name: cleanUsername,
@@ -212,10 +216,15 @@ router.post('/auth/simulated-wallet-login', validateRequest(simulatedWalletLogin
       mjdq_balance: 100000,          // Starter 100,000 mJDQ (100.00 JDQ value)
       jdq_governance_balance: 15,    // Starter 15 JDQ Governance
       scout_reputation: 250,         // Starter 250 Scout Rep
+      is_public: false,
+      handle: null,
+      bio: null,
+      status_text: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
-    db.users.push(user);
+    db.users.push(newUser);
+    user = newUser;
 
     db.ledger.push({
       id: `ledg_welcome_${Date.now()}`,

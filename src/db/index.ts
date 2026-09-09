@@ -19,6 +19,10 @@ export interface UserRow {
   mjdq_balance: number;           // Integer milli-JDQ balance (100,000 mJDQ = 100 JDQ)
   jdq_governance_balance: number; // JDQ Governance Token count (15 JDQ)
   scout_reputation: number;       // Non-inflationary reputation for casual spot discovery
+  is_public: boolean;
+  handle?: string | null;
+  bio?: string | null;
+  status_text?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -182,6 +186,10 @@ const mockUsers: UserRow[] = [
     mjdq_balance: 100000,          // 100,000 mJDQ = 100.00 JDQ
     jdq_governance_balance: 15,    // 15 JDQ
     scout_reputation: 250,         // Scout Reputation
+    is_public: true,
+    handle: 'juandelacruz',
+    bio: 'Pangasinan explorer & cultural heritage scout.',
+    status_text: 'Exploring Hundred Islands & Bolinao 🌊',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -196,6 +204,46 @@ const mockUsers: UserRow[] = [
     mjdq_balance: 0,
     jdq_governance_balance: 50,
     scout_reputation: 1000,
+    is_public: false,
+    handle: null,
+    bio: null,
+    status_text: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: '33333333-3333-3333-3333-333333333333',
+    seed_id: 'user-2',
+    display_name: 'Maria Santos',
+    email: 'maria@juanderquest.ph',
+    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Maria',
+    role: 'user',
+    demo_points: 250,
+    mjdq_balance: 250000,
+    jdq_governance_balance: 30,
+    scout_reputation: 420,
+    is_public: true,
+    handle: 'mariasantos',
+    bio: 'Eco-trail enthusiast and local food lover from Dagupan.',
+    status_text: 'Tasting Dagupan bangus 🐟',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: '44444444-4444-4444-4444-444444444444',
+    seed_id: 'user-3',
+    display_name: 'Private Explorer',
+    email: 'private@juanderquest.ph',
+    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Private',
+    role: 'user',
+    demo_points: 50,
+    mjdq_balance: 50000,
+    jdq_governance_balance: 5,
+    scout_reputation: 50,
+    is_public: false,
+    handle: 'stealthscout',
+    bio: 'This is a private profile.',
+    status_text: 'Hidden',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -556,6 +604,10 @@ export class MemoryDb {
       mjdq_balance: row.mjdq_balance ?? row.demo_points * 1000,
       jdq_governance_balance: row.jdq_governance_balance ?? 15,
       scout_reputation: row.scout_reputation ?? 100,
+      is_public: Boolean(row.is_public),
+      handle: row.handle ?? null,
+      bio: row.bio ?? null,
+      status_text: row.status_text ?? null,
       created_at: toIso(row.created_at), updated_at: toIso(row.updated_at),
     }));
     const { rows: quests } = await pool.query('SELECT * FROM quests ORDER BY created_at');
@@ -695,6 +747,34 @@ export class MemoryDb {
 
   findUserById(id: string): UserRow | undefined {
     return this.users.find((u) => u.id === id);
+  }
+
+  findPublicUserById(id: string): UserRow | undefined {
+    return this.users.find((u) => u.id === id && u.is_public);
+  }
+
+  findPublicUserByHandle(handle: string): UserRow | undefined {
+    const clean = handle.replace(/^@/, '').toLowerCase().trim();
+    return this.users.find((u) => u.is_public && u.handle?.toLowerCase() === clean);
+  }
+
+  updateUserProfile(
+    userId: string,
+    updates: { is_public?: boolean; handle?: string | null; bio?: string | null; status_text?: string | null; display_name?: string }
+  ): UserRow | undefined {
+    const user = this.findUserById(userId);
+    if (!user) return undefined;
+    if (updates.is_public !== undefined) user.is_public = updates.is_public;
+    if (updates.handle !== undefined) user.handle = updates.handle;
+    if (updates.bio !== undefined) user.bio = updates.bio;
+    if (updates.status_text !== undefined) user.status_text = updates.status_text;
+    if (updates.display_name !== undefined) user.display_name = updates.display_name;
+    user.updated_at = new Date().toISOString();
+    this.persist(
+      'UPDATE users SET is_public=$2, handle=$3, bio=$4, status_text=$5, display_name=$6, updated_at=NOW() WHERE id=$1',
+      [user.id, user.is_public, user.handle ?? null, user.bio ?? null, user.status_text ?? null, user.display_name]
+    );
+    return user;
   }
 
   findQuestById(id: string): QuestRow | undefined {
