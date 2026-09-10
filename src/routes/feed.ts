@@ -57,7 +57,7 @@ feedRouter.get('/feed', optionalAuthenticateToken, checkQAAuthorization, (req: A
       (prefs?.tags && prefs.tags.length > 0) ||
       (prefs?.occasions && prefs.occasions.length > 0));
 
-  const allowQA = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.headers['x-include-test'] === 'true');
+  const allowQA = isAuthorizedQA(req);
 
   // 1. Eligible Published & Non-suppressed Spots (strictly excluding synthetic test data unless authorized QA)
   const eligibleSpots = spotStore.spots.filter(
@@ -156,7 +156,7 @@ feedRouter.get('/feed', optionalAuthenticateToken, checkQAAuthorization, (req: A
   const limit = Math.min(50, Math.max(1, Math.floor(requestedLimit)));
   let page;
   try {
-    page = rankedFeedPage(diversifiedItems, userId || 'guest',
+    page = rankedFeedPage(diversifiedItems, JSON.stringify([userId || 'guest', allowQA ? 'qa' : 'public']),
       typeof req.query.cursor === 'string' ? req.query.cursor : undefined, limit);
   } catch {
     return res.status(400).json({ success: false, error: {

@@ -188,6 +188,7 @@ describe('Phase 1: Durable Identity Lifecycle & Persistent Accounts', () => {
     };
     let nextCalled = false;
 
+    res.setHeader = jest.fn();
     await checkQAAuthorization(req, res, () => { nextCalled = true; });
 
     expect(nextCalled).toBe(false);

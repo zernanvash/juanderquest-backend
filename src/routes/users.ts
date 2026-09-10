@@ -1,11 +1,18 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { db, InvalidCursorError } from '../db/index.js';
-import { authenticateToken, AuthRequest, optionalAuthenticateToken, isAuthorizedQA, checkQAAuthorization } from '../middleware/auth.js';
+import { authenticateToken, AuthRequest, optionalAuthenticateToken, isAuthorizedQA, checkQAAuthorization, authorizeQAPreview } from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 
 export const usersRouter = Router();
+
+usersRouter.get('/qa/capabilities', (_req, res, next) => {
+  res.set('Cache-Control', 'private, no-store');
+  next();
+}, authenticateToken, authorizeQAPreview, (_req, res) => {
+  res.json({ success: true, data: { can_preview_test_data: true, scope: 'public-test-read' } });
+});
 
 const publicProfileLimiter = rateLimit({ policyId: 'users:public-profile', windowMs: 60 * 1000, max: 120, keyStrategy: 'ip' });
 const followLimiter = rateLimit({ policyId: 'users:follow-mutation', windowMs: 60 * 1000, max: 30, keyStrategy: 'actor', coarseIpMax: 150 });

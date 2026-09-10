@@ -163,6 +163,38 @@ describe('Phase 0 & 1: QA Visibility & Evaluator Preview Mode', () => {
   });
 
   describe('Header-Based QA Authorization', () => {
+    it('checks capability using durable roles, never anonymous or ordinary-user access', async () => {
+      expect((await request(app).get('/api/v1/qa/capabilities')).status).toBe(401);
+      expect((await request(app).get('/api/v1/qa/capabilities').auth(tokenUser, { type: 'bearer' })).status).toBe(403);
+      for (const token of [tokenQA, tokenAdmin]) {
+        const res = await request(app).get('/api/v1/qa/capabilities').auth(token, { type: 'bearer' });
+        expect(res.status).toBe(200);
+        expect(res.body.data.can_preview_test_data).toBe(true);
+        expect(res.headers['cache-control']).toBe('private, no-store');
+      }
+    });
+
+    it('rejects stale QA claims after durable demotion', async () => {
+      await testDb.pool.query('UPDATE users SET role = $1 WHERE id = $2', ['user', qaUserId]);
+      try {
+        const res = await request(app).get('/api/v1/qa/capabilities').auth(tokenQA, { type: 'bearer' });
+        expect(res.status).toBe(403);
+      } finally {
+        await testDb.pool.query('UPDATE users SET role = $1 WHERE id = $2', ['qa', qaUserId]);
+      }
+    });
+
+    it('rejects preview feed cursors in public scope and under another identity', async () => {
+      const first = await request(app).get('/api/v1/feed?limit=1').auth(tokenQA, { type: 'bearer' }).set('x-include-test', 'true');
+      expect(first.status).toBe(200);
+      const cursor = first.body.data.cursor;
+      expect(cursor).toBeTruthy();
+      const publicPage = await request(app).get('/api/v1/feed').query({ cursor }).auth(tokenQA, { type: 'bearer' });
+      expect(publicPage.status).toBe(400);
+      const other = await request(app).get('/api/v1/feed').query({ cursor }).auth(tokenAdmin, { type: 'bearer' }).set('x-include-test', 'true');
+      expect(other.status).toBe(400);
+    });
+
     it('accepts x-include-test: true header with admin token on GET /spots', async () => {
       const res = await request(app)
         .get('/api/v1/spots')
@@ -234,15 +266,13 @@ describe('Phase 0 & 1: QA Visibility & Evaluator Preview Mode', () => {
   });
 
   describe('Evaluator Preview Passkey (QA_PREVIEW_TOKEN)', () => {
-    it('allows unauthenticated caller with valid x-qa-preview-token to access test spots', async () => {
+    it('rejects the former publicly exposed preview passkey', async () => {
       const res = await request(app)
         .get('/api/v1/spots?include_test=true')
         .set('x-qa-preview-token', 'juanderquest-test-evaluator-token');
 
-      expect(res.status).toBe(200);
-      const spotIds = res.body.data.map((s: any) => s.id);
-      expect(spotIds).toContain(testSpot.id);
-      expect(res.headers['x-robots-tag']).toBe('noindex, nofollow');
+      expect(res.status).toBe(403);
+      expect(res.body.error?.code).toBe('UNAUTHORIZED_QA_MODE');
     });
 
     it('rejects unauthenticated caller attempting QA mode with invalid passkey', async () => {

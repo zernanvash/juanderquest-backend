@@ -100,29 +100,24 @@ export const isAuthorizedQA = (req: AuthRequest): boolean => {
 };
 
 export const checkQAAuthorization = async (req: AuthRequest, res: Response, next: NextFunction) => {
-  const hasPreviewPasskey =
-    typeof req.headers['x-qa-preview-token'] === 'string' &&
-    Boolean(env.QA_PREVIEW_TOKEN) &&
-    req.headers['x-qa-preview-token'] === env.QA_PREVIEW_TOKEN;
-
   const requestedQA =
     req.query.include_test === 'true' ||
     req.query.include_qa === 'true' ||
     req.headers['x-include-test'] === 'true' ||
-    hasPreviewPasskey;
+    typeof req.headers['x-qa-preview-token'] === 'string';
 
   if (!requestedQA) {
     req.isQAAuthorized = false;
     return next();
   }
 
-  // Option B: Valid evaluator preview passkey unlocks QA mode
-  if (hasPreviewPasskey) {
-    req.isQAAuthorized = true;
-    return next();
-  }
+  return authorizeQAPreview(req, res, next);
+};
 
-  // Option A: QA mode requested via query or header. Must be authenticated with active admin or qa capability.
+// Reused by the capability endpoint; always verify the current durable identity.
+export const authorizeQAPreview = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  req.isQAAuthorized = false;
+  res.setHeader('Cache-Control', 'private, no-store');
   if (!req.user || !req.user.id) {
     return res.status(403).json({
       success: false,
@@ -152,6 +147,7 @@ export const checkQAAuthorization = async (req: AuthRequest, res: Response, next
     }
 
     req.isQAAuthorized = true;
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     next();
   } catch (err: any) {
     // Fail closed on database outage during QA authorization check
