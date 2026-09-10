@@ -5,7 +5,7 @@ import { env } from '../config/env.js';
 export interface AuthenticatedUser {
   id: string;
   seed_id: string;
-  role: 'user' | 'admin';
+  role: 'user' | 'admin' | 'qa';
 }
 
 export interface AuthRequest extends Request {
@@ -100,17 +100,29 @@ export const isAuthorizedQA = (req: AuthRequest): boolean => {
 };
 
 export const checkQAAuthorization = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  const hasPreviewPasskey =
+    typeof req.headers['x-qa-preview-token'] === 'string' &&
+    Boolean(env.QA_PREVIEW_TOKEN) &&
+    req.headers['x-qa-preview-token'] === env.QA_PREVIEW_TOKEN;
+
   const requestedQA =
     req.query.include_test === 'true' ||
     req.query.include_qa === 'true' ||
-    req.headers['x-include-test'] === 'true';
+    req.headers['x-include-test'] === 'true' ||
+    hasPreviewPasskey;
 
   if (!requestedQA) {
     req.isQAAuthorized = false;
     return next();
   }
 
-  // QA mode was explicitly requested. Must be authenticated with active admin or qa capability.
+  // Option B: Valid evaluator preview passkey unlocks QA mode
+  if (hasPreviewPasskey) {
+    req.isQAAuthorized = true;
+    return next();
+  }
+
+  // Option A: QA mode requested via query or header. Must be authenticated with active admin or qa capability.
   if (!req.user || !req.user.id) {
     return res.status(403).json({
       success: false,
@@ -129,7 +141,7 @@ export const checkQAAuthorization = async (req: AuthRequest, res: Response, next
       durableUser = db.findUserById(req.user.id) ?? null;
     }
 
-    if (!durableUser || (durableUser.role !== 'admin' && (durableUser as any).role !== 'qa')) {
+    if (!durableUser || (durableUser.role !== 'admin' && durableUser.role !== 'qa')) {
       return res.status(403).json({
         success: false,
         error: {

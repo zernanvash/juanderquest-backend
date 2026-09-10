@@ -17,7 +17,8 @@ const followLimiter = rateLimit({ policyId: 'users:follow-mutation', windowMs: 6
 // GET /users?limit=3 — Public discovery rail (default 3, max 6)
 usersRouter.get('/users', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res: Response) => {
   res.set('Cache-Control', 'no-store');
-  const allowTest = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.query.include_qa === 'true');
+  const allowTest = isAuthorizedQA(req);
+  if (allowTest) res.set('X-Robots-Tag', 'noindex, nofollow');
   const rawLimit = req.query.limit;
   const parsedLimit = rawLimit ? parseInt(rawLimit as string, 10) : 3;
   const limit = Math.min(6, Math.max(1, isNaN(parsedLimit) ? 3 : parsedLimit));
@@ -208,7 +209,7 @@ usersRouter.get(
   checkQAAuthorization,
   async (req: AuthRequest, res: Response) => {
     res.set('Cache-Control', 'no-store');
-    const allowTest = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.query.include_qa === 'true');
+    const allowTest = isAuthorizedQA(req);
     const rawId = req.params.id;
     if (!rawId || rawId.trim().length === 0) {
       return res.status(400).json({
@@ -425,7 +426,7 @@ usersRouter.get(
       });
     }
 
-    const allowTest = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.query.include_qa === 'true');
+    const allowTest = isAuthorizedQA(req);
 
     let target = await db.findPublicUserById(rawId, allowTest);
     if (!target && (rawId.startsWith('@') || !rawId.includes('-'))) {
@@ -490,7 +491,7 @@ usersRouter.get(
       });
     }
 
-    const allowTest = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.query.include_qa === 'true');
+    const allowTest = isAuthorizedQA(req);
 
     let target = await db.findPublicUserById(rawId, allowTest);
     if (!target && (rawId.startsWith('@') || !rawId.includes('-'))) {

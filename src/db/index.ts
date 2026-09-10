@@ -15,7 +15,7 @@ export interface UserRow {
   display_name: string;
   email: string;
   avatar_url: string;
-  role: 'user' | 'admin';
+  role: 'user' | 'admin' | 'qa';
   demo_points: number;            // Backwards-compatible formatted value (100 JDQ)
   mjdq_balance: number;           // Integer milli-JDQ balance (100,000 mJDQ = 100 JDQ)
   jdq_governance_balance: number; // JDQ Governance Token count (15 JDQ)
@@ -548,6 +548,26 @@ const mockQuests: QuestRow[] = [
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
+  {
+    id: 'qa-quest-tambobong',
+    title: 'Dasol Cove Explorer (QA Test Quest)',
+    description: 'A test quest verifying GPS radius and offline marker scanning in Dasol.',
+    category: 'eco',
+    location_name: 'Dasol, Pangasinan',
+    gps_lat: 15.9083,
+    gps_lng: 119.7892,
+    radius_meters: 150,
+    base_reward_php: 50.0,
+    difficulty_factor: 1.0,
+    geo_multiplier: 1.0,
+    reward_points: 50,
+    marker_code: 'QA_MARKER_DASOL_01',
+    marker_image_url: '',
+    is_active: false,
+    is_test: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
 ];
 
 const mockSubmissions: SubmissionRow[] = [
@@ -563,6 +583,34 @@ const mockSubmissions: SubmissionRow[] = [
     status: 'approved',
     reviewed_by: '22222222-2222-2222-2222-222222222222',
     reviewed_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 'sub-genuine-pending-001',
+    idempotency_key: 'genuine-idemp-sub-001',
+    user_id: '11111111-1111-1111-1111-111111111111',
+    quest_id: 'q1111111-1111-1111-1111-111111111111',
+    scanned_marker_code: 'MARKER_HUNDRED_ISLANDS_01',
+    captured_lat: 16.2064,
+    captured_lng: 119.9707,
+    captured_accuracy: 5,
+    status: 'pending',
+    is_test: false,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 'sub-qa-pending-001',
+    idempotency_key: 'qa-idemp-sub-001',
+    user_id: '11111111-1111-1111-1111-111111111111',
+    quest_id: 'qa-quest-tambobong',
+    scanned_marker_code: 'QA_MARKER_DASOL_01',
+    captured_lat: 15.9085,
+    captured_lng: 119.7894,
+    captured_accuracy: 6,
+    status: 'pending',
+    is_test: true,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -1366,9 +1414,13 @@ export class MemoryDb {
     return this.quests.find((q) => q.id === id && (includeInactive || q.is_active));
   }
 
-  listQuests(category?: string): QuestRow[] {
-    if (!category) return this.quests.filter((q) => q.is_active);
-    return this.quests.filter((q) => q.is_active && q.category === category);
+  listQuests(category?: string, allowTest = false): QuestRow[] {
+    const filter = (q: QuestRow) => {
+      const categoryMatches = !category || q.category === category;
+      const activeMatches = q.is_active || (allowTest && q.is_test);
+      return categoryMatches && activeMatches;
+    };
+    return this.quests.filter(filter);
   }
 
   // User-scoped idempotency lookup (Fix 4.4)
@@ -1411,7 +1463,7 @@ export class MemoryDb {
       .filter((s) => (statusFilter ? s.status === statusFilter : true))
       .map((s) => {
         const user = this.findUserById(s.user_id);
-        const quest = this.findQuestById(s.quest_id);
+        const quest = this.findQuestById(s.quest_id, true);
         const distance_meters = calculateHaversineDistance(
           s.captured_lat,
           s.captured_lng,

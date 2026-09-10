@@ -34,7 +34,8 @@ router.get('/spot-taxonomy', (_req, res) => res.json({ success: true, data: {
 } }));
 
 router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
-  const allowTest = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.query.include_qa === 'true');
+  const allowTest = isAuthorizedQA(req);
+  if (allowTest) res.set('X-Robots-Tag', 'noindex, nofollow');
   const lat = numeric(req.query.lat), lng = numeric(req.query.lng), radius = numeric(req.query.radius_km);
   if ((lat !== undefined) !== (lng !== undefined) || [lat, lng, radius].some(v => v !== undefined && !Number.isFinite(v))) {
     return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Valid lat/lng and radius values are required.' } });
@@ -44,12 +45,14 @@ router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, (req: Auth
 });
 
 router.get('/spots/trending', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
-  const allowTest = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.query.include_qa === 'true');
+  const allowTest = isAuthorizedQA(req);
+  if (allowTest) res.set('X-Robots-Tag', 'noindex, nofollow');
   res.json({ success: true, data: spotStore.list({ municipality: req.query.municipality as string | undefined, sort: 'trending', userId: req.user?.id, allowTest }).slice(0, 10) });
 });
 
 router.get('/spots/:slug/alternatives', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
-  const allowTest = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.query.include_qa === 'true');
+  const allowTest = isAuthorizedQA(req);
+  if (allowTest) res.set('X-Robots-Tag', 'noindex, nofollow');
   const source=spotStore.spots.find(s=>s.slug===req.params.slug&&s.status==='published'&&(allowTest||!s.is_test));
   if(!source)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
   const requested=numeric(req.query.limit);const limit=requested===undefined?3:Math.max(1,Math.min(5,Math.floor(requested)));
@@ -57,7 +60,7 @@ router.get('/spots/:slug/alternatives', optionalAuthenticateToken, checkQAAuthor
 });
 
 router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
-  const allowTest = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.query.include_qa === 'true');
+  const allowTest = isAuthorizedQA(req);
   const spot = spotStore.spots.find(s => s.slug === req.params.slug && s.status === 'published' && (allowTest || !s.is_test));
   if (!spot) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
   if (spot.is_test) {

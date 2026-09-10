@@ -194,7 +194,10 @@ searchRouter.get(
       });
     }
 
-    const allowTest = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.query.include_qa === 'true');
+    const allowTest = isAuthorizedQA(req);
+    if (allowTest) {
+      res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    }
 
     const type = (typeof req.query.type === 'string' ? req.query.type.toLowerCase() : 'all') as
       | 'all'

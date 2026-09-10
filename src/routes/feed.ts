@@ -164,6 +164,9 @@ feedRouter.get('/feed', optionalAuthenticateToken, checkQAAuthorization, (req: A
     } });
   }
   res.setHeader('Cache-Control', 'private, no-store');
+  if (allowQA) {
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  }
 
   return res.status(200).json({
     success: true,

@@ -8,7 +8,7 @@ export interface CreateUserData {
   display_name: string;
   email: string;
   avatar_url?: string;
-  role?: 'user' | 'admin';
+  role?: 'user' | 'admin' | 'qa';
   demo_points?: number;
   mjdq_balance?: number;
   jdq_governance_balance?: number;

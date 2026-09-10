@@ -21,6 +21,7 @@ export const MIGRATIONS = [
   '009_synthetic_qa_isolation.sql',
   '010_redemptions_user_voucher_unique.sql',
   '011_governance_ledger.sql',
+  '012_qa_evaluator_role.sql',
 ];
 
 let pool: Pool | null = null;
