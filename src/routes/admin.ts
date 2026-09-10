@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { db } from '../db/index.js';
 import { authenticateToken, requireAdmin, AuthRequest } from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
-import { governanceStore } from './proposals.js';
+import { submissionsService } from '../services/submissions.js';
 
 const router = Router();
 
@@ -26,7 +26,7 @@ const reviewSchema = z.object({
   }),
 });
 
-router.patch('/admin/submissions/:id', validateRequest(reviewSchema), (req: AuthRequest, res: Response) => {
+router.patch('/admin/submissions/:id', validateRequest(reviewSchema), async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const { action, rejection_reason } = req.body;
   const adminId = req.user!.id;
@@ -41,43 +41,30 @@ router.patch('/admin/submissions/:id', validateRequest(reviewSchema), (req: Auth
     });
   }
 
-  const result = db.reviewSubmission(id, action, adminId, rejection_reason);
+  try {
+    const result = await submissionsService.reviewSubmission(id, action, adminId, rejection_reason);
 
-  if (!result) {
-    return res.status(404).json({
-      success: false,
-      error: {
-        code: 'NOT_FOUND',
-        message: `Submission '${id}' not found.`,
+    if (!result.success) {
+      return res.status(result.statusCode || 400).json({
+        success: false,
+        error: result.error,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...result.data!.submission,
+        awarded_points: result.data!.awarded_points,
       },
     });
-  }
-
-  const { submission: updatedSub, alreadyReviewed, conflicting } = result;
-
-  // Conflicting terminal state (e.g. reject after approve) is an explicit 409, not silent success.
-  if (conflicting) {
-    return res.status(409).json({
+  } catch (err) {
+    console.error('[admin] review submission failed:', err);
+    return res.status(503).json({
       success: false,
-      error: {
-        code: 'STATE_CONFLICT',
-        message: `Submission '${id}' has already been reviewed as '${updatedSub.status}' and cannot transition.`,
-      },
+      error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable review storage is unavailable. Please try again later.' },
     });
   }
-
-  const quest = db.findQuestById(updatedSub.quest_id);
-  if (action === 'approve' && !alreadyReviewed && quest) {
-    governanceStore.creditQuestReward(updatedSub.user_id, quest.id, updatedSub.id, quest.reward_points, adminId);
-  }
-
-  return res.status(200).json({
-    success: true,
-    data: {
-      ...updatedSub,
-      awarded_points: action === 'approve' && !alreadyReviewed ? quest?.reward_points || 0 : 0,
-    },
-  });
 });
 
 export default router;

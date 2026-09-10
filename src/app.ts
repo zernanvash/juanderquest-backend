@@ -22,8 +22,15 @@ import analyticsRouter from './routes/analytics.js';
 import { errorHandler } from './middleware/error.js';
 
 import path from 'path';
+import { requestTracingMiddleware } from './middleware/observability.js';
 
 export const app = express();
+
+// Trust loopback proxies (Nginx on 127.0.0.1) while rejecting arbitrary client spoofing
+app.set('trust proxy', 'loopback');
+
+// Structured logging & Request ID tracing
+app.use(requestTracingMiddleware);
 
 export const parseCorsOrigin = (value: string) =>
   value === '*' ? value : value.split(',').map((origin) => origin.trim()).filter(Boolean);

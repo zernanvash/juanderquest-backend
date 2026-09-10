@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import type { MemoryDb } from '../db/index.js';
+import { lockGovernanceSnapshot, commitGovernanceTransaction, authoritativeBalance } from './transaction.js';
 
 export const MJDQ_PER_JDQ = 1000;
 
@@ -210,7 +211,7 @@ export class GovernanceStore {
   }
 
   snapshot() {
-    return {
+    return structuredClone({
       proposals: this.proposals,
       votes: this.votes,
       feedbackVotes: this.feedbackVotes,
@@ -222,24 +223,36 @@ export class GovernanceStore {
       issuedMjdq: this.issuedMjdq,
       idempotency: [...this.idempotency.entries()],
       controls: this.controls,
+    });
+  }
+
+  restore(data: Partial<ReturnType<GovernanceStore['snapshot']>> | null | undefined) {
+    if (!data || typeof data !== 'object') return;
+    const cloned = structuredClone(data);
+    this.proposals = Array.isArray(cloned.proposals) ? cloned.proposals : [];
+    this.votes = Array.isArray(cloned.votes) ? cloned.votes : [];
+    this.feedbackVotes = Array.isArray(cloned.feedbackVotes) ? cloned.feedbackVotes : [];
+    this.balances = new Map(Object.entries(cloned.balances || {}));
+    this.ledger = Array.isArray(cloned.ledger) ? cloned.ledger : [];
+    this.audit = Array.isArray(cloned.audit) ? cloned.audit : [];
+    this.burnedMjdq = typeof cloned.burnedMjdq === 'number' ? cloned.burnedMjdq : 0;
+    this.treasuryMjdq = typeof cloned.treasuryMjdq === 'number' ? cloned.treasuryMjdq : 0;
+    this.issuedMjdq = typeof cloned.issuedMjdq === 'number' ? cloned.issuedMjdq : 0;
+    this.idempotency = new Map(Array.isArray(cloned.idempotency) ? cloned.idempotency : []);
+    this.controls = {
+      pause_all_financial: Boolean(cloned.controls?.pause_all_financial),
+      pause_votes: Boolean(cloned.controls?.pause_votes),
+      pause_payouts: Boolean(cloned.controls?.pause_payouts),
+      pause_vouchers: Boolean(cloned.controls?.pause_vouchers),
+      updated_by: cloned.controls?.updated_by || 'system',
+      updated_at: cloned.controls?.updated_at || now(),
     };
+    if (this.proposals.length === 0) {
+      this.seedProposals();
+    }
   }
 
-  private restore(data: ReturnType<GovernanceStore['snapshot']>) {
-    this.proposals = data.proposals;
-    this.votes = data.votes;
-    this.feedbackVotes = data.feedbackVotes;
-    this.balances = new Map(Object.entries(data.balances));
-    this.ledger = data.ledger;
-    this.audit = data.audit;
-    this.burnedMjdq = data.burnedMjdq;
-    this.treasuryMjdq = data.treasuryMjdq;
-    this.issuedMjdq = data.issuedMjdq;
-    this.idempotency = new Map(data.idempotency);
-    this.controls = data.controls;
-  }
-
-  // Rebuilds user balances from demo_points. Invariant: user balance always equals demo_points * MJDQ_PER_JDQ.
+  // Local bootstrap only. Database-backed commands use locked SQL balances plus durable mJDQ remainder.
   refreshBalances() {
     this.balances.clear();
     this.issuedMjdq = 0;
@@ -250,6 +263,32 @@ export class GovernanceStore {
     }
   }
 
+  publishCommittedTransaction(payload: {
+    entries: LedgerEntry[];
+    audit?: AuditEvent[];
+    userBalanceUpdate?: { userId: string; demoPoints: number; balanceMjdq?: number };
+  }) {
+    for (const entry of payload.entries) {
+      if (!this.ledger.some((l) => l.id === entry.id)) {
+        this.ledger.push(entry);
+        if (entry.type === 'quest_reward_credit' && entry.amount_mjdq > 0) {
+          this.issuedMjdq += entry.amount_mjdq;
+        }
+      }
+    }
+    if (payload.audit) {
+      for (const a of payload.audit) {
+        if (!this.audit.some((aud) => aud.id === a.id)) {
+          this.audit.push(a);
+        }
+      }
+    }
+    if (payload.userBalanceUpdate) {
+      const { userId, demoPoints, balanceMjdq } = payload.userBalanceUpdate;
+      this.balances.set(userId, balanceMjdq ?? authoritativeBalance(demoPoints, this.balanceOf(userId)));
+    }
+  }
+
   async hydrateFromPg(pool: Pool) {
     this.attachPg(pool);
     try {
@@ -257,19 +296,128 @@ export class GovernanceStore {
         'SELECT data FROM governance_snapshot WHERE id = 1'
       );
       if (rows[0]?.data) this.restore(rows[0].data);
-    } catch (error) {
-      console.warn('[governance] snapshot hydrate failed - starting fresh.', (error as Error).message);
+    } catch (error: any) {
+      if (error.code === '42P01') {
+        console.warn('[governance] snapshot table not found during initial boot');
+      } else {
+        console.error('[governance] snapshot hydrate failed:', error.message);
+        throw error;
+      }
     }
-    this.refreshBalances();
+
+    try {
+      const { rows: ledgerRows } = await pool.query<any>(
+        'SELECT id, transaction_group_id, type, account, amount_mjdq, reference_type, reference_id, actor_id, idempotency_key, metadata, created_at FROM governance_ledger ORDER BY created_at ASC'
+      );
+      if (ledgerRows && ledgerRows.length > 0) {
+        const existingIds = new Set(this.ledger.map((l) => l.id));
+        for (const row of ledgerRows) {
+          const amount = Number(row.amount_mjdq);
+          if (!Number.isSafeInteger(amount)) {
+            throw new Error(`LEDGER_AMOUNT_OVERFLOW: amount_mjdq '${row.amount_mjdq}' exceeds JavaScript safe integer range`);
+          }
+          if (!existingIds.has(row.id)) {
+            this.ledger.push({
+              ...row,
+              amount_mjdq: amount,
+              created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+            });
+          }
+        }
+      }
+    } catch (error: any) {
+      if (error.code === '42P01') {
+        // Table does not exist yet before migrations run
+      } else {
+        console.error('[governance] ledger hydrate failed:', error.message);
+        throw error;
+      }
+    }
+
+    // Hydration must not replace historical issuance with current circulation.
+    const { rows: users } = await pool.query('SELECT id, demo_points FROM users');
+    this.balances = new Map(users.map((user) => [user.id, authoritativeBalance(user.demo_points, this.balanceOf(user.id))]));
   }
 
-  private persist() {
-    if (!this.pg) return;
-    void this.pg
-      .query('INSERT INTO governance_snapshot (id, data) VALUES (1, $1) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()', [
-        JSON.stringify(this.snapshot()),
-      ])
-      .catch((error) => console.error('[governance] snapshot persist failed:', error.message));
+  // All database-backed commands execute against a detached, authoritative snapshot.
+  // Lock order shared with vouchers/rewards: governance singleton -> business rows.
+  private async runCommand<T>(command: (worker: GovernanceStore) => Promise<T>): Promise<T> {
+    const client = await this.pg!.connect();
+    try {
+      await client.query('BEGIN');
+      const snapshot = await lockGovernanceSnapshot(client);
+      const { rows: users } = await client.query('SELECT * FROM users ORDER BY id FOR UPDATE');
+      const { rows: submissions } = await client.query('SELECT * FROM submissions');
+      const { rows: quests } = await client.query('SELECT * FROM quests');
+      const changedQuests = new Map<string, MemoryDb['quests'][number]>();
+      const txUsers: MemoryDb['users'] = structuredClone(users);
+      const txDb = {
+        users: txUsers,
+        submissions: structuredClone(submissions),
+        quests: structuredClone(quests),
+        findUserById(userId: string) { return txUsers.find((user) => user.id === userId); },
+        upsertQuest(quest: MemoryDb['quests'][number]) { changedQuests.set(quest.id, structuredClone(quest)); },
+      } as unknown as MemoryDb;
+      const worker = new GovernanceStore(txDb);
+      worker.restore(snapshot);
+      // Users, not cached JSON balances, are authoritative. Preserve issuance counters.
+      worker.balances = new Map(users.map((user) => [user.id, authoritativeBalance(user.demo_points, worker.balanceOf(user.id))]));
+      const before = worker.snapshot();
+      const result = await command(worker);
+      const next = worker.snapshot();
+      for (const user of users) {
+        const balance = worker.balanceOf(user.id);
+        if (!Number.isSafeInteger(balance) || balance < 0) {
+          throw new Error('INVALID_GOVERNANCE_BALANCE');
+        }
+        if (Math.floor(balance / MJDQ_PER_JDQ) !== Number(user.demo_points)) {
+          await client.query('UPDATE users SET demo_points = $2, updated_at = NOW() WHERE id = $1',
+            [user.id, Math.floor(balance / MJDQ_PER_JDQ)]);
+        }
+      }
+      const previousEntries = new Set(before.ledger.map((entry) => entry.id));
+      for (const entry of next.ledger.filter((entry) => !previousEntries.has(entry.id))) {
+        await client.query(
+          'INSERT INTO governance_ledger (id, transaction_group_id, type, account, amount_mjdq, reference_type, reference_id, actor_id, idempotency_key, metadata, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+          [entry.id, entry.transaction_group_id, entry.type, entry.account, entry.amount_mjdq,
+            entry.reference_type, entry.reference_id, entry.actor_id, entry.idempotency_key ?? null,
+            JSON.stringify(entry.metadata ?? {}), entry.created_at]);
+      }
+      const previousAudit = new Set(before.audit.map((event) => event.id));
+      for (const event of next.audit.filter((event) => !previousAudit.has(event.id))) {
+        await client.query(
+          'INSERT INTO governance_audit (id, action, actor_id, subject_type, subject_id, metadata, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+          [event.id, event.action, event.actor_id, event.subject_type, event.subject_id,
+            JSON.stringify({ ...event.metadata, reason: event.reason, evidence_reference: event.evidence_reference }), event.created_at]);
+      }
+      for (const quest of changedQuests.values()) {
+        await client.query(
+          `INSERT INTO quests (id,title,description,category,location_name,gps_lat,gps_lng,radius_meters,reward_points,marker_code,marker_image_url,is_active)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+           ON CONFLICT (id) DO UPDATE SET is_active = EXCLUDED.is_active, updated_at = NOW()`,
+          [quest.id,quest.title,quest.description,quest.category,quest.location_name,quest.gps_lat,quest.gps_lng,
+            quest.radius_meters,quest.reward_points,quest.marker_code,quest.marker_image_url,quest.is_active]);
+      }
+      await client.query('UPDATE governance_snapshot SET data = $1, updated_at = NOW() WHERE id = 1', [JSON.stringify(next)]);
+      await commitGovernanceTransaction(client);
+      // No shared objects were changed while the transaction was in flight.
+      this.restore(next);
+      for (const user of users) {
+        const cached = this.db.findUserById(user.id);
+        if (cached) cached.demo_points = Math.floor(worker.balanceOf(user.id) / MJDQ_PER_JDQ);
+      }
+      for (const quest of changedQuests.values()) {
+        const index = this.db.quests.findIndex((item) => item.id === quest.id);
+        if (index < 0) this.db.quests.push(quest);
+        else this.db.quests[index] = quest;
+      }
+      return structuredClone(result);
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   listProposals() {
@@ -280,7 +428,7 @@ export class GovernanceStore {
     return this.proposals.find((proposal) => proposal.id === proposalId);
   }
 
-  createProposal(payload: {
+  async createProposal(payload: {
     title: string;
     location_name: string;
     category: GovernanceProposal['category'];
@@ -289,7 +437,8 @@ export class GovernanceStore {
     proposed_lng?: number;
     submitted_by_id: string;
     recipients?: PayoutRecipient[];
-  }) {
+  }): Promise<GovernanceProposal> {
+    if (this.pg) return this.runCommand((worker) => worker.createProposal(payload));
     const user = this.db.findUserById(payload.submitted_by_id);
     if (!user) throw new Error('USER_NOT_FOUND');
     const recipients = payload.recipients?.length
@@ -334,28 +483,28 @@ export class GovernanceStore {
     };
     this.proposals.push(proposal);
     this.addAudit('proposal.created', user.id, 'proposal', proposal.id);
-    this.persist();
     return proposal;
   }
 
-  submitProposal(proposalId: string, userId: string) {
+  async submitProposal(proposalId: string, userId: string): Promise<GovernanceProposal> {
+    if (this.pg) return this.runCommand((worker) => worker.submitProposal(proposalId, userId));
     const proposal = this.requireProposal(proposalId);
     if (proposal.submitted_by_id !== userId || proposal.state !== 'draft') throw new Error('INVALID_TRANSITION');
     proposal.state = 'screening';
     proposal.updated_at = now();
     this.addAudit('proposal.submitted', userId, 'proposal', proposal.id);
-    this.persist();
     return proposal;
   }
 
-  screenProposal(
+  async screenProposal(
     proposalId: string,
     adminId: string,
     decision: 'approve' | 'reject',
     reason: string,
     evidenceReference: string,
     checklistComplete: boolean,
-  ) {
+  ): Promise<GovernanceProposal> {
+    if (this.pg) return this.runCommand((worker) => worker.screenProposal(proposalId, adminId, decision, reason, evidenceReference, checklistComplete));
     const proposal = this.requireProposal(proposalId);
     if (proposal.state !== 'screening') throw new Error('INVALID_TRANSITION');
     if (!reason || !evidenceReference) throw new Error('SCREENING_EVIDENCE_REQUIRED');
@@ -382,11 +531,11 @@ export class GovernanceStore {
     }
     proposal.updated_at = now();
     this.addAudit(`proposal.screened.${decision}`, adminId, 'proposal', proposal.id, reason, evidenceReference, { checklist_complete: checklistComplete });
-    this.persist();
     return proposal;
   }
 
-  castProposalVote(proposalId: string, userId: string, choice: 'yes' | 'no', idempotencyKey: string) {
+  async castProposalVote(proposalId: string, userId: string, choice: 'yes' | 'no', idempotencyKey: string): Promise<unknown> {
+    if (this.pg) return this.runCommand((worker) => worker.castProposalVote(proposalId, userId, choice, idempotencyKey));
     const fingerprint = `${proposalId}:${userId}:${choice}`;
     const cached = this.getIdempotent(idempotencyKey, fingerprint);
     if (cached) return cached;
@@ -415,18 +564,18 @@ export class GovernanceStore {
 
     const response = { proposal, charged_mjdq: this.proposalVoteFee, burned_mjdq: burn, escrowed_mjdq: escrow, balance_mjdq: this.balanceOf(userId) };
     this.idempotency.set(idempotencyKey, { fingerprint, response });
-    this.persist();
     return response;
   }
 
-  castFeedback(
+  async castFeedback(
     proposalId: string,
     userId: string,
     choice: 'approve' | 'disapprove',
     idempotencyKey: string,
     rating?: number,
     comment?: string,
-  ) {
+  ): Promise<unknown> {
+    if (this.pg) return this.runCommand((worker) => worker.castFeedback(proposalId, userId, choice, idempotencyKey, rating, comment));
     const fingerprint = `${proposalId}:${userId}:${choice}:${rating || ''}:${comment || ''}`;
     const cached = this.getIdempotent(idempotencyKey, fingerprint);
     if (cached) return cached;
@@ -456,11 +605,11 @@ export class GovernanceStore {
     this.addAudit('proposal.feedback_cast', userId, 'proposal', proposal.id, undefined, undefined, { choice: 'private', rating, fee_mjdq: this.feedbackVoteFee });
     const response = { proposal, charged_mjdq: this.feedbackVoteFee, burned_mjdq: burn, escrowed_mjdq: escrow, balance_mjdq: this.balanceOf(userId) };
     this.idempotency.set(idempotencyKey, { fingerprint, response });
-    this.persist();
     return response;
   }
 
-  closeVoting(proposalId: string, adminId: string, force = false) {
+  async closeVoting(proposalId: string, adminId: string, force = false): Promise<GovernanceProposal> {
+    if (this.pg) return this.runCommand((worker) => worker.closeVoting(proposalId, adminId, force));
     const proposal = this.requireProposal(proposalId);
     if (proposal.state !== 'voting') throw new Error('INVALID_TRANSITION');
     if (!force && proposal.voting_closes_at && new Date(proposal.voting_closes_at) > new Date()) throw new Error('WINDOW_OPEN');
@@ -477,11 +626,11 @@ export class GovernanceStore {
     }
     proposal.updated_at = now();
     this.addAudit('proposal.voting_closed', adminId, 'proposal', proposal.id, undefined, undefined, { passed, force, quorum_met: passedQuorum });
-    this.persist();
     return proposal;
   }
 
-  closeFeedback(proposalId: string, adminId: string, force = false) {
+  async closeFeedback(proposalId: string, adminId: string, force = false): Promise<GovernanceProposal> {
+    if (this.pg) return this.runCommand((worker) => worker.closeFeedback(proposalId, adminId, force));
     const proposal = this.requireProposal(proposalId);
     if (proposal.state !== 'feedback') throw new Error('INVALID_TRANSITION');
     if (!force && proposal.feedback_closes_at && new Date(proposal.feedback_closes_at) > new Date()) throw new Error('WINDOW_OPEN');
@@ -491,11 +640,11 @@ export class GovernanceStore {
     proposal.state = passed ? 'payout_pending' : 'disputed';
     proposal.updated_at = now();
     this.addAudit('proposal.feedback_closed', adminId, 'proposal', proposal.id, undefined, undefined, { passed, force, quorum_met: quorumMet });
-    this.persist();
     return proposal;
   }
 
-  finalizePayout(proposalId: string, adminId: string) {
+  async finalizePayout(proposalId: string, adminId: string): Promise<GovernanceProposal> {
+    if (this.pg) return this.runCommand((worker) => worker.finalizePayout(proposalId, adminId));
     this.requireFinancialActive();
     if (this.controls.pause_payouts) throw new Error('PAYOUTS_PAUSED');
     const proposal = this.requireProposal(proposalId);
@@ -508,11 +657,11 @@ export class GovernanceStore {
     proposal.state = 'completed';
     proposal.updated_at = now();
     this.addAudit('proposal.payout_finalized', adminId, 'proposal', proposal.id, 'Community feedback passed; full locked payout released.');
-    this.persist();
     return proposal;
   }
 
-  transitionProposal(proposalId: string, adminId: string, target: GovernanceState) {
+  async transitionProposal(proposalId: string, adminId: string, target: GovernanceState): Promise<GovernanceProposal> {
+    if (this.pg) return this.runCommand((worker) => worker.transitionProposal(proposalId, adminId, target));
     const proposal = this.requireProposal(proposalId);
     const allowed: Partial<Record<GovernanceState, GovernanceState[]>> = {
       approved: ['scheduled'],
@@ -572,18 +721,18 @@ export class GovernanceStore {
     proposal.state = target;
     proposal.updated_at = now();
     this.addAudit(`proposal.transition.${target}`, adminId, 'proposal', proposal.id);
-    this.persist();
     return proposal;
   }
 
-  resolveDispute(
+  async resolveDispute(
     proposalId: string,
     adminId: string,
     releasePercent: number,
     bondAction: 'refund' | 'slash_50' | 'slash_100',
     reason: string,
     evidenceReference: string,
-  ) {
+  ): Promise<GovernanceProposal> {
+    if (this.pg) return this.runCommand((worker) => worker.resolveDispute(proposalId, adminId, releasePercent, bondAction, reason, evidenceReference));
     this.requireFinancialActive();
     if (this.controls.pause_payouts) throw new Error('PAYOUTS_PAUSED');
     const proposal = this.requireProposal(proposalId);
@@ -603,7 +752,6 @@ export class GovernanceStore {
     proposal.state = 'completed';
     proposal.updated_at = now();
     this.addAudit('proposal.dispute_resolved', adminId, 'proposal', proposal.id, reason, evidenceReference, { release_percent: releasePercent, bond_action: bondAction });
-    this.persist();
     return proposal;
   }
 
@@ -630,7 +778,9 @@ export class GovernanceStore {
     const circulating = [...this.balances.values()].reduce((sum, value) => sum + value, 0);
     const lockedBonds = this.proposals.filter((proposal) => proposal.bond_status === 'locked').reduce((sum, proposal) => sum + proposal.organizer_bond_mjdq, 0);
     const escrow = this.proposals.reduce((sum, proposal) => sum + proposal.escrow_mjdq + proposal.feedback_escrow_mjdq, 0);
-    const accounted = circulating + lockedBonds + escrow + this.treasuryMjdq + this.burnedMjdq;
+    const merchantHeld = this.ledger.filter((entry) => entry.account === 'merchant_settlement')
+      .reduce((sum, entry) => sum + entry.amount_mjdq, 0);
+    const accounted = circulating + lockedBonds + escrow + this.treasuryMjdq + this.burnedMjdq + merchantHeld;
     return {
       unit: 'mJDQ',
       total_issued_mjdq: this.issuedMjdq,
@@ -639,7 +789,7 @@ export class GovernanceStore {
       locked_bonds_mjdq: lockedBonds,
       escrow_mjdq: escrow,
       treasury_mjdq: this.treasuryMjdq,
-      merchant_held_mjdq: 0,
+      merchant_held_mjdq: merchantHeld,
       rewards_distributed_mjdq: this.ledger.filter((entry) => entry.type === 'quest_reward_credit' && entry.amount_mjdq > 0).reduce((sum, entry) => sum + entry.amount_mjdq, 0),
       payouts_distributed_mjdq: this.ledger.filter((entry) => entry.type === 'recipient_credit' && entry.amount_mjdq > 0).reduce((sum, entry) => sum + entry.amount_mjdq, 0),
       reconciliation_difference_mjdq: this.issuedMjdq - accounted,
@@ -661,11 +811,11 @@ export class GovernanceStore {
     return { ...this.controls };
   }
 
-  updateControls(adminId: string, updates: Partial<Pick<GovernanceControls, 'pause_votes' | 'pause_payouts' | 'pause_vouchers' | 'pause_all_financial'>>, reason: string) {
+  async updateControls(adminId: string, updates: Partial<Pick<GovernanceControls, 'pause_votes' | 'pause_payouts' | 'pause_vouchers' | 'pause_all_financial'>>, reason: string): Promise<GovernanceControls> {
+    if (this.pg) return this.runCommand((worker) => worker.updateControls(adminId, updates, reason));
     if (!reason) throw new Error('REASON_REQUIRED');
     this.controls = { ...this.controls, ...updates, updated_by: adminId, updated_at: now() };
     this.addAudit('governance.controls_updated', adminId, 'system', 'governance', reason, undefined, updates);
-    this.persist();
     return this.controls;
   }
 
@@ -699,26 +849,209 @@ export class GovernanceStore {
     };
   }
 
-  creditQuestReward(userId: string, questId: string, submissionId: string, rewardPoints: number, actorId: string) {
+  async recordQuestRewardTx(
+    userId: string,
+    questId: string,
+    submissionId: string,
+    rewardPoints: number,
+    actorId: string,
+    client: { query: (text: string, params?: any[]) => Promise<any> }
+  ): Promise<{ entries: LedgerEntry[]; audit: AuditEvent; balanceMjdq: number } | null> {
+    const amount = rewardPoints * MJDQ_PER_JDQ;
+    if (amount <= 0) return null;
+    const groupId = id('txg');
+    const timestamp = now();
+
+    const debitEntry: LedgerEntry = {
+      id: id('led'),
+      transaction_group_id: groupId,
+      type: 'quest_reward_credit',
+      account: 'reward_issuance',
+      amount_mjdq: -amount,
+      reference_type: 'submission',
+      reference_id: submissionId,
+      actor_id: actorId,
+      metadata: { counterparty: userId },
+      created_at: timestamp,
+    };
+    const creditEntry: LedgerEntry = {
+      id: id('led'),
+      transaction_group_id: groupId,
+      type: 'quest_reward_credit',
+      account: userId,
+      amount_mjdq: amount,
+      reference_type: 'submission',
+      reference_id: submissionId,
+      actor_id: actorId,
+      metadata: { counterparty: 'reward_issuance' },
+      created_at: timestamp,
+    };
+    const auditEvent: AuditEvent = {
+      id: id('audit'),
+      action: 'quest.reward_issued',
+      actor_id: actorId,
+      subject_type: 'quest',
+      subject_id: questId,
+      metadata: { submission_id: submissionId, amount_mjdq: amount },
+      created_at: timestamp,
+    };
+
+    const existing = await client.query(
+      "SELECT 1 FROM governance_ledger WHERE type = 'quest_reward_credit' AND reference_id = $1 AND amount_mjdq > 0 LIMIT 1",
+      [submissionId]
+    );
+    if (existing.rows && existing.rows.length > 0) return null;
+
+    await client.query(
+      `INSERT INTO governance_ledger (id, transaction_group_id, type, account, amount_mjdq, reference_type, reference_id, actor_id, metadata, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10),
+              ($11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+      [
+        debitEntry.id, debitEntry.transaction_group_id, debitEntry.type, debitEntry.account, debitEntry.amount_mjdq, debitEntry.reference_type, debitEntry.reference_id, debitEntry.actor_id, JSON.stringify(debitEntry.metadata), debitEntry.created_at,
+        creditEntry.id, creditEntry.transaction_group_id, creditEntry.type, creditEntry.account, creditEntry.amount_mjdq, creditEntry.reference_type, creditEntry.reference_id, creditEntry.actor_id, JSON.stringify(creditEntry.metadata), creditEntry.created_at,
+      ]
+    );
+    await client.query(
+      `INSERT INTO governance_audit (id, action, actor_id, subject_type, subject_id, metadata, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        auditEvent.id, auditEvent.action, auditEvent.actor_id, auditEvent.subject_type, auditEvent.subject_id, JSON.stringify(auditEvent.metadata), auditEvent.created_at,
+      ]
+    );
+
+    const snapData = await lockGovernanceSnapshot(client);
+    const { rows: balanceRows } = await client.query('SELECT demo_points FROM users WHERE id = $1', [userId]);
+    if (!balanceRows[0]) throw new Error('USER_NOT_FOUND');
+    snapData.balances = { ...snapData.balances, [userId]: authoritativeBalance(balanceRows[0].demo_points, snapData.balances?.[userId]) };
+    snapData.ledger = [...(snapData.ledger || []), debitEntry, creditEntry];
+    snapData.audit = [...(snapData.audit || []), auditEvent];
+    snapData.issuedMjdq = (snapData.issuedMjdq || 0) + amount;
+    await client.query('UPDATE governance_snapshot SET data = $1, updated_at = NOW() WHERE id = 1', [JSON.stringify(snapData)]);
+
+    return { entries: [debitEntry, creditEntry], audit: auditEvent, balanceMjdq: snapData.balances[userId] };
+  }
+
+  async recordVoucherRedemptionTx(
+    userId: string,
+    points: number,
+    voucherId: string,
+    redemptionId: string,
+    client: { query: (text: string, params?: any[]) => Promise<any> }
+  ): Promise<{ entries: LedgerEntry[]; audit: AuditEvent; balanceMjdq: number }> {
+    const amount = points * MJDQ_PER_JDQ;
+    const groupId = id('txg');
+    const timestamp = now();
+
+    const debitEntry: LedgerEntry = {
+      id: id('led'),
+      transaction_group_id: groupId,
+      type: 'voucher_redemption_debit',
+      account: userId,
+      amount_mjdq: -amount,
+      reference_type: 'voucher',
+      reference_id: voucherId,
+      actor_id: userId,
+      metadata: { counterparty: 'merchant_settlement', redemption_id: redemptionId },
+      created_at: timestamp,
+    };
+    const creditEntry: LedgerEntry = {
+      id: id('led'),
+      transaction_group_id: groupId,
+      type: 'voucher_redemption_debit',
+      account: 'merchant_settlement',
+      amount_mjdq: amount,
+      reference_type: 'voucher',
+      reference_id: voucherId,
+      actor_id: userId,
+      metadata: { counterparty: userId, redemption_id: redemptionId },
+      created_at: timestamp,
+    };
+    const auditEvent: AuditEvent = {
+      id: id('audit'),
+      action: 'voucher.redeemed',
+      actor_id: userId,
+      subject_type: 'voucher',
+      subject_id: voucherId,
+      metadata: { redemption_id: redemptionId, points },
+      created_at: timestamp,
+    };
+
+    await client.query(
+      `INSERT INTO governance_ledger (id, transaction_group_id, type, account, amount_mjdq, reference_type, reference_id, actor_id, metadata, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10),
+              ($11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+      [
+        debitEntry.id, debitEntry.transaction_group_id, debitEntry.type, debitEntry.account, debitEntry.amount_mjdq, debitEntry.reference_type, debitEntry.reference_id, debitEntry.actor_id, JSON.stringify(debitEntry.metadata), debitEntry.created_at,
+        creditEntry.id, creditEntry.transaction_group_id, creditEntry.type, creditEntry.account, creditEntry.amount_mjdq, creditEntry.reference_type, creditEntry.reference_id, creditEntry.actor_id, JSON.stringify(creditEntry.metadata), creditEntry.created_at,
+      ]
+    );
+    await client.query(
+      `INSERT INTO governance_audit (id, action, actor_id, subject_type, subject_id, metadata, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        auditEvent.id, auditEvent.action, auditEvent.actor_id, auditEvent.subject_type, auditEvent.subject_id, JSON.stringify(auditEvent.metadata), auditEvent.created_at,
+      ]
+    );
+
+    const snapData = await lockGovernanceSnapshot(client);
+    const { rows: balanceRows } = await client.query('SELECT demo_points FROM users WHERE id = $1', [userId]);
+    if (!balanceRows[0]) throw new Error('USER_NOT_FOUND');
+    snapData.balances = { ...snapData.balances, [userId]: authoritativeBalance(balanceRows[0].demo_points, snapData.balances?.[userId]) };
+    snapData.ledger = [...(snapData.ledger || []), debitEntry, creditEntry];
+    snapData.audit = [...(snapData.audit || []), auditEvent];
+    await client.query('UPDATE governance_snapshot SET data = $1, updated_at = NOW() WHERE id = 1', [JSON.stringify(snapData)]);
+
+    return { entries: [debitEntry, creditEntry], audit: auditEvent, balanceMjdq: snapData.balances[userId] };
+  }
+
+  async creditQuestReward(
+    userId: string,
+    questId: string,
+    submissionId: string,
+    rewardPoints: number,
+    actorId: string,
+    client?: { query: (text: string, params?: any[]) => Promise<any> }
+  ): Promise<{ entries: LedgerEntry[]; audit: AuditEvent } | null | void> {
+    if (client) {
+      return this.recordQuestRewardTx(userId, questId, submissionId, rewardPoints, actorId, client);
+    }
+    if (this.pg) throw new Error('TRANSACTION_CLIENT_REQUIRED');
     const amount = rewardPoints * MJDQ_PER_JDQ;
     if (amount <= 0 || this.ledger.some((entry) => entry.type === 'quest_reward_credit' && entry.reference_id === submissionId && entry.amount_mjdq > 0)) return;
     this.balances.set(userId, this.balanceOf(userId) + amount);
     this.issuedMjdq += amount;
-    this.recordTransfer('quest_reward_credit', 'reward_issuance', userId, amount, 'submission', submissionId, actorId);
-    this.addAudit('quest.reward_issued', actorId, 'quest', questId, undefined, undefined, { submission_id: submissionId, amount_mjdq: amount });
-    this.persist();
+    const debit = { id: id('led'), transaction_group_id: id('txg'), type: 'quest_reward_credit', account: 'reward_issuance', amount_mjdq: -amount, reference_type: 'submission', reference_id: submissionId, actor_id: actorId, metadata: { counterparty: userId }, created_at: now() };
+    const credit = { id: id('led'), transaction_group_id: debit.transaction_group_id, type: 'quest_reward_credit', account: userId, amount_mjdq: amount, reference_type: 'submission', reference_id: submissionId, actor_id: actorId, metadata: { counterparty: 'reward_issuance' }, created_at: now() };
+    const auditEvent = { id: id('audit'), action: 'quest.reward_issued', actor_id: actorId, subject_type: 'quest', subject_id: questId, metadata: { submission_id: submissionId, amount_mjdq: amount }, created_at: now() };
+    this.ledger.push(debit, credit);
+    this.audit.push(auditEvent);
+    return { entries: [debit, credit], audit: auditEvent };
   }
 
   // Consumes demo points for an off-chain voucher redemption and records the ledger debit.
-  consumePoints(userId: string, points: number, voucherId: string, redemptionId: string) {
+  async consumePoints(
+    userId: string,
+    points: number,
+    voucherId: string,
+    redemptionId: string,
+    client?: { query: (text: string, params?: any[]) => Promise<any> }
+  ): Promise<{ entries: LedgerEntry[]; audit: AuditEvent } | void> {
+    if (client) {
+      return this.recordVoucherRedemptionTx(userId, points, voucherId, redemptionId, client);
+    }
+    if (this.pg) throw new Error('TRANSACTION_CLIENT_REQUIRED');
     const amount = points * MJDQ_PER_JDQ;
     if (this.balanceOf(userId) < amount) throw new Error('INSUFFICIENT_JDQ');
     this.balances.set(userId, this.balanceOf(userId) - amount);
     const user = this.db.findUserById(userId);
     if (user) user.demo_points = Math.floor(this.balanceOf(userId) / MJDQ_PER_JDQ);
-    this.recordTransfer('voucher_redemption_debit', userId, 'merchant_settlement', amount, 'voucher', voucherId, userId);
-    this.addAudit('voucher.redeemed', userId, 'voucher', voucherId, undefined, undefined, { redemption_id: redemptionId, points });
-    this.persist();
+    const debit = { id: id('led'), transaction_group_id: id('txg'), type: 'voucher_redemption_debit', account: userId, amount_mjdq: -amount, reference_type: 'voucher', reference_id: voucherId, actor_id: userId, metadata: { counterparty: 'merchant_settlement', redemption_id: redemptionId }, created_at: now() };
+    const credit = { id: id('led'), transaction_group_id: debit.transaction_group_id, type: 'voucher_redemption_debit', account: 'merchant_settlement', amount_mjdq: amount, reference_type: 'voucher', reference_id: voucherId, actor_id: userId, metadata: { counterparty: userId, redemption_id: redemptionId }, created_at: now() };
+    const auditEvent = { id: id('audit'), action: 'voucher.redeemed', actor_id: userId, subject_type: 'voucher', subject_id: voucherId, metadata: { redemption_id: redemptionId, points }, created_at: now() };
+    this.ledger.push(debit, credit);
+    this.audit.push(auditEvent);
+    // Settlement allocation: not a burn
+    return { entries: [debit, credit], audit: auditEvent };
   }
 
   private eligibleGovernanceUsers() {

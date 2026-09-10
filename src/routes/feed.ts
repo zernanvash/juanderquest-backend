@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { optionalAuthenticateToken, AuthRequest } from '../middleware/auth.js';
+import { optionalAuthenticateToken, checkQAAuthorization, isAuthorizedQA, AuthRequest } from '../middleware/auth.js';
 import { spotStore, Spot } from '../spots/store.js';
 import { rankedFeedPage } from '../feed-pagination.js';
 
@@ -18,15 +18,24 @@ export function applyMunicipalDiversity<T extends { municipality: string }>(
   items: T[],
   maxConsecutive = 2
 ): T[] {
-  const result: T[] = [];
+  if (items.length <= maxConsecutive) return [...items];
+
   const pool = [...items];
+  const result: T[] = [];
 
   while (pool.length > 0) {
     let candidateIdx = 0;
-    const n = result.length;
 
-    if (n >= maxConsecutive && result[n - 1].municipality === result[n - 2].municipality) {
-      const avoidMuni = result[n - 1].municipality;
+    // Check if the first candidate violates the maxConsecutive rule
+    const len = result.length;
+    if (
+      len >= maxConsecutive &&
+      result
+        .slice(len - maxConsecutive)
+        .every((item) => item.municipality === pool[candidateIdx].municipality)
+    ) {
+      // Find the first item from a DIFFERENT municipality
+      const avoidMuni = pool[candidateIdx].municipality;
       const alternativeIdx = pool.findIndex((item) => item.municipality !== avoidMuni);
       if (alternativeIdx !== -1) {
         candidateIdx = alternativeIdx;
@@ -39,7 +48,7 @@ export function applyMunicipalDiversity<T extends { municipality: string }>(
   return result;
 }
 
-feedRouter.get('/feed', optionalAuthenticateToken, (req: AuthRequest, res: Response) => {
+feedRouter.get('/feed', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res: Response) => {
   const userId = req.user?.id;
   const prefs = userId ? spotStore.getPreferences(userId) : undefined;
   const hasUserPrefs =
@@ -48,9 +57,11 @@ feedRouter.get('/feed', optionalAuthenticateToken, (req: AuthRequest, res: Respo
       (prefs?.tags && prefs.tags.length > 0) ||
       (prefs?.occasions && prefs.occasions.length > 0));
 
-  // 1. Eligible Published & Non-suppressed Spots
+  const allowQA = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.headers['x-include-test'] === 'true');
+
+  // 1. Eligible Published & Non-suppressed Spots (strictly excluding synthetic test data unless authorized QA)
   const eligibleSpots = spotStore.spots.filter(
-    (s) => s.status === 'published' && !s.recommendation_suppressed
+    (s) => s.status === 'published' && !s.recommendation_suppressed && (allowQA || !s.is_test)
   );
 
   // 2. Score Spots with Persisted Signals

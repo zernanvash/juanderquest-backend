@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
-import { authenticateToken, optionalAuthenticateToken, requireAdmin, AuthRequest } from '../middleware/auth.js';
+import { authenticateToken, optionalAuthenticateToken, requireAdmin, AuthRequest, isAuthorizedQA, checkQAAuthorization } from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { env } from '../config/env.js';
@@ -19,7 +19,12 @@ const mediaUpload = multer({
   limits: { fileSize: 30 * 1024 * 1024 + 1024 }, // Allowed up to 30 MB for video clips (8 MB for photos enforced downstream)
 });
 
-const uploadRateLimiter = rateLimit({ windowMs: 60 * 1000, max: env.NODE_ENV === 'test' ? 1000 : 20 });
+const uploadRateLimiter = rateLimit({
+  policyId: 'spots:photo-upload',
+  windowMs: 60 * 1000,
+  max: env.NODE_ENV === 'test' ? 1000 : 20,
+  keyStrategy: 'actor_or_ip',
+});
 
 
 router.get('/spot-taxonomy', (_req, res) => res.json({ success: true, data: {
@@ -28,27 +33,36 @@ router.get('/spot-taxonomy', (_req, res) => res.json({ success: true, data: {
   amenities: ['parking', 'restroom', 'wifi', 'wheelchair_accessible', 'pet_friendly', 'child_friendly'],
 } }));
 
-router.get('/spots', optionalAuthenticateToken, (req: AuthRequest, res) => {
+router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
+  const allowTest = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.query.include_qa === 'true');
   const lat = numeric(req.query.lat), lng = numeric(req.query.lng), radius = numeric(req.query.radius_km);
   if ((lat !== undefined) !== (lng !== undefined) || [lat, lng, radius].some(v => v !== undefined && !Number.isFinite(v))) {
     return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Valid lat/lng and radius values are required.' } });
   }
-  const data = spotStore.list({ search: req.query.q as string | undefined, categories: csv(req.query.categories), tags: csv(req.query.tags), municipality: req.query.municipality as string | undefined, lat, lng, radius, intent: req.query.intent as string | undefined, sort: req.query.sort as string | undefined, hasQuest: req.query.has_quest === 'true', userId: req.user?.id });
+  const data = spotStore.list({ search: req.query.q as string | undefined, categories: csv(req.query.categories), tags: csv(req.query.tags), municipality: req.query.municipality as string | undefined, lat, lng, radius, intent: req.query.intent as string | undefined, sort: req.query.sort as string | undefined, hasQuest: req.query.has_quest === 'true', userId: req.user?.id, allowTest });
   return res.json({ success: true, data, meta: { count: data.length, sort: req.query.sort || 'recommended' } });
 });
 
-router.get('/spots/trending', optionalAuthenticateToken, (req: AuthRequest, res) => res.json({ success: true, data: spotStore.list({ municipality: req.query.municipality as string | undefined, sort: 'trending', userId: req.user?.id }).slice(0, 10) }));
+router.get('/spots/trending', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
+  const allowTest = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.query.include_qa === 'true');
+  res.json({ success: true, data: spotStore.list({ municipality: req.query.municipality as string | undefined, sort: 'trending', userId: req.user?.id, allowTest }).slice(0, 10) });
+});
 
-router.get('/spots/:slug/alternatives', optionalAuthenticateToken, (req: AuthRequest, res) => {
-  const source=spotStore.spots.find(s=>s.slug===req.params.slug&&s.status==='published');
+router.get('/spots/:slug/alternatives', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
+  const allowTest = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.query.include_qa === 'true');
+  const source=spotStore.spots.find(s=>s.slug===req.params.slug&&s.status==='published'&&(allowTest||!s.is_test));
   if(!source)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
   const requested=numeric(req.query.limit);const limit=requested===undefined?3:Math.max(1,Math.min(5,Math.floor(requested)));
   return res.json({success:true,data:spotStore.alternatives(source,req.user?.id,limit),meta:{source_spot_id:source.id,catalog_scope:'pangasinan_alpha',ranking_scope:'catalog_wide',expansion_ready:'philippines',personalized:Boolean(req.user),estimated_not_live:true}});
 });
 
-router.get('/spots/:slug', optionalAuthenticateToken, (req: AuthRequest, res) => {
-  const spot = spotStore.spots.find(s => s.slug === req.params.slug && s.status === 'published');
+router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
+  const allowTest = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.query.include_qa === 'true');
+  const spot = spotStore.spots.find(s => s.slug === req.params.slug && s.status === 'published' && (allowTest || !s.is_test));
   if (!spot) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
+  if (spot.is_test) {
+    res.set('X-Robots-Tag', 'noindex, nofollow');
+  }
   const attached = Array.from(assetStore.assets.values()).filter(a => a.spot_id === spot.id && a.status === 'attached');
   return res.json({ success: true, data: { ...spot, ...spotStore.crowd(spot), saved: spotStore.isSaved(req.user?.id, spot.id), trend_score: spotStore.trend(spot.id), attached_assets: attached } });
 });

@@ -10,6 +10,7 @@ export interface AuthenticatedUser {
 
 export interface AuthRequest extends Request {
   user?: AuthenticatedUser;
+  isQAAuthorized?: boolean;
 }
 
 export const optionalAuthenticateToken = (req: AuthRequest, _res: Response, next: NextFunction) => {
@@ -49,7 +50,9 @@ export const authenticateToken = (req: AuthRequest, res: Response, next: NextFun
   });
 };
 
-export const requireAdmin = (req: AuthRequest, res: Response, next: NextFunction) => {
+import { db, UserRow } from '../db/index.js';
+
+export const requireAdmin = async (req: AuthRequest, res: Response, next: NextFunction) => {
   if (!req.user || req.user.role !== 'admin') {
     return res.status(403).json({
       success: false,
@@ -59,5 +62,94 @@ export const requireAdmin = (req: AuthRequest, res: Response, next: NextFunction
       },
     });
   }
+
+  // Durable verification: ensure account still exists and role has not been demoted/revoked
+  try {
+    let durableUser: UserRow | null = null;
+    if (db.usersRepo.getPool()) {
+      durableUser = (await db.usersRepo.findById(req.user.id)) ?? null;
+    } else {
+      durableUser = db.findUserById(req.user.id) ?? null;
+    }
+
+    if (!durableUser || durableUser.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Account no longer exists or administrative privileges have been revoked.',
+        },
+      });
+    }
+  } catch (err: any) {
+    // Fail closed on database outage/error: do NOT fall back to trusting token or stale memory
+    return res.status(503).json({
+      success: false,
+      error: {
+        code: 'DATABASE_OUTAGE',
+        message: 'Database unavailable during administrative authorization check.',
+      },
+    });
+  }
+
   next();
 };
+
+export const isAuthorizedQA = (req: AuthRequest): boolean => {
+  return Boolean(req.isQAAuthorized);
+};
+
+export const checkQAAuthorization = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  const requestedQA =
+    req.query.include_test === 'true' ||
+    req.query.include_qa === 'true' ||
+    req.headers['x-include-test'] === 'true';
+
+  if (!requestedQA) {
+    req.isQAAuthorized = false;
+    return next();
+  }
+
+  // QA mode was explicitly requested. Must be authenticated with active admin or qa capability.
+  if (!req.user || !req.user.id) {
+    return res.status(403).json({
+      success: false,
+      error: {
+        code: 'UNAUTHORIZED_QA_MODE',
+        message: 'Explicit authenticated QA or admin privileges required to access synthetic test data.',
+      },
+    });
+  }
+
+  try {
+    let durableUser: UserRow | null = null;
+    if (db.usersRepo.getPool()) {
+      durableUser = (await db.usersRepo.findById(req.user.id)) ?? null;
+    } else {
+      durableUser = db.findUserById(req.user.id) ?? null;
+    }
+
+    if (!durableUser || (durableUser.role !== 'admin' && (durableUser as any).role !== 'qa')) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'UNAUTHORIZED_QA_MODE',
+          message: 'Explicit authenticated QA or admin privileges required to access synthetic test data.',
+        },
+      });
+    }
+
+    req.isQAAuthorized = true;
+    next();
+  } catch (err: any) {
+    // Fail closed on database outage during QA authorization check
+    return res.status(503).json({
+      success: false,
+      error: {
+        code: 'DATABASE_OUTAGE',
+        message: 'Database unavailable during QA authorization check.',
+      },
+    });
+  }
+};
+

@@ -20,14 +20,14 @@ router.get('/community-quests/:id', (req, res) => {
   res.json({ success: true, data: proposal });
 });
 
-router.post('/community-quests/:id/feedback', authenticateToken, (req: AuthRequest, res: Response) => {
+router.post('/community-quests/:id/feedback', authenticateToken, async (req: AuthRequest, res: Response) => {
   const parsed = feedbackSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(422).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Feedback choice and idempotency key are required.', details: parsed.error.errors } });
     return;
   }
   try {
-    const data = governanceStore.castFeedback(
+    const data = await governanceStore.castFeedback(
       req.params.id,
       req.user!.id,
       parsed.data.choice,

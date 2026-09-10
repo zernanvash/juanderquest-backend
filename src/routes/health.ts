@@ -28,6 +28,11 @@ export function createHealthRouter(probes: ReadinessProbes = defaultReadinessPro
     res.status(report.ready ? 200 : 503).json(report);
   });
 
+  router.get('/ready', async (_req, res) => {
+    const report = await buildReadinessReport(probes);
+    res.status(report.ready ? 200 : 503).json(report);
+  });
+
   return router;
 }
 

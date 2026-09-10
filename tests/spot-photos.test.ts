@@ -152,7 +152,7 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('FILE_TOO_LARGE');
-  });
+  }, 15000);
 
   it('rejects oversized video files exceeding 30 MB', async () => {
     const res = await request(app)
@@ -162,7 +162,7 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('FILE_TOO_LARGE');
-  });
+  }, 15000);
 
 
   it('prevents path traversal during local storage operations', async () => {

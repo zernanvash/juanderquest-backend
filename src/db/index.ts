@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { env } from '../config/env.js';
 import { isDevelopmentSeedEnabled } from './policy.js';
+import { UsersRepository, CreateUserData } from '../repositories/users.js';
 
 const developmentFixturesEnabled = isDevelopmentSeedEnabled({
   nodeEnv: env.NODE_ENV,
@@ -23,6 +24,7 @@ export interface UserRow {
   handle?: string | null;
   bio?: string | null;
   status_text?: string | null;
+  is_test?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -109,6 +111,7 @@ export interface QuestRow {
   marker_code: string;
   marker_image_url: string;
   is_active: boolean;
+  is_test?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -167,6 +170,7 @@ export interface SubmissionRow {
   rejection_reason?: string | null;
   reviewed_by?: string | null;
   reviewed_at?: string | null;
+  is_test?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -256,6 +260,7 @@ const mockUsers: UserRow[] = [
     handle: 'juandelacruz',
     bio: 'Pangasinan explorer & cultural heritage scout.',
     status_text: 'Exploring Hundred Islands & Bolinao 🌊',
+    is_test: false,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -274,6 +279,7 @@ const mockUsers: UserRow[] = [
     handle: null,
     bio: null,
     status_text: null,
+    is_test: false,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -292,6 +298,7 @@ const mockUsers: UserRow[] = [
     handle: 'mariasantos',
     bio: 'Eco-trail enthusiast and local food lover from Dagupan.',
     status_text: 'Tasting Dagupan bangus 🐟',
+    is_test: false,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -310,6 +317,7 @@ const mockUsers: UserRow[] = [
     handle: 'stealthscout',
     bio: 'This is a private profile.',
     status_text: 'Hidden',
+    is_test: true,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -677,10 +685,19 @@ export class MemoryDb {
   web_analytics_events: WebAnalyticsEventRow[] = [];
 
   private pg: Pool | null = null;
+  private _usersRepo: UsersRepository | null = null;
+
+  public get usersRepo(): UsersRepository {
+    if (!this._usersRepo) {
+      this._usersRepo = new UsersRepository(this.pg);
+    }
+    return this._usersRepo;
+  }
 
   // Hydrates the in-memory arrays from PostgreSQL and attaches the pool for write-through.
   async hydrateFromPg(pool: Pool) {
     this.pg = pool;
+    this.usersRepo.setPool(pool);
     const toIso = (value: Date | string) => new Date(value).toISOString();
     const { rows: users } = await pool.query('SELECT * FROM users ORDER BY created_at');
     this.users = users.map((row: any) => ({
@@ -693,6 +710,7 @@ export class MemoryDb {
       handle: row.handle ?? null,
       bio: row.bio ?? null,
       status_text: row.status_text ?? null,
+      is_test: Boolean(row.is_test),
       created_at: toIso(row.created_at), updated_at: toIso(row.updated_at),
     }));
     const { rows: quests } = await pool.query('SELECT * FROM quests ORDER BY created_at');
@@ -705,6 +723,7 @@ export class MemoryDb {
       geo_multiplier: row.geo_multiplier ?? 2.0,
       reward_points: row.reward_points, marker_code: row.marker_code,
       marker_image_url: row.marker_image_url, is_active: row.is_active,
+      is_test: Boolean(row.is_test),
       created_at: toIso(row.created_at), updated_at: toIso(row.updated_at),
     }));
     const { rows: submissions } = await pool.query('SELECT * FROM submissions ORDER BY created_at');
@@ -713,6 +732,7 @@ export class MemoryDb {
       scanned_marker_code: row.scanned_marker_code, captured_lat: row.captured_lat, captured_lng: row.captured_lng,
       captured_accuracy: row.captured_accuracy, status: row.status, rejection_reason: row.rejection_reason,
       reviewed_by: row.reviewed_by, reviewed_at: row.reviewed_at ? toIso(row.reviewed_at) : null,
+      is_test: Boolean(row.is_test),
       created_at: toIso(row.created_at), updated_at: toIso(row.updated_at),
     }));
     const { rows: merchants } = await pool.query('SELECT * FROM merchants ORDER BY created_at');
@@ -840,13 +860,19 @@ export class MemoryDb {
     return this.users.find((u) => u.id === id);
   }
 
-  findPublicUserById(id: string): UserRow | undefined {
-    return this.users.find((u) => u.id === id && u.is_public);
+  async findPublicUserById(id: string, allowTest = false): Promise<UserRow | undefined> {
+    if (this.pg) {
+      return await this.usersRepo.findPublicById(id, allowTest);
+    }
+    return this.users.find((u) => u.id === id && u.is_public && (allowTest || !u.is_test));
   }
 
-  findPublicUserByHandle(handle: string): UserRow | undefined {
+  async findPublicUserByHandle(handle: string, allowTest = false): Promise<UserRow | undefined> {
+    if (this.pg) {
+      return await this.usersRepo.findPublicByHandle(handle, allowTest);
+    }
     const clean = handle.replace(/^@/, '').toLowerCase().trim();
-    return this.users.find((u) => u.is_public && u.handle?.toLowerCase() === clean);
+    return this.users.find((u) => u.is_public && u.handle?.toLowerCase() === clean && (allowTest || !u.is_test));
   }
 
   findUserByHandle(handle: string): UserRow | undefined {
@@ -854,10 +880,60 @@ export class MemoryDb {
     return this.users.find((u) => u.handle?.toLowerCase() === clean);
   }
 
+  async findUserByIdDurable(id: string): Promise<UserRow | undefined> {
+    if (this.pg) {
+      const row = await this.usersRepo.findById(id);
+      if (row) {
+        const idx = this.users.findIndex((u) => u.id === id);
+        if (idx >= 0) this.users[idx] = row;
+        else this.users.push(row);
+      }
+      return row;
+    }
+    return this.findUserById(id);
+  }
+
+  async findUserBySeedDurable(seedId: string): Promise<UserRow | undefined> {
+    if (this.pg) {
+      const row = await this.usersRepo.findBySeedId(seedId);
+      if (row) {
+        const idx = this.users.findIndex((u) => u.seed_id === seedId);
+        if (idx >= 0) this.users[idx] = row;
+        else this.users.push(row);
+      }
+      return row;
+    }
+    return this.findUserBySeed(seedId);
+  }
+
+  async findOrCreateUserDurable(data: CreateUserData): Promise<UserRow> {
+    const user = await this.usersRepo.findOrCreateBySeedId(data);
+    const idx = this.users.findIndex((u) => u.id === user.id || u.seed_id === user.seed_id);
+    if (idx >= 0) {
+      this.users[idx] = user;
+    } else {
+      this.users.push(user);
+    }
+    return user;
+  }
+
   async updateUserProfile(
     userId: string,
     updates: { is_public?: boolean; handle?: string | null; bio?: string | null; status_text?: string | null; display_name?: string }
   ): Promise<UserRow | undefined> {
+    if (this.pg) {
+      const updated = await this.usersRepo.updateProfile(userId, updates);
+      if (updated) {
+        const memIdx = this.users.findIndex((u) => u.id === userId);
+        if (memIdx >= 0) {
+          this.users[memIdx] = updated;
+        } else {
+          this.users.push(updated);
+        }
+      }
+      return updated;
+    }
+
     const user = this.findUserById(userId);
     if (!user) return undefined;
 
@@ -876,48 +952,8 @@ export class MemoryDb {
       }
     }
 
-    if (this.pg) {
-      try {
-        const query = `
-          UPDATE users
-          SET is_public = COALESCE($2, is_public),
-              handle = CASE WHEN $3::text IS NOT NULL THEN NULLIF(LOWER(TRIM($3)), '') ELSE handle END,
-              bio = COALESCE($4, bio),
-              status_text = COALESCE($5, status_text),
-              display_name = COALESCE($6, display_name),
-              updated_at = NOW()
-          WHERE id = $1
-          RETURNING *
-        `;
-        const { rows } = await this.pg.query(query, [
-          userId,
-          updates.is_public !== undefined ? updates.is_public : null,
-          normalizedHandle !== undefined ? normalizedHandle : null,
-          updates.bio !== undefined ? updates.bio : null,
-          updates.status_text !== undefined ? updates.status_text : null,
-          updates.display_name !== undefined ? updates.display_name : null,
-        ]);
-        if (!rows.length) return undefined;
-        const row = rows[0];
-        user.is_public = Boolean(row.is_public);
-        user.handle = row.handle ?? null;
-        user.bio = row.bio ?? null;
-        user.status_text = row.status_text ?? null;
-        user.display_name = row.display_name;
-        user.updated_at = new Date(row.updated_at).toISOString();
-        return user;
-      } catch (err: any) {
-        if (err.code === '23505') {
-          const conflictErr = new Error('HANDLE_TAKEN');
-          (conflictErr as any).code = 'HANDLE_TAKEN';
-          throw conflictErr;
-        }
-        throw err;
-      }
-    }
-
     if (updates.is_public !== undefined) user.is_public = updates.is_public;
-    if (normalizedHandle !== undefined) user.handle = normalizedHandle;
+    if (updates.handle !== undefined) user.handle = normalizedHandle || null;
     if (updates.bio !== undefined) user.bio = updates.bio;
     if (updates.status_text !== undefined) user.status_text = updates.status_text;
     if (updates.display_name !== undefined) user.display_name = updates.display_name;
@@ -925,12 +961,15 @@ export class MemoryDb {
     return user;
   }
 
-  getFollowCounts(userId: string): { follower_count: number; following_count: number } {
+  async getFollowCounts(userId: string, ownerView = false, allowTest = false): Promise<{ follower_count: number; following_count: number }> {
+    if (this.pg) {
+      return await this.usersRepo.getFollowCounts(userId, ownerView, allowTest);
+    }
     const user = this.findUserById(userId);
-    if (!user || !user.is_public) {
+    if (!user || (!user.is_public && !ownerView)) {
       return { follower_count: 0, following_count: 0 };
     }
-    const publicUserIds = new Set(this.users.filter((u) => u.is_public).map((u) => u.id));
+    const publicUserIds = new Set(this.users.filter((u) => u.is_public && (allowTest || !u.is_test)).map((u) => u.id));
     const follower_count = this.follows.filter(
       (f) => f.following_id === userId && publicUserIds.has(f.follower_id)
     ).length;
@@ -940,12 +979,15 @@ export class MemoryDb {
     return { follower_count, following_count };
   }
 
-  getRelationship(actorId: string, targetId: string): {
+  async getRelationship(actorId: string, targetId: string): Promise<{
     is_following: boolean;
     follows_you: boolean;
     can_follow: boolean;
     reason?: 'PROFILE_VISIBILITY_REQUIRED' | 'CANNOT_FOLLOW_SELF' | 'TARGET_NOT_FOUND';
-  } {
+  }> {
+    if (this.pg) {
+      return await this.usersRepo.getRelationship(actorId, targetId);
+    }
     const actor = this.findUserById(actorId);
     const target = this.findUserById(targetId);
 
@@ -996,6 +1038,20 @@ export class MemoryDb {
       return { success: false, error: 'CANNOT_FOLLOW_SELF' };
     }
 
+    if (this.pg) {
+      const res = await this.usersRepo.followUser(actorId, targetId);
+      if (res.success) {
+        if (!this.follows.some((f) => f.follower_id === actorId && f.following_id === targetId)) {
+          this.follows.push({
+            follower_id: actorId,
+            following_id: targetId,
+            created_at: new Date().toISOString(),
+          });
+        }
+      }
+      return res;
+    }
+
     const actor = this.findUserById(actorId);
     if (!actor || !actor.is_public) {
       return { success: false, error: 'PROFILE_VISIBILITY_REQUIRED' };
@@ -1004,40 +1060,6 @@ export class MemoryDb {
     const target = this.findUserById(targetId);
     if (!target || !target.is_public) {
       return { success: false, error: 'NOT_FOUND' };
-    }
-
-    if (this.pg) {
-      const client = await this.pg.connect();
-      try {
-        await client.query('BEGIN');
-        const [firstId, secondId] = [actorId, targetId].sort();
-        const { rows: locked } = await client.query(
-          'SELECT id, is_public FROM users WHERE id IN ($1, $2) FOR UPDATE',
-          [firstId, secondId]
-        );
-        const lockedActor = locked.find((r: any) => r.id === actorId);
-        const lockedTarget = locked.find((r: any) => r.id === targetId);
-        if (!lockedActor || !lockedActor.is_public) {
-          await client.query('ROLLBACK');
-          return { success: false, error: 'PROFILE_VISIBILITY_REQUIRED' };
-        }
-        if (!lockedTarget || !lockedTarget.is_public) {
-          await client.query('ROLLBACK');
-          return { success: false, error: 'NOT_FOUND' };
-        }
-        await client.query(
-          `INSERT INTO user_follows (follower_id, following_id, created_at)
-           VALUES ($1, $2, NOW())
-           ON CONFLICT (follower_id, following_id) DO NOTHING`,
-          [actorId, targetId]
-        );
-        await client.query('COMMIT');
-      } catch (err) {
-        await client.query('ROLLBACK');
-        throw err;
-      } finally {
-        client.release();
-      }
     }
 
     const nowIso = new Date().toISOString();
@@ -1049,7 +1071,7 @@ export class MemoryDb {
       });
     }
 
-    const counts = this.getFollowCounts(targetId);
+    const counts = await this.getFollowCounts(targetId);
     return {
       success: true,
       follower_count: counts.follower_count,
@@ -1063,17 +1085,18 @@ export class MemoryDb {
     following_count: number;
   }> {
     if (this.pg) {
-      await this.pg.query(
-        'DELETE FROM user_follows WHERE follower_id = $1 AND following_id = $2',
-        [actorId, targetId]
+      const res = await this.usersRepo.unfollowUser(actorId, targetId);
+      this.follows = this.follows.filter(
+        (f) => !(f.follower_id === actorId && f.following_id === targetId)
       );
+      return res;
     }
 
     this.follows = this.follows.filter(
       (f) => !(f.follower_id === actorId && f.following_id === targetId)
     );
 
-    const counts = this.getFollowCounts(targetId);
+    const counts = await this.getFollowCounts(targetId);
     return {
       success: true,
       follower_count: counts.follower_count,
@@ -1081,16 +1104,20 @@ export class MemoryDb {
     };
   }
 
-  listFollowers(
+  async listFollowers(
     targetId: string,
     limit: number = 20,
     cursor?: string,
-    ownerView = false
-  ): { items: PublicTravelerSummary[]; next_cursor: string | null; has_more: boolean } | null {
+    ownerView = false,
+    allowTest = false
+  ): Promise<{ items: PublicTravelerSummary[]; next_cursor: string | null; has_more: boolean } | null> {
+    if (this.pg) {
+      return await this.usersRepo.listFollowers(targetId, limit, cursor, ownerView, allowTest);
+    }
     const target = this.findUserById(targetId);
     if (!target || (!target.is_public && !ownerView)) return null;
 
-    const publicUserIds = new Set(this.users.filter((u) => u.is_public).map((u) => u.id));
+    const publicUserIds = new Set(this.users.filter((u) => u.is_public && (allowTest || !u.is_test)).map((u) => u.id));
     let candidates = this.follows.filter(
       (f) => f.following_id === targetId && publicUserIds.has(f.follower_id)
     );
@@ -1130,7 +1157,7 @@ export class MemoryDb {
     const items: PublicTravelerSummary[] = pageEdges.flatMap((edge) => {
       const u = byId.get(edge.follower_id);
       if (!u || !u.is_public) return [];
-      const counts = this.getFollowCounts(u.id);
+      const counts = this.getFollowCountsSync(u.id);
       return [
         {
           id: u.id,
@@ -1149,15 +1176,19 @@ export class MemoryDb {
     return { items, next_cursor, has_more };
   }
 
-  listFollowing(
+  async listFollowing(
     targetId: string,
     limit: number = 20,
-    cursor?: string
-  ): { items: PublicTravelerSummary[]; next_cursor: string | null; has_more: boolean } | null {
+    cursor?: string,
+    allowTest = false
+  ): Promise<{ items: PublicTravelerSummary[]; next_cursor: string | null; has_more: boolean } | null> {
+    if (this.pg) {
+      return await this.usersRepo.listFollowing(targetId, limit, cursor, allowTest);
+    }
     const target = this.findUserById(targetId);
     if (!target || !target.is_public) return null;
 
-    const publicUserIds = new Set(this.users.filter((u) => u.is_public).map((u) => u.id));
+    const publicUserIds = new Set(this.users.filter((u) => u.is_public && (allowTest || !u.is_test)).map((u) => u.id));
     let candidates = this.follows.filter(
       (f) => f.follower_id === targetId && publicUserIds.has(f.following_id)
     );
@@ -1197,7 +1228,7 @@ export class MemoryDb {
     const items: PublicTravelerSummary[] = pageEdges.flatMap((edge) => {
       const u = byId.get(edge.following_id);
       if (!u || !u.is_public) return [];
-      const counts = this.getFollowCounts(u.id);
+      const counts = this.getFollowCountsSync(u.id);
       return [
         {
           id: u.id,
@@ -1216,11 +1247,14 @@ export class MemoryDb {
     return { items, next_cursor, has_more };
   }
 
-  listMyFollowing(
+  async listMyFollowing(
     actorId: string,
     limit: number = 20,
     cursor?: string
-  ): { items: PublicTravelerSummary[]; next_cursor: string | null; has_more: boolean } {
+  ): Promise<{ items: PublicTravelerSummary[]; next_cursor: string | null; has_more: boolean }> {
+    if (this.pg) {
+      return await this.usersRepo.listMyFollowing(actorId, limit, cursor);
+    }
     let candidates = this.follows.filter((f) => f.follower_id === actorId);
 
     candidates.sort((a, b) => {
@@ -1269,7 +1303,7 @@ export class MemoryDb {
           is_unavailable: true,
         };
       }
-      const counts = this.getFollowCounts(u.id);
+      const counts = this.getFollowCountsSync(u.id);
       return {
         id: u.id,
         display_name: u.display_name,
@@ -1287,15 +1321,18 @@ export class MemoryDb {
     return { items, next_cursor, has_more };
   }
 
-  listPublicUsers(limit: number = 3): PublicTravelerSummary[] {
+  async listPublicUsers(limit: number = 3, allowTest: boolean = false): Promise<PublicTravelerSummary[]> {
+    if (this.pg) {
+      return await this.usersRepo.listPublicUsers(limit, allowTest);
+    }
     const capped = Math.min(6, Math.max(1, limit));
     const publicUsers = this.users
-      .filter((u) => u.is_public)
+      .filter((u) => u.is_public && (allowTest || !u.is_test))
       .sort((a, b) => a.display_name.localeCompare(b.display_name) || a.id.localeCompare(b.id))
       .slice(0, capped);
 
     return publicUsers.map((u) => {
-      const counts = this.getFollowCounts(u.id);
+      const counts = this.getFollowCountsSync(u.id);
       return {
         id: u.id,
         display_name: u.display_name,
@@ -1310,8 +1347,23 @@ export class MemoryDb {
     });
   }
 
-  findQuestById(id: string): QuestRow | undefined {
-    return this.quests.find((q) => q.id === id && q.is_active);
+  private getFollowCountsSync(userId: string): { follower_count: number; following_count: number } {
+    const user = this.findUserById(userId);
+    if (!user || !user.is_public) {
+      return { follower_count: 0, following_count: 0 };
+    }
+    const publicUserIds = new Set(this.users.filter((u) => u.is_public).map((u) => u.id));
+    const follower_count = this.follows.filter(
+      (f) => f.following_id === userId && publicUserIds.has(f.follower_id)
+    ).length;
+    const following_count = this.follows.filter(
+      (f) => f.follower_id === userId && publicUserIds.has(f.following_id)
+    ).length;
+    return { follower_count, following_count };
+  }
+
+  findQuestById(id: string, includeInactive = false): QuestRow | undefined {
+    return this.quests.find((q) => q.id === id && (includeInactive || q.is_active));
   }
 
   listQuests(category?: string): QuestRow[] {
@@ -1344,7 +1396,7 @@ export class MemoryDb {
     return this.submissions
       .filter((s) => s.user_id === userId)
       .map((s) => {
-        const quest = this.findQuestById(s.quest_id);
+        const quest = this.findQuestById(s.quest_id, true);
         return {
           ...s,
           quest_title: quest?.title || 'Unknown Quest',

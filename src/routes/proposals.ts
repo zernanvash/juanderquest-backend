@@ -56,37 +56,37 @@ proposalsRouter.get('/:id', (req: AuthRequest, res: Response) => {
   res.json({ success: true, data: proposal });
 });
 
-proposalsRouter.post('/', authenticateToken, (req: AuthRequest, res: Response) => {
+proposalsRouter.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   const result = createProposalSchema.safeParse(req.body);
   if (!result.success) {
     res.status(422).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid proposal fields', details: result.error.errors } });
     return;
   }
   try {
-    const proposal = governanceStore.createProposal({ ...result.data, submitted_by_id: req.user!.id });
+    const proposal = await governanceStore.createProposal({ ...result.data, submitted_by_id: req.user!.id });
     res.status(201).json({ success: true, data: proposal });
   } catch (error) {
     sendGovernanceError(res, error);
   }
 });
 
-proposalsRouter.post('/:id/submit', authenticateToken, (req: AuthRequest, res: Response) => {
+proposalsRouter.post('/:id/submit', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
-    const proposal = governanceStore.submitProposal(req.params.id, req.user!.id);
+    const proposal = await governanceStore.submitProposal(req.params.id, req.user!.id);
     res.json({ success: true, data: proposal });
   } catch (error) {
     sendGovernanceError(res, error);
   }
 });
 
-proposalsRouter.post('/:id/votes', authenticateToken, (req: AuthRequest, res: Response) => {
+proposalsRouter.post('/:id/votes', authenticateToken, async (req: AuthRequest, res: Response) => {
   const result = voteSchema.safeParse(req.body);
   if (!result.success) {
     res.status(422).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Vote choice and idempotency key are required.', details: result.error.errors } });
     return;
   }
   try {
-    const vote = governanceStore.castProposalVote(req.params.id, req.user!.id, result.data.choice, result.data.idempotency_key);
+    const vote = await governanceStore.castProposalVote(req.params.id, req.user!.id, result.data.choice, result.data.idempotency_key);
     res.json({ success: true, data: vote, server_time: new Date().toISOString() });
   } catch (error) {
     sendGovernanceError(res, error);

@@ -60,21 +60,21 @@ router.get('/admin/governance/proposals/:id', (req, res) => {
   res.json({ success: true, data: proposal });
 });
 
-router.post('/admin/governance/proposals/:id/screen', (req: AuthRequest, res: Response) => {
+router.post('/admin/governance/proposals/:id/screen', async (req: AuthRequest, res: Response) => {
   const parsed = screenSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(422).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Complete checklist, reason, and evidence reference are required.', details: parsed.error.errors } });
     return;
   }
   try {
-    const data = governanceStore.screenProposal(req.params.id, req.user!.id, parsed.data.decision, parsed.data.reason, parsed.data.evidence_reference, parsed.data.checklist_complete);
+    const data = await governanceStore.screenProposal(req.params.id, req.user!.id, parsed.data.decision, parsed.data.reason, parsed.data.evidence_reference, parsed.data.checklist_complete);
     res.json({ success: true, data });
   } catch (error) {
     fail(res, error);
   }
 });
 
-router.post('/admin/governance/proposals/:id/transition', (req: AuthRequest, res: Response) => {
+router.post('/admin/governance/proposals/:id/transition', async (req: AuthRequest, res: Response) => {
   const parsed = transitionSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(422).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid governance transition.' } });
@@ -88,26 +88,26 @@ router.post('/admin/governance/proposals/:id/transition', (req: AuthRequest, res
       mark_disputed: 'disputed',
     } as const;
     const data = parsed.data.action === 'close_voting'
-      ? governanceStore.closeVoting(req.params.id, req.user!.id, parsed.data.force)
+      ? await governanceStore.closeVoting(req.params.id, req.user!.id, parsed.data.force)
       : parsed.data.action === 'close_feedback'
-      ? governanceStore.closeFeedback(req.params.id, req.user!.id, parsed.data.force)
+      ? await governanceStore.closeFeedback(req.params.id, req.user!.id, parsed.data.force)
       : parsed.data.action === 'finalize_payout'
-      ? governanceStore.finalizePayout(req.params.id, req.user!.id)
-      : governanceStore.transitionProposal(req.params.id, req.user!.id, targets[parsed.data.action]);
+      ? await governanceStore.finalizePayout(req.params.id, req.user!.id)
+      : await governanceStore.transitionProposal(req.params.id, req.user!.id, targets[parsed.data.action]);
     res.json({ success: true, data });
   } catch (error) {
     fail(res, error);
   }
 });
 
-router.post('/admin/governance/proposals/:id/resolve', (req: AuthRequest, res: Response) => {
+router.post('/admin/governance/proposals/:id/resolve', async (req: AuthRequest, res: Response) => {
   const parsed = resolveSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(422).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Release, bond, reason, and evidence are required.', details: parsed.error.errors } });
     return;
   }
   try {
-    const data = governanceStore.resolveDispute(req.params.id, req.user!.id, parsed.data.release_percent, parsed.data.bond_action, parsed.data.reason, parsed.data.evidence_reference);
+    const data = await governanceStore.resolveDispute(req.params.id, req.user!.id, parsed.data.release_percent, parsed.data.bond_action, parsed.data.reason, parsed.data.evidence_reference);
     res.json({ success: true, data });
   } catch (error) {
     fail(res, error);
@@ -130,7 +130,7 @@ router.get('/admin/governance/controls', (_req, res) => {
   res.json({ success: true, data: governanceStore.getControls() });
 });
 
-router.put('/admin/governance/controls', (req: AuthRequest, res: Response) => {
+router.put('/admin/governance/controls', async (req: AuthRequest, res: Response) => {
   const parsed = controlsSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(422).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'A reason and valid control values are required.', details: parsed.error.errors } });
@@ -138,7 +138,7 @@ router.put('/admin/governance/controls', (req: AuthRequest, res: Response) => {
   }
   try {
     const { reason, ...updates } = parsed.data;
-    const data = governanceStore.updateControls(req.user!.id, updates, reason);
+    const data = await governanceStore.updateControls(req.user!.id, updates, reason);
     res.json({ success: true, data });
   } catch (error) {
     fail(res, error);

@@ -1,25 +1,27 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { db, InvalidCursorError } from '../db/index.js';
-import { authenticateToken, AuthRequest, optionalAuthenticateToken } from '../middleware/auth.js';
+import { authenticateToken, AuthRequest, optionalAuthenticateToken, isAuthorizedQA, checkQAAuthorization } from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 
 export const usersRouter = Router();
 
-const publicProfileLimiter = rateLimit({ windowMs: 60 * 1000, max: 120 });
-const followLimiter = rateLimit({ windowMs: 60 * 1000, max: 30 });
+const publicProfileLimiter = rateLimit({ policyId: 'users:public-profile', windowMs: 60 * 1000, max: 120, keyStrategy: 'ip' });
+const followLimiter = rateLimit({ policyId: 'users:follow-mutation', windowMs: 60 * 1000, max: 30, keyStrategy: 'actor', coarseIpMax: 150 });
 
 // ==========================================
 // 1. Literal Routes (Must precede /users/:id)
 // ==========================================
 
 // GET /users?limit=3 — Public discovery rail (default 3, max 6)
-usersRouter.get('/users', (req: AuthRequest, res: Response) => {
+usersRouter.get('/users', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res: Response) => {
+  res.set('Cache-Control', 'no-store');
+  const allowTest = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.query.include_qa === 'true');
   const rawLimit = req.query.limit;
   const parsedLimit = rawLimit ? parseInt(rawLimit as string, 10) : 3;
   const limit = Math.min(6, Math.max(1, isNaN(parsedLimit) ? 3 : parsedLimit));
-  const items = db.listPublicUsers(limit);
+  const items = await db.listPublicUsers(limit, allowTest);
   return res.status(200).json({
     success: true,
     data: {
@@ -29,13 +31,15 @@ usersRouter.get('/users', (req: AuthRequest, res: Response) => {
   });
 });
 
+
 // GET /users/me/profile — Authenticated self profile and settings
 usersRouter.get(
   '/users/me/profile',
   authenticateToken,
-  (req: AuthRequest, res: Response) => {
+  async (req: AuthRequest, res: Response) => {
+    res.set('Cache-Control', 'private, no-store');
     const userId = req.user!.id;
-    const user = db.findUserById(userId);
+    const user = (await db.findUserByIdDurable(userId)) || db.findUserById(userId);
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -43,7 +47,7 @@ usersRouter.get(
       });
     }
 
-    const counts = db.getFollowCounts(user.id);
+    const counts = await db.getFollowCounts(user.id, true);
     return res.status(200).json({
       success: true,
       data: {
@@ -108,7 +112,8 @@ usersRouter.patch(
         });
       }
 
-      const counts = db.getFollowCounts(updated.id);
+      res.set('Cache-Control', 'private, no-store');
+      const counts = await db.getFollowCounts(updated.id, true);
       return res.status(200).json({
         success: true,
         data: {
@@ -142,14 +147,14 @@ usersRouter.patch(
 );
 
 // Owner-only access never changes public visibility or exposes private followers.
-usersRouter.get('/users/me/followers', authenticateToken, publicProfileLimiter, (req: AuthRequest, res: Response) => {
+usersRouter.get('/users/me/followers', authenticateToken, publicProfileLimiter, async (req: AuthRequest, res: Response) => {
   res.set('Cache-Control', 'private, no-store');
   const limit = req.query.limit === undefined ? 20 : Number(req.query.limit);
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
     return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Limit must be an integer from 1 to 50.' } });
   }
   try {
-    const result = db.listFollowers(req.user!.id, limit, typeof req.query.cursor === 'string' ? req.query.cursor : undefined, true);
+    const result = await db.listFollowers(req.user!.id, limit, typeof req.query.cursor === 'string' ? req.query.cursor : undefined, true);
     if (!result) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Account unavailable.' } });
     return res.json({ success: true, data: result });
   } catch (err) {
@@ -162,7 +167,7 @@ usersRouter.get('/users/me/followers', authenticateToken, publicProfileLimiter, 
 usersRouter.get(
   '/users/me/following',
   authenticateToken,
-  (req: AuthRequest, res: Response) => {
+  async (req: AuthRequest, res: Response) => {
     res.set('Cache-Control', 'private, no-store');
     const userId = req.user!.id;
     const rawLimit = req.query.limit;
@@ -171,7 +176,7 @@ usersRouter.get(
     const cursor = typeof req.query.cursor === 'string' && req.query.cursor.trim() ? req.query.cursor.trim() : undefined;
 
     try {
-      const result = db.listMyFollowing(userId, limit, cursor);
+      const result = await db.listMyFollowing(userId, limit, cursor);
       return res.status(200).json({
         success: true,
         data: result,
@@ -200,7 +205,10 @@ usersRouter.get(
   '/users/:id/profile',
   publicProfileLimiter,
   optionalAuthenticateToken,
-  (req: AuthRequest, res: Response) => {
+  checkQAAuthorization,
+  async (req: AuthRequest, res: Response) => {
+    res.set('Cache-Control', 'no-store');
+    const allowTest = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.query.include_qa === 'true');
     const rawId = req.params.id;
     if (!rawId || rawId.trim().length === 0) {
       return res.status(400).json({
@@ -211,11 +219,11 @@ usersRouter.get(
 
     const trimmed = rawId.trim();
     // Allow lookup by ID or @handle
-    let user = db.findPublicUserById(trimmed);
-    if (!user && trimmed.startsWith('@')) {
-      user = db.findPublicUserByHandle(trimmed);
+    let user = await db.findPublicUserById(trimmed, allowTest);
+    if (!user && (trimmed.startsWith('@') || !trimmed.includes('-'))) {
+      user = await db.findPublicUserByHandle(trimmed, allowTest);
     } else if (!user) {
-      user = db.findPublicUserByHandle(trimmed);
+      user = await db.findPublicUserByHandle(trimmed, allowTest);
     }
 
     if (!user || !user.is_public) {
@@ -225,7 +233,11 @@ usersRouter.get(
       });
     }
 
-    const counts = db.getFollowCounts(user.id);
+    if (user.is_test) {
+      res.set('X-Robots-Tag', 'noindex, nofollow');
+    }
+
+    const counts = await db.getFollowCounts(user.id);
 
     // Strict Privacy-Safe Projection: Never leak email, wallet address, balances, or private logs
     return res.status(200).json({
@@ -239,6 +251,7 @@ usersRouter.get(
         status_text: user.status_text || null,
         scout_reputation: user.scout_reputation ?? 0,
         is_public: true,
+        is_test: Boolean(user.is_test),
         follower_count: counts.follower_count,
         following_count: counts.following_count,
         created_at: user.created_at,
@@ -251,7 +264,8 @@ usersRouter.get(
 usersRouter.get(
   '/users/:id/relationship',
   authenticateToken,
-  (req: AuthRequest, res: Response) => {
+  async (req: AuthRequest, res: Response) => {
+    res.set('Cache-Control', 'private, no-store');
     const actorId = req.user!.id;
     const rawId = req.params.id;
     if (!rawId || rawId.trim().length === 0) {
@@ -262,11 +276,11 @@ usersRouter.get(
     }
 
     const trimmed = rawId.trim();
-    let target = db.findUserById(trimmed);
-    if (!target && trimmed.startsWith('@')) {
-      target = db.findUserByHandle(trimmed);
+    let target = await db.findPublicUserById(trimmed);
+    if (!target && (trimmed.startsWith('@') || !trimmed.includes('-'))) {
+      target = await db.findPublicUserByHandle(trimmed);
     } else if (!target) {
-      target = db.findUserByHandle(trimmed);
+      target = await db.findPublicUserByHandle(trimmed);
     }
 
     if (!target || !target.is_public) {
@@ -276,7 +290,7 @@ usersRouter.get(
       });
     }
 
-    const relationship = db.getRelationship(actorId, target.id);
+    const relationship = await db.getRelationship(actorId, target.id);
     return res.status(200).json({
       success: true,
       data: relationship,
@@ -287,8 +301,8 @@ usersRouter.get(
 // PUT /users/:id/follow — Authenticated actor follows public target
 usersRouter.put(
   '/users/:id/follow',
-  followLimiter,
   authenticateToken,
+  followLimiter,
   async (req: AuthRequest, res: Response) => {
     const actorId = req.user!.id;
     const targetId = req.params.id?.trim();
@@ -370,8 +384,8 @@ usersRouter.put(
 // DELETE /users/:id/follow — Authenticated actor unfollows target (idempotent 204)
 usersRouter.delete(
   '/users/:id/follow',
-  followLimiter,
   authenticateToken,
+  followLimiter,
   async (req: AuthRequest, res: Response) => {
     const actorId = req.user!.id;
     const targetId = req.params.id?.trim();
@@ -399,7 +413,10 @@ usersRouter.delete(
 usersRouter.get(
   '/users/:id/followers',
   publicProfileLimiter,
-  (req: AuthRequest, res: Response) => {
+  optionalAuthenticateToken,
+  checkQAAuthorization,
+  async (req: AuthRequest, res: Response) => {
+    res.set('Cache-Control', 'no-store');
     const rawId = req.params.id?.trim();
     if (!rawId) {
       return res.status(400).json({
@@ -408,11 +425,13 @@ usersRouter.get(
       });
     }
 
-    let target = db.findUserById(rawId);
-    if (!target && rawId.startsWith('@')) {
-      target = db.findUserByHandle(rawId);
+    const allowTest = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.query.include_qa === 'true');
+
+    let target = await db.findPublicUserById(rawId, allowTest);
+    if (!target && (rawId.startsWith('@') || !rawId.includes('-'))) {
+      target = await db.findPublicUserByHandle(rawId, allowTest);
     } else if (!target) {
-      target = db.findUserByHandle(rawId);
+      target = await db.findPublicUserByHandle(rawId, allowTest);
     }
 
     if (!target || !target.is_public) {
@@ -428,7 +447,7 @@ usersRouter.get(
     const cursor = typeof req.query.cursor === 'string' && req.query.cursor.trim() ? req.query.cursor.trim() : undefined;
 
     try {
-      const result = db.listFollowers(target.id, limit, cursor);
+      const result = await db.listFollowers(target.id, limit, cursor, false, allowTest);
       if (!result) {
         return res.status(404).json({
           success: false,
@@ -459,7 +478,10 @@ usersRouter.get(
 usersRouter.get(
   '/users/:id/following',
   publicProfileLimiter,
-  (req: AuthRequest, res: Response) => {
+  optionalAuthenticateToken,
+  checkQAAuthorization,
+  async (req: AuthRequest, res: Response) => {
+    res.set('Cache-Control', 'no-store');
     const rawId = req.params.id?.trim();
     if (!rawId) {
       return res.status(400).json({
@@ -468,11 +490,13 @@ usersRouter.get(
       });
     }
 
-    let target = db.findUserById(rawId);
-    if (!target && rawId.startsWith('@')) {
-      target = db.findUserByHandle(rawId);
+    const allowTest = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.query.include_qa === 'true');
+
+    let target = await db.findPublicUserById(rawId, allowTest);
+    if (!target && (rawId.startsWith('@') || !rawId.includes('-'))) {
+      target = await db.findPublicUserByHandle(rawId, allowTest);
     } else if (!target) {
-      target = db.findUserByHandle(rawId);
+      target = await db.findPublicUserByHandle(rawId, allowTest);
     }
 
     if (!target || !target.is_public) {
@@ -488,7 +512,7 @@ usersRouter.get(
     const cursor = typeof req.query.cursor === 'string' && req.query.cursor.trim() ? req.query.cursor.trim() : undefined;
 
     try {
-      const result = db.listFollowing(target.id, limit, cursor);
+      const result = await db.listFollowing(target.id, limit, cursor, allowTest);
       if (!result) {
         return res.status(404).json({
           success: false,

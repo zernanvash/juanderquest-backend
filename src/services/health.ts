@@ -48,8 +48,13 @@ async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, label: s
 
 async function probePostgres(): Promise<void> {
   const pool = getPool();
-  if (!pool) throw new Error('PostgreSQL pool is not initialized');
-  await withTimeout(pool.query('SELECT 1'), 1500, 'PostgreSQL readiness check');
+  if (!pool) {
+    if (env.ALLOW_IN_MEMORY_FALLBACK && env.NODE_ENV !== 'production') {
+      return;
+    }
+    throw new Error('PostgreSQL pool is not initialized');
+  }
+  await withTimeout(pool.query('SELECT COUNT(*) FROM schema_migrations'), 1500, 'PostgreSQL readiness check');
 }
 
 async function probeValhalla(): Promise<void> {

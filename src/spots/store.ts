@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import { randomUUID } from 'crypto';
 import { env } from '../config/env.js';
 import { isDevelopmentSeedEnabled } from '../db/policy.js';
+import { db } from '../db/index.js';
 
 export type SpotCategory = 'eat_drink' | 'nature_outdoors' | 'culture_heritage' | 'activities_wellness' | 'shopping_local' | 'stay';
 export type SpotTrust = 'lgu_verified' | 'editorial' | 'open_data' | 'community';
@@ -9,7 +10,7 @@ export type SpotSource = 'lgu' | 'editorial' | 'open_data' | 'community';
 export type CrowdCapacityBand = 'low' | 'medium' | 'high';
 export type CrowdStatus = 'quiet' | 'moderate' | 'estimated_busy' | 'unknown';
 type ActivityType = 'view' | 'directions' | 'save' | 'visit';
-interface ActivityEvent { id:string; user_id:string; spot_id:string; activity_type:ActivityType; created_at:string; }
+interface ActivityEvent { id:string; user_id:string; spot_id:string; activity_type:ActivityType; created_at:string; is_test?: boolean; }
 
 export interface Spot {
   id: string; slug: string; name: string; description: string;
@@ -20,6 +21,7 @@ export interface Spot {
   trust_level: SpotTrust; status: 'published' | 'needs_review' | 'unpublished';
   quest_id?: string; created_by?: string; created_at: string; updated_at: string;
   crowd_capacity_band?: CrowdCapacityBand; reviewed_by?: string; reviewed_at?: string; recommendation_suppressed?: boolean;
+  is_test?: boolean;
 }
 
 export interface DiscoveryPreferences {
@@ -76,33 +78,34 @@ export class SpotStore {
     for (const p of preferences) this.preferences.set(p.user_id, { categories:p.categories||[],tags:p.tags||[],occasions:p.occasions||[],price_levels:p.price_levels||[],radius_km:p.radius_km,onboarding_state:p.onboarding_state });
     const { rows: interactions } = await pool.query('SELECT * FROM spot_interactions');
     for (const item of interactions) { const values=this.interactions.get(item.user_id)||new Set<string>();values.add(`${item.spot_id}:${item.interaction_type}`);this.interactions.set(item.user_id,values); }
-    const { rows: activity } = await pool.query("SELECT id,user_id,spot_id,activity_type,created_at FROM spot_activity_events WHERE created_at >= NOW() - INTERVAL '24 hours'");
-    this.activityEvents = activity.map((item:any)=>({...item,created_at:new Date(item.created_at).toISOString()}));
+    const { rows: activity } = await pool.query("SELECT id,user_id,spot_id,activity_type,created_at,COALESCE(is_test, FALSE) AS is_test FROM spot_activity_events WHERE created_at >= NOW() - INTERVAL '24 hours'");
+    this.activityEvents = activity.map((item:any)=>({...item,is_test:Boolean(item.is_test),created_at:new Date(item.created_at).toISOString()}));
   }
 
   private async persistSpot(s: Spot) {
     if (!this.pg) return;
-    await this.pg.query(`INSERT INTO spots (id,slug,name,description,category,subcategory,tags,municipality,address,gps_lat,gps_lng,price_level,hours,amenities,image_url,source_type,source_name,source_url,trust_level,status,quest_id,created_by,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,updated_at=EXCLUDED.updated_at`,[s.id,s.slug,s.name,s.description,s.category,s.subcategory,JSON.stringify(s.tags),s.municipality,s.address,s.gps_lat,s.gps_lng,s.price_level,JSON.stringify(s.hours),JSON.stringify(s.amenities),s.image_url,s.source_type,s.source_name,s.source_url||null,s.trust_level,s.status,s.quest_id||null,s.created_by||null,s.created_at,s.updated_at]);
+    await this.pg.query(`INSERT INTO spots (id,slug,name,description,category,subcategory,tags,municipality,address,gps_lat,gps_lng,price_level,hours,amenities,image_url,source_type,source_name,source_url,trust_level,status,quest_id,created_by,is_test,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,is_test=EXCLUDED.is_test,updated_at=EXCLUDED.updated_at`,[s.id,s.slug,s.name,s.description,s.category,s.subcategory,JSON.stringify(s.tags),s.municipality,s.address,s.gps_lat,s.gps_lng,s.price_level,JSON.stringify(s.hours),JSON.stringify(s.amenities),s.image_url,s.source_type,s.source_name,s.source_url||null,s.trust_level,s.status,s.quest_id||null,s.created_by||null,Boolean(s.is_test),s.created_at,s.updated_at]);
   }
 
   getPreferences(userId:string): DiscoveryPreferences { return this.preferences.get(userId) || {categories:[],tags:[],occasions:[],price_levels:[],radius_km:25,onboarding_state:'pending'}; }
   setPreferences(userId:string,p:DiscoveryPreferences) { this.preferences.set(userId,p); if(this.pg)this.pg.query(`INSERT INTO discovery_preferences(user_id,categories,tags,occasions,price_levels,radius_km,onboarding_state) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(user_id) DO UPDATE SET categories=$2,tags=$3,occasions=$4,price_levels=$5,radius_km=$6,onboarding_state=$7,updated_at=NOW()`,[userId,JSON.stringify(p.categories),JSON.stringify(p.tags),JSON.stringify(p.occasions),JSON.stringify(p.price_levels),p.radius_km,p.onboarding_state]).catch(()=>{}); return p; }
   interact(userId:string,spotId:string,type:string,enabled=true) { const key=`${spotId}:${type}`; const set=this.interactions.get(userId)||new Set<string>(); enabled?set.add(key):set.delete(key); this.interactions.set(userId,set);if(this.pg){const query=enabled?'INSERT INTO spot_interactions(user_id,spot_id,interaction_type) VALUES($1,$2,$3) ON CONFLICT DO NOTHING':'DELETE FROM spot_interactions WHERE user_id=$1 AND spot_id=$2 AND interaction_type=$3';this.pg.query(query,[userId,spotId,type]).catch(()=>{});} return enabled; }
   isSaved(userId:string|undefined,spotId:string){return !!userId&&this.interactions.get(userId)?.has(`${spotId}:save`);}
-  trend(spotId:string){let score=0;for(const values of this.interactions.values()){if(values.has(`${spotId}:visit`))score+=5;if(values.has(`${spotId}:directions`))score+=3;if(values.has(`${spotId}:save`))score+=2;if(values.has(`${spotId}:helpful`))score+=2;if(values.has(`${spotId}:view`))score+=.25;}return score;}
+  trend(spotId:string){let score=0;for(const [userId, values] of this.interactions.entries()){if(db.findUserById(userId)?.is_test)continue;if(values.has(`${spotId}:visit`))score+=5;if(values.has(`${spotId}:directions`))score+=3;if(values.has(`${spotId}:save`))score+=2;if(values.has(`${spotId}:helpful`))score+=2;if(values.has(`${spotId}:view`))score+=.25;}return score;}
 
   recordActivity(userId:string,spotId:string,type:ActivityType) {
     if(!this.spots.some(s=>s.id===spotId))return false;
     const now=Date.now();const dedupeMs={view:30*60000,directions:2*3600000,save:24*3600000,visit:12*3600000}[type];
     this.activityEvents=this.activityEvents.filter(e=>now-Date.parse(e.created_at)<=86400000);
     if(this.activityEvents.some(e=>e.user_id===userId&&e.spot_id===spotId&&e.activity_type===type&&now-Date.parse(e.created_at)<dedupeMs))return false;
-    const event:ActivityEvent={id:randomUUID(),user_id:userId,spot_id:spotId,activity_type:type,created_at:new Date(now).toISOString()};this.activityEvents.push(event);
-    if(this.pg)this.pg.query('INSERT INTO spot_activity_events(id,user_id,spot_id,activity_type,created_at) VALUES($1,$2,$3,$4,$5)',[event.id,event.user_id,event.spot_id,event.activity_type,event.created_at]).catch(()=>{});
+    const isTest = Boolean(db.findUserById(userId)?.is_test || this.spots.find(s=>s.id===spotId)?.is_test);
+    const event:ActivityEvent={id:randomUUID(),user_id:userId,spot_id:spotId,activity_type:type,created_at:new Date(now).toISOString(),is_test:isTest};this.activityEvents.push(event);
+    if(this.pg)this.pg.query('INSERT INTO spot_activity_events(id,user_id,spot_id,activity_type,created_at,is_test) VALUES($1,$2,$3,$4,$5,$6)',[event.id,event.user_id,event.spot_id,event.activity_type,event.created_at,isTest]).catch(()=>{});
     return true;
   }
 
   crowd(spot:Spot,now=Date.now()) {
-    const events=this.activityEvents.filter(e=>e.spot_id===spot.id&&now-Date.parse(e.created_at)<=86400000);
+    const events=this.activityEvents.filter(e=>e.spot_id===spot.id&&!e.is_test&&now-Date.parse(e.created_at)<=86400000);
     if(!events.length)return {crowd_status:'unknown' as CrowdStatus,crowd_confidence:'none',crowd_updated_at:null,pressure_score:0};
     const weights:Record<ActivityType,number>={view:.25,directions:3,save:2,visit:5};
     const score=events.reduce((sum,e)=>sum+weights[e.activity_type]*Math.pow(.5,(now-Date.parse(e.created_at))/21600000),0);
@@ -128,9 +131,9 @@ export class SpotStore {
 
   review(spotId:string,adminId:string,status:'published'|'needs_review'|'unpublished',band:CrowdCapacityBand,suppressed=false){const spot=this.spots.find(s=>s.id===spotId);if(!spot)return undefined;spot.status=status;spot.crowd_capacity_band=band;spot.recommendation_suppressed=suppressed;spot.reviewed_by=adminId;spot.reviewed_at=new Date().toISOString();spot.updated_at=spot.reviewed_at;if(this.pg)this.pg.query('UPDATE spots SET status=$1,crowd_capacity_band=$2,recommendation_suppressed=$3,reviewed_by=$4,reviewed_at=$5,updated_at=$5 WHERE id=$6',[status,band,suppressed,adminId,spot.reviewed_at,spot.id]).catch(()=>{});return spot;}
 
-  list(q:{search?:string;categories?:string[];tags?:string[];municipality?:string;lat?:number;lng?:number;radius?:number;intent?:string;sort?:string;hasQuest?:boolean;userId?:string}) {
+  list(q:{search?:string;categories?:string[];tags?:string[];municipality?:string;lat?:number;lng?:number;radius?:number;intent?:string;sort?:string;hasQuest?:boolean;userId?:string;allowTest?:boolean}) {
     const prefs=q.userId?this.getPreferences(q.userId):undefined;
-    return this.spots.filter(s=>s.status==='published').map(s=>{
+    return this.spots.filter(s=>s.status==='published'&&(q.allowTest||!s.is_test)).map(s=>{
       const distance=q.lat!==undefined&&q.lng!==undefined?distanceKm(q.lat,q.lng,s.gps_lat,s.gps_lng):undefined;
       const intent=(q.intent||'').toLowerCase();
       const intentMatch=intent&&[s.category,s.subcategory,...s.tags,s.name].some(v=>v.toLowerCase().includes(intent))?1:0;

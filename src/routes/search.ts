@@ -1,11 +1,12 @@
-import { Router, Request, Response } from 'express';
+import { Router, Response } from 'express';
 import { db } from '../db/index.js';
 import { spotStore } from '../spots/store.js';
 import { rateLimit } from '../middleware/rateLimit.js';
+import { optionalAuthenticateToken, checkQAAuthorization, isAuthorizedQA, AuthRequest } from '../middleware/auth.js';
 
 export const searchRouter = Router();
 
-const searchRateLimiter = rateLimit({ windowMs: 60 * 1000, max: 180 });
+const searchRateLimiter = rateLimit({ policyId: 'search:query', windowMs: 60 * 1000, max: 180, keyStrategy: 'ip' });
 
 export interface PlaceResultItem {
   id: string;
@@ -49,12 +50,13 @@ export interface SearchGroup {
 }
 
 // Search candidates helper functions
-function searchPlaces(query: string): PlaceResultItem[] {
+function searchPlaces(query: string, allowTest: boolean = false): PlaceResultItem[] {
   const qLower = query.toLowerCase();
   const results: PlaceResultItem[] = [];
 
   for (const spot of spotStore.spots) {
     if (spot.status !== 'published') continue;
+    if (!allowTest && spot.is_test) continue;
     let score = 0;
     const nameLower = spot.name.toLowerCase();
     const muniLower = spot.municipality.toLowerCase();
@@ -87,12 +89,17 @@ function searchPlaces(query: string): PlaceResultItem[] {
   return results.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
 }
 
-function searchPeople(query: string, isHandleIntent: boolean): PersonResultItem[] {
+async function searchPeople(query: string, isHandleIntent: boolean, allowTest: boolean = false): Promise<PersonResultItem[]> {
+  if (db.usersRepo.getPool()) {
+    return await db.usersRepo.searchPeople(query, isHandleIntent, allowTest);
+  }
+
   const qLower = query.toLowerCase();
   const results: PersonResultItem[] = [];
 
   for (const user of db.users) {
     if (!user.is_public) continue; // Privacy rule: only explicitly public travelers
+    if (!allowTest && user.is_test) continue;
     let score = 0;
     const nameLower = user.display_name.toLowerCase();
     const handleLower = (user.handle || '').toLowerCase();
@@ -123,12 +130,13 @@ function searchPeople(query: string, isHandleIntent: boolean): PersonResultItem[
   return results.sort((a, b) => b.score - a.score || a.display_name.localeCompare(b.display_name));
 }
 
-function searchQuests(query: string): QuestResultItem[] {
+function searchQuests(query: string, allowTest: boolean = false): QuestResultItem[] {
   const qLower = query.toLowerCase();
   const results: QuestResultItem[] = [];
 
   for (const quest of db.quests) {
     if (!quest.is_active) continue;
+    if (!allowTest && quest.is_test) continue;
     let score = 0;
     const titleLower = quest.title.toLowerCase();
     const locLower = quest.location_name.toLowerCase();
@@ -157,45 +165,52 @@ function searchQuests(query: string): QuestResultItem[] {
   return results.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
 }
 
-searchRouter.get('/search', searchRateLimiter, (req: Request, res: Response) => {
-  const rawQ = typeof req.query.q === 'string' ? req.query.q : '';
-  const normalized = rawQ.normalize('NFKC').trim().replace(/\s+/g, ' ');
+searchRouter.get(
+  '/search',
+  searchRateLimiter,
+  optionalAuthenticateToken,
+  checkQAAuthorization,
+  async (req: AuthRequest, res: Response) => {
+    const rawQ = typeof req.query.q === 'string' ? req.query.q : '';
+    const normalized = rawQ.normalize('NFKC').trim().replace(/\s+/g, ' ');
 
-  // Maximum 100 code points
-  if (normalized.length > 100) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'QUERY_TOO_LONG', message: 'Search query cannot exceed 100 characters.' },
-    });
-  }
+    // Maximum 100 code points
+    if (normalized.length > 100) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'QUERY_TOO_LONG', message: 'Search query cannot exceed 100 characters.' },
+      });
+    }
 
-  // Unicode letter or digit test: must contain at least 2 alphanumeric characters
-  const alphanumericMatches = normalized.match(/[\p{L}\p{N}]/gu);
-  if (!alphanumericMatches || alphanumericMatches.length < 2) {
-    return res.status(400).json({
-      success: false,
-      error: {
-        code: 'QUERY_TOO_SHORT',
-        message: 'Search query must contain at least 2 alphanumeric characters.',
-      },
-    });
-  }
+    // Unicode letter or digit test: must contain at least 2 alphanumeric characters
+    const alphanumericMatches = normalized.match(/[\p{L}\p{N}]/gu);
+    if (!alphanumericMatches || alphanumericMatches.length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'QUERY_TOO_SHORT',
+          message: 'Search query must contain at least 2 alphanumeric characters.',
+        },
+      });
+    }
 
-  const type = (typeof req.query.type === 'string' ? req.query.type.toLowerCase() : 'all') as
-    | 'all'
-    | 'places'
-    | 'people'
-    | 'quests';
-  const mode = (typeof req.query.mode === 'string' ? req.query.mode.toLowerCase() : 'preview') as
-    | 'preview'
-    | 'results';
+    const allowTest = isAuthorizedQA(req) && (req.query.include_test === 'true' || req.query.include_qa === 'true');
 
-  const isHandleIntent = normalized.startsWith('@');
-  const cleanTerm = normalized.replace(/^@/, '').trim();
+    const type = (typeof req.query.type === 'string' ? req.query.type.toLowerCase() : 'all') as
+      | 'all'
+      | 'places'
+      | 'people'
+      | 'quests';
+    const mode = (typeof req.query.mode === 'string' ? req.query.mode.toLowerCase() : 'preview') as
+      | 'preview'
+      | 'results';
 
-  const places = type === 'all' || type === 'places' ? searchPlaces(cleanTerm) : [];
-  const people = type === 'all' || type === 'people' ? searchPeople(cleanTerm, isHandleIntent) : [];
-  const quests = type === 'all' || type === 'quests' ? searchQuests(cleanTerm) : [];
+    const isHandleIntent = normalized.startsWith('@');
+    const cleanTerm = normalized.replace(/^@/, '').trim();
+
+    const places = type === 'all' || type === 'places' ? searchPlaces(cleanTerm, allowTest) : [];
+    const people = type === 'all' || type === 'people' ? await searchPeople(cleanTerm, isHandleIntent, allowTest) : [];
+    const quests = type === 'all' || type === 'quests' ? searchQuests(cleanTerm, allowTest) : [];
 
   // Preview Mode: Compact budget of 8 items maximum, capped at 4 items per group
   if (mode === 'preview') {

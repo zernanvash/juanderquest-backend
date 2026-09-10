@@ -9,7 +9,7 @@ import {
 } from './policy.js';
 
 const rootDir = join(__dirname, '..', '..');
-const MIGRATIONS = [
+export const MIGRATIONS = [
   '001_init.sql',
   '002_runtime.sql',
   '003_spot_discovery.sql',
@@ -18,12 +18,19 @@ const MIGRATIONS = [
   '006_web_analytics.sql',
   '007_public_profiles.sql',
   '008_user_follows.sql',
+  '009_synthetic_qa_isolation.sql',
+  '010_redemptions_user_voucher_unique.sql',
+  '011_governance_ledger.sql',
 ];
 
 let pool: Pool | null = null;
 
 export function getPool(): Pool | null {
   return pool;
+}
+
+export function setPool(nextPool: Pool | null): void {
+  pool = nextPool;
 }
 
 export interface InitPostgresOptions {
@@ -82,7 +89,7 @@ export async function initPostgres(options: InitPostgresOptions = {}): Promise<b
   }
 }
 
-async function applyMigrations(pg: Pool) {
+export async function applyMigrations(pg: Pool) {
   await pg.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       filename TEXT PRIMARY KEY,

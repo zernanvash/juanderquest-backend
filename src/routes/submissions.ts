@@ -4,6 +4,7 @@ import { db, calculateHaversineDistance } from '../db/index.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
 import { rateLimit } from '../middleware/rateLimit.js';
+import { submissionsService } from '../services/submissions.js';
 
 const router = Router();
 
@@ -18,88 +19,46 @@ const submissionSchema = z.object({
   }),
 });
 
-router.post('/submissions', rateLimit({ windowMs: 60_000, max: 30 }), authenticateToken, validateRequest(submissionSchema), (req: AuthRequest, res: Response) => {
-  const userId = req.user!.id;
-  const { idempotency_key, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy } = req.body;
+router.post(
+  '/submissions',
+  authenticateToken,
+  rateLimit({ policyId: 'submissions:create', windowMs: 60_000, max: 30, keyStrategy: 'actor', coarseIpMax: 150 }),
+  validateRequest(submissionSchema),
+  async (req: AuthRequest, res: Response) => {
+    const userId = req.user!.id;
+    const { idempotency_key, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy } = req.body;
 
-  // 1. User-Scoped Idempotency Check (Fix 4.4)
-  const existingSub = db.findSubmissionByIdempotency(idempotency_key, userId);
-  if (existingSub) {
-    return res.status(200).json({
-      success: true,
-      data: existingSub,
-    });
+    try {
+      const result = await submissionsService.createSubmission({
+        idempotency_key,
+        user_id: userId,
+        quest_id,
+        scanned_marker_code,
+        captured_lat,
+        captured_lng,
+        captured_accuracy,
+      });
+
+      if (!result.success) {
+        return res.status(result.statusCode || 400).json({
+          success: false,
+          error: result.error,
+        });
+      }
+
+      return res.status(result.statusCode || 201).json({
+        success: true,
+        data: result.data,
+      });
+    } catch (err) {
+      console.error('[submissions] creation failed:', err);
+      return res.status(503).json({
+        success: false,
+        error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable submission storage is unavailable. Please try again later.' },
+      });
+    }
   }
-
-  // 2. Quest Existence
-  const quest = db.findQuestById(quest_id);
-  if (!quest) {
-    return res.status(404).json({
-      success: false,
-      error: {
-        code: 'NOT_FOUND',
-        message: `Quest '${quest_id}' not found.`,
-      },
-    });
-  }
-
-  // 3. Duplicate Approved Completion Check (Fix 4.6)
-  if (db.hasApprovedSubmission(userId, quest_id)) {
-    return res.status(409).json({
-      success: false,
-      error: {
-        code: 'ALREADY_COMPLETED',
-        message: 'You have already completed this quest.',
-      },
-    });
-  }
-
-  // 4. Check Marker Match
-  if (scanned_marker_code !== quest.marker_code) {
-    return res.status(400).json({
-      success: false,
-      error: {
-        code: 'VALIDATION_ERROR',
-        message: `Scanned marker code '${scanned_marker_code}' does not match target quest requirement.`,
-      },
-    });
-  }
-
-  // 5. GPS Radius Enforcement (Fix 4.3)
-  const distanceMeters = calculateHaversineDistance(
-    captured_lat,
-    captured_lng,
-    quest.gps_lat,
-    quest.gps_lng
-  );
-
-  if (distanceMeters > quest.radius_meters) {
-    return res.status(422).json({
-      success: false,
-      error: {
-        code: 'OUT_OF_RANGE',
-        message: `Your captured location is ${distanceMeters}m away, which exceeds the allowed ${quest.radius_meters}m radius for ${quest.title}.`,
-      },
-    });
-  }
-
-  // 6. Create Pending Submission
-  const newSubmission = db.createSubmission({
-    idempotency_key,
-    user_id: userId,
-    quest_id,
-    scanned_marker_code,
-    captured_lat,
-    captured_lng,
-    captured_accuracy,
-    status: 'pending',
-  });
-
-  return res.status(201).json({
-    success: true,
-    data: newSubmission,
-  });
-});
+);
 
 router.get('/submissions', authenticateToken, (req: AuthRequest, res: Response) => {
   const userId = req.user!.id;
