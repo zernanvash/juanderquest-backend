@@ -454,7 +454,7 @@ const SPOTS = [
     created_by: '33333333-3333-3333-3333-333333333333',
   },
   {
-    id: 'spot-bolinao-falls-1',
+    id: 'spot-bolinao-falls',
     slug: 'bolinao-falls-1',
     name: 'Bolinao Falls 1',
     description: 'A serene forest waterfall with a deep natural turquoise swimming basin, bamboo rafting, and cliff-jumping spots along the Balingasag river system.',
@@ -1262,7 +1262,7 @@ async function seed() {
 
     // 8. Seed Spot Interactions & Recent Activity (Likes, Saves, Views)
     console.log('8. Populating spot interactions and activity events...');
-    const topSpotIds = ['spot-hundred-islands', 'spot-patar', 'spot-manaoag', 'spot-bangus', 'spot-lingayen', 'spot-bolinao-falls-1', 'spot-dasol-salt'];
+    const topSpotIds = ['spot-hundred-islands', 'spot-patar', 'spot-manaoag', 'spot-bangus', 'spot-lingayen', 'spot-bolinao-falls', 'spot-dasol-salt'];
     const userIds = ['11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333333', '55555555-5555-5555-5555-555555555555', '66666666-6666-6666-6666-666666666666', '77777777-7777-7777-7777-777777777777'];
 
     for (let i = 0; i < topSpotIds.length; i++) {
