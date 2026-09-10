@@ -687,7 +687,7 @@ export function calculateHaversineDistance(lat1: number, lon1: number, lat2: num
 export class MemoryDb {
   users = developmentFixturesEnabled ? [...mockUsers] : [];
   quests = developmentFixturesEnabled ? [...mockQuests] : [];
-  campaigns = developmentFixturesEnabled ? [...mockCampaigns] : [];
+  campaigns = [...mockCampaigns];
   submissions = developmentFixturesEnabled ? [...mockSubmissions] : [];
   proposals = developmentFixturesEnabled ? [...mockProposals] : [];
   merchants = developmentFixturesEnabled ? [...mockMerchants] : [];

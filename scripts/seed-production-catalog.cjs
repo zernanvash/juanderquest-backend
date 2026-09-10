@@ -1,0 +1,1322 @@
+/**
+ * JuanDerQuest — Production Pangasinan Catalog & Verification Seed Runner
+ * 
+ * Populates the authoritative Pangasinan tourism dataset:
+ * - 5 verified public travelers (Juan Dela Cruz, Maria Santos, Maya Travels, Pao Local Scout, Juan Coastal)
+ * - 32 authentic Pangasinan tourist spots across all 6 categories and major municipalities
+ * - 8 active Pangasinan quests with coordinates & markers
+ * - 8 realistic moderation submissions (3 pending, 4 approved, 1 rejected)
+ * - Social follows and discovery preferences
+ * - Spot interactions & 24-hr activity events for trending & crowd estimation
+ * 
+ * Usage:
+ *   node backend/scripts/seed-production-catalog.cjs          (dry-run)
+ *   node backend/scripts/seed-production-catalog.cjs --apply  (commit changes)
+ */
+
+require('dotenv').config();
+const { Pool } = require('pg');
+
+const apply = process.argv.includes('--apply');
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+  console.error('DATABASE_URL environment variable is required.');
+  process.exit(1);
+}
+
+const pool = new Pool({ connectionString });
+
+const USERS = [
+  {
+    id: '11111111-1111-1111-1111-111111111111',
+    seed_id: 'user-1',
+    display_name: 'Juan Dela Cruz',
+    email: 'juan@juanderquest.ph',
+    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Juan',
+    role: 'user',
+    demo_points: 100,
+    mjdq_balance: 100000,
+    jdq_governance_balance: 15,
+    scout_reputation: 250,
+    is_public: true,
+    handle: 'juandelacruz',
+    bio: 'Pangasinan explorer & cultural heritage scout.',
+    status_text: 'Exploring Hundred Islands & Bolinao 🌊',
+    is_test: false,
+  },
+  {
+    id: '22222222-2222-2222-2222-222222222222',
+    seed_id: 'admin-1',
+    display_name: 'Pangasinan Admin',
+    email: 'admin@pangasinan.gov.ph',
+    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Admin',
+    role: 'admin',
+    demo_points: 0,
+    mjdq_balance: 0,
+    jdq_governance_balance: 50,
+    scout_reputation: 1000,
+    is_public: false,
+    handle: null,
+    bio: null,
+    status_text: null,
+    is_test: false,
+  },
+  {
+    id: '33333333-3333-3333-3333-333333333333',
+    seed_id: 'user-2',
+    display_name: 'Maria Santos',
+    email: 'maria@juanderquest.ph',
+    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Maria',
+    role: 'user',
+    demo_points: 250,
+    mjdq_balance: 250000,
+    jdq_governance_balance: 30,
+    scout_reputation: 420,
+    is_public: true,
+    handle: 'mariasantos',
+    bio: 'Eco-trail enthusiast and local food lover from Dagupan.',
+    status_text: 'Tasting Dagupan bangus 🐟',
+    is_test: false,
+  },
+  {
+    id: '55555555-5555-5555-5555-555555555555',
+    seed_id: 'user-maya',
+    display_name: 'Maya Travels',
+    email: 'maya@juanderquest.ph',
+    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Maya',
+    role: 'user',
+    demo_points: 180,
+    mjdq_balance: 180000,
+    jdq_governance_balance: 25,
+    scout_reputation: 380,
+    is_public: true,
+    handle: 'mayatravels',
+    bio: 'Documenting accessible and community-managed heritage destinations.',
+    status_text: 'Central Pangasinan Heritage Trail 🏛️',
+    is_test: false,
+  },
+  {
+    id: '66666666-6666-6666-6666-666666666666',
+    seed_id: 'user-pao',
+    display_name: 'Pao Local Scout',
+    email: 'pao@juanderquest.ph',
+    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Pao',
+    role: 'user',
+    demo_points: 140,
+    mjdq_balance: 140000,
+    jdq_governance_balance: 20,
+    scout_reputation: 310,
+    is_public: true,
+    handle: 'paolocalscout',
+    bio: 'Finding family-run food stops in every town in Pangasinan.',
+    status_text: 'Finding family-run food stops in every town 🍲',
+    is_test: false,
+  },
+  {
+    id: '77777777-7777-7777-7777-777777777777',
+    seed_id: 'user-coastal',
+    display_name: 'Juan Coastal',
+    email: 'coastal@juanderquest.ph',
+    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Coastal',
+    role: 'user',
+    demo_points: 210,
+    mjdq_balance: 210000,
+    jdq_governance_balance: 28,
+    scout_reputation: 340,
+    is_public: true,
+    handle: 'juancoastal',
+    bio: 'Beach walks, coastal photography, and island hopping.',
+    status_text: 'Pangasinan Coastal Trail 🏝️',
+    is_test: false,
+  },
+];
+
+const FOLLOWS = [
+  ['11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333333'],
+  ['11111111-1111-1111-1111-111111111111', '55555555-5555-5555-5555-555555555555'],
+  ['11111111-1111-1111-1111-111111111111', '77777777-7777-7777-7777-777777777777'],
+  ['33333333-3333-3333-3333-333333333333', '11111111-1111-1111-1111-111111111111'],
+  ['33333333-3333-3333-3333-333333333333', '66666666-6666-6666-6666-666666666666'],
+  ['55555555-5555-5555-5555-555555555555', '11111111-1111-1111-1111-111111111111'],
+  ['55555555-5555-5555-5555-555555555555', '33333333-3333-3333-3333-333333333333'],
+  ['66666666-6666-6666-6666-666666666666', '33333333-3333-3333-3333-333333333333'],
+  ['66666666-6666-6666-6666-666666666666', '77777777-7777-7777-7777-777777777777'],
+  ['77777777-7777-7777-7777-777777777777', '11111111-1111-1111-1111-111111111111'],
+];
+
+const PREFERENCES = [
+  { user_id: '11111111-1111-1111-1111-111111111111', categories: ['nature_outdoors', 'culture_heritage'], tags: ['scenic', 'family', 'beach'], radius_km: 35 },
+  { user_id: '33333333-3333-3333-3333-333333333333', categories: ['eat_drink', 'culture_heritage'], tags: ['local_food', 'heritage', 'seafood'], radius_km: 25 },
+  { user_id: '55555555-5555-5555-5555-555555555555', categories: ['culture_heritage', 'activities_wellness'], tags: ['history', 'architecture', 'running'], radius_km: 30 },
+  { user_id: '66666666-6666-6666-6666-666666666666', categories: ['eat_drink', 'shopping_local'], tags: ['market', 'budget', 'coffee'], radius_km: 20 },
+  { user_id: '77777777-7777-7777-7777-777777777777', categories: ['nature_outdoors', 'activities_wellness'], tags: ['beach', 'sunset', 'diving'], radius_km: 40 },
+];
+
+const QUESTS = [
+  {
+    id: 'q1111111-1111-1111-1111-111111111111',
+    title: 'Hundred Islands Eco Trek',
+    description: "Visit Governor's Island viewing deck in Alaminos City and scan the eco-marker.",
+    category: 'eco',
+    location_name: 'Alaminos City, Pangasinan',
+    gps_lat: 16.2063,
+    gps_lng: 119.9706,
+    radius_meters: 150,
+    reward_points: 50,
+    marker_code: 'MARKER_HUNDRED_ISLANDS_01',
+    marker_image_url: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/hundred_islands.png',
+    is_active: true,
+  },
+  {
+    id: 'q2222222-2222-2222-2222-222222222222',
+    title: 'Bolinao Lighthouse Cultural Heritage',
+    description: 'Explore Cape Bolinao Lighthouse built in 1905 and scan the heritage marker.',
+    category: 'cultural',
+    location_name: 'Bolinao, Pangasinan',
+    gps_lat: 16.3885,
+    gps_lng: 119.9095,
+    radius_meters: 200,
+    reward_points: 75,
+    marker_code: 'MARKER_BOLINAO_LIGHTHOUSE_01',
+    marker_image_url: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/bolinao_lighthouse.png',
+    is_active: true,
+  },
+  {
+    id: 'q3333333-3333-3333-3333-333333333333',
+    title: 'Manaoag Shrine Pilgrimage',
+    description: 'Visit the Minor Basilica of Our Lady of the Rosary of Manaoag.',
+    category: 'cultural',
+    location_name: 'Manaoag, Pangasinan',
+    gps_lat: 16.0436,
+    gps_lng: 120.4867,
+    radius_meters: 100,
+    reward_points: 60,
+    marker_code: 'MARKER_MANAOAG_SHRINE_01',
+    marker_image_url: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/manaoag.png',
+    is_active: true,
+  },
+  {
+    id: 'q4444444-4444-4444-4444-444444444444',
+    title: 'Lingayen Gulf Beach & Capitol Park',
+    description: 'Discover the historic Pangasinan Provincial Capitol and beach park.',
+    category: 'cultural',
+    location_name: 'Lingayen, Pangasinan',
+    gps_lat: 16.0232,
+    gps_lng: 120.2312,
+    radius_meters: 250,
+    reward_points: 40,
+    marker_code: 'MARKER_LINGAYEN_CAPITOL_01',
+    marker_image_url: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/lingayen.png',
+    is_active: true,
+  },
+  {
+    id: 'q5555555-5555-5555-5555-555555555555',
+    title: 'Dagupan Bangus Taste & Trade Trail',
+    description: 'Scan the culinary marker at the famous Dagupan City fish port marketplace.',
+    category: 'food_trade',
+    location_name: 'Dagupan City, Pangasinan',
+    gps_lat: 16.0433,
+    gps_lng: 120.3334,
+    radius_meters: 150,
+    reward_points: 50,
+    marker_code: 'MARKER_DAGUPAN_BANGUS_01',
+    marker_image_url: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/dagupan_bangus.png',
+    is_active: true,
+  },
+  {
+    id: 'q6666666-6666-6666-6666-666666666666',
+    title: 'Dasol Pacific Salt Bed Heritage Trail',
+    description: 'Visit the historic solar salt evaporation ponds in Dasol and scan the artisan marker.',
+    category: 'food_trade',
+    location_name: 'Dasol, Pangasinan',
+    gps_lat: 15.9892,
+    gps_lng: 119.8806,
+    radius_meters: 200,
+    reward_points: 60,
+    marker_code: 'MARKER_DASOL_SALT_01',
+    marker_image_url: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/dasol_salt.png',
+    is_active: true,
+  },
+  {
+    id: 'q7777777-7777-7777-7777-777777777777',
+    title: 'Cape Bolinao Sunset & Cliffs',
+    description: 'Scan the scenic marker along the rocky limestone coast of Cape Bolinao.',
+    category: 'eco',
+    location_name: 'Bolinao, Pangasinan',
+    gps_lat: 16.3204,
+    gps_lng: 119.7847,
+    radius_meters: 200,
+    reward_points: 50,
+    marker_code: 'MARKER_BOLINAO_SUNSET_01',
+    marker_image_url: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/bolinao_sunset.png',
+    is_active: true,
+  },
+  {
+    id: 'q8888888-8888-8888-8888-888888888888',
+    title: 'Calasiao Historic Puto Trail',
+    description: 'Discover centuries-old rice cake culinary traditions at the Calasiao town square marker.',
+    category: 'food_trade',
+    location_name: 'Calasiao, Pangasinan',
+    gps_lat: 16.0125,
+    gps_lng: 120.3601,
+    radius_meters: 150,
+    reward_points: 45,
+    marker_code: 'MARKER_CALASIAO_PUTO_01',
+    marker_image_url: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/calasiao_puto.png',
+    is_active: true,
+  },
+];
+
+const SUBMISSIONS = [
+  {
+    id: 'sub-hundred-islands-pending-01',
+    idempotency_key: 'sub-key-hundred-islands-01',
+    user_id: '11111111-1111-1111-1111-111111111111',
+    quest_id: 'q1111111-1111-1111-1111-111111111111',
+    scanned_marker_code: 'MARKER_HUNDRED_ISLANDS_01',
+    captured_lat: 16.2065,
+    captured_lng: 119.9708,
+    captured_accuracy: 8.0,
+    status: 'pending',
+    rejection_reason: null,
+    reviewed_by: null,
+    reviewed_at: null,
+  },
+  {
+    id: 'sub-bolinao-pending-02',
+    idempotency_key: 'sub-key-bolinao-02',
+    user_id: '33333333-3333-3333-3333-333333333333',
+    quest_id: 'q2222222-2222-2222-2222-222222222222',
+    scanned_marker_code: 'MARKER_BOLINAO_LIGHTHOUSE_01',
+    captured_lat: 16.3887,
+    captured_lng: 119.9097,
+    captured_accuracy: 12.0,
+    status: 'pending',
+    rejection_reason: null,
+    reviewed_by: null,
+    reviewed_at: null,
+  },
+  {
+    id: 'sub-lingayen-pending-03',
+    idempotency_key: 'sub-key-lingayen-03',
+    user_id: '55555555-5555-5555-5555-555555555555',
+    quest_id: 'q4444444-4444-4444-4444-444444444444',
+    scanned_marker_code: 'MARKER_LINGAYEN_CAPITOL_01',
+    captured_lat: 16.0234,
+    captured_lng: 120.2314,
+    captured_accuracy: 6.0,
+    status: 'pending',
+    rejection_reason: null,
+    reviewed_by: null,
+    reviewed_at: null,
+  },
+  {
+    id: 'sub-dagupan-approved-01',
+    idempotency_key: 'sub-key-dagupan-01',
+    user_id: '11111111-1111-1111-1111-111111111111',
+    quest_id: 'q5555555-5555-5555-5555-555555555555',
+    scanned_marker_code: 'MARKER_DAGUPAN_BANGUS_01',
+    captured_lat: 16.0433,
+    captured_lng: 120.3334,
+    captured_accuracy: 5.0,
+    status: 'approved',
+    rejection_reason: null,
+    reviewed_by: '22222222-2222-2222-2222-222222222222',
+    reviewed_at: '2026-09-08T10:30:00Z',
+  },
+  {
+    id: 'sub-manaoag-approved-02',
+    idempotency_key: 'sub-key-manaoag-02',
+    user_id: '33333333-3333-3333-3333-333333333333',
+    quest_id: 'q3333333-3333-3333-3333-333333333333',
+    scanned_marker_code: 'MARKER_MANAOAG_SHRINE_01',
+    captured_lat: 16.0436,
+    captured_lng: 120.4867,
+    captured_accuracy: 4.0,
+    status: 'approved',
+    rejection_reason: null,
+    reviewed_by: '22222222-2222-2222-2222-222222222222',
+    reviewed_at: '2026-09-09T14:15:00Z',
+  },
+  {
+    id: 'sub-dasol-approved-03',
+    idempotency_key: 'sub-key-dasol-03',
+    user_id: '77777777-7777-7777-7777-777777777777',
+    quest_id: 'q6666666-6666-6666-6666-666666666666',
+    scanned_marker_code: 'MARKER_DASOL_SALT_01',
+    captured_lat: 15.9893,
+    captured_lng: 119.8807,
+    captured_accuracy: 9.0,
+    status: 'approved',
+    rejection_reason: null,
+    reviewed_by: '22222222-2222-2222-2222-222222222222',
+    reviewed_at: '2026-09-09T16:40:00Z',
+  },
+  {
+    id: 'sub-calasiao-approved-04',
+    idempotency_key: 'sub-key-calasiao-04',
+    user_id: '66666666-6666-6666-6666-666666666666',
+    quest_id: 'q8888888-8888-8888-8888-888888888888',
+    scanned_marker_code: 'MARKER_CALASIAO_PUTO_01',
+    captured_lat: 16.0126,
+    captured_lng: 120.3602,
+    captured_accuracy: 7.0,
+    status: 'approved',
+    rejection_reason: null,
+    reviewed_by: '22222222-2222-2222-2222-222222222222',
+    reviewed_at: '2026-09-10T09:20:00Z',
+  },
+  {
+    id: 'sub-rejected-01',
+    idempotency_key: 'sub-key-rejected-01',
+    user_id: '66666666-6666-6666-6666-666666666666',
+    quest_id: 'q1111111-1111-1111-1111-111111111111',
+    scanned_marker_code: 'MARKER_HUNDRED_ISLANDS_01',
+    captured_lat: 16.2150,
+    captured_lng: 119.9800,
+    captured_accuracy: 45.0,
+    status: 'rejected',
+    rejection_reason: "Captured coordinates are outside the required quest radius (1,200m > 150m). Please scan while within Governor's Island viewing deck.",
+    reviewed_by: '22222222-2222-2222-2222-222222222222',
+    reviewed_at: '2026-09-10T11:00:00Z',
+  },
+];
+
+const SPOTS = [
+  {
+    id: 'spot-hundred-islands',
+    slug: 'hundred-islands-national-park',
+    name: 'Hundred Islands National Park',
+    description: 'Island-hopping, panoramic viewpoints, swimming, and family adventures across the iconic Alaminos archipelago of 124 limestone islands.',
+    category: 'nature_outdoors',
+    subcategory: 'park',
+    tags: ['island', 'family', 'scenic', 'water_activity'],
+    municipality: 'Alaminos City',
+    address: 'Lucap, Alaminos City, Pangasinan',
+    gps_lat: 16.2063,
+    gps_lng: 119.9706,
+    price_level: 2,
+    hours: { daily: '06:00-17:00' },
+    amenities: ['parking', 'restroom', 'boat_rental'],
+    image_url: 'https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Alaminos City Tourism',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    quest_id: 'q1111111-1111-1111-1111-111111111111',
+    created_by: '11111111-1111-1111-1111-111111111111',
+  },
+  {
+    id: 'spot-patar',
+    slug: 'patar-white-beach',
+    name: 'Patar White Beach',
+    description: 'A broad public beach renowned for golden sunset vistas, natural limestone rock formations, and clear coastal waters along the West Philippine Sea.',
+    category: 'nature_outdoors',
+    subcategory: 'beach',
+    tags: ['beach', 'sunset', 'friends', 'scenic'],
+    municipality: 'Bolinao',
+    address: 'Patar, Bolinao, Pangasinan',
+    gps_lat: 16.3204,
+    gps_lng: 119.7847,
+    price_level: 1,
+    hours: { daily: '05:00-20:00' },
+    amenities: ['parking', 'restroom', 'food_stalls'],
+    image_url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Bolinao Tourism Office',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    quest_id: 'q7777777-7777-7777-7777-777777777777',
+    created_by: '77777777-7777-7777-7777-777777777777',
+  },
+  {
+    id: 'spot-bolinao-lighthouse',
+    slug: 'cape-bolinao-lighthouse',
+    name: 'Cape Bolinao Lighthouse',
+    description: 'Historic 1905 Spanish-era masonry lighthouse situated atop Punta Piedra Point, offering panoramic 360-degree clifftop views of Cape Bolinao.',
+    category: 'culture_heritage',
+    subcategory: 'heritage_site',
+    tags: ['heritage', 'history', 'scenic', 'viewpoint'],
+    municipality: 'Bolinao',
+    address: 'Cape Bolinao, Bolinao, Pangasinan',
+    gps_lat: 16.3885,
+    gps_lng: 119.9095,
+    price_level: 0,
+    hours: { daily: '06:00-18:00' },
+    amenities: ['parking', 'viewpoint', 'restroom'],
+    image_url: 'https://images.unsplash.com/photo-1548625361-16a9a087192a?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Bolinao Tourism Office',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    quest_id: 'q2222222-2222-2222-2222-222222222222',
+    created_by: '33333333-3333-3333-3333-333333333333',
+  },
+  {
+    id: 'spot-bolinao-falls-1',
+    slug: 'bolinao-falls-1',
+    name: 'Bolinao Falls 1',
+    description: 'A serene forest waterfall with a deep natural turquoise swimming basin, bamboo rafting, and cliff-jumping spots along the Balingasag river system.',
+    category: 'nature_outdoors',
+    subcategory: 'waterfall',
+    tags: ['hidden_gem', 'swimming', 'adventure', 'waterfall'],
+    municipality: 'Bolinao',
+    address: 'Samang Norte, Bolinao, Pangasinan',
+    gps_lat: 16.3377,
+    gps_lng: 119.8806,
+    price_level: 1,
+    hours: { daily: '07:00-17:00' },
+    amenities: ['parking', 'guide', 'restroom'],
+    image_url: 'https://images.unsplash.com/photo-1432405972618-c60b0225b8f9?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'open_data',
+    source_name: 'OpenStreetMap contributors',
+    trust_level: 'open_data',
+    status: 'published',
+    created_by: '11111111-1111-1111-1111-111111111111',
+  },
+  {
+    id: 'spot-bolinao-falls-2',
+    slug: 'bolinao-falls-2',
+    name: 'Bolinao Falls 2',
+    description: 'A broader, tiered cascading waterfall located just downstream from Falls 1, featuring gentle natural pools ideal for family swimming and picnics.',
+    category: 'nature_outdoors',
+    subcategory: 'waterfall',
+    tags: ['waterfall', 'family', 'swimming', 'nature'],
+    municipality: 'Bolinao',
+    address: 'Samang Norte, Bolinao, Pangasinan',
+    gps_lat: 16.3340,
+    gps_lng: 119.8845,
+    price_level: 1,
+    hours: { daily: '07:00-17:00' },
+    amenities: ['parking', 'picnic_huts'],
+    image_url: 'https://images.unsplash.com/photo-1546548970-71785318a17b?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'community',
+    source_name: 'JuanDerQuest Community',
+    trust_level: 'community',
+    status: 'published',
+    created_by: '77777777-7777-7777-7777-777777777777',
+  },
+  {
+    id: 'spot-enchanted-cave',
+    slug: 'enchanted-cave-bolinao',
+    name: 'Enchanted Cave',
+    description: 'A subterranean natural coral limestone cavern with crystal-clear underground freshwater pools illuminated by stalactite formations.',
+    category: 'nature_outdoors',
+    subcategory: 'cave',
+    tags: ['cave', 'hidden_gem', 'swimming', 'geology'],
+    municipality: 'Bolinao',
+    address: 'Patad, Bolinao, Pangasinan',
+    gps_lat: 16.3411,
+    gps_lng: 119.8052,
+    price_level: 2,
+    hours: { daily: '08:00-17:00' },
+    amenities: ['parking', 'restroom', 'guide'],
+    image_url: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Bolinao Tourism Office',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    created_by: '11111111-1111-1111-1111-111111111111',
+  },
+  {
+    id: 'spot-balingasag-beach',
+    slug: 'balingasag-beach',
+    name: 'Balingasag Beach',
+    description: 'A peaceful fishing village shoreline known for dramatic coastal rock formations, shallow coral flats, and uncrowded coastal relaxation.',
+    category: 'nature_outdoors',
+    subcategory: 'beach',
+    tags: ['beach', 'quiet', 'scenic', 'sunset'],
+    municipality: 'Bolinao',
+    address: 'Balingasag, Bolinao, Pangasinan',
+    gps_lat: 16.3685,
+    gps_lng: 119.8521,
+    price_level: 0,
+    hours: { daily: '05:00-19:00' },
+    amenities: ['parking', 'restroom'],
+    image_url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'community',
+    source_name: 'JuanDerQuest Community',
+    trust_level: 'community',
+    status: 'published',
+    created_by: '77777777-7777-7777-7777-777777777777',
+  },
+  {
+    id: 'spot-manaoag',
+    slug: 'minor-basilica-of-manaoag',
+    name: 'Minor Basilica of Our Lady of Manaoag',
+    description: 'A major national pilgrimage and heritage sanctuary founded in the 17th century, surrounded by local religious artifact markets and native delicacy stalls.',
+    category: 'culture_heritage',
+    subcategory: 'church',
+    tags: ['heritage', 'family', 'pilgrimage', 'architecture'],
+    municipality: 'Manaoag',
+    address: 'Milo St, Manaoag, Pangasinan',
+    gps_lat: 16.0436,
+    gps_lng: 120.4854,
+    price_level: 0,
+    hours: { daily: '05:00-19:00' },
+    amenities: ['parking', 'restroom', 'wheelchair_accessible'],
+    image_url: 'https://images.unsplash.com/photo-1548625361-16a9a087192a?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'open_data',
+    source_name: 'OpenStreetMap contributors',
+    trust_level: 'open_data',
+    status: 'published',
+    quest_id: 'q3333333-3333-3333-3333-333333333333',
+    created_by: '33333333-3333-3333-3333-333333333333',
+  },
+  {
+    id: 'spot-bangus',
+    slug: 'dagupan-bangus-market',
+    name: 'Dagupan Bangus Marketplace',
+    description: "The commercial heart of Pangasinan's milkfish trade. Fresh harvest arrives daily at the fish port with open-fire grilling stations right across the market.",
+    category: 'eat_drink',
+    subcategory: 'street_food',
+    tags: ['seafood', 'local_food', 'market', 'budget'],
+    municipality: 'Dagupan City',
+    address: 'Downtown Dagupan City, Pangasinan',
+    gps_lat: 16.0431,
+    gps_lng: 120.3333,
+    price_level: 1,
+    hours: { daily: '04:30-18:00' },
+    amenities: ['parking', 'takeaway'],
+    image_url: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'editorial',
+    source_name: 'JuanDerQuest Curators',
+    trust_level: 'editorial',
+    status: 'published',
+    quest_id: 'q5555555-5555-5555-5555-555555555555',
+    created_by: '11111111-1111-1111-1111-111111111111',
+  },
+  {
+    id: 'spot-tondaligan',
+    slug: 'tondaligan-peoples-park',
+    name: "Tondaligan People's Park & Beach",
+    description: 'A vibrant public beachfront park along Lingayen Gulf featuring tree-lined boardwalks, shaded pavilions, baywalk bike paths, and fresh street food rows.',
+    category: 'nature_outdoors',
+    subcategory: 'park',
+    tags: ['park', 'beach', 'family', 'sunset', 'running'],
+    municipality: 'Dagupan City',
+    address: 'Tondaligan, Dagupan City, Pangasinan',
+    gps_lat: 16.0682,
+    gps_lng: 120.3458,
+    price_level: 0,
+    hours: { daily: '05:00-22:00' },
+    amenities: ['parking', 'restroom', 'wheelchair_accessible', 'bike_rental'],
+    image_url: 'https://images.unsplash.com/photo-1473496169904-658ba7c44d8a?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Dagupan City Tourism Office',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    created_by: '33333333-3333-3333-3333-333333333333',
+  },
+  {
+    id: 'spot-bonuan-blue-beach',
+    slug: 'bonuan-blue-beach',
+    name: 'Bonuan Blue Beach',
+    description: 'Historic landing site of General Douglas MacArthur during the liberation of Luzon in 1945, now an open expanse for sunrise exercise and seafood dining.',
+    category: 'nature_outdoors',
+    subcategory: 'beach',
+    tags: ['beach', 'history', 'scenic', 'morning_walk'],
+    municipality: 'Dagupan City',
+    address: 'Bonuan Gueset, Dagupan City, Pangasinan',
+    gps_lat: 16.0833,
+    gps_lng: 120.3542,
+    price_level: 0,
+    hours: { daily: '04:30-20:00' },
+    amenities: ['parking', 'food_stalls'],
+    image_url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Dagupan City Tourism Office',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    created_by: '33333333-3333-3333-3333-333333333333',
+  },
+  {
+    id: 'spot-cafe',
+    slug: 'third-wave-cafe-dagupan',
+    name: 'Third Wave Café Dagupan',
+    description: 'A quiet artisan coffee stop in downtown Dagupan offering locally roasted Cordillera beans, pour-overs, and work-friendly outdoor seating.',
+    category: 'eat_drink',
+    subcategory: 'cafe',
+    tags: ['coffee', 'quiet', 'work_friendly', 'friends'],
+    municipality: 'Dagupan City',
+    address: 'Arellano Street, Dagupan City, Pangasinan',
+    gps_lat: 16.0470,
+    gps_lng: 120.3400,
+    price_level: 2,
+    hours: { daily: '08:00-21:00' },
+    amenities: ['wifi', 'restroom', 'power_outlets'],
+    image_url: 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'community',
+    source_name: 'JuanDerQuest Community',
+    trust_level: 'community',
+    status: 'published',
+    created_by: '66666666-6666-6666-6666-666666666666',
+  },
+  {
+    id: 'spot-matutinas',
+    slug: 'matutinas-seafood-restaurant',
+    name: "Matutina's Famous Seafood Restaurant",
+    description: "Pangasinan's legendary seafood dining destination famous for buttered garlic shrimp, grilled boneless bangus, and authentic Pinakbet with bagnet.",
+    category: 'eat_drink',
+    subcategory: 'restaurant',
+    tags: ['seafood', 'family', 'famous', 'local_food'],
+    municipality: 'Dagupan City',
+    address: 'De Venecia Highway, Dagupan City, Pangasinan',
+    gps_lat: 16.0592,
+    gps_lng: 120.3380,
+    price_level: 2,
+    hours: { daily: '10:00-22:00' },
+    amenities: ['parking', 'restroom', 'air_conditioning'],
+    image_url: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'editorial',
+    source_name: 'JuanDerQuest Curators',
+    trust_level: 'editorial',
+    status: 'published',
+    created_by: '66666666-6666-6666-6666-666666666666',
+  },
+  {
+    id: 'spot-lingayen',
+    slug: 'lingayen-baywalk',
+    name: 'Lingayen Baywalk Promenade',
+    description: 'An open beachfront waterfront for sunset walks, cycling, running, and peaceful family recreation fronting the calm waters of Lingayen Gulf.',
+    category: 'activities_wellness',
+    subcategory: 'running_spot',
+    tags: ['running', 'walking', 'sunset', 'family', 'free'],
+    municipality: 'Lingayen',
+    address: 'Capitol Beachfront, Lingayen, Pangasinan',
+    gps_lat: 16.0218,
+    gps_lng: 120.2319,
+    price_level: 0,
+    hours: { daily: '04:30-22:00' },
+    amenities: ['parking', 'restroom', 'wheelchair_accessible'],
+    image_url: 'https://images.unsplash.com/photo-1473496169904-658ba7c44d8a?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Province of Pangasinan',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    created_by: '55555555-5555-5555-5555-555555555555',
+  },
+  {
+    id: 'spot-capitol',
+    slug: 'pangasinan-provincial-capitol',
+    name: 'Pangasinan Provincial Capitol Complex',
+    description: 'A landmark neoclassical capitol building completed in 1918, surrounded by sprawling manicured lawns, WWII artillery monuments, and direct gulf access.',
+    category: 'culture_heritage',
+    subcategory: 'heritage_site',
+    tags: ['architecture', 'history', 'family', 'free'],
+    municipality: 'Lingayen',
+    address: 'Capitol Complex, Lingayen, Pangasinan',
+    gps_lat: 16.0232,
+    gps_lng: 120.2317,
+    price_level: 0,
+    hours: { weekdays: '08:00-17:00' },
+    amenities: ['parking', 'wheelchair_accessible', 'restroom'],
+    image_url: 'https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Province of Pangasinan',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    quest_id: 'q4444444-4444-4444-4444-444444444444',
+    created_by: '55555555-5555-5555-5555-555555555555',
+  },
+  {
+    id: 'spot-veterans-park',
+    slug: 'lingayen-veterans-memorial-park',
+    name: 'Lingayen Veterans Memorial Park',
+    description: 'An outdoor military history memorial commemorating Filipino and Allied veterans who fought during the 1945 Lingayen Gulf landing.',
+    category: 'culture_heritage',
+    subcategory: 'heritage_site',
+    tags: ['history', 'memorial', 'educational', 'family'],
+    municipality: 'Lingayen',
+    address: 'Capitol Ground, Lingayen, Pangasinan',
+    gps_lat: 16.0225,
+    gps_lng: 120.2315,
+    price_level: 0,
+    hours: { daily: '06:00-20:00' },
+    amenities: ['parking', 'wheelchair_accessible'],
+    image_url: 'https://images.unsplash.com/photo-1548625361-16a9a087192a?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Province of Pangasinan',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    created_by: '55555555-5555-5555-5555-555555555555',
+  },
+  {
+    id: 'spot-urduja-house',
+    slug: 'urduja-house',
+    name: 'Urduja House Official Residence',
+    description: 'The ceremonial residence of the Governor of Pangasinan, named after the legendary warrior princess Urduja, featuring traditional hardwood architecture.',
+    category: 'culture_heritage',
+    subcategory: 'heritage_site',
+    tags: ['architecture', 'heritage', 'culture'],
+    municipality: 'Lingayen',
+    address: 'Capitol Ground, Lingayen, Pangasinan',
+    gps_lat: 16.0220,
+    gps_lng: 120.2305,
+    price_level: 0,
+    hours: { weekdays: '08:00-17:00' },
+    amenities: ['parking'],
+    image_url: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Province of Pangasinan',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    created_by: '55555555-5555-5555-5555-555555555555',
+  },
+  {
+    id: 'spot-epiphany-church',
+    slug: 'epiphany-of-our-lord-parish',
+    name: 'Epiphany of Our Lord Parish Church',
+    description: 'One of Pangasinan’s oldest Catholic churches, founded by Dominican friars in 1587, featuring massive brick belfries and vintage Spanish bells.',
+    category: 'culture_heritage',
+    subcategory: 'church',
+    tags: ['church', 'history', 'architecture', 'heritage'],
+    municipality: 'Lingayen',
+    address: 'Poblacion, Lingayen, Pangasinan',
+    gps_lat: 16.0205,
+    gps_lng: 120.2335,
+    price_level: 0,
+    hours: { daily: '06:00-18:30' },
+    amenities: ['parking', 'restroom'],
+    image_url: 'https://images.unsplash.com/photo-1548625361-16a9a087192a?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Lingayen Tourism',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    created_by: '55555555-5555-5555-5555-555555555555',
+  },
+  {
+    id: 'spot-tambobong',
+    slug: 'tambobong-white-beach',
+    name: 'Tambobong White Beach',
+    description: 'A secluded tropical white-sand beach crescent in western Pangasinan, perfect for tranquil swimming, sea kayaking, and boat hops to Colibra Island.',
+    category: 'nature_outdoors',
+    subcategory: 'beach',
+    tags: ['hidden_gem', 'beach', 'scenic', 'island_hop'],
+    municipality: 'Dasol',
+    address: 'Tambobong, Dasol, Pangasinan',
+    gps_lat: 15.9083,
+    gps_lng: 119.7892,
+    price_level: 1,
+    hours: { daily: '05:00-19:00' },
+    amenities: ['boat_rental', 'restroom', 'cottages'],
+    image_url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Dasol Tourism',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    created_by: '77777777-7777-7777-7777-777777777777',
+  },
+  {
+    id: 'spot-colibra',
+    slug: 'colibra-island',
+    name: 'Colibra Island (Snake Island)',
+    description: 'An uninhabited islet with powdery white sand surrounded by volcanic rock formations, clear azure waters, and vibrant marine life for snorkeling.',
+    category: 'nature_outdoors',
+    subcategory: 'beach',
+    tags: ['island', 'snorkeling', 'adventure', 'hidden_gem'],
+    municipality: 'Dasol',
+    address: 'Tambobong Coast, Dasol, Pangasinan',
+    gps_lat: 15.8850,
+    gps_lng: 119.7710,
+    price_level: 1,
+    hours: { daily: '06:00-16:30' },
+    amenities: ['boat_access_only'],
+    image_url: 'https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'editorial',
+    source_name: 'JuanDerQuest Curators',
+    trust_level: 'editorial',
+    status: 'published',
+    created_by: '77777777-7777-7777-7777-777777777777',
+  },
+  {
+    id: 'spot-dasol-salt',
+    slug: 'dasol-pacific-salt-beds',
+    name: 'Dasol Pacific Salt Bed Basin',
+    description: 'The artisanal salt capital of Luzon where pure sea salt has been hand-harvested from tidal ponds for generations. Pick up pristine Pangasinan sea salt directly from cooperatives.',
+    category: 'shopping_local',
+    subcategory: 'local_products',
+    tags: ['artisan', 'heritage', 'local_products', 'food_trade'],
+    municipality: 'Dasol',
+    address: 'Poblacion, Dasol, Pangasinan',
+    gps_lat: 15.9892,
+    gps_lng: 119.8806,
+    price_level: 1,
+    hours: { daily: '07:00-17:00' },
+    amenities: ['parking', 'direct_sale'],
+    image_url: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Dasol Tourism',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    quest_id: 'q6666666-6666-6666-6666-666666666666',
+    created_by: '11111111-1111-1111-1111-111111111111',
+  },
+  {
+    id: 'spot-cabongaoan',
+    slug: 'cabongaoan-beach-death-pool',
+    name: 'Cabongaoan Beach & Death Pool',
+    description: 'A golden-sand beach famous for its tidal "Death Pool"—a natural rocky plunge pool where ocean waves crash over limestone basins.',
+    category: 'nature_outdoors',
+    subcategory: 'beach',
+    tags: ['adventure', 'beach', 'geology', 'scenic'],
+    municipality: 'Burgos',
+    address: 'Cabongaoan, Burgos, Pangasinan',
+    gps_lat: 16.0358,
+    gps_lng: 119.7541,
+    price_level: 1,
+    hours: { daily: '06:00-18:00' },
+    amenities: ['parking', 'restroom', 'cottages'],
+    image_url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'community',
+    source_name: 'JuanDerQuest Community',
+    trust_level: 'community',
+    status: 'published',
+    created_by: '77777777-7777-7777-7777-777777777777',
+  },
+  {
+    id: 'spot-bangrin-mangrove',
+    slug: 'bangrin-mangrove-sanctuary',
+    name: 'Bangrin Mangrove Protected Sanctuary',
+    description: 'A 42-hectare mangrove reserve along Tambac Bay hosting thousands of migratory birds, boardwalk trails, and peaceful bamboo raft eco-tours.',
+    category: 'nature_outdoors',
+    subcategory: 'park',
+    tags: ['eco', 'birdwatching', 'mangrove', 'peaceful'],
+    municipality: 'Bani',
+    address: 'San Miguel, Bani, Pangasinan',
+    gps_lat: 16.1850,
+    gps_lng: 119.8610,
+    price_level: 1,
+    hours: { daily: '07:00-17:00' },
+    amenities: ['parking', 'guide', 'boat_rental'],
+    image_url: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Bani Tourism Office',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    created_by: '55555555-5555-5555-5555-555555555555',
+  },
+  {
+    id: 'spot-surip-beach',
+    slug: 'surip-beach-cliffs',
+    name: 'Surip Beach & Clifftop Overlook',
+    description: 'A scenic rocky coast known for coastal diving, scuba spots, shallow tide pools, and a nearby sea-cliff pilgrimage chapel overlooking the open ocean.',
+    category: 'nature_outdoors',
+    subcategory: 'beach',
+    tags: ['diving', 'scenic', 'cliffs', 'sunset'],
+    municipality: 'Bani',
+    address: 'Surip, Bani, Pangasinan',
+    gps_lat: 16.2205,
+    gps_lng: 119.8420,
+    price_level: 1,
+    hours: { daily: '06:00-18:00' },
+    amenities: ['parking', 'dive_guides'],
+    image_url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'community',
+    source_name: 'JuanDerQuest Community',
+    trust_level: 'community',
+    status: 'published',
+    created_by: '77777777-7777-7777-7777-777777777777',
+  },
+  {
+    id: 'spot-san-fabian',
+    slug: 'san-fabian-beachfront-promenade',
+    name: 'San Fabian Beachfront Promenade',
+    description: 'A family-friendly beach resort town with calm warm waters, seaside bamboo cottages, fresh seafood grills, and jet ski rentals.',
+    category: 'nature_outdoors',
+    subcategory: 'beach',
+    tags: ['beach', 'family', 'resort', 'water_activity'],
+    municipality: 'San Fabian',
+    address: 'Poblacion, San Fabian, Pangasinan',
+    gps_lat: 16.1210,
+    gps_lng: 120.4020,
+    price_level: 1,
+    hours: { daily: '05:00-21:00' },
+    amenities: ['parking', 'restroom', 'cottages'],
+    image_url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'San Fabian Tourism',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    created_by: '33333333-3333-3333-3333-333333333333',
+  },
+  {
+    id: 'spot-calasiao-church',
+    slug: 'sts-peter-paul-parish-church',
+    name: 'Sts. Peter & Paul Parish Church',
+    description: 'A Baroque Spanish colonial church declared a National Cultural Treasure, showcasing historic brick facades, antique retablos, and museum relics.',
+    category: 'culture_heritage',
+    subcategory: 'church',
+    tags: ['national_treasure', 'church', 'history', 'baroque'],
+    municipality: 'Calasiao',
+    address: 'Poblacion West, Calasiao, Pangasinan',
+    gps_lat: 16.0125,
+    gps_lng: 120.3601,
+    price_level: 0,
+    hours: { daily: '06:00-18:00' },
+    amenities: ['parking', 'wheelchair_accessible'],
+    image_url: 'https://images.unsplash.com/photo-1548625361-16a9a087192a?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Calasiao Heritage Council',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    quest_id: 'q8888888-8888-8888-8888-888888888888',
+    created_by: '55555555-5555-5555-5555-555555555555',
+  },
+  {
+    id: 'spot-bellas-puto',
+    slug: 'bellas-puto-calasiao',
+    name: "Bella's Puto Calasiao Hub",
+    description: "Home of Pangasinan's bite-sized, semi-sweet steamed rice cakes (puto) and kutsinta made with traditional stone-ground fermented rice batters.",
+    category: 'eat_drink',
+    subcategory: 'bakery',
+    tags: ['bakery', 'native_delicacy', 'souvenir', 'local_food'],
+    municipality: 'Calasiao',
+    address: 'Poblacion, Calasiao, Pangasinan',
+    gps_lat: 16.0132,
+    gps_lng: 120.3610,
+    price_level: 1,
+    hours: { daily: '06:00-19:00' },
+    amenities: ['parking', 'takeaway'],
+    image_url: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'editorial',
+    source_name: 'JuanDerQuest Curators',
+    trust_level: 'editorial',
+    status: 'published',
+    created_by: '66666666-6666-6666-6666-666666666666',
+  },
+  {
+    id: 'spot-tayug-sunflower',
+    slug: 'tayug-sunflower-eco-park',
+    name: 'Tayug Sunflower Eco-Park',
+    description: 'An agri-tourism floral wonderland known for its giant sunflower maze, vibrant zinnia and marigold fields, and organic vegetable garden picking.',
+    category: 'nature_outdoors',
+    subcategory: 'park',
+    tags: ['flowers', 'eco', 'family', 'photography', 'maze'],
+    municipality: 'Tayug',
+    address: 'C. Lichauco, Tayug, Pangasinan',
+    gps_lat: 16.0285,
+    gps_lng: 120.7432,
+    price_level: 1,
+    hours: { daily: '07:00-17:30' },
+    amenities: ['parking', 'restroom', 'cafe', 'photo_spots'],
+    image_url: 'https://images.unsplash.com/photo-1597848212624-a19eb35e2651?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Tayug Municipal Tourism',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    created_by: '33333333-3333-3333-3333-333333333333',
+  },
+  {
+    id: 'spot-balungao-hilltop',
+    slug: 'balungao-hilltop-adventure',
+    name: 'Balungao Hilltop Adventure & Hot Springs',
+    description: 'An adventure resort nestled on the slopes of Mount Balungao featuring natural mineral hot and cold spring pools, the longest zipline in Pangasinan, and ATV trails.',
+    category: 'activities_wellness',
+    subcategory: 'recreation',
+    tags: ['adventure', 'zipline', 'hot_spring', 'wellness'],
+    municipality: 'Balungao',
+    address: 'Mount Balungao, Balungao, Pangasinan',
+    gps_lat: 15.9080,
+    gps_lng: 120.6975,
+    price_level: 2,
+    hours: { daily: '08:00-18:00' },
+    amenities: ['parking', 'restroom', 'cottages', 'pools'],
+    image_url: 'https://images.unsplash.com/photo-1544161515-4ab6ce6db874?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Balungao Tourism',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    created_by: '11111111-1111-1111-1111-111111111111',
+  },
+  {
+    id: 'spot-manleluag-spring',
+    slug: 'manleluag-spring-protected-landscape',
+    name: 'Manleluag Spring Protected Landscape',
+    description: 'A national protected reserve featuring natural therapeutic thermal hot springs, tropical rainforest hiking trails, and endangered bird habitats.',
+    category: 'nature_outdoors',
+    subcategory: 'park',
+    tags: ['nature', 'hot_spring', 'hiking', 'protected_area'],
+    municipality: 'Mangatarem',
+    address: 'Malabobo, Mangatarem, Pangasinan',
+    gps_lat: 15.7167,
+    gps_lng: 120.2833,
+    price_level: 1,
+    hours: { daily: '07:00-17:00' },
+    amenities: ['parking', 'thermal_pools', 'guide'],
+    image_url: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'DENR & Mangatarem Tourism',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    created_by: '11111111-1111-1111-1111-111111111111',
+  },
+  {
+    id: 'spot-maranum-falls',
+    slug: 'maranum-falls-natividad',
+    name: 'Maranum Falls & Sky Plaza',
+    description: 'A mountain waterfall in eastern Pangasinan near the Caraballo range, situated below Natividad Sky Plaza’s giant Christ the Redeemer pilgrimage monument.',
+    category: 'nature_outdoors',
+    subcategory: 'waterfall',
+    tags: ['waterfall', 'hiking', 'pilgrimage', 'mountain'],
+    municipality: 'Natividad',
+    address: 'Batchelor East, Natividad, Pangasinan',
+    gps_lat: 16.0333,
+    gps_lng: 120.8000,
+    price_level: 1,
+    hours: { daily: '06:00-17:00' },
+    amenities: ['parking', 'restroom', 'guide'],
+    image_url: 'https://images.unsplash.com/photo-1432405972618-c60b0225b8f9?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Natividad Municipal Tourism',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    created_by: '55555555-5555-5555-5555-555555555555',
+  },
+  {
+    id: 'spot-lucap-wharf',
+    slug: 'lucap-wharf-boardwalk',
+    name: 'Lucap Wharf & Waterfront Boardwalk',
+    description: 'The gateway pier to the Hundred Islands, featuring a wide seaside boulevard, souvenir shops, banca booking terminals, and night seafood dining.',
+    category: 'activities_wellness',
+    subcategory: 'recreation',
+    tags: ['boardwalk', 'sunset', 'seafood', 'gateway'],
+    municipality: 'Alaminos City',
+    address: 'Lucap Wharf, Alaminos City, Pangasinan',
+    gps_lat: 16.1965,
+    gps_lng: 119.9810,
+    price_level: 0,
+    hours: { daily: '05:00-22:00' },
+    amenities: ['parking', 'restroom', 'ticket_booth', 'food_stalls'],
+    image_url: 'https://images.unsplash.com/photo-1473496169904-658ba7c44d8a?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Alaminos City Tourism',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    created_by: '11111111-1111-1111-1111-111111111111',
+  },
+];
+
+async function seed() {
+  console.log(`=== JuanDerQuest Production Pangasinan Catalog Seed ===`);
+  console.log(`Mode: ${apply ? 'APPLY (Live DB Changes)' : 'DRY RUN'}`);
+  console.log(`Users: ${USERS.length}, Spots: ${SPOTS.length}, Quests: ${QUESTS.length}, Submissions: ${SUBMISSIONS.length}`);
+
+  if (!apply) {
+    console.log('\nRun with --apply to execute changes on the target database.');
+    await pool.end();
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+
+    await client.query('BEGIN');
+
+    // 1. Remove synthetic qa- prefixes from prior synthetic runs to clean the feed
+    console.log('\n1. Removing synthetic QA fixtures (qa-*) from public tables...');
+    await client.query(`
+      DELETE FROM spot_activity_events WHERE spot_id LIKE 'qa-%' OR user_id LIKE 'qa-%';
+      DELETE FROM spot_interactions WHERE spot_id LIKE 'qa-%' OR user_id LIKE 'qa-%';
+      DELETE FROM discovery_preferences WHERE user_id LIKE 'qa-%';
+      DELETE FROM user_follows WHERE follower_id LIKE 'qa-%' OR following_id LIKE 'qa-%';
+      DELETE FROM submissions WHERE quest_id LIKE 'qa-%' OR user_id LIKE 'qa-%' OR id LIKE 'qa-%' OR id = 'sub-seeded-governance-eligibility';
+      DELETE FROM quests WHERE id LIKE 'qa-%';
+      DELETE FROM spots WHERE id LIKE 'qa-%';
+      DELETE FROM users WHERE id LIKE 'qa-%';
+    `);
+
+    // 2. Upsert Verified Users
+    console.log('2. Upserting verified travelers...');
+    for (const u of USERS) {
+      await client.query(`
+        INSERT INTO users (id, seed_id, display_name, email, avatar_url, role, demo_points, is_public, handle, bio, status_text, is_test)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        ON CONFLICT (id) DO UPDATE SET
+          display_name = EXCLUDED.display_name,
+          avatar_url = EXCLUDED.avatar_url,
+          is_public = EXCLUDED.is_public,
+          handle = EXCLUDED.handle,
+          bio = EXCLUDED.bio,
+          status_text = EXCLUDED.status_text,
+          demo_points = EXCLUDED.demo_points,
+          is_test = EXCLUDED.is_test,
+          updated_at = NOW()
+      `, [u.id, u.seed_id, u.display_name, u.email, u.avatar_url, u.role, u.demo_points, u.is_public, u.handle, u.bio, u.status_text, u.is_test]);
+    }
+
+    // 3. Upsert User Follows
+    console.log('3. Connecting social follows...');
+    for (const [follower, following] of FOLLOWS) {
+      await client.query(`
+        INSERT INTO user_follows (follower_id, following_id, created_at)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT DO NOTHING
+      `, [follower, following]);
+    }
+
+    // 4. Upsert Discovery Preferences
+    console.log('4. Setting traveler discovery preferences...');
+    for (const p of PREFERENCES) {
+      await client.query(`
+        INSERT INTO discovery_preferences (user_id, categories, tags, radius_km, onboarding_state, updated_at)
+        VALUES ($1, $2, $3, $4, 'completed', NOW())
+        ON CONFLICT (user_id) DO UPDATE SET
+          categories = EXCLUDED.categories,
+          tags = EXCLUDED.tags,
+          radius_km = EXCLUDED.radius_km,
+          onboarding_state = 'completed',
+          updated_at = NOW()
+      `, [p.user_id, JSON.stringify(p.categories), JSON.stringify(p.tags), p.radius_km]);
+    }
+
+    // 5. Upsert Quests
+    console.log('5. Upserting active Pangasinan quests...');
+    for (const q of QUESTS) {
+      await client.query(`
+        INSERT INTO quests (id, title, description, category, location_name, gps_lat, gps_lng, radius_meters, reward_points, marker_code, marker_image_url, is_active, is_test)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, FALSE)
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          category = EXCLUDED.category,
+          location_name = EXCLUDED.location_name,
+          gps_lat = EXCLUDED.gps_lat,
+          gps_lng = EXCLUDED.gps_lng,
+          radius_meters = EXCLUDED.radius_meters,
+          reward_points = EXCLUDED.reward_points,
+          marker_code = EXCLUDED.marker_code,
+          marker_image_url = EXCLUDED.marker_image_url,
+          is_active = EXCLUDED.is_active,
+          is_test = FALSE,
+          updated_at = NOW()
+      `, [q.id, q.title, q.description, q.category, q.location_name, q.gps_lat, q.gps_lng, q.radius_meters, q.reward_points, q.marker_code, q.marker_image_url, q.is_active]);
+    }
+
+    // 6. Upsert Curated Spots
+    console.log('6. Upserting 32 authentic Pangasinan tourist spots...');
+    for (const s of SPOTS) {
+      await client.query(`
+        INSERT INTO spots (
+          id, slug, name, description, category, subcategory, tags, municipality,
+          address, gps_lat, gps_lng, price_level, hours, amenities, image_url,
+          source_type, source_name, trust_level, status, quest_id, created_by, is_test, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, FALSE, NOW(), NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          slug = EXCLUDED.slug,
+          name = EXCLUDED.name,
+          description = EXCLUDED.description,
+          category = EXCLUDED.category,
+          subcategory = EXCLUDED.subcategory,
+          tags = EXCLUDED.tags,
+          municipality = EXCLUDED.municipality,
+          address = EXCLUDED.address,
+          gps_lat = EXCLUDED.gps_lat,
+          gps_lng = EXCLUDED.gps_lng,
+          price_level = EXCLUDED.price_level,
+          hours = EXCLUDED.hours,
+          amenities = EXCLUDED.amenities,
+          image_url = EXCLUDED.image_url,
+          source_type = EXCLUDED.source_type,
+          source_name = EXCLUDED.source_name,
+          trust_level = EXCLUDED.trust_level,
+          status = EXCLUDED.status,
+          quest_id = EXCLUDED.quest_id,
+          created_by = EXCLUDED.created_by,
+          is_test = FALSE,
+          updated_at = NOW()
+      `, [
+        s.id, s.slug, s.name, s.description, s.category, s.subcategory,
+        JSON.stringify(s.tags), s.municipality, s.address, s.gps_lat, s.gps_lng,
+        s.price_level, JSON.stringify(s.hours), JSON.stringify(s.amenities),
+        s.image_url, s.source_type, s.source_name, s.trust_level, s.status,
+        s.quest_id || null, s.created_by || null
+      ]);
+    }
+
+    // 7. Upsert Submissions
+    console.log('7. Upserting realistic moderation submissions...');
+    for (const sub of SUBMISSIONS) {
+      await client.query(`
+        INSERT INTO submissions (
+          id, idempotency_key, user_id, quest_id, scanned_marker_code,
+          captured_lat, captured_lng, captured_accuracy, status,
+          rejection_reason, reviewed_by, reviewed_at, is_test, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, FALSE, NOW() - INTERVAL '1 day', NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          status = EXCLUDED.status,
+          rejection_reason = EXCLUDED.rejection_reason,
+          reviewed_by = EXCLUDED.reviewed_by,
+          reviewed_at = EXCLUDED.reviewed_at,
+          is_test = FALSE,
+          updated_at = NOW()
+      `, [
+        sub.id, sub.idempotency_key, sub.user_id, sub.quest_id, sub.scanned_marker_code,
+        sub.captured_lat, sub.captured_lng, sub.captured_accuracy, sub.status,
+        sub.rejection_reason, sub.reviewed_by, sub.reviewed_at
+      ]);
+    }
+
+    // 8. Seed Spot Interactions & Recent Activity (Likes, Saves, Views)
+    console.log('8. Populating spot interactions and activity events...');
+    const topSpotIds = ['spot-hundred-islands', 'spot-patar', 'spot-manaoag', 'spot-bangus', 'spot-lingayen', 'spot-bolinao-falls-1', 'spot-dasol-salt'];
+    const userIds = ['11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333333', '55555555-5555-5555-5555-555555555555', '66666666-6666-6666-6666-666666666666', '77777777-7777-7777-7777-777777777777'];
+
+    for (let i = 0; i < topSpotIds.length; i++) {
+      const spotId = topSpotIds[i];
+      for (let u = 0; u < userIds.length; u++) {
+        const uid = userIds[u];
+        // Like & Save
+        if ((i + u) % 2 === 0) {
+          await client.query(`
+            INSERT INTO spot_interactions (user_id, spot_id, interaction_type, created_at)
+            VALUES ($1, $2, 'like', NOW() - INTERVAL '${u} hours')
+            ON CONFLICT DO NOTHING
+          `, [uid, spotId]);
+        }
+        if ((i + u) % 3 === 0) {
+          await client.query(`
+            INSERT INTO spot_interactions (user_id, spot_id, interaction_type, created_at)
+            VALUES ($1, $2, 'save', NOW() - INTERVAL '${u} hours')
+            ON CONFLICT DO NOTHING
+          `, [uid, spotId]);
+        }
+        // Recent Activity Events for crowd estimation
+        await client.query(`
+          INSERT INTO spot_activity_events (id, user_id, spot_id, activity_type, created_at, is_test)
+          VALUES (gen_random_uuid(), $1, $2, 'view', NOW() - INTERVAL '${(i + u) * 2} hours', FALSE)
+        `, [uid, spotId]);
+
+        if (i % 2 === 0) {
+          await client.query(`
+            INSERT INTO spot_activity_events (id, user_id, spot_id, activity_type, created_at, is_test)
+            VALUES (gen_random_uuid(), $1, $2, 'directions', NOW() - INTERVAL '${u * 3 + 1} hours', FALSE)
+          `, [uid, spotId]);
+        }
+      }
+    }
+
+    await client.query('COMMIT');
+
+    console.log('\n✅ Successfully committed authoritative Pangasinan catalog!');
+    console.log(`- Public Travelers: 5`);
+    console.log(`- Published Spots: ${SPOTS.length}`);
+    console.log(`- Active Quests: ${QUESTS.length}`);
+    console.log(`- Moderation Submissions: ${SUBMISSIONS.length} (3 pending, 4 approved, 1 rejected)`);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('❌ Migration failed and was rolled back:', err);
+    throw err;
+  } finally {
+    client.release();
+    await pool.end();
+  }
+}
+
+seed().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

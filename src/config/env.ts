@@ -21,6 +21,7 @@ export const env = cleanEnv(process.env, {
     default: process.env.NODE_ENV === 'production' ? 'signature' : 'local',
   }),
   ALLOW_INSECURE_LOCAL_WALLET_AUTH: bool({ default: false }),
+  ALLOW_DEMO_LOGIN: bool({ default: isLocalRuntime }),
   SPOT_PHOTO_STORAGE: str({ choices: ['local', 'azure'], default: 'local' }),
   AZURE_STORAGE_CONNECTION_STRING: str({ default: '' }),
   AZURE_STORAGE_CONTAINER_NAME: str({ default: 'spot-photos' }),

@@ -162,7 +162,7 @@ const loginSchema = z.object({
 });
 
 router.post('/auth/demo-login', rateLimit({ policyId: 'auth:demo-login', windowMs: 60_000, max: 20 }), validateRequest(loginSchema), (req, res) => {
-  if (env.NODE_ENV === 'production') {
+  if (env.NODE_ENV === 'production' && !env.ALLOW_DEMO_LOGIN) {
     return res.status(403).json({
       success: false,
       error: {
