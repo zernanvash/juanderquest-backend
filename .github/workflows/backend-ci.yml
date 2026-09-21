@@ -89,7 +89,7 @@ jobs:
           # 5. Verify restored migration count and representative data completeness
           MIGRATION_COUNT=$(PGPASSWORD=test_password psql -h localhost -U test_user -d juanderquest_ci_drill -t -c "SELECT COUNT(*) FROM schema_migrations;")
           echo "Verified restored migration count: $MIGRATION_COUNT"
-          test $(echo "$MIGRATION_COUNT" | tr -d '[:space:]') -ge 11
+          test $(echo "$MIGRATION_COUNT" | tr -d '[:space:]') -ge 19
 
           USER_COUNT=$(PGPASSWORD=test_password psql -h localhost -U test_user -d juanderquest_ci_drill -t -c "SELECT COUNT(*) FROM users WHERE id = 'ci-u1';")
           echo "Verified restored user count: $USER_COUNT"

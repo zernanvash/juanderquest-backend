@@ -2,6 +2,8 @@ import { db, SubmissionRow, calculateHaversineDistance } from '../db/index.js';
 import { getPool } from '../db/pool.js';
 import { lockGovernanceSnapshot, commitGovernanceTransaction } from '../governance/transaction.js';
 import { governanceStore } from '../routes/proposals.js';
+import { progressionService } from '../progression/service.js';
+import { env } from '../config/env.js';
 import { randomUUID } from 'crypto';
 
 export interface CreateSubmissionInput {
@@ -306,6 +308,21 @@ export class SubmissionsService {
               await client.query('ROLLBACK');
               throw govErr;
             }
+          }
+
+          // Emit progression outbox event within the SAME transaction if enabled
+          if (env.PROGRESSION_ENABLED && env.PROGRESSION_EMIT_OUTBOX_ENABLED) {
+            await progressionService.recordApprovalOutboxEvent(
+              {
+                id: updatedSub.id,
+                user_id: updatedSub.user_id,
+                quest_id: updatedSub.quest_id,
+                created_at: updatedSub.created_at,
+                reviewed_at: updatedSub.reviewed_at,
+                is_test: updatedSub.is_test,
+              },
+              client
+            );
           }
         }
 

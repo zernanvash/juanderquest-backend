@@ -36,6 +36,12 @@ export async function createTestDb(): Promise<TestDbInstance> {
   const memDb = newDb();
 
   memDb.public.registerFunction({
+    name: 'clock_timestamp', args: [], returns: DataType.timestamptz,
+    implementation: () => new Date(),
+    impure: true,
+  });
+
+  memDb.public.registerFunction({
     name: 'version',
     args: [],
     returns: DataType.text,
@@ -108,6 +114,10 @@ export async function createTestDb(): Promise<TestDbInstance> {
       } catch {
         // table does not exist yet
       }
+    }
+    if (sql.includes('SKIP LOCKED')) {
+      const res = memDb.public.query(sql.replace(/SKIP\s+LOCKED/gi, ''));
+      return res && typeof res === 'object' && 'rows' in res ? (res as any).rows : (Array.isArray(res) ? res : []);
     }
     return null;
   });

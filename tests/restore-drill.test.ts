@@ -40,7 +40,7 @@ describe('Phase 6: Isolated Backup & Restore Drill', () => {
     const usersDump = await primaryDb.pool.query('SELECT * FROM users WHERE id IN ($1, $2)', [user1Id, user2Id]);
     const followsDump = await primaryDb.pool.query('SELECT * FROM user_follows WHERE follower_id = $1 AND following_id = $2', [user1Id, user2Id]);
 
-    expect(migrationsDump.rows.length).toBeGreaterThanOrEqual(11);
+    expect(migrationsDump.rows.length).toBeGreaterThanOrEqual(19);
     expect(usersDump.rows.length).toBe(2);
     expect(followsDump.rows.length).toBe(1);
 

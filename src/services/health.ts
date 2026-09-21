@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { BlobServiceClient } from '@azure/storage-blob';
 import { env } from '../config/env.js';
-import { getPool } from '../db/pool.js';
+import { getPool, MIGRATIONS } from '../db/pool.js';
 
 export type DependencyState = 'up' | 'down' | 'degraded';
 
@@ -54,7 +54,11 @@ async function probePostgres(): Promise<void> {
     }
     throw new Error('PostgreSQL pool is not initialized');
   }
-  await withTimeout(pool.query('SELECT COUNT(*) FROM schema_migrations'), 1500, 'PostgreSQL readiness check');
+  const result = await withTimeout(pool.query('SELECT COUNT(*)::int AS count FROM schema_migrations'), 1500, 'PostgreSQL readiness check');
+  const applied = Number(result.rows[0]?.count ?? 0);
+  if (applied < MIGRATIONS.length) {
+    throw new Error(`Migration ledger incomplete: ${applied}/${MIGRATIONS.length}`);
+  }
 }
 
 async function probeValhalla(): Promise<void> {

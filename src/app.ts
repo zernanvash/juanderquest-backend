@@ -19,6 +19,8 @@ import { usersRouter } from './routes/users.js';
 import appVersionRouter from './routes/appVersion.js';
 import routesRouter from './routes/routes.js';
 import analyticsRouter from './routes/analytics.js';
+import { progressionRouter } from './routes/progression.js';
+import { juanChoiceRouter } from './routes/juanchoice.js';
 import { errorHandler } from './middleware/error.js';
 
 import path from 'path';
@@ -65,6 +67,8 @@ app.use('/api/v1', usersRouter);
 app.use('/api/v1', appVersionRouter);
 app.use('/api/v1', routesRouter);
 app.use('/api/v1', analyticsRouter);
+app.use('/api/v1', progressionRouter);
+app.use('/api/v1', juanChoiceRouter);
 
 // JSON parse errors -> 400 instead of 500
 app.use((err: Error & { type?: string }, _req: express.Request, res: express.Response, next: express.NextFunction) => {

@@ -22,6 +22,13 @@ export const MIGRATIONS = [
   '010_redemptions_user_voucher_unique.sql',
   '011_governance_ledger.sql',
   '012_qa_evaluator_role.sql',
+  '013_progression_identity_foundation.sql',
+  '014_progression_hardening_and_retrofits.sql',
+  '015_progression_legacy_013_upgrade.sql',
+  '016_juanchoice_pilot.sql',
+  '017_juanchoice_supporter_quest.sql',
+  '018_juanchoice_retention_foundation.sql',
+  '019_juanchoice_partnerships_and_budget_guardrails.sql',
 ];
 
 let pool: Pool | null = null;
