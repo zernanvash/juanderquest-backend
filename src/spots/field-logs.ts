@@ -14,9 +14,16 @@ export interface SpotFieldLog {
   spot_id: string;
   user_id: string;
   author_name: string;
-  author_badge: string;
-  tag: FieldLogTag;
+  author_badge?: string;
+  author_avatar?: string;
+  tag?: FieldLogTag;
   content: string;
+  image_url?: string;
+  location_pin?: {
+    name: string;
+    lat?: number;
+    lng?: number;
+  };
   helpful_count: number;
   helpful_user_ids: string[];
   created_at: string;
@@ -50,8 +57,15 @@ const SEED_LOGS: SpotFieldLog[] = [
     user_id: 'qa-sim-20260927-u01',
     author_name: 'Scout Aira',
     author_badge: 'Verified Scout • Lvl 4',
+    author_avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
     tag: 'local_tip',
-    content: 'Rent the kayak at Governor Island early morning! The hidden cave connection to Virgin Island is calmest before 9:00 AM before tour boat swells pick up.',
+    content: 'Rent the kayak at Governor Island early morning! 🚣🌊 The hidden cave connection to Virgin Island is calmest before 9:00 AM before tour boat swells pick up. Absolutely breathtaking! ✨',
+    location_pin: {
+      name: 'Governor Island Kayak Dock, Alaminos',
+      lat: 16.2023,
+      lng: 120.0435,
+    },
+    image_url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=700&q=80',
     helpful_count: 16,
     helpful_user_ids: ['u-auto-01', 'u-auto-02'],
     created_at: '2026-09-28T07:30:00Z',
@@ -64,7 +78,10 @@ const SEED_LOGS: SpotFieldLog[] = [
     author_name: 'Scout Ben',
     author_badge: 'Pangasinan Pioneer',
     tag: 'gear_alert',
-    content: 'Definitely bring aqua reef shoes! The limestone steps near Quezon Island view deck can be sharp when wet from high tide spray.',
+    content: 'Definitely bring aqua reef shoes! 👟 The limestone steps near Quezon Island view deck can be sharp when wet from high tide spray. 🌊',
+    location_pin: {
+      name: 'Quezon Island View Deck, Alaminos',
+    },
     helpful_count: 11,
     helpful_user_ids: ['u-auto-03'],
     created_at: '2026-09-30T10:15:00Z',
@@ -168,7 +185,10 @@ class FieldLogStore {
     authorBadge: string,
     tag: FieldLogTag,
     content: string,
-    isVerifiedVisit = false
+    isVerifiedVisit = false,
+    imageUrl?: string,
+    locationPin?: { name: string; lat?: number; lng?: number },
+    authorAvatar?: string
   ): SpotFieldLog {
     const log: SpotFieldLog = {
       id: `log-${randomUUID().slice(0, 8)}`,
@@ -176,8 +196,11 @@ class FieldLogStore {
       user_id: userId,
       author_name: authorName || 'Fellow Scout',
       author_badge: authorBadge || 'Explorer',
-      tag: tag || 'local_tip',
+      author_avatar: authorAvatar,
+      tag: tag || 'general',
       content: content.trim(),
+      image_url: imageUrl,
+      location_pin: locationPin,
       helpful_count: 0,
       helpful_user_ids: [],
       created_at: new Date().toISOString(),

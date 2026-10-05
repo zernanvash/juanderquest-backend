@@ -500,9 +500,16 @@ router.get(['/spots/:id/comments', '/spots/:id/field-logs'], optionalAuthenticat
 // POST /spots/:id/comments
 const createFieldLogSchema = z.object({
   body: z.object({
-    content: z.string().min(3).max(600),
-    tag: z.enum(['local_tip', 'gear_alert', 'tide_condition', 'food_find', 'heritage', 'eco_watch', 'general']).default('local_tip'),
+    content: z.string().min(1).max(1000),
+    tag: z.enum(['local_tip', 'gear_alert', 'tide_condition', 'food_find', 'heritage', 'eco_watch', 'general']).optional().default('general'),
     author_name: z.string().max(80).optional(),
+    author_avatar: z.string().max(2000).optional(),
+    image_url: z.string().max(2000000).optional(),
+    location_pin: z.object({
+      name: z.string().min(1).max(100),
+      lat: z.number().optional(),
+      lng: z.number().optional(),
+    }).optional(),
     is_verified_visit: z.boolean().optional(),
   }),
 });
@@ -516,10 +523,12 @@ router.post(['/spots/:id/comments', '/spots/:id/field-logs'], optionalAuthentica
   const userId = req.user?.id || `guest-${randomUUID().slice(0, 8)}`;
   let authorName = req.body.author_name;
   let authorBadge = 'Explorer';
+  let authorAvatar = req.body.author_avatar;
 
   if (req.user) {
     const actor = db.findUserById(req.user.id);
-    authorName = actor?.display_name || authorName || 'Verified Scout';
+    authorName = actor?.display_name || authorName || 'Traveler';
+    authorAvatar = actor?.avatar_url || authorAvatar;
     if (actor?.role === 'admin') {
       authorBadge = 'Tourism Officer';
     } else if (actor && actor.demo_points > 100) {
@@ -528,8 +537,8 @@ router.post(['/spots/:id/comments', '/spots/:id/field-logs'], optionalAuthentica
       authorBadge = 'Verified Scout';
     }
   } else {
-    authorName = authorName || 'Pangasinan Scout';
-    authorBadge = 'Guest Explorer';
+    authorName = authorName || 'Guest Explorer';
+    authorBadge = 'Traveler';
   }
 
   const log = fieldLogStore.create(
@@ -539,7 +548,10 @@ router.post(['/spots/:id/comments', '/spots/:id/field-logs'], optionalAuthentica
     authorBadge,
     req.body.tag,
     req.body.content,
-    Boolean(req.body.is_verified_visit)
+    Boolean(req.body.is_verified_visit),
+    req.body.image_url,
+    req.body.location_pin,
+    authorAvatar
   );
 
   return res.status(201).json({
