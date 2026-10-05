@@ -27,7 +27,7 @@ check_endpoint() {
   local name="$1"
   local url="$2"
   local result
-  result=$(curl -s -k -o /dev/null -w "%{http_code} %{time_total}" --connect-timeout 4 --max-time 6 "$url" 2>/dev/null || echo "ERR 0")
+  result=$(curl -s -k -o /dev/null -w "%{http_code} %{time_total}" --connect-timeout 5 --max-time 10 "$url" 2>/dev/null || echo "ERR 0")
   local code=$(echo "$result" | awk '{print $1}')
   local time=$(echo "$result" | awk '{print $2}')
 
@@ -44,28 +44,31 @@ check_endpoint() {
 }
 
 check_endpoint "Traveler Web App" "https://juanderquest.app"
-check_endpoint "Express REST API" "https://api.juanderquest.app/api/v1/spots/spot-hundred-islands"
+check_endpoint "Express REST API" "https://api.juanderquest.app/api/v1/health"
 check_endpoint "LGU Admin Dashboard" "https://admin.juanderquest.app"
 
-# 2. Local Daemons & Containers
-echo -e "${BOLD}🐳 BACKEND SERVICES & CONTAINERS:${NC}"
-if docker ps --format '{{.Names}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null | grep -q 'jdq-alpha-postgres'; then
-  pg_info=$(docker ps --filter "name=jdq-alpha-postgres" --format '{{.Status}} (Port {{.Ports}})')
-  echo -e "  [ ${GREEN}● RUNNING${NC} ] ${BOLD}PostgreSQL Alpha DB Container${NC}"
-  echo -e "             Details: $pg_info"
+# 2. PM2 Managed Services
+echo -e "${BOLD}🚀 PM2 PROCESS MANAGER STATUS:${NC}"
+if command -v pm2 >/dev/null 2>&1; then
+  pm2 list
 else
-  echo -e "  [ ${RED}✖ STOPPED${NC} ] ${BOLD}PostgreSQL Alpha DB Container${NC}"
-fi
-
-if pgrep -f 'node.*dist/server.js' >/dev/null 2>&1; then
-  api_pid=$(pgrep -f 'node.*dist/server.js' | head -n1)
-  echo -e "  [ ${GREEN}● ACTIVE${NC}  ] ${BOLD}Backend REST API Daemon${NC} (PID: $api_pid)"
-else
-  echo -e "  [ ${RED}✖ INACTIVE${NC} ] ${BOLD}Backend REST API Daemon${NC}"
+  echo -e "  ${RED}pm2 command not found in PATH${NC}"
 fi
 echo ""
 
-# 3. System Resources
+# 3. Docker Containers
+echo -e "${BOLD}🐳 DATABASE CONTAINERS & ROUTING DAEMON:${NC}"
+for cname in jdq-alpha-postgres juanderquest_valhalla_local; do
+  if docker ps --format '{{.Names}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null | grep -q "$cname"; then
+    info=$(docker ps --filter "name=$cname" --format '{{.Status}} (Port {{.Ports}})')
+    echo -e "  [ ${GREEN}● RUNNING${NC} ] ${BOLD}$cname${NC}: $info"
+  else
+    echo -e "  [ ${YELLOW}○ STOPPED${NC} ] ${BOLD}$cname${NC}"
+  fi
+done
+echo ""
+
+# 4. System Resources
 echo -e "${BOLD}📊 SYSTEM RESOURCES & TELEMETRY:${NC}"
 echo -e "  Uptime:   ${CYAN}$(uptime -p 2>/dev/null || uptime)${NC}"
 echo -e "  Load Avg: ${CYAN}$(cat /proc/loadavg | awk '{print $1, $2, $3}')${NC}"
@@ -75,10 +78,11 @@ disk_info=$(df -h / | awk 'NR==2 {print "Used: " $3 " / " $2 " (" $5 " used)"}')
 echo -e "  Disk (/): ${CYAN}$disk_info${NC}"
 echo ""
 
-# 4. Quick Commands Reminder
+# 5. Quick Commands Reminder
 echo -e "${GOLD}${BOLD}⚡ QUICK MANAGEMENT SHORTCUTS:${NC}"
 echo -e "  - Run ${BOLD}jdq-status${NC} anytime to re-check status"
-echo -e "  - Run ${BOLD}watch -n 5 jdq-status${NC} for auto-refreshing 5s monitor"
+echo -e "  - Run ${BOLD}watch -n 5 jdq-status${NC} for live auto-refreshing monitor"
+echo -e "  - Run ${BOLD}pm2 logs${NC} or ${BOLD}pm2 logs <service>${NC} to stream logs"
+echo -e "  - Run ${BOLD}pm2 restart all${NC} to reload backend, web, and dashboard"
 echo -e "  - Run ${BOLD}docker logs jdq-alpha-postgres --tail 10${NC} for DB logs"
-echo -e "  - Run ${BOLD}cd /mnt/c/Users/HP/Desktop/Code/JuanderQuest${NC} to access project files"
 echo -e "${GOLD}==============================================================${NC}"
