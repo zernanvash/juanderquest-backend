@@ -4,6 +4,7 @@ import path from 'path';
 import { execSync } from 'child_process';
 
 export const appVersionRouter = Router();
+const LATEST_ANDROID_APK = 'https://github.com/zernanvash/juanderquest-mobile/releases/latest/download/juanderquest-latest.apk';
 
 export interface ContentManifestMetadata {
   version: string;
@@ -60,7 +61,7 @@ export const getGitCommitHead = (): string => {
 const getVersionFilePath = (): string => {
   // Check in downloads folder or server root
   const customPath = process.env.APP_VERSION_FILE;
-  if (customPath && fs.existsSync(customPath)) {
+  if (customPath) {
     return customPath;
   }
 
@@ -88,7 +89,7 @@ export const getLatestAppVersion = (): AppVersionData => {
     versionName: `alpha-${currentCommit}`,
     commitHash: currentCommit,
     fileName: defaultFileName,
-    downloadUrl: `https://jdq.zernanvash.dev/downloads/${defaultFileName}`,
+    downloadUrl: LATEST_ANDROID_APK,
     changelog: 'Automated alpha release build of JuanDerQuest for Pangasinan tourism.',
     publishedAt: new Date().toISOString(),
     forceUpdate: false,
@@ -114,7 +115,7 @@ export const getLatestAppVersion = (): AppVersionData => {
         versionName: parsed.versionName || `alpha-${commit}`,
         commitHash: commit,
         fileName,
-        downloadUrl: parsed.downloadUrl || `https://jdq.zernanvash.dev/downloads/${fileName}`,
+        downloadUrl: parsed.downloadUrl || LATEST_ANDROID_APK,
         changelog: parsed.changelog || fallback.changelog,
         publishedAt: parsed.publishedAt || fallback.publishedAt,
         forceUpdate: isForce,

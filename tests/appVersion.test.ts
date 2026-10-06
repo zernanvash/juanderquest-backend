@@ -27,6 +27,7 @@ describe('App Version Endpoint (OTA Updates)', () => {
     expect(res.body.data.commitHash).toBeDefined();
     expect(res.body.data.fileName).toMatch(/^juanderquest-alpha-.*\.apk$/);
     expect(res.body.data.downloadUrl).toContain('.apk');
+    expect(res.body.data.downloadUrl).toBe('https://github.com/zernanvash/juanderquest-mobile/releases/latest/download/juanderquest-latest.apk');
     expect(res.body.data.minimumBaseVersionCode).toBe(1);
     expect(res.body.data.baseReleaseRequired).toBe(false);
     expect(res.body.data.updatePolicy).toBe('optional');
@@ -86,7 +87,7 @@ describe('App Version Endpoint (OTA Updates)', () => {
     if (res.status === 302) {
       expect(res.headers.location).toContain('.apk');
     } else {
-      expect(res.headers['content-disposition']).toMatch(/juanderquest-alpha-.*\.apk/);
+      expect(res.headers['content-disposition']).toMatch(/juanderquest-.*\.apk/);
     }
   });
 });
