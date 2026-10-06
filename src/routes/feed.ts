@@ -11,6 +11,7 @@ export interface FeedItem extends Spot {
   crowd_status: string;
   crowd_confidence: string;
   saved: boolean;
+  liked: boolean;
 }
 
 // Applies municipal diversity spacing: at most 2 consecutive items from the same municipality
@@ -50,6 +51,7 @@ export function applyMunicipalDiversity<T extends { municipality: string }>(
 
 feedRouter.get('/feed', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res: Response) => {
   const userId = req.user?.id;
+  const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
   const prefs = userId ? spotStore.getPreferences(userId) : undefined;
   const hasUserPrefs =
     Boolean(prefs) &&
@@ -142,7 +144,8 @@ feedRouter.get('/feed', optionalAuthenticateToken, checkQAAuthorization, (req: A
       recommendation_reasons: reasons,
       crowd_status: crowdInfo.crowd_status,
       crowd_confidence: crowdInfo.crowd_confidence,
-      saved: Boolean(spotStore.isSaved(userId, spot.id)),
+      saved: Boolean(spotStore.isSaved(actorId, spot.id)),
+      liked: Boolean(spotStore.isLiked(actorId, spot.id)),
     };
   });
 

@@ -49,14 +49,16 @@ router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, (req: Auth
   if ((lat !== undefined) !== (lng !== undefined) || [lat, lng, radius].some(v => v !== undefined && !Number.isFinite(v))) {
     return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Valid lat/lng and radius values are required.' } });
   }
-  const data = spotStore.list({ search: req.query.q as string | undefined, categories: csv(req.query.categories), tags: csv(req.query.tags), municipality: req.query.municipality as string | undefined, lat, lng, radius, intent: req.query.intent as string | undefined, sort: req.query.sort as string | undefined, hasQuest: req.query.has_quest === 'true', userId: req.user?.id, allowTest });
+  const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
+  const data = spotStore.list({ search: req.query.q as string | undefined, categories: csv(req.query.categories), tags: csv(req.query.tags), municipality: req.query.municipality as string | undefined, lat, lng, radius, intent: req.query.intent as string | undefined, sort: req.query.sort as string | undefined, hasQuest: req.query.has_quest === 'true', userId: actorId, allowTest });
   return res.json({ success: true, data, meta: { count: data.length, sort: req.query.sort || 'recommended' } });
 });
 
 router.get('/spots/trending', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
   const allowTest = isAuthorizedQA(req);
   if (allowTest) res.set('X-Robots-Tag', 'noindex, nofollow');
-  res.json({ success: true, data: spotStore.list({ municipality: req.query.municipality as string | undefined, sort: 'trending', userId: req.user?.id, allowTest }).slice(0, 10) });
+  const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
+  res.json({ success: true, data: spotStore.list({ municipality: req.query.municipality as string | undefined, sort: 'trending', userId: actorId, allowTest }).slice(0, 10) });
 });
 
 router.get('/spots/:slug/alternatives', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
@@ -65,7 +67,8 @@ router.get('/spots/:slug/alternatives', optionalAuthenticateToken, checkQAAuthor
   const source=publicSpot(req.params.slug,allowTest);
   if(!source)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
   const requested=numeric(req.query.limit);const limit=requested===undefined?3:Math.max(1,Math.min(5,Math.floor(requested)));
-  return res.json({success:true,data:spotStore.alternatives(source,req.user?.id,limit),meta:{source_spot_id:source.id,catalog_scope:'pangasinan_alpha',ranking_scope:'catalog_wide',expansion_ready:'philippines',personalized:Boolean(req.user),estimated_not_live:true}});
+  const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
+  return res.json({success:true,data:spotStore.alternatives(source,actorId,limit),meta:{source_spot_id:source.id,catalog_scope:'pangasinan_alpha',ranking_scope:'catalog_wide',expansion_ready:'philippines',personalized:Boolean(req.user),estimated_not_live:true}});
 });
 
 router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
@@ -75,8 +78,9 @@ router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, (req
   if (spot.is_test) {
     res.set('X-Robots-Tag', 'noindex, nofollow');
   }
+  const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
   const attached = Array.from(assetStore.assets.values()).filter(a => a.spot_id === spot.id && a.status === 'attached');
-  return res.json({ success: true, data: { ...spot, ...spotStore.crowd(spot), saved: spotStore.isSaved(req.user?.id, spot.id), trend_score: spotStore.trend(spot.id), attached_assets: attached } });
+  return res.json({ success: true, data: { ...spot, ...spotStore.crowd(spot), saved: spotStore.isSaved(actorId, spot.id), liked: spotStore.isLiked(actorId, spot.id), trend_score: spotStore.trend(spot.id), attached_assets: attached } });
 });
 
 router.get('/me/discovery-preferences', authenticateToken, (req: AuthRequest, res) => res.json({ success: true, data: spotStore.getPreferences(req.user!.id) }));
@@ -85,6 +89,22 @@ router.put('/me/discovery-preferences', authenticateToken, validateRequest(prefe
 
 router.put('/spots/:id/save', authenticateToken, (req: AuthRequest, res) => { const spot=spotStore.spots.find(item=>item.id===req.params.id); const actor=db.findUserById(req.user!.id); if(!actor)return res.status(403).json({success:false,error:{code:'FORBIDDEN',message:'Account is unavailable.'}}); if(spot&&Boolean(spot.is_test)!==Boolean(actor.is_test))return res.status(403).json({success:false,error:{code:'SCOPE_MISMATCH',message:'Fictional alpha posts are read-only for real accounts.'}}); const saved=spotStore.interact(req.user!.id,req.params.id,'save',true);spotStore.recordActivity(req.user!.id,req.params.id,'save');return res.json({success:true,data:{saved}}); });
 router.delete('/spots/:id/save', authenticateToken, (req: AuthRequest, res) => res.json({ success: true, data: { saved: spotStore.interact(req.user!.id, req.params.id, 'save', false) } }));
+
+router.put('/spots/:id/like', optionalAuthenticateToken, (req: AuthRequest, res) => {
+  const spot = spotStore.spots.find(item => item.id === req.params.id || item.slug === req.params.id);
+  if (!spot) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
+  const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip || 'anon';
+  spotStore.interact(String(actorId), spot.id, 'like', true);
+  return res.json({ success: true, data: { liked: true, spot_id: spot.id } });
+});
+
+router.delete('/spots/:id/like', optionalAuthenticateToken, (req: AuthRequest, res) => {
+  const spot = spotStore.spots.find(item => item.id === req.params.id || item.slug === req.params.id);
+  if (!spot) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
+  const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip || 'anon';
+  spotStore.interact(String(actorId), spot.id, 'like', false);
+  return res.json({ success: true, data: { liked: false, spot_id: spot.id } });
+});
 router.post('/spots/:id/interactions', authenticateToken, validateRequest(z.object({ body: z.object({ type: z.enum(['view', 'directions', 'helpful', 'visit']), captured_lat:z.number().min(-90).max(90).optional(), captured_lng:z.number().min(-180).max(180).optional() }) })), (req: AuthRequest, res) => {
   const spot=spotStore.spots.find(item=>item.id===req.params.id);if(!spot)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
   const actor=db.findUserById(req.user!.id);if(!actor)return res.status(403).json({success:false,error:{code:'FORBIDDEN',message:'Account is unavailable.'}});if(Boolean(spot.is_test)!==Boolean(actor.is_test))return res.status(403).json({success:false,error:{code:'SCOPE_MISMATCH',message:'Fictional alpha posts are read-only for real accounts.'}});
@@ -567,7 +587,7 @@ router.post(['/spots/:id/comments/:logId/helpful', '/spots/:id/field-logs/:logId
     return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
   }
 
-  const userId = req.user?.id || (req.headers['x-forwarded-for'] as string) || req.ip || 'anon';
+  const userId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip || 'anon';
   const result = fieldLogStore.toggleHelpful(spot.id, req.params.logId, String(userId));
   if (!result) {
     return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Field log not found.' } });

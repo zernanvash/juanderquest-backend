@@ -7,9 +7,9 @@ import { db } from '../db/index.js';
 export type SpotCategory = 'eat_drink' | 'nature_outdoors' | 'culture_heritage' | 'activities_wellness' | 'shopping_local' | 'stay';
 export type SpotTrust = 'lgu_verified' | 'editorial' | 'open_data' | 'community';
 export type SpotSource = 'lgu' | 'editorial' | 'open_data' | 'community';
-export type CrowdCapacityBand = 'low' | 'medium' | 'high';
-export type CrowdStatus = 'quiet' | 'moderate' | 'estimated_busy' | 'unknown';
-type ActivityType = 'view' | 'directions' | 'save' | 'visit';
+export type { CrowdCapacityBand, CrowdStatus, CrowdConfidence, ActivityType, CrowdMetrics } from './crowd.js';
+import type { CrowdCapacityBand, CrowdStatus, ActivityType } from './crowd.js';
+import { calculateCrowdMetrics } from './crowd.js';
 interface ActivityEvent { id:string; user_id:string; spot_id:string; activity_type:ActivityType; created_at:string; is_test?: boolean; }
 
 export interface Spot {
@@ -93,7 +93,8 @@ export class SpotStore {
   setPreferences(userId:string,p:DiscoveryPreferences) { this.preferences.set(userId,p); if(this.pg)this.pg.query(`INSERT INTO discovery_preferences(user_id,categories,tags,occasions,price_levels,radius_km,onboarding_state) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(user_id) DO UPDATE SET categories=$2,tags=$3,occasions=$4,price_levels=$5,radius_km=$6,onboarding_state=$7,updated_at=NOW()`,[userId,JSON.stringify(p.categories),JSON.stringify(p.tags),JSON.stringify(p.occasions),JSON.stringify(p.price_levels),p.radius_km,p.onboarding_state]).catch(()=>{}); return p; }
   interact(userId:string,spotId:string,type:string,enabled=true) { const key=`${spotId}:${type}`; const set=this.interactions.get(userId)||new Set<string>(); enabled?set.add(key):set.delete(key); this.interactions.set(userId,set);if(this.pg){const query=enabled?'INSERT INTO spot_interactions(user_id,spot_id,interaction_type) VALUES($1,$2,$3) ON CONFLICT DO NOTHING':'DELETE FROM spot_interactions WHERE user_id=$1 AND spot_id=$2 AND interaction_type=$3';this.pg.query(query,[userId,spotId,type]).catch(()=>{});} return enabled; }
   isSaved(userId:string|undefined,spotId:string){return !!userId&&this.interactions.get(userId)?.has(`${spotId}:save`);}
-  trend(spotId:string){let score=0;for(const [userId, values] of this.interactions.entries()){if(db.findUserById(userId)?.is_test)continue;if(values.has(`${spotId}:visit`))score+=5;if(values.has(`${spotId}:directions`))score+=3;if(values.has(`${spotId}:save`))score+=2;if(values.has(`${spotId}:helpful`))score+=2;if(values.has(`${spotId}:view`))score+=.25;}return score;}
+  isLiked(userId:string|undefined,spotId:string){return !!userId&&this.interactions.get(userId)?.has(`${spotId}:like`);}
+  trend(spotId:string){let score=0;for(const [userId, values] of this.interactions.entries()){if(db.findUserById(userId)?.is_test)continue;if(values.has(`${spotId}:visit`))score+=5;if(values.has(`${spotId}:directions`))score+=3;if(values.has(`${spotId}:save`))score+=2;if(values.has(`${spotId}:like`))score+=2;if(values.has(`${spotId}:helpful`))score+=2;if(values.has(`${spotId}:view`))score+=.25;}return score;}
 
   recordActivity(userId:string,spotId:string,type:ActivityType) {
     if(!this.spots.some(s=>s.id===spotId))return false;
@@ -107,15 +108,7 @@ export class SpotStore {
   }
 
   crowd(spot:Spot,now=Date.now()) {
-    const events=this.activityEvents.filter(e=>e.spot_id===spot.id&&!e.is_test&&now-Date.parse(e.created_at)<=86400000);
-    if(!events.length)return {crowd_status:'unknown' as CrowdStatus,crowd_confidence:'none',crowd_updated_at:null,pressure_score:0};
-    const weights:Record<ActivityType,number>={view:.25,directions:3,save:2,visit:5};
-    const score=events.reduce((sum,e)=>sum+weights[e.activity_type]*Math.pow(.5,(now-Date.parse(e.created_at))/21600000),0);
-    const [moderate,busy]={low:[3,8],medium:[6,15],high:[12,30]}[spot.crowd_capacity_band||'medium'];
-    const unique=new Set(events.map(e=>e.user_id)).size;
-    const roundedScore = Number(score.toFixed(2));
-    const status:CrowdStatus=roundedScore>=busy?'estimated_busy':roundedScore>=moderate?'moderate':'quiet';
-    return {crowd_status:status,crowd_confidence:unique>=8?'high':unique>=3?'medium':'low',crowd_updated_at:new Date(Math.max(...events.map(e=>Date.parse(e.created_at)))).toISOString(),pressure_score:roundedScore};
+    return calculateCrowdMetrics(this.activityEvents.filter(e => e.spot_id === spot.id), spot.crowd_capacity_band || 'medium', now);
   }
 
   alternatives(source:Spot,userId?:string,limit=3) {
@@ -147,7 +140,7 @@ export class SpotStore {
       const freshness=Math.max(0,1-ageDays/30);
       const score=intentMatch*.30+prefMatch*.20+distanceScore*.20+trust*.15+trend*.10+freshness*.05;
       const reasons:string[]=[];if(distance!==undefined)reasons.push(`${distance<1?Math.round(distance*1000)+' m':distance.toFixed(1)+' km'} away`);if(intentMatch)reasons.push(`Matches ${q.intent}`);if(s.trust_level==='lgu_verified')reasons.push('LGU verified');if(trend>.25)reasons.push(`Trending in ${s.municipality}`);
-      return {...s,...this.crowd(s),distance_km:distance,recommendation_score:Number(score.toFixed(4)),recommendation_reasons:reasons,saved:this.isSaved(q.userId,s.id),trend_score:this.trend(s.id)};
+      return {...s,...this.crowd(s),distance_km:distance,recommendation_score:Number(score.toFixed(4)),recommendation_reasons:reasons,saved:this.isSaved(q.userId,s.id),liked:this.isLiked(q.userId,s.id),trend_score:this.trend(s.id)};
     }).filter(s=>(!q.search||`${s.name} ${s.description} ${s.tags.join(' ')}`.toLowerCase().includes(q.search.toLowerCase()))&&(!q.categories?.length||q.categories.includes(s.category))&&(!q.tags?.length||q.tags.some(t=>s.tags.includes(t)))&&(!q.municipality||s.municipality.toLowerCase()===q.municipality.toLowerCase())&&(!q.hasQuest||!!s.quest_id)&&(s.distance_km===undefined||!q.radius||s.distance_km<=q.radius)).sort((a,b)=>q.sort==='nearest'?(a.distance_km??999)-(b.distance_km??999):q.sort==='newest'?Date.parse(b.created_at)-Date.parse(a.created_at):q.sort==='trending'?b.trend_score-a.trend_score:b.recommendation_score-a.recommendation_score);
   }
 
