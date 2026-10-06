@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true
+  },
+  "include": [
+    "src/**/*",
+    "scripts/juanchoice-capacity-rehearsal.ts",
+    "scripts/juanchoice-capacity-child-client.ts",
+    "scripts/juanchoice-capacity-mode.ts",
+    "scripts/juanchoice-pool-acquisition-probe.ts",
+    "scripts/juanchoice-capacity-segments.ts",
+    "scripts/juanchoice-capacity-ipc-validator.ts",
+    "scripts/juanchoice-capacity-arrivals.ts",
+    "scripts/juanchoice-capacity-reader-identities.ts",
+    "scripts/juanchoice-capacity-reader-fixture.ts",
+    "scripts/juanchoice-capacity-reader-assembly.ts",
+    "scripts/juanchoice-capacity-reader-headers.ts",
+    "scripts/juanchoice-capacity-reader-matcher.ts",
+    "scripts/juanchoice-capacity-ballot-admission.ts",
+    "scripts/juanchoice-capacity-stall-overlap.ts",
+    "scripts/juanchoice-capacity-cpu-profile.ts"
+  ]
+}

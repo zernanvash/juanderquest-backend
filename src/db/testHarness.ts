@@ -9,8 +9,12 @@ export interface TestDbInstance {
   close: () => Promise<void>;
 }
 
-export async function createTestDb(): Promise<TestDbInstance> {
+export async function createTestDb(options: { poolMax?: number } = {}): Promise<TestDbInstance> {
   if (process.env.JDQ_REAL_PG_URL) {
+    const poolMax = options.poolMax ?? 5;
+    if (!Number.isInteger(poolMax) || poolMax < 1 || poolMax > 50) {
+      throw new Error('Disposable test pool size must be an integer from 1 to 50');
+    }
     const url = new URL(process.env.JDQ_REAL_PG_URL);
     if (!['localhost', '127.0.0.1'].includes(url.hostname) || url.pathname !== '/jdq_reliability_test') {
       throw new Error('Real integration harness only accepts loopback jdq_reliability_test');
@@ -19,7 +23,7 @@ export async function createTestDb(): Promise<TestDbInstance> {
     const admin = new Pool({ connectionString: url.toString(), connectionTimeoutMillis: 3000 });
     try { await admin.query(`CREATE SCHEMA ${schema}`); }
     catch (error) { await admin.end(); throw error; }
-    const pool = new Pool({ connectionString: url.toString(), options: `-c search_path=${schema}`, max: 5, connectionTimeoutMillis: 3000 });
+    const pool = new Pool({ connectionString: url.toString(), options: `-c search_path=${schema}`, max: poolMax, connectionTimeoutMillis: 3000 });
     try { await applyMigrations(pool); }
     catch (error) {
       await pool.end();
@@ -42,10 +46,22 @@ export async function createTestDb(): Promise<TestDbInstance> {
   });
 
   memDb.public.registerFunction({
+    name: 'jsonb_typeof', args: [DataType.jsonb], returns: DataType.text,
+    implementation: (value: unknown) => Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value,
+  });
+
+  memDb.public.registerFunction({
     name: 'version',
     args: [],
     returns: DataType.text,
     implementation: () => 'PostgreSQL 15.0 (pg-mem)',
+  });
+
+  memDb.public.registerFunction({
+    name: 'current_database',
+    args: [],
+    returns: DataType.text,
+    implementation: () => 'juanderquest_presentation_test',
   });
 
   memDb.public.registerFunction({
@@ -60,6 +76,13 @@ export async function createTestDb(): Promise<TestDbInstance> {
     args: [DataType.text],
     returns: DataType.integer,
     implementation: (val: string) => (val ? val.length : 0),
+  });
+
+  memDb.public.registerFunction({
+    name: 'trim',
+    args: [DataType.text],
+    returns: DataType.text,
+    implementation: (val: string) => (val ? val.trim() : ''),
   });
 
   memDb.registerLanguage('plpgsql', ({ code }) => () => {
@@ -105,6 +128,13 @@ export async function createTestDb(): Promise<TestDbInstance> {
   // Intercept CREATE TABLE IF NOT EXISTS schema_migrations if table already exists,
   // preventing pg-mem unread AST error on idempotent re-runs
   memDb.public.interceptQueries((sql) => {
+    // pg-mem's ANY(ARRAY[...]::text[]) silently returns no rows for this
+    // PostgreSQL-valid batched identity query. Keep the production query intact
+    // and translate only its exact test-harness shape to an equivalent IN list.
+    const scopeBatch = /^SELECT id, seed_id, is_test FROM users WHERE id = ANY\(ARRAY\[(.*)\]::text\[\]\)$/.exec(sql);
+    if (scopeBatch) {
+      return memDb.public.query(`SELECT id, seed_id, is_test FROM users WHERE id IN (${scopeBatch[1]})`).rows;
+    }
     if (sql.includes('CREATE TABLE IF NOT EXISTS schema_migrations')) {
       try {
         const exists = memDb.public.getTable('schema_migrations', true);

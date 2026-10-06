@@ -8,7 +8,11 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "test": "jest --detectOpenHandles",
-    "test:community": "tsx scripts/community-simulation.ts"
+    "test:community": "tsx scripts/community-simulation.ts",
+    "test:juanchoice-browser-fixture": "tsx scripts/juanchoice-browser-fixture.ts",
+    "check:juanchoice-browser-fixture": "tsc -p tsconfig.browser-fixture.json",
+    "check:juanchoice-capacity": "tsc -p tsconfig.capacity.json",
+    "test:juanchoice-capacity": "tsx scripts/juanchoice-capacity-rehearsal.ts"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.33.0",

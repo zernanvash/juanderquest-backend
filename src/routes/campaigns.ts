@@ -6,6 +6,20 @@ import { validateRequest } from '../middleware/validate.js';
 
 const router = Router();
 
+// The legacy event flow only keeps reservations and reward accounting in this
+// process. Keep discovery available, but never issue tickets or points until a
+// durable, GPS-verified implementation replaces it.
+router.use('/campaigns', (req: Request, res: Response, next) => {
+  if (req.method === 'GET') return next();
+  return res.status(503).json({
+    success: false,
+    error: {
+      code: 'FEATURE_UNDER_DEVELOPMENT',
+      message: 'Event registration and rewards are under development.',
+    },
+  });
+});
+
 // List active/upcoming campaigns for node_pangasinan
 router.get('/campaigns', (_req: Request, res: Response) => {
   return res.status(200).json({

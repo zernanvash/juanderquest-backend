@@ -25,6 +25,7 @@ import { errorHandler } from './middleware/error.js';
 
 import path from 'path';
 import { requestTracingMiddleware } from './middleware/observability.js';
+import { validateAndParseCorsOrigin } from './config/cors.js';
 
 export const app = express();
 
@@ -34,11 +35,26 @@ app.set('trust proxy', 'loopback');
 // Structured logging & Request ID tracing
 app.use(requestTracingMiddleware);
 
-export const parseCorsOrigin = (value: string) =>
-  value === '*' ? value : value.split(',').map((origin) => origin.trim()).filter(Boolean);
+export const parseCorsOrigin = (value: string): string | string[] => {
+  const parsed = validateAndParseCorsOrigin(value, env.NODE_ENV, env.JUANCHOICE_PRESENTATION_MODE);
+  return parsed.isWildcard ? '*' : parsed.origins;
+};
 
-app.use(cors({ origin: parseCorsOrigin(env.CORS_ORIGIN) }));
+const corsConfig = validateAndParseCorsOrigin(env.CORS_ORIGIN, env.NODE_ENV, env.JUANCHOICE_PRESENTATION_MODE);
+app.use(cors({ origin: corsConfig.isWildcard ? true : corsConfig.origins, credentials: true }));
 app.use(express.json());
+
+// Cookie-authenticated mutations must originate from an approved web origin.
+// Bearer clients (including Flutter) are unaffected; SameSite is defense in depth.
+app.use('/api/v1', (req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method) || req.headers.authorization || !req.headers.cookie) return next();
+  const origin = req.headers.origin;
+  const allowed = env.CORS_ORIGIN === '*'
+    ? env.NODE_ENV !== 'production' && (origin === 'http://localhost:3000' || origin === 'http://127.0.0.1:3000')
+    : Array.isArray(parseCorsOrigin(env.CORS_ORIGIN)) && (parseCorsOrigin(env.CORS_ORIGIN) as string[]).includes(origin || '');
+  if (!allowed) return res.status(403).json({ success: false, error: { code: 'INVALID_ORIGIN', message: 'Cookie-authenticated request origin is not allowed.' } });
+  next();
+});
 
 // Serve local upload files
 const uploadDir = path.resolve(process.cwd(), env.LOCAL_UPLOAD_DIR || 'uploads/spot-photos');

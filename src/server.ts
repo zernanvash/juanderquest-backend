@@ -4,8 +4,8 @@ import { bootstrap } from './bootstrap.js';
 
 bootstrap()
   .then(() => {
-    app.listen(env.PORT, () => {
-      console.log(`🚀 JuanderQuest REST API backend running on http://localhost:${env.PORT}`);
+    app.listen(env.PORT, env.HOST, () => {
+      console.log(`🚀 JuanderQuest REST API backend running on http://${env.HOST}:${env.PORT}`);
       console.log(`📡 Environment: ${env.NODE_ENV}`);
     });
   })

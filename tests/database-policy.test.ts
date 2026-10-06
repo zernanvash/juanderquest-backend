@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { initPostgres } from '../src/db/pool.js';
+import { initPostgres, seedDevelopmentData } from '../src/db/pool.js';
 import {
   DatabaseRuntimePolicy,
   isDevelopmentSeedEnabled,
@@ -59,5 +59,34 @@ describe('PostgreSQL runtime policy', () => {
       allowInMemoryFallback: false,
       seedDevelopmentData: true,
     })).toBe(true);
+  });
+
+  it('replays the idempotent development seed to repair partially populated databases', async () => {
+    const query = jest.fn().mockResolvedValue({ rows: [], rowCount: 0 });
+
+    await seedDevelopmentData({ query } as unknown as Pick<Pool, 'query'>);
+
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0][0]).toContain('INSERT INTO quests');
+    expect(query.mock.calls[0][0]).toContain('ON CONFLICT');
+  });
+
+  it('handles idle pool errors without crashing after a database interruption', async () => {
+    const logger = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const on = jest.fn();
+    const candidate = {
+      ...unavailablePool(),
+      on,
+    } as unknown as Pool;
+
+    await expect(initPostgres({ policy: productionPolicy, poolFactory: () => candidate }))
+      .rejects.toThrow('refusing to start without durable storage');
+
+    expect(on).toHaveBeenCalledWith('error', expect.any(Function));
+    const handler = on.mock.calls[0][1] as (error: Error) => void;
+    expect(() => handler(new Error('terminating connection due to administrator command')))
+      .not.toThrow();
+    expect(logger).toHaveBeenCalledWith(expect.stringContaining('Idle PostgreSQL connection error'));
+    logger.mockRestore();
   });
 });

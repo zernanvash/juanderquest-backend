@@ -245,7 +245,7 @@ usersRouter.get(
       res.set('X-Robots-Tag', 'noindex, nofollow');
     }
 
-    const counts = await db.getFollowCounts(user.id);
+    const counts = await db.getFollowCounts(user.id, false, allowTest);
 
     // Strict Privacy-Safe Projection: Never leak email, wallet address, balances, or private logs
     return res.status(200).json({
@@ -346,6 +346,10 @@ usersRouter.put(
         success: false,
         error: { code: 'NOT_FOUND', message: 'User not found or profile is private.' },
       });
+    }
+
+    if (Boolean(actor.is_test) !== Boolean(target.is_test)) {
+      return res.status(403).json({ success: false, error: { code: 'SCOPE_MISMATCH', message: 'Simulation travelers cannot be followed by real accounts.' } });
     }
 
     try {

@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { spawn } from 'child_process';
 import path from 'path';
+import type { PoolClient } from 'pg';
 import { app } from '../src/app.js';
 import { env } from '../src/config/env.js';
 import { setPool } from '../src/db/pool.js';
@@ -11,6 +12,9 @@ import { createTestDb, TestDbInstance } from '../src/db/testHarness.js';
 import { castBallot, cancelCampaign, claimSupporterQuest, finalizeCampaign, getSupporterQuest, publishCampaign } from '../src/juanchoice/service.js';
 
 describe('JuanChoice Phase 2 pilot', () => {
+  // pg-mem does not faithfully implement multi-row ON CONFLICT RETURNING or
+  // conditional upsert row counts; these invariants require real PostgreSQL.
+  const realIt = process.env.JDQ_REAL_PG_URL ? it : it.skip;
   let db: TestDbInstance;
   const user = 'jc-user';
   const young = 'jc-young';
@@ -25,6 +29,7 @@ describe('JuanChoice Phase 2 pilot', () => {
     db = await createTestDb(); setPool(db.pool); domainDb.usersRepo.setPool(db.pool);
     (env as any).JUANCHOICE_ENABLED = true;
     (env as any).JUANCHOICE_WRITES_ENABLED = true;
+    (env as any).JUANCHOICE_BATCH_WRITES_ENABLED = Boolean(process.env.JDQ_REAL_PG_URL);
     (env as any).PROGRESSION_ENABLED = true;
     await db.pool.query(`INSERT INTO users(id,seed_id,display_name,email,created_at,is_test) VALUES
       ($1,$2,'Voter','jc-voter@example.test',NOW() - INTERVAL '4 days',false),
@@ -46,12 +51,14 @@ describe('JuanChoice Phase 2 pilot', () => {
     setPool(null); domainDb.usersRepo.setPool(null); await db.close();
     (env as any).JUANCHOICE_ENABLED = false;
     (env as any).JUANCHOICE_WRITES_ENABLED = false;
+    (env as any).JUANCHOICE_BATCH_WRITES_ENABLED = false;
   });
 
   it('awards once, changes ballot once, and replays exact receipt after close', async () => {
     const key = randomUUID();
     const initial = await castBallot({ campaignId:campaign,userId:user,candidateId:first,expectedVersion:0,idempotencyKey:key });
     expect(initial.ballot.version).toBe(1);
+    expect(Number.isFinite(Date.parse(initial.server_time))).toBe(true);
     expect(initial.participation).toEqual({ civic_xp:25,stamps:1,token_grant_mjdq:'0' });
     const edited = await castBallot({ campaignId:campaign,userId:user,candidateId:second,expectedVersion:1,idempotencyKey:randomUUID() });
     expect(edited.ballot.version).toBe(2);
@@ -64,6 +71,7 @@ describe('JuanChoice Phase 2 pilot', () => {
     await db.pool.query("UPDATE juanchoice_campaigns SET status='closed', closes_at=NOW() - INTERVAL '1 minute' WHERE id=$1",[campaign]);
     const replay = await castBallot({ campaignId:campaign,userId:user,candidateId:first,expectedVersion:0,idempotencyKey:key });
     expect(replay.replayed).toBe(true);
+    expect(replay.server_time).toBe(initial.server_time);
     await expect(castBallot({ campaignId:campaign,userId:user,candidateId:second,expectedVersion:0,idempotencyKey:key }))
       .rejects.toMatchObject({code:'IDEMPOTENCY_CONFLICT'});
     await expect(castBallot({ campaignId:campaign,userId:user,candidateId:first,expectedVersion:2,idempotencyKey:randomUUID() }))
@@ -77,6 +85,66 @@ describe('JuanChoice Phase 2 pilot', () => {
       .rejects.toMatchObject({code:'NOT_ELIGIBLE'});
   });
 
+  it('rejects a synthetic test actor from a real campaign without writing a ballot or reward', async () => {
+    const testActor=`jc-test-${randomUUID()}`;
+    await db.pool.query(`INSERT INTO users(id,seed_id,display_name,email,created_at,is_test)
+      VALUES($1,$2,'Synthetic voter',$3,NOW()-INTERVAL '4 days',TRUE)`,
+      [testActor,testActor,`${testActor}@example.test`]);
+    await expect(castBallot({campaignId:secondCampaign,userId:testActor,candidateId:foreign,
+      expectedVersion:0,idempotencyKey:randomUUID()})).rejects.toMatchObject({code:'CAMPAIGN_NOT_FOUND'});
+    expect((await db.pool.query('SELECT 1 FROM juanchoice_ballots WHERE user_id=$1',[testActor])).rowCount).toBe(0);
+    expect((await db.pool.query('SELECT 1 FROM progression_events WHERE user_id=$1',[testActor])).rowCount).toBe(0);
+  });
+
+  realIt('rolls back a first ballot when Civic totals would exceed the safe integer bound', async () => {
+    const voter = `jc-overflow-${randomUUID()}`;
+    const overflowCampaign = randomUUID();
+    const overflowCandidate = randomUUID();
+    await db.pool.query("INSERT INTO juanchoice_campaigns(id,slug,region,theme,status,opens_at,closes_at) VALUES($1,$2,'Pangasinan','Overflow','voting',NOW()-INTERVAL '1 day',NOW()+INTERVAL '1 day')",[overflowCampaign,`jc-overflow-${randomUUID()}`]);
+    await db.pool.query('INSERT INTO juanchoice_candidates(id,campaign_id,spot_id) VALUES($1,$2,$3)',[overflowCandidate,overflowCampaign,'jc-spot-1']);
+    await db.pool.query(
+      "INSERT INTO users(id,seed_id,display_name,email,created_at) VALUES($1::text,$1::text,'Overflow voter',$2,NOW() - INTERVAL '4 days')",
+      [voter, `${voter}@example.test`]
+    );
+    await db.pool.query(
+      'INSERT INTO progression_totals(user_id,civic_xp,civic_stamps) VALUES($1,$2,$3)',
+      [voter, String(Number.MAX_SAFE_INTEGER - 24), 0]
+    );
+    await expect(castBallot({campaignId:overflowCampaign,userId:voter,candidateId:overflowCandidate,
+      expectedVersion:0,idempotencyKey:randomUUID()})).rejects.toMatchObject({code:'TOTALS_OUT_OF_BOUNDS'});
+    for (const table of ['juanchoice_ballots','juanchoice_participations','progression_events']) {
+      expect((await db.pool.query(`SELECT 1 FROM ${table} WHERE user_id=$1`,[voter])).rowCount).toBe(0);
+    }
+    const totals=(await db.pool.query('SELECT civic_xp,civic_stamps FROM progression_totals WHERE user_id=$1',[voter])).rows[0];
+    expect(BigInt(totals.civic_xp)).toBe(BigInt(Number.MAX_SAFE_INTEGER - 24));
+    expect(Number(totals.civic_stamps)).toBe(0);
+  });
+
+  realIt('rolls back both awards and the ballot if one logical participation award already exists', async () => {
+    const voter = `jc-conflict-${randomUUID()}`;
+    const conflictCampaign = randomUUID();
+    const conflictCandidate = randomUUID();
+    await db.pool.query("INSERT INTO juanchoice_campaigns(id,slug,region,theme,status,opens_at,closes_at) VALUES($1,$2,'Pangasinan','Conflict','voting',NOW()-INTERVAL '1 day',NOW()+INTERVAL '1 day')",[conflictCampaign,`jc-conflict-${randomUUID()}`]);
+    await db.pool.query('INSERT INTO juanchoice_candidates(id,campaign_id,spot_id) VALUES($1,$2,$3)',[conflictCandidate,conflictCampaign,'jc-spot-1']);
+    await db.pool.query(
+      "INSERT INTO users(id,seed_id,display_name,email,created_at) VALUES($1::text,$1::text,'Conflict voter',$2,NOW() - INTERVAL '4 days')",
+      [voter, `${voter}@example.test`]
+    );
+    await db.pool.query(
+      `INSERT INTO progression_events
+       (id,user_id,track,delta,source_type,source_id,award_kind,rule_version,is_test)
+       VALUES($1,$2,'civic',25,'juanchoice_participation',$3,'xp','prior-rule',false)`,
+      [randomUUID(),voter,conflictCampaign]
+    );
+    await expect(castBallot({campaignId:conflictCampaign,userId:voter,candidateId:conflictCandidate,
+      expectedVersion:0,idempotencyKey:randomUUID()})).rejects.toMatchObject({code:'REWARD_CONFLICT'});
+    expect((await db.pool.query('SELECT 1 FROM juanchoice_ballots WHERE user_id=$1',[voter])).rowCount).toBe(0);
+    expect((await db.pool.query('SELECT 1 FROM juanchoice_participations WHERE user_id=$1',[voter])).rowCount).toBe(0);
+    const awards=(await db.pool.query('SELECT award_kind FROM progression_events WHERE user_id=$1',[voter])).rows;
+    expect(awards.map(row=>row.award_kind)).toEqual(['xp']);
+    expect((await db.pool.query('SELECT 1 FROM progression_totals WHERE user_id=$1',[voter])).rowCount).toBe(0);
+  });
+
   it('finalizes a durable result once, preserving zero-vote outcome', async () => {
     await db.pool.query("UPDATE juanchoice_campaigns SET status='closed', closes_at=NOW() - INTERVAL '1 minute' WHERE id=$1",[secondCampaign]);
     const result = await finalizeCampaign(secondCampaign);
@@ -85,6 +153,79 @@ describe('JuanChoice Phase 2 pilot', () => {
     const replay = await finalizeCampaign(secondCampaign);
     expect(replay.finalized_at).toEqual(result.finalized_at);
     expect((await db.pool.query('SELECT * FROM juanchoice_results WHERE campaign_id=$1',[secondCampaign])).rowCount).toBe(1);
+  });
+
+  realIt('rolls back every finalization write when the final audit insert fails before COMMIT', async () => {
+    const id = randomUUID();
+    await db.pool.query(`INSERT INTO juanchoice_campaigns
+      (id,slug,region,theme,status,opens_at,closes_at)
+      VALUES($1,$2,'Pangasinan','Failure drill','closed',NOW()-INTERVAL '2 days',NOW()-INTERVAL '1 day')`,
+    [id,`jc-finalize-fail-${id.slice(0,8)}`]);
+    await db.pool.query(`CREATE FUNCTION jdq_fail_finalization_audit() RETURNS trigger AS $$
+      BEGIN RAISE EXCEPTION 'INJECTED_FINALIZATION_AUDIT_FAILURE'; END
+      $$ LANGUAGE plpgsql`);
+    await db.pool.query(`CREATE TRIGGER jdq_fail_finalization_audit
+      BEFORE INSERT ON juanchoice_campaign_audit FOR EACH ROW
+      EXECUTE FUNCTION jdq_fail_finalization_audit()`);
+    try {
+      await expect(finalizeCampaign(id)).rejects.toThrow('INJECTED_FINALIZATION_AUDIT_FAILURE');
+      expect((await db.pool.query('SELECT 1 FROM juanchoice_results WHERE campaign_id=$1',[id])).rowCount).toBe(0);
+      const row=(await db.pool.query('SELECT status,finalized_at FROM juanchoice_campaigns WHERE id=$1',[id])).rows[0];
+      expect(row.status).toBe('closed');
+      expect(row.finalized_at).toBeNull();
+      expect((await db.pool.query("SELECT 1 FROM juanchoice_campaign_audit WHERE campaign_id=$1 AND action='finalized'",[id])).rowCount).toBe(0);
+    } finally {
+      await db.pool.query('DROP TRIGGER jdq_fail_finalization_audit ON juanchoice_campaign_audit');
+      await db.pool.query('DROP FUNCTION jdq_fail_finalization_audit()');
+    }
+    const recovered=await finalizeCampaign(id);
+    expect(recovered.valid_ballots).toBe(0);
+    expect((await db.pool.query("SELECT 1 FROM juanchoice_campaign_audit WHERE campaign_id=$1 AND action='finalized'",[id])).rowCount).toBe(1);
+  });
+
+  realIt('replays a committed result after the COMMIT response is lost', async () => {
+    const id=randomUUID();
+    await db.pool.query(`INSERT INTO juanchoice_campaigns
+      (id,slug,region,theme,status,opens_at,closes_at)
+      VALUES($1,$2,'Pangasinan','Commit ambiguity','closed',NOW()-INTERVAL '2 days',NOW()-INTERVAL '1 day')`,
+    [id,`jc-commit-lost-${id.slice(0,8)}`]);
+    const originalConnect=db.pool.connect;
+    const connectOriginal=originalConnect.bind(db.pool);
+    let wrappedClient: PoolClient | null=null;
+    let originalQuery: PoolClient['query'] | null=null;
+    let injected=false;
+    (db.pool as any).connect=async () => {
+      const client=await connectOriginal();
+      if (!injected) {
+        injected=true;
+        wrappedClient=client;
+        originalQuery=client.query;
+        (client as any).query=(...args: unknown[]) => {
+          const result=Reflect.apply(originalQuery!,client,args);
+          if (args[0] === 'COMMIT') {
+            return Promise.resolve(result).then(() => {
+              (client as any).query=originalQuery;
+              throw new Error('INJECTED_COMMIT_RESPONSE_LOST');
+            });
+          }
+          return result;
+        };
+      }
+      return client;
+    };
+    try {
+      await expect(finalizeCampaign(id)).rejects.toThrow('INJECTED_COMMIT_RESPONSE_LOST');
+    } finally {
+      if (wrappedClient && originalQuery) (wrappedClient as any).query=originalQuery;
+      (db.pool as any).connect=originalConnect;
+    }
+    const committed=(await db.pool.query('SELECT * FROM juanchoice_results WHERE campaign_id=$1',[id])).rows[0];
+    expect(committed).toBeDefined();
+    expect((await db.pool.query("SELECT 1 FROM juanchoice_campaign_audit WHERE campaign_id=$1 AND action='finalized'",[id])).rowCount).toBe(1);
+    const retry=await finalizeCampaign(id);
+    expect(retry.finalized_at).toEqual(committed.finalized_at);
+    expect((await db.pool.query('SELECT 1 FROM juanchoice_results WHERE campaign_id=$1',[id])).rowCount).toBe(1);
+    expect((await db.pool.query("SELECT 1 FROM juanchoice_campaign_audit WHERE campaign_id=$1 AND action='finalized'",[id])).rowCount).toBe(1);
   });
 
   it('keeps private ballot off public standings and requires a bearer token for /me', async () => {
@@ -96,6 +237,44 @@ describe('JuanChoice Phase 2 pilot', () => {
     const mine = await request(app).get(`/api/v1/juanchoice/campaigns/${campaign}/me`).set('Authorization',`Bearer ${token}`);
     expect(mine.status).toBe(200);
     expect(mine.body.data.ballot.version).toBe(2);
+    expect(mine.body.data.eligibility).toEqual({eligible:true,reason:null,eligible_at:null});
+    expect(mine.body.data.can_vote_now).toBe(false);
+    expect(mine.body.data.vote_unavailable_reason).toBe('ROUND_CLOSED');
+    expect(Number.isFinite(Date.parse(mine.body.data.server_time))).toBe(true);
+    const youngToken = jwt.sign({id:young,role:'user'},env.JWT_SECRET);
+    const youngMine = await request(app).get(`/api/v1/juanchoice/campaigns/${secondCampaign}/me`)
+      .set('Authorization',`Bearer ${youngToken}`);
+    expect(youngMine.status).toBe(200);
+    expect(youngMine.body.data.ballot).toBeNull();
+    expect(youngMine.body.data.eligibility.eligible).toBe(false);
+    expect(youngMine.body.data.eligibility.reason).toBe('ACCOUNT_TOO_NEW');
+    expect(Number.isFinite(Date.parse(youngMine.body.data.eligibility.eligible_at))).toBe(true);
+  });
+
+  it('allows a new account to qualify through a non-revoked verified visit', async () => {
+    const questId = `jc-eligibility-${randomUUID()}`;
+    const submissionId = `jc-eligibility-sub-${randomUUID()}`;
+    const visitId = randomUUID();
+    await db.pool.query(`INSERT INTO quests(id,title,description,category,location_name,gps_lat,gps_lng,
+      radius_meters,reward_points,marker_code,marker_image_url)
+      VALUES($1,'Eligibility visit','Visit proof','eco','Bolinao',16,120,100,0,$2,'https://example.test/marker.png')`,
+      [questId, questId]);
+    await db.pool.query(`INSERT INTO submissions(id,idempotency_key,user_id,quest_id,scanned_marker_code,
+      captured_lat,captured_lng,captured_accuracy,status,reviewed_at)
+      VALUES($1,$2,$3,$4,$5,16,120,5,'approved',NOW())`,
+      [submissionId,randomUUID(),young,questId,questId]);
+    await db.pool.query(`INSERT INTO verified_visits(id,user_id,spot_id,source_submission_id,occurred_at,verified_at,is_test)
+      VALUES($1,$2,$3,$4,NOW(),NOW(),false)`,[visitId,young,'jc-spot-1',submissionId]);
+    const token = jwt.sign({id:young,role:'user'},env.JWT_SECRET);
+    const eligible = await request(app).get(`/api/v1/juanchoice/campaigns/${secondCampaign}/me`)
+      .set('Authorization',`Bearer ${token}`);
+    expect(eligible.status).toBe(200);
+    expect(eligible.body.data.eligibility).toEqual({eligible:true,reason:null,eligible_at:null});
+    await db.pool.query('UPDATE verified_visits SET revoked_at=NOW() WHERE id=$1',[visitId]);
+    const revoked = await request(app).get(`/api/v1/juanchoice/campaigns/${secondCampaign}/me`)
+      .set('Authorization',`Bearer ${token}`);
+    expect(revoked.status).toBe(200);
+    expect(revoked.body.data.eligibility.reason).toBe('ACCOUNT_TOO_NEW');
   });
 
   it('quarantines synthetic campaigns from public discovery', async () => {
@@ -156,6 +335,9 @@ describe('JuanChoice Phase 2 pilot', () => {
     await db.pool.query('INSERT INTO juanchoice_candidates(id,campaign_id,spot_id) VALUES($1,$2,$3)',[featuredCandidate,featuredCampaign,'jc-spot-1']);
     await db.pool.query('INSERT INTO juanchoice_results(campaign_id,standings,co_winner_ids,valid_ballots,policy_version) VALUES($1,$2::jsonb,$3::jsonb,5,$4)',
       [featuredCampaign,JSON.stringify([{candidate_id:featuredCandidate,spot_id:'jc-spot-1',votes:5}]),JSON.stringify([featuredCandidate]),'juanchoice-pilot-v1']);
+    await db.pool.query(`INSERT INTO juanchoice_promotion_assessments(id,candidate_id,assessed_by,revision,decision,reason,assessed_at,valid_until,is_test)
+      VALUES($1,$2,$3,1,'cleared','Valid initial assessment for featured fixture',NOW() - INTERVAL '1 hour',NOW() + INTERVAL '6 days',false)`,
+      [randomUUID(),featuredCandidate,admin]);
     expect((await request(app).get('/api/v1/juanchoice/spotlight')).body.data).toBeNull();
     (env as any).JUANCHOICE_PROMOTION_ENABLED=true;
     try {
@@ -163,9 +345,13 @@ describe('JuanChoice Phase 2 pilot', () => {
       expect(live.status).toBe(200);
       expect(live.body.data.kind).toBe('juanchoice_spotlight');
       expect(live.body.data.winners.map((winner:any)=>winner.spot_id)).toEqual(['jc-spot-1']);
+      await db.pool.query("UPDATE juanchoice_candidates SET status='suspended' WHERE id=$1",[featuredCandidate]);
+      expect((await request(app).get('/api/v1/juanchoice/spotlight')).body.data).toBeNull();
+      await db.pool.query("UPDATE juanchoice_candidates SET status='eligible' WHERE id=$1",[featuredCandidate]);
       await db.pool.query("UPDATE spots SET recommendation_suppressed=TRUE WHERE id='jc-spot-1'");
       expect((await request(app).get('/api/v1/juanchoice/spotlight')).body.data).toBeNull();
     } finally {
+      await db.pool.query("UPDATE juanchoice_candidates SET status='eligible' WHERE id=$1",[featuredCandidate]);
       await db.pool.query("UPDATE spots SET recommendation_suppressed=FALSE WHERE id='jc-spot-1'");
       (env as any).JUANCHOICE_PROMOTION_ENABLED=false;
     }
@@ -178,6 +364,9 @@ describe('JuanChoice Phase 2 pilot', () => {
     await db.pool.query('INSERT INTO juanchoice_candidates(id,campaign_id,spot_id) VALUES($1,$2,$3)',[candidate,visitCampaign,'jc-spot-1']);
     await db.pool.query("INSERT INTO juanchoice_results(campaign_id,standings,co_winner_ids,valid_ballots,policy_version,finalized_at) VALUES($1,$2::jsonb,$3::jsonb,2,$4,NOW())",
       [visitCampaign,JSON.stringify([{candidate_id:candidate,spot_id:'jc-spot-1',votes:2}]),JSON.stringify([candidate]),'juanchoice-pilot-v1']);
+    await db.pool.query(`INSERT INTO juanchoice_promotion_assessments(id,candidate_id,assessed_by,revision,decision,reason,assessed_at,valid_until,is_test)
+      VALUES($1,$2,$3,1,'cleared','Valid assessment for supporter fixture',NOW() - INTERVAL '1 hour',NOW() + INTERVAL '6 days',false)`,
+      [randomUUID(),candidate,admin]);
     expect(await getSupporterQuest(young)).toBeNull();
     await db.pool.query(`INSERT INTO quests(id,title,description,category,location_name,gps_lat,gps_lng,radius_meters,reward_points,marker_code,marker_image_url)
       VALUES($1,'Supporter visit','Visit the community-selected destination','eco','Bolinao',16,120,100,0,'jc-supporter-marker','https://example.test/marker.png')`,[questId]);
@@ -200,7 +389,6 @@ describe('JuanChoice Phase 2 pilot', () => {
     expect(api.status).toBe(200); expect(api.body.data.claimed).toBe(true);
   });
 
-  const realIt = process.env.JDQ_REAL_PG_URL ? it : it.skip;
   realIt('serializes simultaneous first ballots on real PostgreSQL', async () => {
     const contender = 'jc-concurrent';
     const raceCampaign = randomUUID();

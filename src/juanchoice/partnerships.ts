@@ -33,8 +33,8 @@ export async function createMerchantOffer(input: { campaignId: string; merchantI
     if (!voucher || voucher.merchant_id !== input.merchantId || !voucher.is_active) throw new JuanChoiceError('INVALID_VOUCHER', 422);
     if (new Date(input.endsAt) <= new Date(input.startsAt)) throw new JuanChoiceError('INVALID_WINDOW', 400);
     const row = (await client.query(
-      `INSERT INTO juanchoice_merchant_offers(id,campaign_id,merchant_id,voucher_id,terms_snapshot,status,partner_consent_at,starts_at,ends_at,is_test)
-       VALUES($1,$2,$3,$4,$5::jsonb,'approved',NOW(),$6,$7,$8) RETURNING *`,
+      `INSERT INTO juanchoice_merchant_offers(id,campaign_id,merchant_id,voucher_id,terms_snapshot,status,starts_at,ends_at,is_test)
+       VALUES($1,$2,$3,$4,$5::jsonb,'draft',$6,$7,$8) RETURNING *`,
       [randomUUID(), input.campaignId, input.merchantId, input.voucherId, JSON.stringify(input.termsSnapshot), input.startsAt, input.endsAt, input.isTest])).rows[0];
     await client.query('COMMIT');
     return row;
@@ -42,13 +42,13 @@ export async function createMerchantOffer(input: { campaignId: string; merchantI
   finally { client.release(); }
 }
 
-export async function createPromotionBudget(input: { campaignId: string; budgetMjdq: number; approvalReference: string; isTest: boolean; }) {
+export async function createPromotionBudget(input: { campaignId: string; budgetMjdq: number; requestReference: string; isTest: boolean; }) {
   const campaign = (await pool().query('SELECT is_test,status FROM juanchoice_campaigns WHERE id=$1', [input.campaignId])).rows[0];
   if (!campaign || campaign.is_test !== input.isTest || campaign.status === 'cancelled') {
     throw new JuanChoiceError('CAMPAIGN_NOT_FOUND', 404);
   }
   return (await pool().query(
-    `INSERT INTO juanchoice_promotion_budgets(id,campaign_id,authorized_budget_mjdq,status,approval_reference,is_test)
-     VALUES($1,$2,$3,'approved',$4,$5) RETURNING *`,
-    [randomUUID(), input.campaignId, input.budgetMjdq, input.approvalReference, input.isTest])).rows[0];
+    `INSERT INTO juanchoice_promotion_budgets(id,campaign_id,authorized_budget_mjdq,status,request_reference,is_test)
+     VALUES($1,$2,$3,'draft',$4,$5) RETURNING *`,
+    [randomUUID(), input.campaignId, input.budgetMjdq, input.requestReference, input.isTest])).rows[0];
 }

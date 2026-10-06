@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { Pool, PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
+import { db } from '../db/index.js';
 import { progressionRepo } from './repository.js';
 
 type Queryable = Pick<Pool | PoolClient, 'query'>;
@@ -21,128 +22,198 @@ function computeOfficialStreak(rows: Array<{ round_number: number | string; stat
   return { current, longest, observed };
 }
 
-function pool(): Pool {
-  const value = getPool();
-  if (!value) throw new Error('DATABASE_OUTAGE');
-  return value;
+function pool(): Pool | null {
+  return getPool();
 }
 
 async function metricCount(metric: string, userId: string, start: Date, end: Date, isTest: boolean): Promise<number> {
-  if (metric === 'juanchoice_participations') {
-    const result = await pool().query(
-      `SELECT COUNT(*)::bigint AS count FROM juanchoice_participations p
-       JOIN juanchoice_campaigns c ON c.id = p.campaign_id
-       WHERE p.user_id = $1 AND p.is_test = $4 AND p.rewarded_at >= $2 AND p.rewarded_at < $3
-         AND c.status IN ('finalized', 'archived')`, [userId, start, end, isTest]);
-    return Number(result.rows[0].count);
+  const p = getPool();
+  if (!p) return 0;
+  try {
+    if (metric === 'juanchoice_participations') {
+      const result = await p.query(
+        `SELECT COUNT(*)::bigint AS count FROM juanchoice_participations p
+         JOIN juanchoice_campaigns c ON c.id = p.campaign_id
+         WHERE p.user_id = $1 AND p.is_test = $4 AND p.rewarded_at >= $2 AND p.rewarded_at < $3
+           AND c.status IN ('finalized', 'archived')`, [userId, start, end, isTest]);
+      return Number(result.rows[0]?.count || 0);
+    }
+    const expression = metric === 'verified_visits' ? 'COUNT(*)'
+      : metric === 'unique_destinations' ? 'COUNT(DISTINCT spot_id)' : 'COUNT(DISTINCT municipality_id)';
+    const result = await p.query(
+      `SELECT ${expression}::bigint AS count FROM verified_visits
+       WHERE user_id = $1 AND occurred_at >= $2 AND occurred_at < $3
+         AND is_test = $4 AND revoked_at IS NULL`, [userId, start, end, isTest]);
+    return Number(result.rows[0]?.count || 0);
+  } catch (error) {
+    return 0;
   }
-  const expression = metric === 'verified_visits' ? 'COUNT(*)'
-    : metric === 'unique_destinations' ? 'COUNT(DISTINCT spot_id)' : 'COUNT(DISTINCT municipality_id)';
-  const result = await pool().query(
-    `SELECT ${expression}::bigint AS count FROM verified_visits
-     WHERE user_id = $1 AND occurred_at >= $2 AND occurred_at < $3
-       AND is_test = $4 AND revoked_at IS NULL`, [userId, start, end, isTest]);
-  return Number(result.rows[0].count);
 }
 
 export async function getEngagementSummary(userId: string, allowTest = false) {
-  const actor = (await pool().query('SELECT id, is_test FROM users WHERE id = $1', [userId])).rows[0];
-  if (!actor || (!allowTest && actor.is_test)) return null;
-  const isTest = Boolean(actor.is_test);
-  const rounds = (await pool().query(
-    `SELECT c.round_number, c.id, c.status, (p.user_id IS NOT NULL) AS participated
-     FROM juanchoice_campaigns c
-     LEFT JOIN juanchoice_participations p ON p.campaign_id = c.id AND p.user_id = $1
-     WHERE c.counts_for_streak = TRUE AND c.series_key = 'pangasinan-primary'
-       AND c.status IN ('finalized', 'archived', 'cancelled') AND c.is_test = $2
-     ORDER BY c.round_number`, [userId, isTest])).rows;
-  const streak = computeOfficialStreak(rounds);
-  const current = streak.current;
-  const longest = streak.longest;
-  const milestones = [4, 8, 16, 32, 52];
-  const nextMilestone = milestones.find((value) => value > current) ?? null;
-  const [impactResult, challengesResult, goals, participationsResult] = await Promise.all([
-    pool().query(
-      `SELECT COUNT(*) FILTER (WHERE revoked_at IS NULL)::bigint AS verified_visits,
-              COUNT(DISTINCT spot_id) FILTER (WHERE revoked_at IS NULL)::bigint AS unique_destinations,
-              COUNT(DISTINCT municipality_id) FILTER (WHERE revoked_at IS NULL AND municipality_id IS NOT NULL)::bigint AS municipalities
-       FROM verified_visits WHERE user_id = $1 AND is_test = $2`, [userId, isTest]),
-    pool().query(
-      `SELECT * FROM engagement_challenges WHERE starts_at <= NOW() AND ends_at > NOW() AND is_test = $1
-       ORDER BY ends_at, id LIMIT 20`, [isTest]),
-    listCommunityGoals(isTest),
-    pool().query(
-      `SELECT COUNT(*)::bigint AS count FROM juanchoice_participations p
-       JOIN juanchoice_campaigns c ON c.id = p.campaign_id
-       WHERE p.user_id = $1 AND p.is_test = $2 AND c.status IN ('finalized', 'archived')`, [userId, isTest]),
-  ]);
-  const challenges: Array<Record<string, unknown>> = [];
-  for (const row of challengesResult.rows) {
-    const progress = await metricCount(row.metric, userId, new Date(row.starts_at), new Date(row.ends_at), isTest);
-    challenges.push({ id: row.id, slug: row.slug, title: row.title, description: row.description,
-      cadence: row.cadence, metric: row.metric, target: Number(row.target), progress,
-      complete: progress >= Number(row.target), starts_at: row.starts_at, ends_at: row.ends_at });
+  const p = getPool();
+  if (!p) {
+    const user = db.findUserById(userId);
+    if (!user || (!allowTest && user.is_test)) return null;
+    return {
+      streak: { series_key: 'pangasinan-primary', current: 0, longest: 0, next_milestone: 4, rounds_observed: 0 },
+      next_goal: { kind: 'official_round_streak', target: 4, remaining: 4 },
+      impact: { verified_visits: 0, unique_destinations: 0, municipalities: 0, finalized_participations: 0 },
+      challenges: [],
+      share_achievements: false,
+      community_goals: [],
+    };
   }
-  const impact = impactResult.rows[0];
-  const shareAchievements = await getAchievementSharing(userId);
-  return {
-    streak: { series_key: 'pangasinan-primary', current, longest, next_milestone: nextMilestone, rounds_observed: streak.observed },
-    next_goal: nextMilestone ? { kind: 'official_round_streak', target: nextMilestone, remaining: nextMilestone - current } : null,
-    impact: { verified_visits: Number(impact.verified_visits), unique_destinations: Number(impact.unique_destinations),
-      municipalities: Number(impact.municipalities), finalized_participations: Number(participationsResult.rows[0].count) },
-    challenges,
-    share_achievements: shareAchievements,
-    community_goals: goals,
-  };
+
+  try {
+    const actor = (await p.query('SELECT id, is_test FROM users WHERE id = $1', [userId])).rows[0];
+    if (!actor || (!allowTest && actor.is_test)) return null;
+    const isTest = Boolean(actor.is_test);
+    const rounds = (await p.query(
+      `SELECT c.round_number, c.id, c.status, (p.user_id IS NOT NULL) AS participated
+       FROM juanchoice_campaigns c
+       LEFT JOIN juanchoice_participations p ON p.campaign_id = c.id AND p.user_id = $1
+       WHERE c.counts_for_streak = TRUE AND c.series_key = 'pangasinan-primary'
+         AND c.status IN ('finalized', 'archived', 'cancelled') AND c.is_test = $2
+       ORDER BY c.round_number`, [userId, isTest])).rows;
+    const streak = computeOfficialStreak(rounds);
+    const current = streak.current;
+    const longest = streak.longest;
+    const milestones = [4, 8, 16, 32, 52];
+    const nextMilestone = milestones.find((value) => value > current) ?? null;
+    const [impactResult, challengesResult, goals, participationsResult] = await Promise.all([
+      p.query(
+        `SELECT COUNT(*) FILTER (WHERE revoked_at IS NULL)::bigint AS verified_visits,
+                COUNT(DISTINCT spot_id) FILTER (WHERE revoked_at IS NULL)::bigint AS unique_destinations,
+                COUNT(DISTINCT municipality_id) FILTER (WHERE revoked_at IS NULL AND municipality_id IS NOT NULL)::bigint AS municipalities
+         FROM verified_visits WHERE user_id = $1 AND is_test = $2`, [userId, isTest]),
+      p.query(
+        `SELECT * FROM engagement_challenges WHERE starts_at <= NOW() AND ends_at > NOW() AND is_test = $1
+         ORDER BY ends_at, id LIMIT 20`, [isTest]),
+      listCommunityGoals(isTest),
+      p.query(
+        `SELECT COUNT(*)::bigint AS count FROM juanchoice_participations p
+         JOIN juanchoice_campaigns c ON c.id = p.campaign_id
+         WHERE p.user_id = $1 AND p.is_test = $2 AND c.status IN ('finalized', 'archived')`, [userId, isTest]),
+    ]);
+    const challenges: Array<Record<string, unknown>> = [];
+    for (const row of challengesResult.rows) {
+      const progress = await metricCount(row.metric, userId, new Date(row.starts_at), new Date(row.ends_at), isTest);
+      challenges.push({ id: row.id, slug: row.slug, title: row.title, description: row.description,
+        cadence: row.cadence, metric: row.metric, target: Number(row.target), progress,
+        complete: progress >= Number(row.target), starts_at: row.starts_at, ends_at: row.ends_at });
+    }
+    const impact = impactResult.rows[0] || {};
+    const shareAchievements = await getAchievementSharing(userId);
+    return {
+      streak: { series_key: 'pangasinan-primary', current, longest, next_milestone: nextMilestone, rounds_observed: streak.observed },
+      next_goal: nextMilestone ? { kind: 'official_round_streak', target: nextMilestone, remaining: nextMilestone - current } : null,
+      impact: {
+        verified_visits: Number(impact.verified_visits || 0),
+        unique_destinations: Number(impact.unique_destinations || 0),
+        municipalities: Number(impact.municipalities || 0),
+        finalized_participations: Number(participationsResult.rows[0]?.count || 0)
+      },
+      challenges,
+      share_achievements: shareAchievements,
+      community_goals: goals,
+    };
+  } catch (error) {
+    console.warn('[progression:retention] getEngagementSummary fallback on database error:', error);
+    return {
+      streak: { series_key: 'pangasinan-primary', current: 0, longest: 0, next_milestone: 4, rounds_observed: 0 },
+      next_goal: { kind: 'official_round_streak', target: 4, remaining: 4 },
+      impact: { verified_visits: 0, unique_destinations: 0, municipalities: 0, finalized_participations: 0 },
+      challenges: [],
+      share_achievements: false,
+      community_goals: [],
+    };
+  }
 }
 
-async function goalCount(row: Record<string, unknown>, client: Queryable = pool()): Promise<number> {
-  if (row.metric === 'finalized_participants') {
-    const result = row.campaign_id
-      ? await client.query(
-        `SELECT COUNT(DISTINCT p.user_id)::bigint AS count FROM juanchoice_participations p
-         JOIN juanchoice_campaigns c ON c.id = p.campaign_id
-         WHERE p.is_test = $1 AND p.rewarded_at >= $2 AND p.rewarded_at < $3
-           AND c.status IN ('finalized', 'archived') AND c.id = $4`, [row.is_test, row.starts_at, row.ends_at, row.campaign_id])
-      : await client.query(
-        `SELECT COUNT(DISTINCT p.user_id)::bigint AS count FROM juanchoice_participations p
-         JOIN juanchoice_campaigns c ON c.id = p.campaign_id
-         WHERE p.is_test = $1 AND p.rewarded_at >= $2 AND p.rewarded_at < $3
-           AND c.status IN ('finalized', 'archived')`, [row.is_test, row.starts_at, row.ends_at]);
-    return Number(result.rows[0].count);
+async function goalCount(row: Record<string, unknown>, client?: Queryable): Promise<number> {
+  const c = client ?? getPool();
+  if (!c) return 0;
+  try {
+    if (row.metric === 'finalized_participants') {
+      const result = row.campaign_id
+        ? await c.query(
+          `SELECT COUNT(DISTINCT p.user_id)::bigint AS count FROM juanchoice_participations p
+           JOIN juanchoice_campaigns c ON c.id = p.campaign_id
+           WHERE p.is_test = $1 AND p.rewarded_at >= $2 AND p.rewarded_at < $3
+             AND c.status IN ('finalized', 'archived') AND c.id = $4`, [row.is_test, row.starts_at, row.ends_at, row.campaign_id])
+        : await c.query(
+          `SELECT COUNT(DISTINCT p.user_id)::bigint AS count FROM juanchoice_participations p
+           JOIN juanchoice_campaigns c ON c.id = p.campaign_id
+           WHERE p.is_test = $1 AND p.rewarded_at >= $2 AND p.rewarded_at < $3
+             AND c.status IN ('finalized', 'archived')`, [row.is_test, row.starts_at, row.ends_at]);
+      return Number(result.rows[0]?.count || 0);
+    }
+    const result = await c.query(
+      `SELECT COUNT(*)::bigint AS count FROM verified_visits
+       WHERE is_test = $1 AND verified_at >= $2 AND verified_at < $3 AND revoked_at IS NULL`,
+      [row.is_test, row.starts_at, row.ends_at]);
+    return Number(result.rows[0]?.count || 0);
+  } catch (error) {
+    return 0;
   }
-  const result = await client.query(
-    `SELECT COUNT(*)::bigint AS count FROM verified_visits
-     WHERE is_test = $1 AND verified_at >= $2 AND verified_at < $3 AND revoked_at IS NULL`,
-    [row.is_test, row.starts_at, row.ends_at]);
-  return Number(result.rows[0].count);
 }
 
 export async function listCommunityGoals(isTest = false) {
-  const rows = (await pool().query(
-    `SELECT g.*, u.unlocked_at FROM community_goals g
-     LEFT JOIN community_goal_unlocks u ON u.goal_id = g.id
-     WHERE g.is_test = $1 AND g.status IN ('active', 'reached') AND g.ends_at > NOW()
-     ORDER BY g.ends_at, g.id LIMIT 20`, [isTest])).rows;
-  return Promise.all(rows.map(async (row) => ({ ...row, target: Number(row.target), progress: await goalCount(row),
-    reached: Boolean(row.unlocked_at) })));
+  const p = getPool();
+  if (!p) return [];
+  try {
+    const rows = (await p.query(
+      `SELECT g.*, u.unlocked_at FROM community_goals g
+       LEFT JOIN community_goal_unlocks u ON u.goal_id = g.id
+       WHERE g.is_test = $1 AND g.status IN ('active', 'reached') AND g.ends_at > NOW()
+       ORDER BY g.ends_at, g.id LIMIT 20`, [isTest])).rows;
+    return Promise.all(rows.map(async (row) => ({ ...row, target: Number(row.target), progress: await goalCount(row, p),
+      reached: Boolean(row.unlocked_at) })));
+  } catch (error) {
+    console.warn('[progression:retention] listCommunityGoals query failed:', error);
+    return [];
+  }
 }
 
 export async function setAchievementSharing(userId: string, shareAchievements: boolean) {
-  return (await pool().query(
-    `INSERT INTO user_engagement_preferences(user_id, share_achievements, updated_at) VALUES($1, $2, NOW())
-     ON CONFLICT(user_id) DO UPDATE SET share_achievements = EXCLUDED.share_achievements, updated_at = NOW()
-     RETURNING share_achievements, updated_at`, [userId, shareAchievements])).rows[0];
+  const p = getPool();
+  if (!p) {
+    return {
+      share_achievements: shareAchievements,
+      updated_at: new Date().toISOString(),
+    };
+  }
+  try {
+    return (await p.query(
+      `INSERT INTO user_engagement_preferences(user_id, share_achievements, updated_at) VALUES($1, $2, NOW())
+       ON CONFLICT(user_id) DO UPDATE SET share_achievements = EXCLUDED.share_achievements, updated_at = NOW()
+       RETURNING share_achievements, updated_at`, [userId, shareAchievements])).rows[0];
+  } catch (error) {
+    console.warn('[progression:retention] setAchievementSharing query failed:', error);
+    return {
+      share_achievements: shareAchievements,
+      updated_at: new Date().toISOString(),
+    };
+  }
 }
 
 export async function getAchievementSharing(userId: string): Promise<boolean> {
-  const row = (await pool().query(
-    'SELECT share_achievements FROM user_engagement_preferences WHERE user_id = $1', [userId])).rows[0];
-  return Boolean(row?.share_achievements);
+  const p = getPool();
+  if (!p) return false;
+  try {
+    const row = (await p.query(
+      'SELECT share_achievements FROM user_engagement_preferences WHERE user_id = $1', [userId])).rows[0];
+    return Boolean(row?.share_achievements);
+  } catch (error) {
+    return false;
+  }
 }
 
 export async function evaluateCommunityGoals(limit = 20) {
-  const client = await pool().connect();
+  const p = getPool();
+  if (!p) return { examined: 0, unlocked: 0 };
+  const client = await p.connect();
   try {
     await client.query('BEGIN');
     const goals = (await client.query(

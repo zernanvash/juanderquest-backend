@@ -5,6 +5,7 @@ import { spotStore } from './spots/store.js';
 import { assetStore } from './spots/asset-store.js';
 import { initOutboxWorker } from './jobs/outbox-worker.js';
 import { initJuanChoiceFinalizer } from './jobs/juanchoice-finalizer.js';
+import { initJuanChoiceScheduler } from './jobs/juanchoice-scheduler.js';
 
 // Boot orchestration: connect PostgreSQL (when available), hydrate memory + governance, fall back to in-memory.
 export async function bootstrap() {
@@ -20,6 +21,7 @@ export async function bootstrap() {
   }
   initOutboxWorker();
   initJuanChoiceFinalizer();
+  initJuanChoiceScheduler();
   console.log(
     `[bootstrap] storage: ${pgAvailable ? 'postgres' : 'in-memory'} (${db.users.length} users, ${db.quests.length} quests, ${db.submissions.length} submissions, ${db.vouchers.length} vouchers)`
   );

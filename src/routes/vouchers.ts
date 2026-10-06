@@ -1,5 +1,6 @@
-import { Router, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import { env } from '../config/env.js';
 import { db } from '../db/index.js';
 import { governanceStore } from './proposals.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
@@ -7,6 +8,19 @@ import { validateRequest } from '../middleware/validate.js';
 import { vouchersService } from '../services/vouchers.js';
 
 const router = Router();
+
+// The initial SQL migration contains sample merchants and vouchers. Never
+// advertise or redeem those offers from a public alpha by accident.
+router.use('/vouchers', (req: Request, res: Response, next: NextFunction) => {
+  if (env.MARKETPLACE_ENABLED) return next();
+  if (req.method === 'GET') {
+    return res.json({ success: true, data: [], meta: { availability: 'under_development' } });
+  }
+  return res.status(503).json({
+    success: false,
+    error: { code: 'FEATURE_UNAVAILABLE', message: 'Merchant vouchers are under development.' },
+  });
+});
 
 const redeemSchema = z.object({
   body: z.object({

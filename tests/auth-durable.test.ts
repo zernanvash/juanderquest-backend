@@ -5,6 +5,8 @@ import request from 'supertest';
 import { app } from '../src/app.js';
 import { requireAdmin, checkQAAuthorization } from '../src/middleware/auth.js';
 import { Pool } from 'pg';
+import { env } from '../src/config/env.js';
+import jwt from 'jsonwebtoken';
 
 describe('Phase 1: Durable Identity Lifecycle & Persistent Accounts', () => {
   let testDb: TestDbInstance;
@@ -95,6 +97,41 @@ describe('Phase 1: Durable Identity Lifecycle & Persistent Accounts', () => {
     expect(pgRes.rows[0].seed_id).toBe(seedId);
     expect(pgRes.rows[0].display_name).toBe('DurableExplorer');
     expect(pgRes.rows[0].is_public).toBe(false);
+  });
+
+  it('does not issue a demo JWT for an in-memory-only seed when PostgreSQL is active', async () => {
+    const previous = env.ALLOW_DEMO_LOGIN;
+    Reflect.set(env, 'ALLOW_DEMO_LOGIN', true);
+    try {
+      const missing = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'user-1' });
+      expect(missing.status).toBe(404);
+      expect(missing.body.data?.token).toBeUndefined();
+
+      const demoId = '11111111-1111-1111-1111-111111111111';
+      await usersRepo.findOrCreateBySeedId({
+        id: demoId, seed_id: 'user-1',
+        display_name: 'Durable Demo Traveler', email: 'durable-demo@example.test',
+        role: 'user',
+      });
+      const durable = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'user-1' });
+      expect(durable.status).toBe(200);
+      expect(durable.body.data.user.id).toBe(demoId);
+      expect(durable.body.data.token).toBeDefined();
+    } finally {
+      Reflect.set(env, 'ALLOW_DEMO_LOGIN', previous);
+    }
+  });
+
+  it('returns 401 and clears the cookie when a valid session subject no longer exists', async () => {
+    const token = jwt.sign({ id: 'deleted-traveler-1', seed_id: 'guest:deleted', role: 'user' }, env.JWT_SECRET);
+    const response = await request(app)
+      .get('/api/v1/auth/me')
+      .set('Cookie', `jdq_session=${token}`);
+
+    expect(response.status).toBe(401);
+    expect(response.body.error.code).toBe('UNAUTHORIZED');
+    expect(response.body.data).toBeUndefined();
+    expect(response.headers['set-cookie']?.[0]).toContain('jdq_session=;');
   });
 
   it('returns 503 STORAGE_UNAVAILABLE and does NOT issue a token when durable database fails', async () => {

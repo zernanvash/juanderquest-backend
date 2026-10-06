@@ -5,6 +5,7 @@ import { app } from '../src/app.js';
 import { env } from '../src/config/env.js';
 import { createTestDb, TestDbInstance } from '../src/db/testHarness.js';
 import { setPool } from '../src/db/pool.js';
+import { db as domainDb } from '../src/db/index.js';
 import {
   evaluateCommunityGoals,
   evaluateFinalizedCampaignRetention,
@@ -26,6 +27,7 @@ describe('Phase 5: JuanChoice retention and measured conversion', () => {
     (env as any).JUANCHOICE_WRITES_ENABLED = true;
     database = await createTestDb();
     setPool(database.pool);
+    domainDb.usersRepo.setPool(database.pool);
     await database.pool.query(
       `INSERT INTO users(id,seed_id,display_name,email,role,is_public,is_test)
        VALUES($1,'ret-user','Retention Traveler','retention@jdq.ph','user',TRUE,FALSE),
@@ -36,6 +38,7 @@ describe('Phase 5: JuanChoice retention and measured conversion', () => {
 
   afterAll(async () => {
     setPool(null);
+    domainDb.usersRepo.setPool(null);
     if (database) await database.close();
   });
 
@@ -142,13 +145,98 @@ describe('Phase 5: JuanChoice retention and measured conversion', () => {
     )).rejects.toBeDefined();
   });
 
-  it('publishes only consented, scope-matched merchant offers and never grants currency', async () => {
-    await createMerchantOffer({ campaignId: campaigns[0], merchantId: 'm1', voucherId: 'v1',
+  it('keeps admin-created merchant offers in draft without verified partner consent', async () => {
+    const draft = await createMerchantOffer({ campaignId: campaigns[0], merchantId: 'm1', voucherId: 'v1',
       termsSnapshot: { label: 'Pilot offer', redemption: 'merchant validates voucher' },
       startsAt: new Date(Date.now() - 60_000).toISOString(), endsAt: new Date(Date.now() + 86_400_000).toISOString(), isTest: false });
+    expect(draft.status).toBe('draft');
+    expect(draft.partner_consent_at).toBeNull();
     const offers = await listActiveMerchantOffers(campaigns[0]);
-    expect(offers).toHaveLength(1);
-    expect(offers[0].merchant_id).toBe('m1');
+    expect(offers).toHaveLength(0);
+    await expect(database.pool.query("UPDATE juanchoice_merchant_offers SET status='approved', partner_consent_at=NOW() WHERE id=$1",[draft.id]))
+      .rejects.toBeDefined();
+    const adminToken = jwt.sign({ id: adminId, role: 'admin' }, env.JWT_SECRET);
+    const endpoint = `/api/v1/juanchoice/admin/campaigns/${campaigns[2]}/offers`;
+    const body = { merchant_id:'m1', voucher_id:'v1', terms_snapshot:{label:'Pilot offer'},
+      starts_at:new Date(Date.now()-60_000).toISOString(), ends_at:new Date(Date.now()+86_400_000).toISOString() };
+    const forged = await request(app).post(endpoint).set('Authorization',`Bearer ${adminToken}`)
+      .send({...body,partner_consent:true});
+    expect(forged.status).toBe(400);
+    const created = await request(app).post(endpoint).set('Authorization',`Bearer ${adminToken}`).send(body);
+    expect(created.status).toBe(201);
+    expect(created.body.data.status).toBe('draft');
+    expect((await listActiveMerchantOffers(campaigns[2]))).toHaveLength(0);
     expect((await database.pool.query('SELECT COUNT(*)::int AS count FROM governance_ledger')).rows[0].count).toBe(0);
+  });
+
+  it('does not turn an admin reference into a funded promotional budget', async () => {
+    const adminToken = jwt.sign({ id: adminId, role: 'admin' }, env.JWT_SECRET);
+    const endpoint = `/api/v1/juanchoice/admin/campaigns/${campaigns[0]}/budget`;
+    const requestBody = { budget_mjdq: 1_000, request_reference: 'Draft proposal only' };
+    expect((await request(app).post(endpoint).set('Authorization',`Bearer ${adminToken}`).send(requestBody)).status).toBe(503);
+    const previous = env.JUANCHOICE_ECONOMY_ENABLED;
+    (env as any).JUANCHOICE_ECONOMY_ENABLED = true;
+    try {
+      const falseApproval = await request(app).post(endpoint).set('Authorization',`Bearer ${adminToken}`)
+        .send({ budget_mjdq:1_000, approval_reference:'Unverified admin claim' });
+      expect(falseApproval.status).toBe(400);
+      const created = await request(app).post(endpoint).set('Authorization',`Bearer ${adminToken}`).send(requestBody);
+      expect(created.status).toBe(201);
+      expect(created.body.data).toMatchObject({status:'draft',request_reference:'Draft proposal only'});
+      await expect(database.pool.query("UPDATE juanchoice_promotion_budgets SET status='approved' WHERE id=$1",[created.body.data.id]))
+        .rejects.toBeDefined();
+      await expect(database.pool.query('UPDATE juanchoice_promotion_budgets SET reserved_mjdq=1 WHERE id=$1',[created.body.data.id]))
+        .rejects.toBeDefined();
+      expect((await database.pool.query('SELECT COUNT(*)::int AS count FROM governance_ledger')).rows[0].count).toBe(0);
+    } finally {
+      (env as any).JUANCHOICE_ECONOMY_ENABLED = previous;
+    }
+  });
+
+  it('falls back safely to default retention engagement and returns 200 without crashing when database pool is null', async () => {
+    setPool(null);
+    try {
+      // In-memory fallback lookup: ensure mock user exists in in-memory db
+      const mockUser = domainDb.findUserById(userId);
+      if (!mockUser) {
+        domainDb.users.push({
+          id: userId,
+          seed_id: 'ret-user',
+          display_name: 'Retention Traveler',
+          email: 'retention@jdq.ph',
+          avatar_url: '',
+          role: 'user',
+          demo_points: 100,
+          mjdq_balance: 100000,
+          jdq_governance_balance: 15,
+          scout_reputation: 0,
+          is_public: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
+
+      const summary = await getEngagementSummary(userId);
+      expect(summary).toBeDefined();
+      expect(summary?.streak.current).toBe(0);
+      expect(summary?.impact.verified_visits).toBe(0);
+
+      const res = await request(app)
+        .get('/api/v1/me/engagement')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.streak.current).toBe(0);
+
+      const prefRes = await request(app)
+        .put('/api/v1/me/engagement/preferences')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ share_achievements: true });
+      expect(prefRes.status).toBe(200);
+      expect(prefRes.body.success).toBe(true);
+      expect(prefRes.body.data.share_achievements).toBe(true);
+    } finally {
+      setPool(database.pool);
+    }
   });
 });

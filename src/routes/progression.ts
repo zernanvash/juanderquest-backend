@@ -52,38 +52,62 @@ progressionRouter.get(
   authenticateToken,
   checkQAAuthorization,
   async (req: AuthRequest, res: Response) => {
-    res.set('Cache-Control', 'private, no-store');
-    const userId = req.user!.id;
-    const allowTest = isAuthorizedQA(req);
-    const passport = await progressionService.getTravelerPassport(userId, userId, allowTest);
+    try {
+      res.set('Cache-Control', 'private, no-store');
+      const userId = req.user!.id;
+      const allowTest = isAuthorizedQA(req);
+      const passport = await progressionService.getTravelerPassport(userId, userId, allowTest);
 
-    if (!passport) {
-      return res.status(404).json({
+      if (!passport) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Traveler profile not found.' },
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: passport,
+      });
+    } catch (err: any) {
+      console.error('[progression] GET /me/progression error:', err);
+      return res.status(500).json({
         success: false,
-        error: { code: 'NOT_FOUND', message: 'Traveler profile not found.' },
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve traveler passport.' },
       });
     }
-
-    return res.status(200).json({
-      success: true,
-      data: passport,
-    });
   }
 );
 
 progressionRouter.get('/me/engagement', authenticateToken, checkQAAuthorization, async (req: AuthRequest, res: Response) => {
-  res.set('Cache-Control', 'private, no-store');
-  const summary = await getEngagementSummary(req.user!.id, isAuthorizedQA(req));
-  if (!summary) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND' } });
-  return res.json({ success: true, data: summary });
+  try {
+    res.set('Cache-Control', 'private, no-store');
+    const summary = await getEngagementSummary(req.user!.id, isAuthorizedQA(req));
+    if (!summary) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND' } });
+    return res.json({ success: true, data: summary });
+  } catch (err: any) {
+    console.error('[progression] GET /me/engagement error:', err);
+    return res.status(503).json({
+      success: false,
+      error: { code: 'DATABASE_OUTAGE', message: 'Engagement summary temporarily unavailable.' },
+    });
+  }
 });
 
 const engagementPreferenceSchema = z.object({ share_achievements: z.boolean() }).strict();
 progressionRouter.put('/me/engagement/preferences', authenticateToken, async (req: AuthRequest, res: Response) => {
-  const parsed = engagementPreferenceSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR' } });
-  res.set('Cache-Control', 'private, no-store');
-  return res.json({ success: true, data: await setAchievementSharing(req.user!.id, parsed.data.share_achievements) });
+  try {
+    const parsed = engagementPreferenceSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR' } });
+    res.set('Cache-Control', 'private, no-store');
+    return res.json({ success: true, data: await setAchievementSharing(req.user!.id, parsed.data.share_achievements) });
+  } catch (err: any) {
+    console.error('[progression] PUT /me/engagement/preferences error:', err);
+    return res.status(503).json({
+      success: false,
+      error: { code: 'DATABASE_OUTAGE', message: 'Unable to update engagement preferences.' },
+    });
+  }
 });
 
 // GET /me/visits — Verified destination visits history
@@ -92,34 +116,47 @@ progressionRouter.get(
   authenticateToken,
   checkQAAuthorization,
   async (req: AuthRequest, res: Response) => {
-    res.set('Cache-Control', 'private, no-store');
-    const userId = req.user!.id;
-    const allowTest = isAuthorizedQA(req);
-    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
-    const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
+    try {
+      res.set('Cache-Control', 'private, no-store');
+      const userId = req.user!.id;
+      const allowTest = isAuthorizedQA(req);
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
+      const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
 
-    const visits = await progressionRepo.getVerifiedVisitsForUser(userId, {
-      limit,
-      offset,
-      allowTest,
-    });
+      const visits = await progressionRepo.getVerifiedVisitsForUser(userId, {
+        limit,
+        offset,
+        allowTest,
+      });
 
-    return res.status(200).json({
-      success: true,
-      data: {
-        items: visits,
-        total: visits.length,
-      },
-    });
+      return res.status(200).json({
+        success: true,
+        data: {
+          items: visits,
+          total: visits.length,
+        },
+      });
+    } catch (err: any) {
+      console.error('[progression] GET /me/visits error:', err);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve visits.' },
+      });
+    }
   }
 );
 
 progressionRouter.get('/community-goals', optionalAuthenticateToken, checkQAAuthorization,
   async (req: AuthRequest, res: Response) => {
-    const allowTest = isAuthorizedQA(req);
-    res.set('Cache-Control', allowTest ? 'private, no-store' : 'public, max-age=60');
-    const items = await listCommunityGoals(allowTest && req.query.include_test === 'true');
-    return res.json({ success: true, data: { items, total: items.length } });
+    try {
+      const allowTest = isAuthorizedQA(req);
+      res.set('Cache-Control', allowTest ? 'private, no-store' : 'public, max-age=60');
+      const items = await listCommunityGoals(allowTest && req.query.include_test === 'true');
+      return res.json({ success: true, data: { items, total: items.length } });
+    } catch (err: any) {
+      console.error('[progression] GET /community-goals error:', err);
+      return res.json({ success: true, data: { items: [], total: 0 } });
+    }
   });
 
 // GET /me/achievements — Earned badges and honors for authenticated account
@@ -128,19 +165,27 @@ progressionRouter.get(
   authenticateToken,
   checkQAAuthorization,
   async (req: AuthRequest, res: Response) => {
-    res.set('Cache-Control', 'private, no-store');
-    const userId = req.user!.id;
-    const allowTest = isAuthorizedQA(req);
-    const awards = await progressionRepo.getAwardsForUser(userId, allowTest);
-    const catalog = await progressionRepo.getAllAchievementDefinitions();
+    try {
+      res.set('Cache-Control', 'private, no-store');
+      const userId = req.user!.id;
+      const allowTest = isAuthorizedQA(req);
+      const awards = await progressionRepo.getAwardsForUser(userId, allowTest);
+      const catalog = await progressionRepo.getAllAchievementDefinitions();
 
-    return res.status(200).json({
-      success: true,
-      data: {
-        earned: awards,
-        catalog,
-      },
-    });
+      return res.status(200).json({
+        success: true,
+        data: {
+          earned: awards,
+          catalog,
+        },
+      });
+    } catch (err: any) {
+      console.error('[progression] GET /me/achievements error:', err);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve achievements.' },
+      });
+    }
   }
 );
 
@@ -154,22 +199,30 @@ progressionRouter.get(
   optionalAuthenticateToken,
   checkQAAuthorization,
   async (req: AuthRequest, res: Response) => {
-    const allowTest = isAuthorizedQA(req);
-    if (req.user || allowTest) {
-      res.set('Cache-Control', 'private, no-store');
-    } else {
-      res.set('Cache-Control', 'public, max-age=60');
-    }
-    const userId = req.user?.id;
-    const collections = await progressionRepo.getCuratedCollections(userId, allowTest);
+    try {
+      const allowTest = isAuthorizedQA(req);
+      if (req.user || allowTest) {
+        res.set('Cache-Control', 'private, no-store');
+      } else {
+        res.set('Cache-Control', 'public, max-age=60');
+      }
+      const userId = req.user?.id;
+      const collections = await progressionRepo.getCuratedCollections(userId, allowTest);
 
-    return res.status(200).json({
-      success: true,
-      data: {
-        items: collections,
-        total: collections.length,
-      },
-    });
+      return res.status(200).json({
+        success: true,
+        data: {
+          items: collections,
+          total: collections.length,
+        },
+      });
+    } catch (err: any) {
+      console.error('[progression] GET /collections error:', err);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve collections.' },
+      });
+    }
   }
 );
 
@@ -183,30 +236,38 @@ progressionRouter.get(
   optionalAuthenticateToken,
   checkQAAuthorization,
   async (req: AuthRequest, res: Response) => {
-    res.set('Cache-Control', 'no-store');
-    const allowTest = isAuthorizedQA(req);
-    const userId = req.params.id;
+    try {
+      res.set('Cache-Control', 'no-store');
+      const allowTest = isAuthorizedQA(req);
+      const userId = req.params.id;
 
-    if (!(await getAchievementSharing(userId))) {
-      return res.status(404).json({
+      if (!(await getAchievementSharing(userId))) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'User not found or achievement sharing is disabled.' },
+        });
+      }
+
+      const publicProjection = await progressionService.getPublicAchievements(userId, allowTest);
+
+      if (!publicProjection) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'User not found or profile is private.' },
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: publicProjection,
+      });
+    } catch (err: any) {
+      console.error('[progression] GET /users/:id/achievements error:', err);
+      return res.status(500).json({
         success: false,
-        error: { code: 'NOT_FOUND', message: 'User not found or achievement sharing is disabled.' },
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve public achievements.' },
       });
     }
-
-    const publicProjection = await progressionService.getPublicAchievements(userId, allowTest);
-
-    if (!publicProjection) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: 'User not found or profile is private.' },
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      data: publicProjection,
-    });
   }
 );
 
@@ -225,29 +286,45 @@ progressionRouter.post(
   requireAdmin,
   adminOutboxLimiter,
   async (req: AuthRequest, res: Response) => {
-    const parseResult = processOutboxSchema.safeParse(req.body);
-    if (!parseResult.success) {
-      return res.status(400).json({
+    try {
+      const parseResult = processOutboxSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'batch_size must be an integer between 1 and 100.' },
+        });
+      }
+
+      const batchSize = parseResult.data.batch_size ?? 20;
+      const result = await progressionService.processOutboxBatch(batchSize, `admin-${req.user!.id}`);
+
+      return res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (err: any) {
+      console.error('[progression] POST /admin/progression/process-outbox error:', err);
+      return res.status(500).json({
         success: false,
-        error: { code: 'VALIDATION_ERROR', message: 'batch_size must be an integer between 1 and 100.' },
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to process outbox batch.' },
       });
     }
-
-    const batchSize = parseResult.data.batch_size ?? 20;
-    const result = await progressionService.processOutboxBatch(batchSize, `admin-${req.user!.id}`);
-
-    return res.status(200).json({
-      success: true,
-      data: result,
-    });
   }
 );
 
 progressionRouter.post('/admin/progression/evaluate-community-goals', authenticateToken, requireAdmin,
   adminOutboxLimiter, async (req: AuthRequest, res: Response) => {
-    const parsed = z.object({ limit: z.number().int().min(1).max(100).optional() }).strict().safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR' } });
-    return res.json({ success: true, data: await evaluateCommunityGoals(parsed.data.limit ?? 20) });
+    try {
+      const parsed = z.object({ limit: z.number().int().min(1).max(100).optional() }).strict().safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR' } });
+      return res.json({ success: true, data: await evaluateCommunityGoals(parsed.data.limit ?? 20) });
+    } catch (err: any) {
+      console.error('[progression] POST /admin/progression/evaluate-community-goals error:', err);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to evaluate community goals.' },
+      });
+    }
   });
 
 const catchUpSchema = z.object({
@@ -262,18 +339,26 @@ progressionRouter.post(
   requireAdmin,
   adminOutboxLimiter,
   async (req: AuthRequest, res: Response) => {
-    const parseResult = catchUpSchema.safeParse(req.body);
-    if (!parseResult.success) {
-      return res.status(400).json({
+    try {
+      const parseResult = catchUpSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'Invalid catch-up parameters. limit must be 1..500 and since must be an ISO datetime string.' },
+        });
+      }
+
+      const result = await progressionService.catchUpApprovedSubmissions(parseResult.data);
+      return res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (err: any) {
+      console.error('[progression] POST /admin/progression/catch-up error:', err);
+      return res.status(500).json({
         success: false,
-        error: { code: 'VALIDATION_ERROR', message: 'Invalid catch-up parameters. limit must be 1..500 and since must be an ISO datetime string.' },
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to catch up approved submissions.' },
       });
     }
-
-    const result = await progressionService.catchUpApprovedSubmissions(parseResult.data);
-    return res.status(200).json({
-      success: true,
-      data: result,
-    });
   }
 );
