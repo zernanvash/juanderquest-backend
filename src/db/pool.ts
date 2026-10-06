@@ -29,6 +29,11 @@ export const MIGRATIONS = [
   '017_juanchoice_supporter_quest.sql',
   '018_juanchoice_retention_foundation.sql',
   '019_juanchoice_partnerships_and_budget_guardrails.sql',
+  '020_juanchoice_monthly_schedules.sql',
+  '021_juanchoice_unverified_offer_quarantine.sql',
+  '022_juanchoice_unfunded_budget_quarantine.sql',
+  '023_juanchoice_promotion_assessments.sql',
+  '024_user_wallet_binding.sql',
 ];
 
 let pool: Pool | null = null;
@@ -69,11 +74,19 @@ export async function initPostgres(options: InitPostgresOptions = {}): Promise<b
     max: 5,
   });
 
+  // pg emits errors from idle clients on the Pool itself. Without this
+  // listener, a database restart terminates the entire API process.
+  if (typeof candidate.on === 'function') {
+    candidate.on('error', (error: Error) => {
+      console.error(`[db] Idle PostgreSQL connection error: ${error.message}`);
+    });
+  }
+
   try {
     await candidate.query('SELECT 1');
     await applyMigrations(candidate);
     if (isDevelopmentSeedEnabled(policy)) {
-      await seedIfEmpty(candidate);
+      await seedDevelopmentData(candidate);
     }
     pool = candidate;
     return true;
@@ -124,10 +137,10 @@ export async function applyMigrations(pg: Pool) {
   }
 }
 
-async function seedIfEmpty(pg: Pool) {
-  const { rows } = await pg.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM users');
-  if (Number(rows[0].count) === 0) {
-    const seedSql = readFileSync(join(rootDir, 'seeds', 'development.sql'), 'utf8');
-    await pg.query(seedSql);
-  }
+export async function seedDevelopmentData(pg: Pick<Pool, 'query'>) {
+  // The seed file is intentionally idempotent. Always replay it when local
+  // seeding is enabled so a partially populated development database repairs
+  // missing dependency rows (for example quests referenced by seeded spots).
+  const seedSql = readFileSync(join(rootDir, 'seeds', 'development.sql'), 'utf8');
+  await pg.query(seedSql);
 }

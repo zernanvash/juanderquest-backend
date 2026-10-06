@@ -24,6 +24,7 @@ export interface UserRow {
   handle?: string | null;
   bio?: string | null;
   status_text?: string | null;
+  wallet_address?: string | null;
   is_test?: boolean;
   created_at: string;
   updated_at: string;
@@ -43,6 +44,7 @@ export interface PublicTravelerSummary {
   bio: string | null;
   status_text: string | null;
   scout_reputation: number;
+  is_test?: boolean;
   follower_count?: number;
   following_count?: number;
   is_unavailable?: boolean;
@@ -687,7 +689,7 @@ export function calculateHaversineDistance(lat1: number, lon1: number, lat2: num
 export class MemoryDb {
   users = developmentFixturesEnabled ? [...mockUsers] : [];
   quests = developmentFixturesEnabled ? [...mockQuests] : [];
-  campaigns = [...mockCampaigns];
+  campaigns = developmentFixturesEnabled ? [...mockCampaigns] : [];
   submissions = developmentFixturesEnabled ? [...mockSubmissions] : [];
   proposals = developmentFixturesEnabled ? [...mockProposals] : [];
   merchants = developmentFixturesEnabled ? [...mockMerchants] : [];
@@ -752,7 +754,7 @@ export class MemoryDb {
       id: row.id, seed_id: row.seed_id, display_name: row.display_name, email: row.email,
       avatar_url: row.avatar_url, role: row.role, demo_points: row.demo_points,
       mjdq_balance: row.mjdq_balance ?? row.demo_points * 1000,
-      jdq_governance_balance: row.jdq_governance_balance ?? 15,
+      jdq_governance_balance: row.jdq_governance_balance ?? (row.seed_id?.startsWith('guest:') ? 0 : 15),
       scout_reputation: row.scout_reputation ?? 100,
       is_public: Boolean(row.is_public),
       handle: row.handle ?? null,
@@ -962,6 +964,71 @@ export class MemoryDb {
     } else {
       this.users.push(user);
     }
+    return user;
+  }
+
+  async findUserByWalletAddressDurable(walletAddress: string): Promise<UserRow | undefined> {
+    const clean = walletAddress.trim().toLowerCase();
+    if (this.pg) {
+      const row = await this.usersRepo.findByWalletAddress(clean);
+      if (row) {
+        const idx = this.users.findIndex((u) => u.id === row.id);
+        if (idx >= 0) this.users[idx] = row;
+        else this.users.push(row);
+      }
+      return row;
+    }
+    return this.users.find((u) => u.wallet_address?.toLowerCase() === clean);
+  }
+
+  async bindWalletAddress(userId: string, walletAddress: string): Promise<UserRow> {
+    const clean = walletAddress.trim();
+    if (this.pg) {
+      const updated = await this.usersRepo.bindWalletAddress(userId, clean);
+      const memIdx = this.users.findIndex((u) => u.id === userId);
+      if (memIdx >= 0) this.users[memIdx] = updated;
+      else this.users.push(updated);
+      return updated;
+    }
+
+    const conflict = this.users.find(
+      (u) => u.wallet_address?.toLowerCase() === clean.toLowerCase() && u.id !== userId
+    );
+    if (conflict) {
+      const err = new Error('WALLET_ALREADY_BOUND');
+      (err as any).code = 'WALLET_ALREADY_BOUND';
+      throw err;
+    }
+
+    const user = this.findUserById(userId);
+    if (!user) {
+      const err = new Error('USER_NOT_FOUND');
+      (err as any).code = 'USER_NOT_FOUND';
+      throw err;
+    }
+
+    user.wallet_address = clean;
+    user.updated_at = new Date().toISOString();
+    return user;
+  }
+
+  async unbindWalletAddress(userId: string): Promise<UserRow> {
+    if (this.pg) {
+      const updated = await this.usersRepo.unbindWalletAddress(userId);
+      const memIdx = this.users.findIndex((u) => u.id === userId);
+      if (memIdx >= 0) this.users[memIdx] = updated;
+      return updated;
+    }
+
+    const user = this.findUserById(userId);
+    if (!user) {
+      const err = new Error('USER_NOT_FOUND');
+      (err as any).code = 'USER_NOT_FOUND';
+      throw err;
+    }
+
+    user.wallet_address = null;
+    user.updated_at = new Date().toISOString();
     return user;
   }
 

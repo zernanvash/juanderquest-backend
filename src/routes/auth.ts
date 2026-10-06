@@ -35,6 +35,24 @@ const findOrCreateWalletUser = async (address: string): Promise<(typeof db.users
   const normalized = address.toLowerCase();
   const seedId = `wallet:${normalized}`;
 
+  // 1. Check if an account is already linked to this wallet address
+  const existingByWallet = await db.findUserByWalletAddressDurable(address);
+  if (existingByWallet) {
+    return existingByWallet;
+  }
+
+  // 2. Check if an account already exists with seedId
+  const existingBySeed = db.usersRepo.getPool()
+    ? await db.findUserBySeedDurable(seedId)
+    : db.findUserBySeed(seedId);
+
+  if (existingBySeed) {
+    if (!existingBySeed.wallet_address) {
+      return await db.bindWalletAddress(existingBySeed.id, address);
+    }
+    return existingBySeed;
+  }
+
   return await db.findOrCreateUserDurable({
     seed_id: seedId,
     display_name: `Traveler ${address.slice(0, 6)}…${address.slice(-4)}`,
@@ -49,6 +67,7 @@ const findOrCreateWalletUser = async (address: string): Promise<(typeof db.users
     handle: null,
     bio: null,
     status_text: null,
+    wallet_address: address,
   });
 };
 
@@ -186,6 +205,139 @@ router.post(
       });
     } catch (err) {
       console.error('[auth] durable user creation failed in local wallet login:', err);
+      return res.status(503).json({
+        success: false,
+        error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable user storage is unavailable. Please try again later.' },
+      });
+    }
+  }
+);
+
+router.post(
+  '/auth/wallet/bind',
+  rateLimit({ policyId: 'auth:wallet-bind', windowMs: 60_000, max: 20 }),
+  authenticateToken,
+  validateRequest(z.object({ body: z.object({ address: walletAddressSchema, signature: z.string().min(1) }) })),
+  async (req: AuthRequest, res: Response) => {
+    const address = getAddress(req.body.address);
+    const key = address.toLowerCase();
+
+    if (env.WALLET_AUTH_MODE === 'signature') {
+      const challenge = walletChallenges.get(key);
+      walletChallenges.delete(key);
+      if (!challenge || challenge.expiresAt <= Date.now()) {
+        return res.status(401).json({
+          success: false,
+          error: { code: 'INVALID_CHALLENGE', message: 'Wallet challenge is missing, expired, or already used.' },
+        });
+      }
+      try {
+        const recovered = getAddress(verifyMessage(challenge.message, req.body.signature));
+        if (recovered !== address) throw new Error('Address mismatch');
+      } catch {
+        return res.status(401).json({
+          success: false,
+          error: { code: 'INVALID_SIGNATURE', message: 'The wallet signature could not be verified.' },
+        });
+      }
+    } else {
+      const challenge = walletChallenges.get(key);
+      if (challenge) {
+        walletChallenges.delete(key);
+        try {
+          const recovered = getAddress(verifyMessage(challenge.message, req.body.signature));
+          if (recovered !== address) throw new Error('Address mismatch');
+        } catch {
+          if (!env.ALLOW_INSECURE_LOCAL_WALLET_AUTH && env.NODE_ENV !== 'test') {
+            return res.status(401).json({
+              success: false,
+              error: { code: 'INVALID_SIGNATURE', message: 'The wallet signature could not be verified.' },
+            });
+          }
+        }
+      }
+    }
+
+    try {
+      const existingUser = await db.findUserByWalletAddressDurable(address);
+      if (existingUser && existingUser.id !== req.user!.id) {
+        return res.status(409).json({
+          success: false,
+          error: {
+            code: 'WALLET_ALREADY_BOUND',
+            message: 'This wallet address is already linked to another JuanDerQuest traveler account.',
+          },
+        });
+      }
+
+      const updatedUser = await db.bindWalletAddress(req.user!.id, address);
+      return res.status(200).json({
+        success: true,
+        data: {
+          user: updatedUser,
+          wallet_address: address,
+          message: 'Wallet successfully linked to your traveler passport.',
+        },
+      });
+    } catch (err: any) {
+      if (err?.code === 'WALLET_ALREADY_BOUND') {
+        return res.status(409).json({
+          success: false,
+          error: {
+            code: 'WALLET_ALREADY_BOUND',
+            message: 'This wallet address is already linked to another JuanDerQuest traveler account.',
+          },
+        });
+      }
+      if (err?.code === 'USER_NOT_FOUND') {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'USER_NOT_FOUND', message: 'Traveler account not found.' },
+        });
+      }
+      console.error('[auth] wallet binding failed:', err);
+      return res.status(503).json({
+        success: false,
+        error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable user storage is unavailable. Please try again later.' },
+      });
+    }
+  }
+);
+
+router.delete(
+  '/auth/wallet/unbind',
+  rateLimit({ policyId: 'auth:wallet-unbind', windowMs: 60_000, max: 20 }),
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const user = db.usersRepo.getPool()
+        ? await db.usersRepo.findById(req.user!.id)
+        : db.findUserById(req.user!.id);
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'USER_NOT_FOUND', message: 'Traveler account not found.' },
+        });
+      }
+
+      if (!user.wallet_address) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'WALLET_NOT_BOUND', message: 'No wallet address is currently bound to this account.' },
+        });
+      }
+
+      const updatedUser = await db.unbindWalletAddress(req.user!.id);
+      return res.status(200).json({
+        success: true,
+        data: {
+          user: updatedUser,
+          message: 'Wallet unlinked successfully.',
+        },
+      });
+    } catch (err: any) {
+      console.error('[auth] wallet unbinding failed:', err);
       return res.status(503).json({
         success: false,
         error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable user storage is unavailable. Please try again later.' },

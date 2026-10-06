@@ -17,6 +17,13 @@ export interface CreateUserData {
   handle?: string | null;
   bio?: string | null;
   status_text?: string | null;
+  wallet_address?: string | null;
+}
+
+export interface AlphaSessionScope {
+  id: string;
+  seed_id: string;
+  is_test: boolean;
 }
 
 export class UsersRepository {
@@ -28,6 +35,47 @@ export class UsersRepository {
 
   getPool(): Pool | null {
     return this.pool;
+  }
+
+  async findAlphaSessionScopesByIds(ids: string[]): Promise<Map<string, AlphaSessionScope>> {
+    if (!this.pool) {
+      throw new Error('UsersRepository.findAlphaSessionScopesByIds requires an active PostgreSQL pool.');
+    }
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      throw new Error('findAlphaSessionScopesByIds requires a nonempty array of user IDs.');
+    }
+
+    if (ids.length > 100) {
+      throw new Error('findAlphaSessionScopesByIds accepts at most 100 IDs.');
+    }
+
+    const uniqueIds = Array.from(new Set(ids));
+    if (uniqueIds.length < 1 || uniqueIds.length > 100) {
+      throw new Error('findAlphaSessionScopesByIds expects between 1 and 100 unique IDs.');
+    }
+
+    for (const id of uniqueIds) {
+      if (typeof id !== 'string' || id.trim().length === 0 || id.length > 128) {
+        throw new Error('Invalid user ID.');
+      }
+    }
+
+    const { rows } = await this.pool.query<{ id: string; seed_id: string; is_test: boolean }>(
+      'SELECT id, seed_id, is_test FROM users WHERE id = ANY($1::text[])',
+      [uniqueIds]
+    );
+
+    const resultMap = new Map<string, AlphaSessionScope>();
+    for (const row of rows) {
+      resultMap.set(row.id, {
+        id: row.id,
+        seed_id: row.seed_id,
+        is_test: Boolean(row.is_test),
+      });
+    }
+
+    return resultMap;
   }
 
   async findById(id: string): Promise<UserRow | undefined> {
@@ -70,6 +118,7 @@ export class UsersRepository {
         handle: data.handle ?? null,
         bio: data.bio ?? null,
         status_text: data.status_text ?? null,
+        wallet_address: data.wallet_address ?? null,
         created_at: now,
         updated_at: now,
       };
@@ -78,11 +127,12 @@ export class UsersRepository {
     // Atomic ON CONFLICT DO UPDATE ensures concurrent create-or-find resolves to the single committed row
     const query = `
       INSERT INTO users (
-        id, seed_id, display_name, email, avatar_url, role, demo_points, is_public, handle, bio, status_text, created_at, updated_at
+        id, seed_id, display_name, email, avatar_url, role, demo_points, is_public, handle, bio, status_text, scout_reputation, wallet_address, created_at, updated_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
       ON CONFLICT (seed_id) DO UPDATE
-      SET updated_at = NOW()
+      SET updated_at = NOW(),
+          wallet_address = COALESCE(users.wallet_address, EXCLUDED.wallet_address)
       RETURNING *
     `;
 
@@ -98,6 +148,8 @@ export class UsersRepository {
       data.handle ?? null,
       data.bio ?? null,
       data.status_text ?? null,
+      data.scout_reputation ?? 0,
+      data.wallet_address ?? null,
     ];
 
     const { rows } = await this.pool.query(query, values);
@@ -122,6 +174,56 @@ export class UsersRepository {
       [clean, allowTest]
     );
     if (!rows.length) return undefined;
+    return this.mapRow(rows[0]);
+  }
+
+  async findByWalletAddress(walletAddress: string): Promise<UserRow | undefined> {
+    if (!this.pool) return undefined;
+    const clean = walletAddress.trim().toLowerCase();
+    const { rows } = await this.pool.query('SELECT * FROM users WHERE LOWER(wallet_address) = $1', [clean]);
+    if (!rows.length) return undefined;
+    return this.mapRow(rows[0]);
+  }
+
+  async bindWalletAddress(userId: string, walletAddress: string): Promise<UserRow> {
+    if (!this.pool) {
+      throw new Error('Database pool not available');
+    }
+    const clean = walletAddress.trim();
+    const { rows: conflict } = await this.pool.query(
+      'SELECT id FROM users WHERE LOWER(wallet_address) = LOWER($1) AND id <> $2',
+      [clean, userId]
+    );
+    if (conflict.length > 0) {
+      const err = new Error('WALLET_ALREADY_BOUND');
+      (err as any).code = 'WALLET_ALREADY_BOUND';
+      throw err;
+    }
+    const { rows } = await this.pool.query(
+      'UPDATE users SET wallet_address = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+      [clean, userId]
+    );
+    if (!rows.length) {
+      const err = new Error('USER_NOT_FOUND');
+      (err as any).code = 'USER_NOT_FOUND';
+      throw err;
+    }
+    return this.mapRow(rows[0]);
+  }
+
+  async unbindWalletAddress(userId: string): Promise<UserRow> {
+    if (!this.pool) {
+      throw new Error('Database pool not available');
+    }
+    const { rows } = await this.pool.query(
+      'UPDATE users SET wallet_address = NULL, updated_at = NOW() WHERE id = $1 RETURNING *',
+      [userId]
+    );
+    if (!rows.length) {
+      const err = new Error('USER_NOT_FOUND');
+      (err as any).code = 'USER_NOT_FOUND';
+      throw err;
+    }
     return this.mapRow(rows[0]);
   }
 
@@ -409,8 +511,8 @@ export class UsersRepository {
 
     const query = `
       SELECT
-        u.id, u.display_name, u.handle, u.avatar_url, u.bio, u.status_text,
-        COALESCE(u.demo_points, 0) AS scout_reputation,
+        u.id, u.display_name, u.handle, u.avatar_url, u.bio, u.status_text, u.is_test,
+        COALESCE(u.scout_reputation, 0) AS scout_reputation,
         uf.created_at AS follow_created_at,
         uf.follower_id
       FROM user_follows uf
@@ -446,6 +548,7 @@ export class UsersRepository {
       bio: r.bio || null,
       status_text: r.status_text || null,
       scout_reputation: r.scout_reputation ?? 0,
+      is_test: Boolean(r.is_test),
       follower_count: r.follower_count ?? 0,
       following_count: r.following_count ?? 0,
     }));
@@ -484,7 +587,7 @@ export class UsersRepository {
     const query = `
       SELECT
         u.id, u.display_name, u.handle, u.avatar_url, u.bio, u.status_text,
-        COALESCE(u.demo_points, 0) AS scout_reputation,
+        COALESCE(u.scout_reputation, 0) AS scout_reputation,
         uf.created_at AS follow_created_at,
         uf.following_id
       FROM user_follows uf
@@ -551,7 +654,7 @@ export class UsersRepository {
         uf.following_id,
         uf.created_at AS follow_created_at,
         u.id, u.display_name, u.handle, u.avatar_url, u.bio, u.status_text,
-        COALESCE(u.demo_points, 0) AS scout_reputation,
+        COALESCE(u.scout_reputation, 0) AS scout_reputation,
         u.is_public
       FROM user_follows uf
       LEFT JOIN users u ON u.id = uf.following_id
@@ -616,8 +719,8 @@ export class UsersRepository {
     const capped = Math.min(6, Math.max(1, limit));
     const query = `
       SELECT
-        u.id, u.display_name, u.handle, u.avatar_url, u.bio, u.status_text,
-        COALESCE(u.demo_points, 0) AS scout_reputation
+        u.id, u.display_name, u.handle, u.avatar_url, u.bio, u.status_text, u.is_test,
+        COALESCE(u.scout_reputation, 0) AS scout_reputation
       FROM users u
       WHERE u.is_public = TRUE
         AND ($2 = TRUE OR COALESCE(u.is_test, FALSE) = FALSE)
@@ -634,6 +737,7 @@ export class UsersRepository {
       bio: r.bio || null,
       status_text: r.status_text || null,
       scout_reputation: r.scout_reputation ?? 0,
+      is_test: Boolean(r.is_test),
       follower_count: r.follower_count ?? 0,
       following_count: r.following_count ?? 0,
     }));
@@ -698,12 +802,13 @@ export class UsersRepository {
       role: row.role,
       demo_points: row.demo_points,
       mjdq_balance: row.mjdq_balance ?? row.demo_points * 1000,
-      jdq_governance_balance: row.jdq_governance_balance ?? 15,
+      jdq_governance_balance: row.jdq_governance_balance ?? (row.seed_id?.startsWith('guest:') ? 0 : 15),
       scout_reputation: row.scout_reputation ?? 250,
       is_public: Boolean(row.is_public),
       handle: row.handle ?? null,
       bio: row.bio ?? null,
       status_text: row.status_text ?? null,
+      wallet_address: row.wallet_address || null,
       is_test: Boolean(row.is_test),
       created_at: new Date(row.created_at).toISOString(),
       updated_at: new Date(row.updated_at).toISOString(),
