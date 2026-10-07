@@ -155,6 +155,9 @@ appVersionRouter.get('/app/download', (_req: Request, res: Response) => {
 
   const possiblePaths = [
     `/var/www/jdq-downloads/${targetFileName}`,
+    path.resolve(process.cwd(), '../juanderquest_app/build/app/outputs/flutter-apk/app-release.apk'),
+    path.resolve(process.cwd(), '../juanderquest_app/build/app/outputs/apk/release/app-release.apk'),
+    path.resolve(process.cwd(), '../juanderquest_app/build/app/outputs/flutter-apk/app-debug.apk'),
     '/var/www/jdq-downloads/juanderquest-latest.apk',
     path.resolve(process.cwd(), `downloads/${targetFileName}`),
     path.resolve(process.cwd(), 'downloads/juanderquest-latest.apk'),

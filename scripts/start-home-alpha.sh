@@ -29,23 +29,27 @@ fi
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$script_dir/.."
 
-# GitHub Releases is the artifact source. Cache its small manifest outside Git
-# so /app/version reports the actual APK release, not the backend commit.
-manifest_dir="$HOME/.config/juanderquest-alpha"
-mkdir -p "$manifest_dir"
-manifest_file="$manifest_dir/version.json"
-manifest_candidate=$(mktemp "$manifest_dir/version.json.XXXXXX")
-if curl --fail --location --silent --show-error --connect-timeout 5 --max-time 15 \
-  'https://github.com/zernanvash/juanderquest-mobile/releases/latest/download/version.json' \
-  --output "$manifest_candidate" && \
-  node -e 'const m=JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); if (!Number.isSafeInteger(m.versionCode) || m.versionCode < 1 || m.downloadUrl !== "https://github.com/zernanvash/juanderquest-mobile/releases/latest/download/juanderquest-latest.apk") process.exit(1)' "$manifest_candidate"; then
-  mv "$manifest_candidate" "$manifest_file"
+# Temporary server deployment: Prefer locally built APK manifest when present
+if [ -f "$script_dir/../downloads/version.json" ]; then
+  export APP_VERSION_FILE="$script_dir/../downloads/version.json"
 else
-  rm -f "$manifest_candidate"
-  echo 'Could not refresh GitHub APK manifest; using last cached version if available.' >&2
-fi
-if [ -s "$manifest_file" ]; then
-  export APP_VERSION_FILE="$manifest_file"
+  # Fallback to GitHub Releases artifact source
+  manifest_dir="$HOME/.config/juanderquest-alpha"
+  mkdir -p "$manifest_dir"
+  manifest_file="$manifest_dir/version.json"
+  manifest_candidate=$(mktemp "$manifest_dir/version.json.XXXXXX")
+  if curl --fail --location --silent --show-error --connect-timeout 5 --max-time 15 \
+    'https://github.com/zernanvash/juanderquest-mobile/releases/latest/download/version.json' \
+    --output "$manifest_candidate" && \
+    node -e 'const m=JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); if (!Number.isSafeInteger(m.versionCode) || m.versionCode < 1 || m.downloadUrl !== "https://github.com/zernanvash/juanderquest-mobile/releases/latest/download/juanderquest-latest.apk") process.exit(1)' "$manifest_candidate"; then
+    mv "$manifest_candidate" "$manifest_file"
+  else
+    rm -f "$manifest_candidate"
+    echo 'Could not refresh GitHub APK manifest; using last cached version if available.' >&2
+  fi
+  if [ -s "$manifest_file" ]; then
+    export APP_VERSION_FILE="$manifest_file"
+  fi
 fi
 
 export NODE_ENV=production

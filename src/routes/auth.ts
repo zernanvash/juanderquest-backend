@@ -353,7 +353,7 @@ const loginSchema = z.object({
 });
 
 router.post('/auth/demo-login', rateLimit({ policyId: 'auth:demo-login', windowMs: 60_000, max: 20 }), validateRequest(loginSchema), async (req, res) => {
-  if (!env.ALLOW_DEMO_LOGIN || env.NODE_ENV === 'production') {
+  if (!env.ALLOW_DEMO_LOGIN || (env.NODE_ENV === 'production' && !env.ALPHA_WALLET_SIMULATION_ENABLED)) {
     return res.status(403).json({
       success: false,
       error: {
@@ -375,6 +375,41 @@ router.post('/auth/demo-login', rateLimit({ policyId: 'auth:demo-login', windowM
     return res.status(503).json({ success: false, error: {
       code: 'STORAGE_UNAVAILABLE', message: 'Durable user storage is unavailable. Please try again later.',
     } });
+  }
+
+  if (!user && (seed_id === 'user-1' || seed_id === 'admin-1')) {
+    try {
+      if (seed_id === 'user-1') {
+        user = await db.findOrCreateUserDurable({
+          id: '11111111-1111-1111-1111-111111111111',
+          seed_id: 'user-1',
+          display_name: 'Juan Dela Cruz',
+          email: 'juan@juanderquest.ph',
+          avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Juan',
+          role: 'user',
+          demo_points: 100,
+          scout_reputation: 250,
+          is_public: true,
+          handle: 'juandelacruz',
+          bio: 'Pangasinan explorer & cultural heritage scout.',
+          status_text: 'Exploring Hundred Islands & Bolinao 🌊',
+        });
+      } else if (seed_id === 'admin-1') {
+        user = await db.findOrCreateUserDurable({
+          id: '22222222-2222-2222-2222-222222222222',
+          seed_id: 'admin-1',
+          display_name: 'Tourism Officer Admin',
+          email: 'admin@pangasinan.gov.ph',
+          avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Admin',
+          role: 'admin',
+          demo_points: 0,
+          scout_reputation: 1000,
+          is_public: false,
+        });
+      }
+    } catch (err) {
+      console.warn('[auth] Auto-provision of canonical demo user failed:', err);
+    }
   }
 
   if (!user) {
