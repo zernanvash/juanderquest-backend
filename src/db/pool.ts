@@ -34,6 +34,7 @@ export const MIGRATIONS = [
   '022_juanchoice_unfunded_budget_quarantine.sql',
   '023_juanchoice_promotion_assessments.sql',
   '024_user_wallet_binding.sql',
+  '025_seed_pangasinan_discovery_spots.sql',
 ];
 
 let pool: Pool | null = null;

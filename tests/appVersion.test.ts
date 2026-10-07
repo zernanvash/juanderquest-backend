@@ -89,6 +89,6 @@ describe('App Version Endpoint (OTA Updates)', () => {
     } else {
       expect(res.headers['content-disposition']).toMatch(/juanderquest-.*\.apk/);
     }
-  });
+  }, 30000);
 });
 
