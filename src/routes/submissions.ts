@@ -9,14 +9,20 @@ import { submissionsService } from '../services/submissions.js';
 const router = Router();
 
 const submissionSchema = z.object({
-  body: z.object({
-    idempotency_key: z.string().uuid('Idempotency key must be a valid UUID'),
-    quest_id: z.string().min(1, 'Quest ID is required'),
-    scanned_marker_code: z.string().min(1, 'Scanned marker code is required'),
-    captured_lat: z.number().min(-90).max(90),
-    captured_lng: z.number().min(-180).max(180),
-    captured_accuracy: z.number().nonnegative(),
-  }),
+  body: z
+    .object({
+      idempotency_key: z.string().uuid('Idempotency key must be a valid UUID'),
+      quest_id: z.string().min(1, 'Quest ID is required'),
+      scanned_marker_code: z.string().min(1).optional(),
+      challenge_token: z.string().min(1).optional(),
+      captured_lat: z.number().min(-90).max(90),
+      captured_lng: z.number().min(-180).max(180),
+      captured_accuracy: z.number().nonnegative(),
+    })
+    .refine((data) => Boolean(data.scanned_marker_code || data.challenge_token), {
+      message: 'Either challenge_token or scanned_marker_code is required',
+      path: ['challenge_token'],
+    }),
 });
 
 router.post(
@@ -26,7 +32,7 @@ router.post(
   validateRequest(submissionSchema),
   async (req: AuthRequest, res: Response) => {
     const userId = req.user!.id;
-    const { idempotency_key, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy } = req.body;
+    const { idempotency_key, quest_id, scanned_marker_code, challenge_token, captured_lat, captured_lng, captured_accuracy } = req.body;
 
     try {
       const result = await submissionsService.createSubmission({
@@ -34,6 +40,7 @@ router.post(
         user_id: userId,
         quest_id,
         scanned_marker_code,
+        challenge_token,
         captured_lat,
         captured_lng,
         captured_accuracy,

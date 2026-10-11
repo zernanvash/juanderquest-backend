@@ -11,6 +11,7 @@ describe('JuanChoice monthly scheduler with isolated database',()=>{
     (env as any).JUANCHOICE_ENABLED=true;
     (env as any).JUANCHOICE_SCHEDULER_ENABLED=true;
     (env as any).JUANCHOICE_WRITES_ENABLED=false;
+    await fixture.pool.query("DELETE FROM spots");
     for(const [id,municipality] of [['monthly-a','Bolinao'],['monthly-b','Alaminos'],
       ['monthly-c','Anda'],['monthly-d','Lingayen']]){
       await fixture.pool.query(`INSERT INTO spots(id,slug,name,description,category,subcategory,municipality,address,

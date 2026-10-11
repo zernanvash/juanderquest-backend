@@ -13,6 +13,7 @@ import { assetStore } from '../spots/asset-store.js';
 import { getSpotPhotoStorageProvider } from '../storage/spot-photos.js';
 import { detectValidatedMediaMime } from '../utils/media-mime.js';
 import { fieldLogStore, FieldLogTag, SpotReportReason } from '../spots/field-logs.js';
+import { hiddenGemHighlights } from '../spots/highlights.js';
 
 const router = Router();
 const csv = (value: unknown) => typeof value === 'string' && value ? value.split(',').map(v => v.trim()).filter(Boolean) : [];
@@ -52,6 +53,12 @@ router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, (req: Auth
   const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
   const data = spotStore.list({ search: req.query.q as string | undefined, categories: csv(req.query.categories), tags: csv(req.query.tags), municipality: req.query.municipality as string | undefined, lat, lng, radius, intent: req.query.intent as string | undefined, sort: req.query.sort as string | undefined, hasQuest: req.query.has_quest === 'true', userId: actorId, allowTest });
   return res.json({ success: true, data, meta: { count: data.length, sort: req.query.sort || 'recommended' } });
+});
+
+router.get('/spots/highlights', optionalAuthenticateToken, (req: AuthRequest, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  return res.json({ success: true, data: hiddenGemHighlights(spotStore, req.user?.id),
+    meta: { algorithm: 'curated_hidden_gems_v1', estimated_not_live: true } });
 });
 
 router.get('/spots/trending', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
@@ -311,6 +318,18 @@ const createAuthorQuestSchema = z.object({
     category: z.enum(['eco', 'cultural', 'food_trade']),
     radius_meters: z.number().int().min(50).max(500).default(200),
     reward_points: z.union([z.literal(50), z.literal(75), z.literal(100)]).default(75),
+    status: z.enum(['draft', 'published']).default('published'),
+    steps: z.array(z.object({
+      step_order: z.number().int().min(1),
+      title: z.string().trim().min(3).max(100),
+      description: z.string().trim().min(5).max(500),
+      checkpoint_type: z.enum(['location', 'qr', 'photo', 'action']),
+      required: z.boolean().default(true),
+      gps_lat: z.number().optional(),
+      gps_lng: z.number().optional(),
+      radius_meters: z.number().int().optional(),
+      hint: z.string().optional(),
+    })).max(10).default([]),
   }),
 });
 
@@ -339,8 +358,15 @@ router.post('/spots/:id/quests', authenticateToken, validateRequest(createAuthor
   const markerCode = `JDQ-${randomUUID().slice(0, 8).toUpperCase()}`;
   const nowIso = new Date().toISOString();
 
+  const questStatus = req.body.status ?? 'published';
+  const questSteps = Array.isArray(req.body.steps) ? req.body.steps : [];
+
   const newQuest: QuestRow = {
     id: questId,
+    author_id: req.user!.id,
+    status: questStatus,
+    version: 1,
+    steps: questSteps,
     title: req.body.title,
     description: req.body.description,
     category: req.body.category,
@@ -354,7 +380,7 @@ router.post('/spots/:id/quests', authenticateToken, validateRequest(createAuthor
     reward_points: req.body.reward_points,
     marker_code: markerCode,
     marker_image_url: spot.image_url || 'https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?auto=format&fit=crop&w=1200&q=80',
-    is_active: true,
+    is_active: questStatus === 'published',
     is_test: Boolean(spot.is_test),
     created_at: nowIso,
     updated_at: nowIso,
@@ -369,8 +395,9 @@ router.post('/spots/:id/quests', authenticateToken, validateRequest(createAuthor
         `INSERT INTO quests (
           id, title, description, category, location_name, gps_lat, gps_lng,
           radius_meters, reward_points, marker_code, marker_image_url, is_active, is_test,
-          base_reward_php, difficulty_factor, geo_multiplier, created_at, updated_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+          base_reward_php, difficulty_factor, geo_multiplier, author_id, status, version, steps,
+          created_at, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title,
           description = EXCLUDED.description,
@@ -392,6 +419,10 @@ router.post('/spots/:id/quests', authenticateToken, validateRequest(createAuthor
           newQuest.base_reward_php,
           newQuest.difficulty_factor,
           newQuest.geo_multiplier,
+          newQuest.author_id,
+          newQuest.status,
+          newQuest.version,
+          JSON.stringify(newQuest.steps),
           newQuest.created_at,
           newQuest.updated_at,
         ]
@@ -448,6 +479,9 @@ router.get('/spots/:id/quests', optionalAuthenticateToken, checkQAAuthorization,
     return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
   }
 
+  const isAuthor = Boolean(req.user?.id && spot.created_by === req.user.id);
+  const isAdminOrQA = Boolean(req.user?.role === 'admin' || req.user?.role === 'qa');
+
   const pool = getPool();
   let quests: QuestRow[] = [];
 
@@ -477,18 +511,38 @@ router.get('/spots/:id/quests', optionalAuthenticateToken, checkQAAuthorization,
         marker_image_url: r.marker_image_url,
         is_active: Boolean(r.is_active),
         is_test: Boolean(r.is_test),
+        author_id: r.author_id ?? null,
+        status: r.status ?? 'published',
+        version: Number(r.version ?? 1),
+        steps: Array.isArray(r.steps) ? r.steps : [],
         created_at: new Date(r.created_at).toISOString(),
         updated_at: new Date(r.updated_at).toISOString(),
       }));
     } catch (e: any) {
       console.warn('[spots:getQuests] PG query fallback:', e.message);
-      quests = db.quests.filter(q => (q.id === spot.quest_id) && (allowTest || !q.is_test));
+      quests = db.quests.filter(q => (q.id === spot.quest_id || q.author_id === spot.created_by) && (allowTest || !q.is_test));
     }
   } else {
-    quests = db.quests.filter(q => (q.id === spot.quest_id) && (allowTest || !q.is_test));
+    quests = db.quests.filter(q => (q.id === spot.quest_id || q.author_id === spot.created_by) && (allowTest || !q.is_test));
   }
 
-  const sanitized = quests.map(({ marker_code, ...quest }) => quest);
+  // Filter out drafts or archived for general travelers
+  if (!isAuthor && !isAdminOrQA) {
+    quests = quests.filter(q => q.status === 'published' || (!q.status && q.is_active));
+  }
+
+  // Sanitize: strip marker_code unless authorized
+  const sanitized = quests.map((quest) => {
+    const canInspectMarker = allowTest || isAuthor || isAdminOrQA;
+    const base = canInspectMarker ? { ...quest } : (({ marker_code, ...rest }) => rest)(quest);
+    if (isAuthor || isAdminOrQA) {
+      return {
+        ...base,
+        stats: db.getQuestAttemptStats(quest.id),
+      };
+    }
+    return base;
+  });
 
   return res.json({
     success: true,

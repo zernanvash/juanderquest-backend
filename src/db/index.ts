@@ -97,8 +97,62 @@ export function decodeFollowCursor(
   }
 }
 
+export type QuestStatus = 'draft' | 'published' | 'paused' | 'archived';
+
+export interface QuestStep {
+  step_order: number;
+  title: string;
+  description: string;
+  checkpoint_type: 'location' | 'qr' | 'photo' | 'action';
+  required: boolean;
+  gps_lat?: number;
+  gps_lng?: number;
+  radius_meters?: number;
+  hint?: string;
+}
+
+export type QuestAttemptStatus = 'in_progress' | 'submitted' | 'completed' | 'abandoned';
+
+export interface QuestAttemptRow {
+  id: string;
+  quest_id: string;
+  user_id: string;
+  version: number;
+  current_step: number;
+  total_steps: number;
+  status: QuestAttemptStatus;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
+}
+
+export type AffiliateApplicationStatus = 'received' | 'in_review' | 'approved' | 'rejected';
+
+export interface AffiliateApplicationRow {
+  id: string;
+  user_id: string;
+  business_name: string;
+  category: string;
+  municipality: string;
+  contact_name: string;
+  contact_email: string;
+  contact_phone: string;
+  sponsorship_goals: string[];
+  proposal_details: string;
+  status: AffiliateApplicationStatus;
+  reviewer_id?: string | null;
+  reviewer_notes?: string | null;
+  reviewed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface QuestRow {
   id: string;
+  author_id?: string | null;
+  status?: QuestStatus;
+  version?: number;
+  steps?: QuestStep[];
   title: string;
   description: string;
   category: 'eco' | 'cultural' | 'food_trade';
@@ -733,6 +787,8 @@ export class MemoryDb {
     },
   ] : [];
   web_analytics_events: WebAnalyticsEventRow[] = [];
+  quest_attempts: QuestAttemptRow[] = [];
+  affiliate_applications: AffiliateApplicationRow[] = [];
 
   private pg: Pool | null = null;
   private _usersRepo: UsersRepository | null = null;
@@ -774,8 +830,52 @@ export class MemoryDb {
       reward_points: row.reward_points, marker_code: row.marker_code,
       marker_image_url: row.marker_image_url, is_active: row.is_active,
       is_test: Boolean(row.is_test),
+      author_id: row.author_id ?? null,
+      status: row.status ?? 'published',
+      version: row.version ?? 1,
+      steps: Array.isArray(row.steps) ? row.steps : [],
       created_at: toIso(row.created_at), updated_at: toIso(row.updated_at),
     }));
+    try {
+      const { rows: attempts } = await pool.query('SELECT * FROM quest_attempts ORDER BY created_at');
+      this.quest_attempts = attempts.map((row: any) => ({
+        id: row.id,
+        quest_id: row.quest_id,
+        user_id: row.user_id,
+        version: row.version ?? 1,
+        current_step: row.current_step ?? 1,
+        total_steps: row.total_steps ?? 1,
+        status: row.status,
+        created_at: toIso(row.created_at),
+        updated_at: toIso(row.updated_at),
+        completed_at: row.completed_at ? toIso(row.completed_at) : null,
+      }));
+    } catch {
+      // quest_attempts table may not exist in legacy dev fixtures
+    }
+    try {
+      const { rows: affiliateApps } = await pool.query('SELECT * FROM merchant_affiliate_applications ORDER BY created_at DESC');
+      this.affiliate_applications = affiliateApps.map((row: any) => ({
+        id: row.id,
+        user_id: row.user_id,
+        business_name: row.business_name,
+        category: row.category,
+        municipality: row.municipality,
+        contact_name: row.contact_name,
+        contact_email: row.contact_email,
+        contact_phone: row.contact_phone,
+        sponsorship_goals: Array.isArray(row.sponsorship_goals) ? row.sponsorship_goals : [],
+        proposal_details: row.proposal_details ?? '',
+        status: row.status,
+        reviewer_id: row.reviewer_id ?? null,
+        reviewer_notes: row.reviewer_notes ?? null,
+        reviewed_at: row.reviewed_at ? toIso(row.reviewed_at) : null,
+        created_at: toIso(row.created_at),
+        updated_at: toIso(row.updated_at),
+      }));
+    } catch {
+      // merchant_affiliate_applications may not exist in legacy fixtures
+    }
     const { rows: submissions } = await pool.query('SELECT * FROM submissions ORDER BY created_at');
     this.submissions = submissions.map((row: any) => ({
       id: row.id, idempotency_key: row.idempotency_key, user_id: row.user_id, quest_id: row.quest_id,
@@ -841,14 +941,18 @@ export class MemoryDb {
     if (existing) Object.assign(existing, quest);
     else this.quests.push(quest);
     this.persist(
-      `INSERT INTO quests (id, title, description, category, location_name, gps_lat, gps_lng, radius_meters, reward_points, marker_code, marker_image_url, is_active)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      `INSERT INTO quests (id, title, description, category, location_name, gps_lat, gps_lng, radius_meters, reward_points, marker_code, marker_image_url, is_active, author_id, status, version, steps)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, description=EXCLUDED.description, category=EXCLUDED.category,
          location_name=EXCLUDED.location_name, gps_lat=EXCLUDED.gps_lat, gps_lng=EXCLUDED.gps_lng,
          radius_meters=EXCLUDED.radius_meters, reward_points=EXCLUDED.reward_points, marker_code=EXCLUDED.marker_code,
-         marker_image_url=EXCLUDED.marker_image_url, is_active=EXCLUDED.is_active, updated_at=NOW()`,
+         marker_image_url=EXCLUDED.marker_image_url, is_active=EXCLUDED.is_active,
+         author_id=COALESCE(EXCLUDED.author_id, quests.author_id),
+         status=EXCLUDED.status, version=EXCLUDED.version, steps=EXCLUDED.steps,
+         updated_at=NOW()`,
       [quest.id, quest.title, quest.description, quest.category, quest.location_name, quest.gps_lat, quest.gps_lng,
-        quest.radius_meters, quest.reward_points, quest.marker_code, quest.marker_image_url, quest.is_active]
+        quest.radius_meters, quest.reward_points, quest.marker_code, quest.marker_image_url, quest.is_active,
+        quest.author_id ?? null, quest.status ?? 'published', quest.version ?? 1, JSON.stringify(quest.steps ?? [])]
     );
   }
 
@@ -1488,6 +1592,143 @@ export class MemoryDb {
       return categoryMatches && activeMatches;
     };
     return this.quests.filter(filter);
+  }
+
+  getActiveAttempt(userId: string, questId: string): QuestAttemptRow | undefined {
+    return this.quest_attempts.find((a) => a.user_id === userId && a.quest_id === questId && a.status === 'in_progress');
+  }
+
+  getAttemptsForUser(userId: string): QuestAttemptRow[] {
+    return this.quest_attempts.filter((a) => a.user_id === userId);
+  }
+
+  createAttempt(payload: Omit<QuestAttemptRow, 'created_at' | 'updated_at' | 'completed_at'>): QuestAttemptRow {
+    const newAttempt: QuestAttemptRow = {
+      ...payload,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      completed_at: null,
+    };
+    this.quest_attempts.push(newAttempt);
+    this.persist(
+      `INSERT INTO quest_attempts (id, quest_id, user_id, version, current_step, total_steps, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+       ON CONFLICT (id) DO UPDATE SET current_step = EXCLUDED.current_step, status = EXCLUDED.status, updated_at = NOW()`,
+      [newAttempt.id, newAttempt.quest_id, newAttempt.user_id, newAttempt.version, newAttempt.current_step, newAttempt.total_steps, newAttempt.status]
+    );
+    return newAttempt;
+  }
+
+  completeAttempt(userId: string, questId: string): QuestAttemptRow | undefined {
+    const attempt = this.getActiveAttempt(userId, questId);
+    if (attempt) {
+      attempt.status = 'completed';
+      attempt.completed_at = new Date().toISOString();
+      attempt.updated_at = new Date().toISOString();
+      this.persist(
+        `UPDATE quest_attempts SET status = 'completed', completed_at = NOW(), updated_at = NOW() WHERE id = $1`,
+        [attempt.id]
+      );
+    }
+    return attempt;
+  }
+
+  getQuestAttemptStats(questId: string): { total_attempts: number; active_attempts: number; completed_attempts: number } {
+    const attempts = this.quest_attempts.filter((a) => a.quest_id === questId);
+    return {
+      total_attempts: attempts.length,
+      active_attempts: attempts.filter((a) => a.status === 'in_progress').length,
+      completed_attempts: attempts.filter((a) => a.status === 'completed').length,
+    };
+  }
+
+  findAffiliateApplicationByUser(userId: string): AffiliateApplicationRow | undefined {
+    const userApps = this.affiliate_applications.filter((a) => a.user_id === userId);
+    const active = userApps.find((a) => a.status === 'received' || a.status === 'in_review');
+    if (active) return active;
+    return userApps[0];
+  }
+
+  findAffiliateApplicationById(id: string): AffiliateApplicationRow | undefined {
+    return this.affiliate_applications.find((a) => a.id === id);
+  }
+
+  listAffiliateApplications(status?: AffiliateApplicationStatus): AffiliateApplicationRow[] {
+    let list = this.affiliate_applications;
+    if (status) {
+      list = list.filter((a) => a.status === status);
+    }
+    return [...list].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }
+
+  createAffiliateApplication(payload: Omit<AffiliateApplicationRow, 'id' | 'status' | 'reviewer_id' | 'reviewer_notes' | 'reviewed_at' | 'created_at' | 'updated_at'>): AffiliateApplicationRow {
+    const existingActive = this.affiliate_applications.find(
+      (a) => a.user_id === payload.user_id && (a.status === 'received' || a.status === 'in_review')
+    );
+    if (existingActive) {
+      const error: any = new Error('You already have an active application under review.');
+      error.code = 'ACTIVE_APPLICATION_EXISTS';
+      throw error;
+    }
+
+    const now = new Date().toISOString();
+    const id = `app_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const newApp: AffiliateApplicationRow = {
+      id,
+      user_id: payload.user_id,
+      business_name: payload.business_name,
+      category: payload.category,
+      municipality: payload.municipality,
+      contact_name: payload.contact_name,
+      contact_email: payload.contact_email,
+      contact_phone: payload.contact_phone,
+      sponsorship_goals: payload.sponsorship_goals,
+      proposal_details: payload.proposal_details || '',
+      status: 'received',
+      created_at: now,
+      updated_at: now,
+    };
+
+    this.affiliate_applications.unshift(newApp);
+    this.persist(
+      `INSERT INTO merchant_affiliate_applications 
+       (id, user_id, business_name, category, municipality, contact_name, contact_email, contact_phone, sponsorship_goals, proposal_details, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())`,
+      [
+        newApp.id,
+        newApp.user_id,
+        newApp.business_name,
+        newApp.category,
+        newApp.municipality,
+        newApp.contact_name,
+        newApp.contact_email,
+        newApp.contact_phone,
+        JSON.stringify(newApp.sponsorship_goals),
+        newApp.proposal_details,
+        newApp.status,
+      ]
+    );
+    return newApp;
+  }
+
+  updateAffiliateApplicationStatus(id: string, update: { status: AffiliateApplicationStatus; reviewer_id: string; reviewer_notes?: string | null }): AffiliateApplicationRow | null {
+    const app = this.findAffiliateApplicationById(id);
+    if (!app) return null;
+
+    const now = new Date().toISOString();
+    app.status = update.status;
+    app.reviewer_id = update.reviewer_id;
+    app.reviewer_notes = update.reviewer_notes ?? null;
+    app.reviewed_at = now;
+    app.updated_at = now;
+
+    this.persist(
+      `UPDATE merchant_affiliate_applications 
+       SET status = $1, reviewer_id = $2, reviewer_notes = $3, reviewed_at = NOW(), updated_at = NOW()
+       WHERE id = $4`,
+      [app.status, app.reviewer_id, app.reviewer_notes, app.id]
+    );
+    return app;
   }
 
   // User-scoped idempotency lookup (Fix 4.4)

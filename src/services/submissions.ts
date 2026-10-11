@@ -5,15 +5,50 @@ import { governanceStore } from '../routes/proposals.js';
 import { progressionService } from '../progression/service.js';
 import { env } from '../config/env.js';
 import { randomUUID } from 'crypto';
+import jwt from 'jsonwebtoken';
+
+// Single-use challenge nonces are claimed in memory before any await so that
+// concurrent requests cannot both pass the replay check. Entries expire shortly
+// after the challenge JWT lifetime; the submissions table remains the durable
+// cross-process backstop (`CHALLENGE:<nonce>` rows).
+const CHALLENGE_NONCE_TTL_MS = 15 * 60 * 1000;
+const usedChallengeNonces = new Map<string, number>();
+
+function claimChallengeNonce(nonce: string): boolean {
+  const now = Date.now();
+  for (const [key, expiresAt] of usedChallengeNonces) {
+    if (expiresAt <= now) {
+      usedChallengeNonces.delete(key);
+    }
+  }
+  if (usedChallengeNonces.has(nonce)) {
+    return false;
+  }
+  usedChallengeNonces.set(nonce, now + CHALLENGE_NONCE_TTL_MS);
+  return true;
+}
 
 export interface CreateSubmissionInput {
   idempotency_key: string;
   user_id: string;
   quest_id: string;
-  scanned_marker_code: string;
+  scanned_marker_code?: string;
+  challenge_token?: string;
   captured_lat: number;
   captured_lng: number;
   captured_accuracy: number;
+}
+
+// Fingerprint of the presented proof for idempotent-replay comparison. Challenge
+// tokens are matched by nonce only, so a delayed network retry with an expired
+// token still replays its original submission instead of a false conflict.
+// Signature validation still happens later, before any proof is accepted.
+function fingerprintProof(payload: CreateSubmissionInput): string | undefined {
+  if (payload.challenge_token) {
+    const decoded = jwt.decode(payload.challenge_token) as any;
+    return decoded?.nonce ? `CHALLENGE:${decoded.nonce}` : undefined;
+  }
+  return payload.scanned_marker_code;
 }
 
 export interface ServiceResult<T> {
@@ -29,6 +64,7 @@ export interface ServiceResult<T> {
 export class SubmissionsService {
   async createSubmission(payload: CreateSubmissionInput): Promise<ServiceResult<SubmissionRow>> {
     const pool = getPool();
+    const presentedProofMarker = fingerprintProof(payload);
 
     // 1. User-scoped Idempotency Check
     if (pool) {
@@ -38,7 +74,7 @@ export class SubmissionsService {
       );
       if (existingRows.length > 0) {
         const existing = existingRows[0];
-        if (existing.quest_id !== payload.quest_id || existing.scanned_marker_code !== payload.scanned_marker_code) {
+        if (existing.quest_id !== payload.quest_id || existing.scanned_marker_code !== presentedProofMarker) {
           return {
             success: false,
             statusCode: 409,
@@ -57,7 +93,7 @@ export class SubmissionsService {
     } else {
       const existing = db.findSubmissionByIdempotency(payload.idempotency_key, payload.user_id);
       if (existing) {
-        if (existing.quest_id !== payload.quest_id || existing.scanned_marker_code !== payload.scanned_marker_code) {
+        if (existing.quest_id !== payload.quest_id || existing.scanned_marker_code !== presentedProofMarker) {
           return {
             success: false,
             statusCode: 409,
@@ -85,6 +121,22 @@ export class SubmissionsService {
       };
     }
 
+    if (quest.status === 'paused') {
+      return {
+        success: false,
+        statusCode: 409,
+        error: { code: 'QUEST_PAUSED', message: 'This quest is temporarily paused by the author.' },
+      };
+    }
+
+    if (quest.status === 'archived') {
+      return {
+        success: false,
+        statusCode: 410,
+        error: { code: 'QUEST_ARCHIVED', message: 'This quest has been archived and is no longer available.' },
+      };
+    }
+
     // 3. Duplicate approved completion check
     if (pool) {
       const { rows } = await pool.query(
@@ -106,14 +158,107 @@ export class SubmissionsService {
       };
     }
 
-    // 4. Check marker match
-    if (payload.scanned_marker_code !== quest.marker_code) {
+    // 4. Verify Proof (Challenge Token or Physical Scanned Marker)
+    let finalMarkerCode: string;
+
+    if (payload.challenge_token) {
+      try {
+        const decoded = jwt.verify(payload.challenge_token, env.JWT_SECRET) as any;
+        if (!decoded || decoded.sub !== 'quest_challenge') {
+          return {
+            success: false,
+            statusCode: 401,
+            error: { code: 'INVALID_CHALLENGE', message: 'Challenge token subject is invalid.' },
+          };
+        }
+        if (decoded.user_id !== payload.user_id) {
+          return {
+            success: false,
+            statusCode: 403,
+            error: { code: 'CHALLENGE_ACTOR_MISMATCH', message: 'Challenge token was not issued for this user.' },
+          };
+        }
+        if (decoded.quest_id !== payload.quest_id) {
+          return {
+            success: false,
+            statusCode: 400,
+            error: { code: 'CHALLENGE_QUEST_MISMATCH', message: 'Challenge token was not issued for this quest.' },
+          };
+        }
+        const nonce = decoded.nonce;
+        if (!nonce) {
+          return {
+            success: false,
+            statusCode: 401,
+            error: { code: 'INVALID_CHALLENGE', message: 'Challenge token is missing its nonce.' },
+          };
+        }
+        // Claim the nonce synchronously before any await: two concurrent requests
+        // presenting the same token must not both pass the replay check.
+        if (!claimChallengeNonce(nonce)) {
+          return {
+            success: false,
+            statusCode: 409,
+            error: { code: 'CHALLENGE_ALREADY_USED', message: 'This challenge token has already been consumed.' },
+          };
+        }
+        if (pool) {
+          const { rows } = await pool.query(
+            "SELECT 1 FROM submissions WHERE scanned_marker_code = $1 LIMIT 1",
+            [`CHALLENGE:${nonce}`]
+          );
+          if (rows.length > 0) {
+            return {
+              success: false,
+              statusCode: 409,
+              error: { code: 'CHALLENGE_ALREADY_USED', message: 'This challenge token has already been consumed.' },
+            };
+          }
+        }
+        finalMarkerCode = `CHALLENGE:${nonce}`;
+      } catch (err: any) {
+        if (err.name === 'TokenExpiredError') {
+          return {
+            success: false,
+            statusCode: 400,
+            error: { code: 'CHALLENGE_EXPIRED', message: 'Challenge token has expired. Please refresh your quest attempt.' },
+          };
+        }
+        return {
+          success: false,
+          statusCode: 401,
+          error: { code: 'INVALID_CHALLENGE', message: 'Challenge token signature or format is invalid.' },
+        };
+      }
+    } else if (payload.scanned_marker_code) {
+      if (!env.ALLOW_LEGACY_MARKER_PROOF) {
+        return {
+          success: false,
+          statusCode: 400,
+          error: {
+            code: 'CHALLENGE_REQUIRED',
+            message: 'Marker-code proof is deprecated. Request a challenge token from POST /quests/:id/challenge and resubmit.',
+          },
+        };
+      }
+      if (payload.scanned_marker_code !== quest.marker_code) {
+        return {
+          success: false,
+          statusCode: 400,
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: `Scanned marker code '${payload.scanned_marker_code}' does not match target quest requirement.`,
+          },
+        };
+      }
+      finalMarkerCode = payload.scanned_marker_code;
+    } else {
       return {
         success: false,
         statusCode: 400,
         error: {
-          code: 'VALIDATION_ERROR',
-          message: `Scanned marker code '${payload.scanned_marker_code}' does not match target quest requirement.`,
+          code: 'CHALLENGE_REQUIRED',
+          message: 'Challenge verification is required. Request a challenge token from POST /quests/:id/challenge and resubmit.',
         },
       };
     }
@@ -153,7 +298,7 @@ export class SubmissionsService {
         payload.idempotency_key,
         payload.user_id,
         payload.quest_id,
-        payload.scanned_marker_code,
+        finalMarkerCode,
         payload.captured_lat,
         payload.captured_lng,
         payload.captured_accuracy,
@@ -172,7 +317,7 @@ export class SubmissionsService {
       idempotency_key: payload.idempotency_key,
       user_id: payload.user_id,
       quest_id: payload.quest_id,
-      scanned_marker_code: payload.scanned_marker_code,
+      scanned_marker_code: finalMarkerCode,
       captured_lat: payload.captured_lat,
       captured_lng: payload.captured_lng,
       captured_accuracy: payload.captured_accuracy,
@@ -324,6 +469,16 @@ export class SubmissionsService {
               client
             );
           }
+
+          // Complete traveler's active attempt on this quest if one exists
+          try {
+            await client.query(
+              "UPDATE quest_attempts SET status = 'completed', completed_at = NOW(), updated_at = NOW() WHERE user_id = $1 AND quest_id = $2 AND status = 'in_progress'",
+              [updatedSub.user_id, updatedSub.quest_id]
+            );
+          } catch {
+            // non-fatal if table not present in legacy fixtures
+          }
         }
 
         await commitGovernanceTransaction(client);
@@ -332,6 +487,9 @@ export class SubmissionsService {
         const memSub = db.submissions.find((s) => s.id === id);
         if (memSub) {
           Object.assign(memSub, updatedSub);
+        }
+        if (action === 'approve') {
+          db.completeAttempt(updatedSub.user_id, updatedSub.quest_id);
         }
         if (action === 'approve' && newPoints !== undefined) {
           const memUser = db.findUserById(sub.user_id);
@@ -386,8 +544,11 @@ export class SubmissionsService {
 
     const quest = db.findQuestById(result.submission.quest_id, true);
     const awardedPoints = action === 'approve' && !result.alreadyReviewed ? quest?.reward_points || 0 : 0;
-    if (action === 'approve' && !result.alreadyReviewed && quest) {
-      void governanceStore.creditQuestReward(result.submission.user_id, quest.id, result.submission.id, awardedPoints, adminId);
+    if (action === 'approve') {
+      db.completeAttempt(result.submission.user_id, result.submission.quest_id);
+      if (!result.alreadyReviewed && quest) {
+        void governanceStore.creditQuestReward(result.submission.user_id, quest.id, result.submission.id, awardedPoints, adminId);
+      }
     }
 
     return {

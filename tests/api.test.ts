@@ -308,10 +308,10 @@ it('filters spots by category and optional quest availability', async () => {
     }
   });
 
-  it('GET /quests/:id keeps marker_code for the simulated AR flow', async () => {
+  it('GET /quests/:id masks marker_code from public responses for security', async () => {
     const res = await request(app).get('/api/v1/quests/q1111111-1111-1111-1111-111111111111');
     expect(res.status).toBe(200);
-    expect(res.body.data.marker_code).toBe('MARKER_HUNDRED_ISLANDS_01');
+    expect(res.body.data.marker_code).toBeUndefined();
   });
 
   it('admin submission listing includes quest_radius_meters', async () => {

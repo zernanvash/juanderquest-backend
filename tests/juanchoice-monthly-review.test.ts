@@ -15,6 +15,7 @@ describe('monthly scheduler review regressions', () => {
     fixture = await createTestDb();
     setPool(fixture.pool);
     Object.assign(env, { JUANCHOICE_ENABLED: true, JUANCHOICE_SCHEDULER_ENABLED: true, JUANCHOICE_WRITES_ENABLED: false });
+    await fixture.pool.query("DELETE FROM spots");
     for (const isTest of [false, true]) {
       for (let index = 0; index < 4; index++) {
         const id = `${isTest ? 'test' : 'real'}-review-${index}`;

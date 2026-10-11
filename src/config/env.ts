@@ -1,8 +1,25 @@
 import dotenv from 'dotenv';
 import { bool, cleanEnv, str, port, num } from 'envalid';
+import { existsSync } from 'fs';
+import { join } from 'path';
 import { validateAndParseCorsOrigin } from './cors.js';
 
-dotenv.config();
+// JDQ_ENV selects an explicit profile file (`.env.dev`, `.env.prod`, ...).
+// Profiles never fall back to the default `.env`, so switching to the
+// production profile cannot silently inherit development credentials.
+const requestedProfile = process.env.JDQ_ENV?.trim();
+if (requestedProfile) {
+  if (!/^[A-Za-z0-9_-]+$/.test(requestedProfile)) {
+    throw new Error(`JDQ_ENV must be a simple profile name (letters, digits, "-", "_"), got "${requestedProfile}".`);
+  }
+  const profileFile = join(__dirname, '..', '..', `.env.${requestedProfile}`);
+  if (!existsSync(profileFile)) {
+    throw new Error(`JDQ_ENV=${requestedProfile} requires ${profileFile}, but it does not exist. Refusing to fall back to .env.`);
+  }
+  dotenv.config({ path: profileFile });
+} else {
+  dotenv.config();
+}
 
 const isLocalRuntime = process.env.NODE_ENV !== 'production';
 
@@ -23,6 +40,9 @@ const rawEnv = cleanEnv(process.env, {
     default: process.env.NODE_ENV === 'test' ? 'local' : 'signature',
   }),
   ALLOW_INSECURE_LOCAL_WALLET_AUTH: bool({ default: false }),
+  // Deprecated physical marker-code proof path. Tests keep parity; every other
+  // runtime must explicitly opt in and production refuses it outright.
+  ALLOW_LEGACY_MARKER_PROOF: bool({ default: process.env.NODE_ENV === 'test' }),
   // Demo accounts include an admin fixture; never enable them by default in development.
   ALLOW_DEMO_LOGIN: bool({ default: process.env.NODE_ENV === 'test' }),
   GUEST_LOGIN_ENABLED: bool({ default: isLocalRuntime }),
@@ -99,6 +119,10 @@ if (env.NODE_ENV === 'production' && env.ALLOW_IN_MEMORY_FALLBACK) {
   throw new Error('ALLOW_IN_MEMORY_FALLBACK cannot be enabled in production');
 }
 
+if (env.NODE_ENV === 'production' && env.ALLOW_LEGACY_MARKER_PROOF) {
+  throw new Error('ALLOW_LEGACY_MARKER_PROOF cannot be enabled in production');
+}
+
 if (env.NODE_ENV === 'production' && env.SEED_DEVELOPMENT_DATA) {
   throw new Error('SEED_DEVELOPMENT_DATA cannot be enabled in production');
 }
@@ -128,6 +152,29 @@ if (!Number.isInteger(env.JUANCHOICE_SCHEDULER_BATCH_SIZE) || env.JUANCHOICE_SCH
 
 // Fail-closed validation for CORS_ORIGIN across environments
 validateAndParseCorsOrigin(env.CORS_ORIGIN, env.NODE_ENV, env.JUANCHOICE_PRESENTATION_MODE);
+
+// Profile safety: `prod` must never point at a development database, and
+// `dev` must never seed demo fixtures into a real/alpha/presentation database.
+if (requestedProfile === 'prod') {
+  if (env.SEED_DEVELOPMENT_DATA) {
+    throw new Error('JDQ_ENV=prod forbids SEED_DEVELOPMENT_DATA=true: dummy fixtures must never load into the real UX database.');
+  }
+  if (env.ALLOW_IN_MEMORY_FALLBACK) {
+    throw new Error('JDQ_ENV=prod requires ALLOW_IN_MEMORY_FALLBACK=false so the real UX always exercises durable storage.');
+  }
+  const dbName = extractDatabaseName(env.DATABASE_URL);
+  if (dbName && /(^|_)(dev|test)(_|$)/i.test(dbName)) {
+    throw new Error(`JDQ_ENV=prod refuses development database "${dbName}". Point DATABASE_URL at the production/UX database.`);
+  }
+}
+
+if (requestedProfile === 'dev') {
+  const dbName = extractDatabaseName(env.DATABASE_URL);
+  const protectedDatabases = new Set(['juanderquest', 'juanderquest_alpha', 'juanderquest_prod']);
+  if (dbName && (protectedDatabases.has(dbName) || dbName.startsWith('juanderquest_presentation'))) {
+    throw new Error(`JDQ_ENV=dev refuses non-development database "${dbName}"; dummy fixtures must not touch it. Use a *_dev database.`);
+  }
+}
 
 export const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 

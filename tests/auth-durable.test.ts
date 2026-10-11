@@ -103,17 +103,17 @@ describe('Phase 1: Durable Identity Lifecycle & Persistent Accounts', () => {
     const previous = env.ALLOW_DEMO_LOGIN;
     Reflect.set(env, 'ALLOW_DEMO_LOGIN', true);
     try {
-      const missing = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'user-1' });
+      const missing = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'unseeded-demo-user' });
       expect(missing.status).toBe(404);
       expect(missing.body.data?.token).toBeUndefined();
 
       const demoId = '11111111-1111-1111-1111-111111111111';
       await usersRepo.findOrCreateBySeedId({
-        id: demoId, seed_id: 'user-1',
+        id: demoId, seed_id: 'unseeded-demo-user',
         display_name: 'Durable Demo Traveler', email: 'durable-demo@example.test',
         role: 'user',
       });
-      const durable = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'user-1' });
+      const durable = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'unseeded-demo-user' });
       expect(durable.status).toBe(200);
       expect(durable.body.data.user.id).toBe(demoId);
       expect(durable.body.data.token).toBeDefined();
