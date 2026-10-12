@@ -50,6 +50,7 @@ export const MIGRATIONS = [
   '034_economic_cosmetic_refund.sql',
   '035_chain_indexer_reorg_safety.sql',
   '036_cultural_quizzes.sql',
+  '037_unified_auth_foundation.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so

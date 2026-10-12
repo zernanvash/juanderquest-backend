@@ -47,7 +47,7 @@ const rawEnv = cleanEnv(process.env, {
   ALLOW_LEGACY_MARKER_PROOF: bool({ default: process.env.NODE_ENV === 'test' }),
   // Demo accounts include an admin fixture; never enable them by default in development.
   ALLOW_DEMO_LOGIN: bool({ default: process.env.NODE_ENV === 'test' }),
-  GUEST_LOGIN_ENABLED: bool({ default: isLocalRuntime }),
+  GUEST_LOGIN_ENABLED: bool({ default: false }),
   ALPHA_WALLET_SIMULATION_ENABLED: bool({ default: false }),
   // Merchant offers in the prototype migrations are fixtures, not live deals.
   MARKETPLACE_ENABLED: bool({ default: isLocalRuntime }),

@@ -2,6 +2,9 @@ import type { Pool } from 'pg';
 import { env } from '../config/env.js';
 import { isDevelopmentSeedEnabled } from './policy.js';
 import { UsersRepository, CreateUserData } from '../repositories/users.js';
+import { AuthChallengeService } from '../auth/challengeService.js';
+import { AuthMailerService } from '../auth/mailerService.js';
+import { UnifiedIdentityService } from '../auth/identityService.js';
 
 const developmentFixturesEnabled = isDevelopmentSeedEnabled({
   nodeEnv: env.NODE_ENV,
@@ -792,6 +795,9 @@ export class MemoryDb {
 
   private pg: Pool | null = null;
   private _usersRepo: UsersRepository | null = null;
+  private _challengeService: AuthChallengeService | null = null;
+  private _mailerService: AuthMailerService | null = null;
+  private _identityService: UnifiedIdentityService | null = null;
 
   public get usersRepo(): UsersRepository {
     if (!this._usersRepo) {
@@ -800,10 +806,34 @@ export class MemoryDb {
     return this._usersRepo;
   }
 
+  public get challengeService(): AuthChallengeService {
+    if (!this._challengeService) {
+      this._challengeService = new AuthChallengeService(this.pg);
+    }
+    return this._challengeService;
+  }
+
+  public get mailerService(): AuthMailerService {
+    if (!this._mailerService) {
+      this._mailerService = new AuthMailerService(this.pg);
+    }
+    return this._mailerService;
+  }
+
+  public get identityService(): UnifiedIdentityService {
+    if (!this._identityService) {
+      this._identityService = new UnifiedIdentityService(this.pg);
+    }
+    return this._identityService;
+  }
+
   // Hydrates the in-memory arrays from PostgreSQL and attaches the pool for write-through.
   async hydrateFromPg(pool: Pool) {
     this.pg = pool;
     this.usersRepo.setPool(pool);
+    this.challengeService.setPool(pool);
+    this.mailerService.setPool(pool);
+    this.identityService.setPool(pool);
     const toIso = (value: Date | string) => new Date(value).toISOString();
     const { rows: users } = await pool.query('SELECT * FROM users ORDER BY created_at');
     this.users = users.map((row: any) => ({

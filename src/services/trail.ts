@@ -2,7 +2,7 @@ import { spotStore, Spot } from '../spots/store.js';
 import { CrowdStatus } from '../spots/crowd.js';
 import { calculateRoute, computeHaversineDistanceKm, RouteResponse, TravelCosting } from './routing.js';
 
-export { TravelCosting } from './routing.js';
+export type { TravelCosting } from './routing.js';
 
 export interface ServiceAreaMetadata {
   id: string;
