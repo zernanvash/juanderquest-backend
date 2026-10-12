@@ -24,6 +24,10 @@ import { juanChoiceRouter } from './routes/juanchoice.js';
 import { affiliatesRouter } from './routes/affiliates.js';
 import { trailRouter } from './routes/trail.js';
 import { leaderboardRouter } from './routes/leaderboard.js';
+import { economyAdminRouter } from './routes/economyAdmin.js';
+import { economyReadsRouter } from './routes/economyReads.js';
+import quizzesRouter from './routes/quizzes.js';
+import adminQuizzesRouter from './routes/adminQuizzes.js';
 import { errorHandler } from './middleware/error.js';
 
 import path from 'path';
@@ -72,6 +76,8 @@ app.use('/api/v1', healthRouter);
 app.use('/api/v1', authRouter);
 app.use('/api/v1', questsRouter);
 app.use('/api/v1', submissionsRouter);
+// Internal economy profile gate must run before the broad /admin middleware.
+app.use('/api/v1', economyReadsRouter);
 app.use('/api/v1', adminRouter);
 app.use('/api/v1/proposals', proposalsRouter);
 app.use('/api/v1', governanceAdminRouter);
@@ -91,6 +97,9 @@ app.use('/api/v1', juanChoiceRouter);
 app.use('/api/v1', affiliatesRouter);
 app.use('/api/v1', trailRouter);
 app.use('/api/v1', leaderboardRouter);
+app.use('/api/v1', economyAdminRouter);
+app.use('/api/v1', quizzesRouter);
+app.use('/api/v1', adminQuizzesRouter);
 
 // JSON parse errors -> 400 instead of 500
 app.use((err: Error & { type?: string }, _req: express.Request, res: express.Response, next: express.NextFunction) => {

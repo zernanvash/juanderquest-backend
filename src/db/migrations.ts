@@ -1,12 +1,17 @@
 import type { Pool } from 'pg';
 import { createHash } from 'crypto';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 
 // This module intentionally does not import `config/env.ts`: migration tooling
 // (scripts/db-migrate.ts, the test harness) must be able to run against a
 // database without the full runtime configuration being valid.
-const rootDir = join(__dirname, '..', '..');
+// Normal app builds live under dist/db; isolated simulation builds include
+// scripts and live under dist-simulation/src/db. Both must read the same
+// checked-in migrations rather than a copied or stale artifact.
+const candidateRoot = join(__dirname, '..', '..');
+const rootDir = existsSync(join(candidateRoot, 'migrations'))
+  ? candidateRoot : join(candidateRoot, '..');
 
 export const MIGRATIONS = [
   '001_init.sql',
@@ -36,6 +41,15 @@ export const MIGRATIONS = [
   '025_seed_pangasinan_discovery_spots.sql',
   '026_destination_author_quest_progression.sql',
   '027_merchant_affiliate_applications.sql',
+  '028_economic_backbone.sql',
+  '029_economic_ledger_integrity.sql',
+  '030_economic_restricted_posting.sql',
+  '031_economic_correction_invariants.sql',
+  '032_economic_canonical_activity.sql',
+  '033_economic_lifecycle_outbox.sql',
+  '034_economic_cosmetic_refund.sql',
+  '035_chain_indexer_reorg_safety.sql',
+  '036_cultural_quizzes.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
@@ -44,6 +58,24 @@ const MIGRATION_ADVISORY_LOCK_KEY = 0x4a445130;
 
 function migrationChecksum(sql: string): string {
   return createHash('sha256').update(sql).digest('hex');
+}
+
+// A restricted runtime must never attempt DDL or repair the ledger on boot.
+// Deployment tooling applies migrations with the owner connection first; the
+// application then verifies that the exact checked-in files are installed.
+export async function verifyMigrations(pg: Pick<Pool, 'query'>): Promise<void> {
+  const result = await pg.query('SELECT filename, checksum FROM schema_migrations');
+  const applied = new Map<string, string | null>(
+    result.rows.map((row) => [String(row.filename), row.checksum === null ? null : String(row.checksum)])
+  );
+  for (const file of MIGRATIONS) {
+    const stored = applied.get(file);
+    if (!stored) throw new Error(`Migration ${file} is missing or has no checksum; run the owner-only migration command first.`);
+    const expected = migrationChecksum(readFileSync(join(rootDir, 'migrations', file), 'utf8'));
+    if (stored !== expected) throw new Error(`Migration ${file} checksum mismatch; runtime refuses altered migration history.`);
+    applied.delete(file);
+  }
+  if (applied.size) throw new Error(`Database has unknown migrations: ${[...applied.keys()].sort().join(', ')}`);
 }
 
 // Applies pending migrations in filename order. One pooled client holds an
