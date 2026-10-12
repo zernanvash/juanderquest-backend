@@ -144,11 +144,18 @@ export class SpotStore {
     }).filter(s=>(!q.search||`${s.name} ${s.description} ${s.tags.join(' ')}`.toLowerCase().includes(q.search.toLowerCase()))&&(!q.categories?.length||q.categories.includes(s.category))&&(!q.tags?.length||q.tags.some(t=>s.tags.includes(t)))&&(!q.municipality||s.municipality.toLowerCase()===q.municipality.toLowerCase())&&(!q.hasQuest||!!s.quest_id)&&(s.distance_km===undefined||!q.radius||s.distance_km<=q.radius)).sort((a,b)=>q.sort==='nearest'?(a.distance_km??999)-(b.distance_km??999):q.sort==='newest'?Date.parse(b.created_at)-Date.parse(a.created_at):q.sort==='trending'?b.trend_score-a.trend_score:b.recommendation_score-a.recommendation_score);
   }
 
-  create(input:Omit<Spot,'id'|'slug'|'source_type'|'source_name'|'trust_level'|'status'|'created_at'|'updated_at'>,userId:string){
-    const duplicate=this.spots.find(s=>distanceKm(input.gps_lat,input.gps_lng,s.gps_lat,s.gps_lng)<.05&&s.name.toLowerCase().includes(input.name.toLowerCase().slice(0,5)));
-    if(duplicate) return {duplicate};
-    const timestamp=new Date().toISOString();const slug=`${input.name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')}-${randomUUID().slice(0,6)}`;
-    const spot:Spot={...input,id:randomUUID(),slug,source_type:'community',source_name:'JuanDerQuest Community',trust_level:'community',status:'needs_review',crowd_capacity_band:'medium',recommendation_suppressed:false,created_by:userId,created_at:timestamp,updated_at:timestamp};this.spots.push(spot);this.persistSpot(spot).catch(()=>{});return {spot};
+  async create(input:Omit<Spot,'id'|'slug'|'source_type'|'source_name'|'trust_level'|'status'|'created_at'|'updated_at'>,userId:string){
+    const timestamp=new Date().toISOString();
+    let baseSlug = input.name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+    if (!baseSlug) baseSlug = 'destination';
+    let slug = `${baseSlug}-${randomUUID().slice(0,6)}`;
+    while (this.spots.some(s => s.slug === slug)) {
+      slug = `${baseSlug}-${randomUUID().slice(0,8)}`;
+    }
+    const spot:Spot={...input,id:randomUUID(),slug,source_type:'community',source_name:'JuanDerQuest Community',trust_level:'community',status:'published',crowd_capacity_band:'medium',recommendation_suppressed:false,created_by:userId,created_at:timestamp,updated_at:timestamp};
+    await this.persistSpot(spot);
+    this.spots.push(spot);
+    return {spot};
   }
 }
 

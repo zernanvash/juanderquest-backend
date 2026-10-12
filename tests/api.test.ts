@@ -34,15 +34,18 @@ it('filters spots by category and optional quest availability', async () => {
     expect(res.body.data.every((spot: any) => spot.category === 'nature_outdoors' && spot.quest_id)).toBe(true);
   });
 
-  it('rejects a duplicate community spot within 50 meters', async () => {
+  it('allows duplicate community spots within 50 meters and auto-publishes them', async () => {
     const login = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'user-1' });
     const res = await request(app).post('/api/v1/spots').set('Authorization', `Bearer ${login.body.data.token}`).send({
       name: 'Hundred Islands Park', description: 'A duplicate test entry close to the known destination pin.',
       category: 'nature_outdoors', subcategory: 'park', municipality: 'Alaminos City', address: 'Lucap',
       gps_lat: 16.20631, gps_lng: 119.97061, tags: [], price_level: 1, hours: {}, amenities: [], image_url: '',
     });
-    expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('DUPLICATE_SPOT');
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.status).toBe('published');
+    expect(res.body.data.id).toBeDefined();
+    expect(res.body.data.id).not.toBe('spot-hundred-islands');
   });
 
   it('reports local wallet auth mode during test development', async () => {
@@ -207,7 +210,7 @@ it('filters spots by category and optional quest availability', async () => {
     expect(res.body.data.length).toBeGreaterThan(0);
   });
 
-  it('POST /api/v1/proposals creates new tourism location proposal', async () => {
+  it('POST /api/v1/proposals returns 410 FEATURE_RETIRED directing to JuanChoice', async () => {
     const res = await request(app)
       .post('/api/v1/proposals')
       .set('Authorization', `Bearer ${userToken}`)
@@ -218,9 +221,10 @@ it('filters spots by category and optional quest availability', async () => {
         description: 'Explore the cleanest river in Region 1 with mangrove kayaking.',
       });
 
-    expect(res.status).toBe(201);
-    expect(res.body.success).toBe(true);
-    expect(res.body.data.title).toBe('Balingasay River Eco Cruise');
+    expect(res.status).toBe(410);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('FEATURE_RETIRED');
+    expect(res.body.error.message).toContain('JuanChoice');
   });
 
   it('GET governance overview and tokenomics exposes reconciled admin controls', async () => {
@@ -255,41 +259,20 @@ it('filters spots by category and optional quest availability', async () => {
     expect(res.body.data.organizer_bond_mjdq).toBe(25000);
   });
 
-  it('paid proposal vote burns 20%, escrows 80%, and is idempotent', async () => {
+  it('POST /api/v1/proposals/:id/votes returns 410 FEATURE_RETIRED directing to JuanChoice', async () => {
     const voteBody = {
       choice: 'yes',
       idempotency_key: 'governance-vote-user-1-prop-1',
     };
-    const first = await request(app)
-      .post('/api/v1/proposals/prop_1/votes')
-      .set('Authorization', `Bearer ${userToken}`)
-      .send(voteBody);
-    const repeat = await request(app)
-      .post('/api/v1/proposals/prop_1/votes')
-      .set('Authorization', `Bearer ${userToken}`)
-      .send(voteBody);
-
-    expect(first.status).toBe(200);
-    expect(first.body.data.charged_mjdq).toBe(5000);
-    expect(first.body.data.burned_mjdq).toBe(1000);
-    expect(first.body.data.escrowed_mjdq).toBe(4000);
-    expect(repeat.status).toBe(200);
-    expect(repeat.body.data.proposal.votes).toBe(1);
-
-    const analytics = await request(app)
-      .get('/api/v1/admin/tokenomics/analytics')
-      .set('Authorization', `Bearer ${adminToken}`);
-    expect(analytics.body.data.reconciliation_difference_mjdq).toBe(0);
-  });
-
-  it('blocks a second paid vote by the same eligible user', async () => {
     const res = await request(app)
       .post('/api/v1/proposals/prop_1/votes')
       .set('Authorization', `Bearer ${userToken}`)
-      .send({ choice: 'no', idempotency_key: 'governance-vote-user-1-prop-1-second' });
+      .send(voteBody);
 
-    expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('ALREADY_VOTED');
+    expect(res.status).toBe(410);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('FEATURE_RETIRED');
+    expect(res.body.error.message).toContain('JuanChoice');
   });
 
   it('requires admin role for tokenomics analytics', async () => {

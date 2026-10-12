@@ -279,13 +279,7 @@ router.post('/spots', authenticateToken, validateRequest(contributionSchema), as
     }
   }
 
-  const result = spotStore.create(req.body, req.user!.id);
-  if (result.duplicate) {
-    return res.status(409).json({
-      success: false,
-      error: { code: 'DUPLICATE_SPOT', message: 'A similar spot already exists within 50 meters.', existing_spot: result.duplicate.slug },
-    });
-  }
+  const result = await spotStore.create(req.body, req.user!.id);
 
   if (assetIds.length > 0) {
     try {

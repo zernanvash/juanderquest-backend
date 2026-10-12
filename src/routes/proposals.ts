@@ -56,50 +56,45 @@ proposalsRouter.get('/:id', (req: AuthRequest, res: Response) => {
   res.json({ success: true, data: proposal });
 });
 
-proposalsRouter.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
-  const result = createProposalSchema.safeParse(req.body);
-  if (!result.success) {
-    res.status(422).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid proposal fields', details: result.error.errors } });
-    return;
-  }
-  try {
-    const proposal = await governanceStore.createProposal({ ...result.data, submitted_by_id: req.user!.id });
-    res.status(201).json({ success: true, data: proposal });
-  } catch (error) {
-    sendGovernanceError(res, error);
-  }
+// Retired mutation endpoints — JuanChoice is now the only active voting engine.
+// Historical records remain readable via GET routes.
+proposalsRouter.post('/', authenticateToken, (_req: AuthRequest, res: Response) => {
+  res.status(410).json({
+    success: false,
+    error: {
+      code: 'FEATURE_RETIRED',
+      message: 'Proposal creation has been retired. JuanChoice (/choice) is the active community voting engine.',
+    },
+  });
 });
 
-proposalsRouter.post('/:id/submit', authenticateToken, async (req: AuthRequest, res: Response) => {
-  try {
-    const proposal = await governanceStore.submitProposal(req.params.id, req.user!.id);
-    res.json({ success: true, data: proposal });
-  } catch (error) {
-    sendGovernanceError(res, error);
-  }
+proposalsRouter.post('/:id/submit', authenticateToken, (_req: AuthRequest, res: Response) => {
+  res.status(410).json({
+    success: false,
+    error: {
+      code: 'FEATURE_RETIRED',
+      message: 'Proposal submission has been retired. JuanChoice (/choice) is the active community voting engine.',
+    },
+  });
 });
 
-proposalsRouter.post('/:id/votes', authenticateToken, async (req: AuthRequest, res: Response) => {
-  const result = voteSchema.safeParse(req.body);
-  if (!result.success) {
-    res.status(422).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Vote choice and idempotency key are required.', details: result.error.errors } });
-    return;
-  }
-  try {
-    const vote = await governanceStore.castProposalVote(req.params.id, req.user!.id, result.data.choice, result.data.idempotency_key);
-    res.json({ success: true, data: vote, server_time: new Date().toISOString() });
-  } catch (error) {
-    sendGovernanceError(res, error);
-  }
+proposalsRouter.post('/:id/votes', authenticateToken, (_req: AuthRequest, res: Response) => {
+  res.status(410).json({
+    success: false,
+    error: {
+      code: 'FEATURE_RETIRED',
+      message: 'Proposal voting has been retired. JuanChoice (/choice) is the active community voting engine.',
+    },
+  });
 });
 
-// Compatibility route for old clients. Paid governance requires an explicit choice and idempotency key.
+// Compatibility route for old clients
 proposalsRouter.post('/:id/vote', authenticateToken, (_req: AuthRequest, res: Response) => {
   res.status(410).json({
     success: false,
     error: {
-      code: 'PAID_VOTE_REQUIRED',
-      message: 'Use POST /proposals/:id/votes with choice and idempotency_key. The 5 JDQ fee and 20% burn must be disclosed before confirmation.',
+      code: 'FEATURE_RETIRED',
+      message: 'Proposal voting has been retired. JuanChoice (/choice) is the active community voting engine.',
     },
   });
 });

@@ -20,27 +20,14 @@ router.get('/community-quests/:id', (req, res) => {
   res.json({ success: true, data: proposal });
 });
 
-router.post('/community-quests/:id/feedback', authenticateToken, async (req: AuthRequest, res: Response) => {
-  const parsed = feedbackSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(422).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Feedback choice and idempotency key are required.', details: parsed.error.errors } });
-    return;
-  }
-  try {
-    const data = await governanceStore.castFeedback(
-      req.params.id,
-      req.user!.id,
-      parsed.data.choice,
-      parsed.data.idempotency_key,
-      parsed.data.rating,
-      parsed.data.comment,
-    );
-    res.json({ success: true, data, server_time: new Date().toISOString() });
-  } catch (error) {
-    const code = error instanceof Error ? error.message : 'INTERNAL_ERROR';
-    const status = ['NOT_ELIGIBLE'].includes(code) ? 403 : ['ALREADY_VOTED', 'INSUFFICIENT_JDQ'].includes(code) ? 409 : 422;
-    res.status(status).json({ success: false, error: { code, message: code.replaceAll('_', ' ').toLowerCase() } });
-  }
+router.post('/community-quests/:id/feedback', authenticateToken, (_req: AuthRequest, res: Response) => {
+  res.status(410).json({
+    success: false,
+    error: {
+      code: 'FEATURE_RETIRED',
+      message: 'Community quest feedback voting has been retired. JuanChoice (/choice) is the active community voting engine.',
+    },
+  });
 });
 
 export default router;
