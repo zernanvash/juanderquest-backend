@@ -11,6 +11,7 @@ import { progressionRepo } from '../src/progression/repository.js';
 import { progressionService } from '../src/progression/service.js';
 import { submissionsService } from '../src/services/submissions.js';
 import { OutboxWorker } from '../src/jobs/outbox-worker.js';
+import { newDb } from 'pg-mem';
 
 describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
   let db: TestDbInstance;
@@ -975,7 +976,6 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
     });
 
     it('migration 014 preflight check detects and aborts on out-of-bounds historical records', async () => {
-      const { newDb } = await import('pg-mem');
       const mem = newDb();
       mem.registerLanguage('plpgsql', ({ code }) => () => {
         const ifExistsMatch = code.match(/IF\s+EXISTS\s*\(\s*([\s\S]+?)\s*\)\s*THEN\s*RAISE\s+EXCEPTION\s+['"]([\s\S]+?)['"]/i);

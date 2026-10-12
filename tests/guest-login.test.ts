@@ -78,7 +78,7 @@ describe('guest user sessions', () => {
   it('fails closed when disabled and advertises availability', async () => {
     Reflect.set(env, 'GUEST_LOGIN_ENABLED', false);
     expect((await request(app).get('/api/v1/auth/wallet/config')).body.data.guest_login_enabled).toBe(false);
-    expect((await request(app).post('/api/v1/auth/guest-login').send({})).status).toBe(403);
+    expect((await request(app).post('/api/v1/auth/guest-login').send({})).status).toBe(410);
     Reflect.set(env, 'GUEST_LOGIN_ENABLED', true);
   });
 

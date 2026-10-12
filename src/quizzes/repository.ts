@@ -94,6 +94,33 @@ export class CulturalQuizRepository {
     };
   }
 
+  async findVersionById(versionId: string, client?: QueryExecutor): Promise<CulturalQuizVersion | null> {
+    const executor = this.getExecutor(client);
+    if (!executor) return null;
+
+    const { rows } = await executor.query(
+      `SELECT * FROM cultural_quiz_versions WHERE id = $1`,
+      [versionId]
+    );
+    if (!rows.length) return null;
+    const r = rows[0];
+    return {
+      id: r.id,
+      quiz_id: r.quiz_id,
+      version: Number(r.version),
+      title: r.title,
+      description: r.description,
+      language: r.language,
+      radius_meters: Number(r.radius_meters),
+      xp_reward: Number(r.xp_reward),
+      time_limit_minutes: Number(r.time_limit_minutes),
+      cooldown_hours: Number(r.cooldown_hours),
+      created_by: r.created_by,
+      published_at: r.published_at ? new Date(r.published_at).toISOString() : null,
+      created_at: new Date(r.created_at).toISOString(),
+    };
+  }
+
   async findQuestionsWithOptions(versionId: string, client?: QueryExecutor): Promise<CulturalQuizQuestion[]> {
     const executor = this.getExecutor(client);
     if (!executor) return [];

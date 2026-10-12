@@ -206,6 +206,7 @@ router.put('/quiz-attempts/:id/submission', authenticateToken, async (req: AuthR
       data: result,
     });
   } catch (err: any) {
+    console.error('[quiz-submission] error:', err);
     const msg = err?.message || '';
     if (msg.startsWith('ATTEMPT_EXPIRED')) {
       return res.status(410).json({ success: false, error: { code: 'ATTEMPT_EXPIRED', message: msg } });

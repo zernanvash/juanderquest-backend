@@ -1,4 +1,7 @@
 import request from 'supertest';
+import fs from 'fs';
+import path from 'path';
+import jwt from 'jsonwebtoken';
 import { app } from '../src/app';
 import { env } from '../src/config/env.js';
 
@@ -36,8 +39,6 @@ describe('Public alpha marketplace safety', () => {
 
 describe('Fast-alpha launcher JuanChoice flag closure', () => {
   it('explicitly sets all JuanChoice write and scheduler flags to false in start-home-alpha.sh', async () => {
-    const fs = await import('fs');
-    const path = await import('path');
     const scriptPath = path.resolve(__dirname, '../scripts/start-home-alpha.sh');
     const content = fs.readFileSync(scriptPath, 'utf8');
 
@@ -56,8 +57,6 @@ describe('Fast-alpha launcher JuanChoice flag closure', () => {
   });
 
   it('binds loopback 127.0.0.1 and does not export wildcard 0.0.0.0 in start-home-alpha.sh', async () => {
-    const fs = await import('fs');
-    const path = await import('path');
     const scriptPath = path.resolve(__dirname, '../scripts/start-home-alpha.sh');
     const content = fs.readFileSync(scriptPath, 'utf8');
 
@@ -66,7 +65,6 @@ describe('Fast-alpha launcher JuanChoice flag closure', () => {
   });
 
   it('rejects schedule mutation at the global JuanChoice write guard with 503 WRITES_DISABLED before auth or handler work', async () => {
-    const jwt = (await import('jsonwebtoken')).default;
     const originalJuanChoice = env.JUANCHOICE_ENABLED;
     const originalWrites = env.JUANCHOICE_WRITES_ENABLED;
     const originalScheduler = env.JUANCHOICE_SCHEDULER_ENABLED;

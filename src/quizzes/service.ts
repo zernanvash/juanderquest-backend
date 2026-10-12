@@ -454,7 +454,7 @@ export class CulturalQuizService {
         alreadyCompletedPrior = await this.repo.hasCompletedRewardScope(params.userId, attemptRow.reward_scope_id, client);
 
         if (!alreadyCompletedPrior) {
-          const version = await this.repo.findVersion(attemptRow.quiz_id, attemptRow.version_id, client);
+          const version = await this.repo.findVersionById(attemptRow.version_id, client);
           xpToAward = version?.xp_reward ?? 25;
 
           // Record progression event
@@ -511,7 +511,7 @@ export class CulturalQuizService {
 
       let cooldownUntil: string | null = null;
       if (!passed) {
-        const version = await this.repo.findVersion(attemptRow.quiz_id, attemptRow.version_id, client);
+        const version = await this.repo.findVersionById(attemptRow.version_id, client);
         const cdHours = version?.cooldown_hours ?? 24;
         cooldownUntil = new Date(Date.now() + cdHours * 3600 * 1000).toISOString();
       }
