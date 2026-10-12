@@ -52,10 +52,10 @@ describe('crowd diversion recommendations', () => {
     expect(recommendation.sponsored).toBe(false);
   });
 
-  test('holds community contributions for review', () => {
+  test('publishes community contributions immediately', async () => {
     const store = new SpotStore();
-    const result = store.create({name:'Local Pocket Park',description:'A quiet neighborhood green space.',category:'nature_outdoors',subcategory:'park',tags:['quiet'],municipality:'Dagupan City',address:'Test Street',gps_lat:16.08,gps_lng:120.39,price_level:0,hours:{},amenities:[],image_url:''}, 'user-1');
-    expect(result.spot?.status).toBe('needs_review');
-    expect(store.list({}).some(spot => spot.id === result.spot?.id)).toBe(false);
+    const result = await store.create({name:'Local Pocket Park',description:'A quiet neighborhood green space.',category:'nature_outdoors',subcategory:'park',tags:['quiet'],municipality:'Dagupan City',address:'Test Street',gps_lat:16.08,gps_lng:120.39,price_level:0,hours:{},amenities:[],image_url:''}, 'user-1');
+    expect(result.spot?.status).toBe('published');
+    expect(store.list({}).some(spot => spot.id === result.spot?.id)).toBe(true);
   });
 });

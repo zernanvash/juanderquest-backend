@@ -14,6 +14,8 @@ export interface ContentManifestMetadata {
 }
 
 export interface AppVersionData {
+  schemaVersion?: number;
+  packageName?: string;
   versionCode: number;
   versionName: string;
   commitHash: string;
@@ -26,9 +28,12 @@ export interface AppVersionData {
   minimumBaseVersionCode?: number;
   baseReleaseRequired?: boolean;
   updatePolicy?: 'optional' | 'mandatory' | 'silent';
+  sha256?: string;
+  sizeBytes?: number;
+  signingKeyGeneration?: number;
+  legacyInstallRequiresReinstall?: boolean;
   content?: ContentManifestMetadata;
 }
-
 
 let cachedGitCommit: string | null = null;
 
@@ -59,7 +64,6 @@ export const getGitCommitHead = (): string => {
 };
 
 const getVersionFilePath = (): string => {
-  // Check in downloads folder or server root
   const customPath = process.env.APP_VERSION_FILE;
   if (customPath) {
     return customPath;
@@ -85,6 +89,8 @@ export const getLatestAppVersion = (): AppVersionData => {
   const defaultFileName = `juanderquest-alpha-${currentCommit}.apk`;
 
   const fallback: AppVersionData = {
+    schemaVersion: 1,
+    packageName: 'dev.zernanvash.juanderquest',
     versionCode: 1,
     versionName: `alpha-${currentCommit}`,
     commitHash: currentCommit,
@@ -111,6 +117,8 @@ export const getLatestAppVersion = (): AppVersionData => {
       const minimumBase = typeof parsed.minimumBaseVersionCode === 'number' ? parsed.minimumBaseVersionCode : minSupported;
 
       return {
+        schemaVersion: typeof parsed.schemaVersion === 'number' ? parsed.schemaVersion : 1,
+        packageName: parsed.packageName || 'dev.zernanvash.juanderquest',
         versionCode: typeof parsed.versionCode === 'number' ? parsed.versionCode : fallback.versionCode,
         versionName: parsed.versionName || `alpha-${commit}`,
         commitHash: commit,
@@ -123,6 +131,10 @@ export const getLatestAppVersion = (): AppVersionData => {
         minimumBaseVersionCode: minimumBase,
         baseReleaseRequired: typeof parsed.baseReleaseRequired === 'boolean' ? parsed.baseReleaseRequired : false,
         updatePolicy: parsed.updatePolicy || (isForce ? 'mandatory' : 'optional'),
+        sha256: parsed.sha256,
+        sizeBytes: typeof parsed.sizeBytes === 'number' ? parsed.sizeBytes : undefined,
+        signingKeyGeneration: typeof parsed.signingKeyGeneration === 'number' ? parsed.signingKeyGeneration : undefined,
+        legacyInstallRequiresReinstall: typeof parsed.legacyInstallRequiresReinstall === 'boolean' ? parsed.legacyInstallRequiresReinstall : undefined,
         content: parsed.content ? {
           version: String(parsed.content.version || ''),
           manifestUrl: String(parsed.content.manifestUrl || ''),
@@ -138,10 +150,10 @@ export const getLatestAppVersion = (): AppVersionData => {
   return fallback;
 };
 
-
 // GET /api/v1/app/version -> Get latest app version info
 appVersionRouter.get('/app/version', (_req: Request, res: Response) => {
   const versionData = getLatestAppVersion();
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({
     success: true,
     data: versionData,
@@ -153,17 +165,15 @@ appVersionRouter.get('/app/download', (_req: Request, res: Response) => {
   const versionData = getLatestAppVersion();
   const targetFileName = versionData.fileName || `juanderquest-alpha-${versionData.commitHash}.apk`;
 
+  // Serve strictly promoted, immutable release APKs.
+  // Never serve debug or unverified development artifacts.
   const possiblePaths = [
     `/var/www/jdq-downloads/${targetFileName}`,
-    path.resolve(process.cwd(), '../juanderquest_app/build/app/outputs/flutter-apk/app-release.apk'),
-    path.resolve(process.cwd(), '../juanderquest_app/build/app/outputs/apk/release/app-release.apk'),
-    path.resolve(process.cwd(), '../juanderquest_app/build/app/outputs/flutter-apk/app-debug.apk'),
-    '/var/www/jdq-downloads/juanderquest-latest.apk',
     path.resolve(process.cwd(), `downloads/${targetFileName}`),
+    path.resolve(process.cwd(), '../downloads', targetFileName),
     path.resolve(process.cwd(), 'downloads/juanderquest-latest.apk'),
-    path.resolve(process.cwd(), '../downloads/juanderquest-latest.apk'),
+    '/var/www/jdq-downloads/juanderquest-latest.apk',
   ];
-
 
   for (const apkPath of possiblePaths) {
     if (fs.existsSync(apkPath)) {
