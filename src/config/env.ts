@@ -28,6 +28,8 @@ const rawEnv = cleanEnv(process.env, {
   HOST: str({ default: '127.0.0.1' }),
   NODE_ENV: str({ choices: ['development', 'test', 'production'], default: 'development' }),
   DATABASE_URL: str({ default: 'postgres://postgres:postgres@localhost:5432/juanderquest' }),
+  // Restricted runtime uses verify; owner-only db-migrate applies DDL first.
+  DB_MIGRATION_MODE: str({ choices: ['apply', 'verify'], default: 'apply' }),
   // Local development/test keeps the prototype fallback; production always fails closed.
   ALLOW_IN_MEMORY_FALLBACK: bool({ default: isLocalRuntime }),
   // Prototype fixtures are local-only and can never be enabled in production.

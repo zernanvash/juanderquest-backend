@@ -1,7 +1,10 @@
-import { Router, Response } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { randomUUID } from 'crypto';
 import { db } from '../db/index.js';
+import { getPool } from '../db/pool.js';
+import { EconomyError, EconomyService } from '../economy/service.js';
+import { isLocalEconomyProfile } from '../economy/profile.js';
 import { env } from '../config/env.js';
 import { spotStore } from '../spots/store.js';
 import { optionalAuthenticateToken, authenticateToken, checkQAAuthorization, isAuthorizedQA, AuthRequest } from '../middleware/auth.js';
@@ -138,7 +141,7 @@ router.patch('/quests/:id/status', authenticateToken, (req: AuthRequest, res: Re
 });
 
 // POST /quests/:id/attempts - Start or resume progressive quest attempt
-router.post('/quests/:id/attempts', authenticateToken, (req: AuthRequest, res: Response) => {
+router.post('/quests/:id/attempts', authenticateToken, async (req: AuthRequest, res: Response, next: NextFunction) => {
   const { id } = req.params;
   const quest = db.findQuestById(id, true);
 
@@ -178,11 +181,51 @@ router.post('/quests/:id/attempts', authenticateToken, (req: AuthRequest, res: R
     });
   }
 
+  let rewardReservation;
+  const pool = getPool();
+  if (pool && isLocalEconomyProfile()) {
+    try {
+      rewardReservation = await new EconomyService(pool).reserveForQuestIfActive(id, userId);
+    } catch (error) {
+      if (error instanceof EconomyError && ['NO_FUNDED_SLOT', 'ALREADY_AWARDED', 'POOL_NOT_ACTIVE'].includes(error.code)) {
+        return res.status(409).json({
+          success: false,
+          error: { code: error.code, message: 'This funded reward is unavailable. Please check the quest terms before starting.' },
+        });
+      }
+      return next(error);
+    }
+  }
+
+  if (rewardReservation?.attemptId && pool) {
+    // Funded starts have already committed the attempt and full reservation in
+    // one database transaction. The in-memory mirror is a cache, never a
+    // second attempt writer for this path.
+    const persisted = await pool.query('SELECT * FROM quest_attempts WHERE id = $1', [rewardReservation.attemptId]);
+    const row = persisted.rows[0];
+    if (!row || row.user_id !== userId || row.quest_id !== id) return next(new Error('FUNDED_ATTEMPT_UNAVAILABLE'));
+    const existingMirror = db.getActiveAttempt(userId, id);
+    const attempt = {
+      id: String(row.id), quest_id: String(row.quest_id), user_id: String(row.user_id),
+      version: Number(row.version), current_step: Number(row.current_step),
+      total_steps: Number(row.total_steps), status: row.status,
+      created_at: new Date(row.created_at).toISOString(),
+      updated_at: new Date(row.updated_at).toISOString(),
+      completed_at: row.completed_at ? new Date(row.completed_at).toISOString() : null,
+    };
+    if (existingMirror) Object.assign(existingMirror, attempt);
+    else db.quest_attempts.push(attempt);
+    return res.status(existingMirror ? 200 : 201).json({
+      success: true, data: { ...attempt, reward_reservation: rewardReservation },
+      message: existingMirror ? 'Resumed existing quest attempt.' : 'Quest attempt started.',
+    });
+  }
+
   const existing = db.getActiveAttempt(userId, id);
   if (existing) {
     return res.status(200).json({
       success: true,
-      data: existing,
+      data: rewardReservation ? { ...existing, reward_reservation: rewardReservation } : existing,
       message: 'Resumed existing quest attempt.',
     });
   }
@@ -200,7 +243,7 @@ router.post('/quests/:id/attempts', authenticateToken, (req: AuthRequest, res: R
 
   return res.status(201).json({
     success: true,
-    data: newAttempt,
+    data: rewardReservation ? { ...newAttempt, reward_reservation: rewardReservation } : newAttempt,
     message: 'Quest attempt started.',
   });
 });

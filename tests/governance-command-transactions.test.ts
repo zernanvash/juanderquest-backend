@@ -6,6 +6,7 @@ import { setPool } from '../src/db/pool.js';
 import { createTestDb, TestDbInstance } from '../src/db/testHarness.js';
 import { GovernanceStore } from '../src/governance/store.js';
 import { vouchersService } from '../src/services/vouchers.js';
+import { reconcileEconomy } from '../src/economy/reconcile.js';
 
 const realIt = process.env.JDQ_REAL_PG_URL ? it : it.skip;
 
@@ -57,6 +58,9 @@ describe('Authoritative governance commands (V3 regression)', () => {
     expect(rows.map((row) => row.demo_points)).toEqual([95, 95]);
     expect(state.balances['cmd-a']).toBe(95000);
     expect(state.balances['cmd-b']).toBe(95000);
+    const shadow = await reconcileEconomy(database.pool);
+    expect(shadow.legacy.filter((row) => row.userId === 'cmd-a' || row.userId === 'cmd-b')
+      .map((row) => row.classification)).toEqual(['exact', 'exact']);
     const ledger = (await database.pool.query('SELECT amount_mjdq FROM governance_ledger')).rows;
     expect(ledger).toHaveLength(12);
     expect(ledger.reduce((sum, row) => sum + Number(row.amount_mjdq), 0)).toBe(0);
@@ -128,6 +132,11 @@ describe('Authoritative governance commands (V3 regression)', () => {
     expect((await database.pool.query("SELECT demo_points FROM users WHERE id='cmd-a'")).rows[0].demo_points).toBe(96);
     const restarted = new GovernanceStore(memory); await restarted.hydrateFromPg(database.pool);
     expect(restarted.balanceOf('cmd-a')).toBe(96667);
+    const shadow = await reconcileEconomy(database.pool);
+    expect(shadow.legacy.filter((row) => row.userId === 'cmd-a' || row.userId === 'cmd-b')
+      .map((row) => [row.userId, row.classification, row.differenceMjdq]))
+      .toEqual([['cmd-a', 'fractional_remainder', '667'],
+        ['cmd-b', 'fractional_remainder', '333']]);
     expect(restarted.getTokenomics().reconciliation_difference_mjdq).toBe(0);
   });
 

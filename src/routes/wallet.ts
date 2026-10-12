@@ -3,6 +3,8 @@ import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { db } from '../db/index.js';
 import { governanceStore } from './proposals.js';
 import { authoritativeBalance } from '../governance/transaction.js';
+import { EconomyError, EconomyService, SIM_ASSET } from '../economy/service.js';
+import { isLocalEconomyProfile } from '../economy/profile.js';
 
 const router = Router();
 
@@ -41,6 +43,14 @@ router.get('/wallet', authenticateToken, async (req: AuthRequest, res: Response)
   const formatted_jdq = mjdq_balance / 1000;
   const jdq_governance_balance = governanceBalance;
   const scout_reputation = scoutReputation;
+  let explorerCoins: string | undefined;
+  if (pool && isLocalEconomyProfile()) {
+    try {
+      explorerCoins = await new EconomyService(pool).balance(req.user!.id);
+    } catch {
+      return res.status(503).json({ success: false, error: { code: 'ACCOUNTING_UNAVAILABLE', message: 'Coin balance temporarily unavailable.' } });
+    }
+  }
   
   res.setHeader('Cache-Control', 'private, no-store');
   res.json({
@@ -50,15 +60,37 @@ router.get('/wallet', authenticateToken, async (req: AuthRequest, res: Response)
       unit: 'mJDQ',
       mjdq_balance,
       jdq_governance_balance,
-      formatted_mjdq: `${formatted_jdq.toFixed(2)} JDQ`,
+      formatted_mjdq: `${mjdq_balance} mJDQ (demo)`,
       scout_reputation,
       demo_points: demoPoints ?? wallet.balance_jdq,
       balance_mjdq: mjdq_balance,
       balance_jdq: formatted_jdq,
-      fiat_purchasing_power_php: formatted_jdq * 1.0, // 1 JDQ / 1000 mJDQ >= ₱1.00 Floor
-      oracle_rate_php: 1.0,
+      balance_jdq_is_demo: true,
+      fiat_purchasing_power_php: null,
+      oracle_rate_php: null,
+      ...(explorerCoins !== undefined ? { explorer_coin_balance: explorerCoins, explorer_coin_asset: SIM_ASSET } : {}),
     },
   });
+});
+
+router.post('/wallet/cosmetics/:id/purchase', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const pool = db.usersRepo.getPool();
+  if (!pool || !isLocalEconomyProfile()) {
+    return res.status(404).json({ success: false, error: { code: 'NOT_AVAILABLE', message: 'Simulation purchase is unavailable.' } });
+  }
+  const key = req.header('x-idempotency-key') ?? '';
+  try {
+    const receipt = await new EconomyService(pool).purchaseCosmetic(req.user!.id, req.params.id, key);
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.status(200).json({ success: true, data: receipt });
+  } catch (error) {
+    if (error instanceof EconomyError) {
+      const status = error.code === 'INVALID_IDEMPOTENCY_KEY' ? 400 :
+        error.code === 'COSMETIC_UNAVAILABLE' ? 404 : 409;
+      return res.status(status).json({ success: false, error: { code: error.code, message: error.message } });
+    }
+    return res.status(503).json({ success: false, error: { code: 'ACCOUNTING_UNAVAILABLE', message: 'Purchase temporarily unavailable.' } });
+  }
 });
 
 router.get('/wallet/ledger', authenticateToken, async (req: AuthRequest, res: Response) => {

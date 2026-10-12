@@ -23,29 +23,87 @@ echo ""
 # 1. Endpoint Health Probes
 echo -e "${BOLD}🌐 PUBLIC WEBSITES & API HEALTH:${NC}"
 
-check_endpoint() {
-  local name="$1"
-  local url="$2"
-  local result
-  result=$(curl -s -k -o /dev/null -w "%{http_code} %{time_total}" --connect-timeout 5 --max-time 10 "$url" 2>/dev/null || echo "ERR 0")
-  local code=$(echo "$result" | awk '{print $1}')
-  local time=$(echo "$result" | awk '{print $2}')
+# A WSL restart (Windows reboot, `wsl --shutdown`, or a WSL package update)
+# kills the Cloudflare Tunnel origins for the ~1-2 minutes the stack needs to
+# boot. When a probe fails shortly after WSL started, wait out the boot window
+# instead of reporting the endpoints as down.
+BOOT_AGE_LIMIT=600      # seconds since WSL boot treated as "still booting"
+BOOT_GRACE_SECONDS=180  # max wait for a booting stack before reporting
+boot_age=$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo 99999)
+
+probe_endpoint() {
+  curl -s -k -o /dev/null -w "%{http_code} %{time_total}" --connect-timeout 5 --max-time 10 "$1" 2>/dev/null || echo "ERR 0"
+}
+
+endpoint_names=("Traveler Web App" "Express REST API" "LGU Admin Dashboard")
+endpoint_urls=("https://juanderquest.app" "https://api.juanderquest.app/api/v1/health" "https://admin.juanderquest.app")
+endpoint_codes=()
+endpoint_times=()
+endpoint_recovered=()
+
+pending=0
+for i in "${!endpoint_urls[@]}"; do
+  result=$(probe_endpoint "${endpoint_urls[$i]}")
+  endpoint_codes[$i]=$(echo "$result" | awk '{print $1}')
+  endpoint_times[$i]=$(echo "$result" | awk '{print $2}')
+  endpoint_recovered[$i]=0
+  if [ "${endpoint_codes[$i]}" != "200" ]; then
+    pending=1
+  fi
+done
+
+if [ "$pending" -eq 1 ] && [ "$boot_age" -lt "$BOOT_AGE_LIMIT" ]; then
+  echo -e "  ${YELLOW}⏳ WSL started ${boot_age}s ago and the stack is not fully up yet;${NC}"
+  echo -e "  ${YELLOW}   waiting up to ${BOOT_GRACE_SECONDS}s for the boot to finish…${NC}"
+  echo ""
+  wait_start=$SECONDS
+  while [ $((SECONDS - wait_start)) -lt "$BOOT_GRACE_SECONDS" ]; do
+    sleep 5
+    pending=0
+    for i in "${!endpoint_urls[@]}"; do
+      if [ "${endpoint_codes[$i]}" = "200" ]; then
+        continue
+      fi
+      result=$(probe_endpoint "${endpoint_urls[$i]}")
+      endpoint_codes[$i]=$(echo "$result" | awk '{print $1}')
+      endpoint_times[$i]=$(echo "$result" | awk '{print $2}')
+      if [ "${endpoint_codes[$i]}" = "200" ]; then
+        endpoint_recovered[$i]=$((SECONDS - wait_start))
+      else
+        pending=1
+      fi
+    done
+    if [ "$pending" -eq 0 ]; then
+      break
+    fi
+  done
+fi
+
+for i in "${!endpoint_urls[@]}"; do
+  name="${endpoint_names[$i]}"
+  url="${endpoint_urls[$i]}"
+  code="${endpoint_codes[$i]}"
+  time="${endpoint_times[$i]}"
 
   if [ "$code" = "200" ]; then
     echo -e "  [ ${GREEN}● ONLINE${NC} ] ${BOLD}$name${NC}"
     echo -e "             URL: ${CYAN}$url${NC}"
     echo -e "             Status: ${GREEN}HTTP $code OK${NC} | Response Time: ${YELLOW}${time}s${NC}"
+    if [ "${endpoint_recovered[$i]}" -gt 0 ]; then
+      echo -e "             ${YELLOW}Note: recovered ${endpoint_recovered[$i]}s into the post-boot wait window.${NC}"
+    fi
   else
     echo -e "  [ ${RED}✖ DOWN/ERR${NC} ] ${BOLD}$name${NC}"
     echo -e "             URL: ${CYAN}$url${NC}"
     echo -e "             Status: ${RED}HTTP $code${NC}"
   fi
   echo ""
-}
+done
 
-check_endpoint "Traveler Web App" "https://juanderquest.app"
-check_endpoint "Express REST API" "https://api.juanderquest.app/api/v1/health"
-check_endpoint "LGU Admin Dashboard" "https://admin.juanderquest.app"
+if [ "$pending" -eq 1 ]; then
+  echo -e "  ${YELLOW}Hint:${NC} check ${BOLD}pm2 list${NC} / ${BOLD}pm2 logs <service>${NC} and ${BOLD}docker ps${NC} before restarting the stack."
+  echo ""
+fi
 
 # 2. PM2 Managed Services
 echo -e "${BOLD}🚀 PM2 PROCESS MANAGER STATUS:${NC}"

@@ -56,6 +56,10 @@ router.patch('/admin/submissions/:id', validateRequest(reviewSchema), async (req
       data: {
         ...result.data!.submission,
         awarded_points: result.data!.awarded_points,
+        ...(result.data!.awarded_explorer_coins !== undefined
+          ? { awarded_explorer_coins: result.data!.awarded_explorer_coins } : {}),
+        ...(result.data!.explorer_coin_transaction_id !== undefined
+          ? { explorer_coin_transaction_id: result.data!.explorer_coin_transaction_id } : {}),
       },
     });
   } catch (err) {

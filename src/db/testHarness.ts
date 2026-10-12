@@ -128,6 +128,16 @@ export async function createTestDb(options: { poolMax?: number } = {}): Promise<
   // Intercept CREATE TABLE IF NOT EXISTS schema_migrations if table already exists,
   // preventing pg-mem unread AST error on idempotent re-runs
   memDb.public.interceptQueries((sql) => {
+    // pg-mem cannot execute PostgreSQL deferred constraint triggers. This
+    // migration is verified by the disposable real-PostgreSQL suite instead;
+    // do not pretend the emulator enforces these constraints.
+    if (sql.includes('-- ECONOMY_REAL_PG_HARDENING') ||
+        sql.includes('-- ECONOMY_REAL_PG_AUTHORITY') ||
+        sql.includes('-- ECONOMY_REAL_PG_CORRECTIONS') ||
+        sql.includes('-- ECONOMY_REAL_PG_ACTIVITY') ||
+        sql.includes('-- ECONOMY_REAL_PG_LIFECYCLE') ||
+        sql.includes('-- ECONOMY_REAL_PG_REFUND')) return [];
+    if (sql.includes('-- CHAIN_REAL_PG_INDEXER')) return [];
     // pg-mem's ANY(ARRAY[...]::text[]) silently returns no rows for this
     // PostgreSQL-valid batched identity query. Keep the production query intact
     // and translate only its exact test-harness shape to an equivalent IN list.

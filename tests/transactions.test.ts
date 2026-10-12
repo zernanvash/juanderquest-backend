@@ -5,6 +5,7 @@ import { submissionsService } from '../src/services/submissions.js';
 import { vouchersService } from '../src/services/vouchers.js';
 import { governanceStore } from '../src/routes/proposals.js';
 import { randomUUID } from 'crypto';
+import { reconcileEconomy } from '../src/economy/reconcile.js';
 
 describe('Phase 3: Atomic Submission, Review and Redemption Lifecycle', () => {
   let testDb: TestDbInstance;
@@ -140,6 +141,8 @@ describe('Phase 3: Atomic Submission, Review and Redemption Lifecycle', () => {
       // Verify PostgreSQL user balance: 100 + 50 = 150
       const userRes = await testDb.pool.query('SELECT demo_points FROM users WHERE id = $1', ['usr_alice_tx']);
       expect(userRes.rows[0].demo_points).toBe(150);
+      expect((await reconcileEconomy(testDb.pool)).legacy.find((row) => row.userId === 'usr_alice_tx')?.classification)
+        .toBe('exact');
     });
 
     it('rejects terminal state transitions (approve after reject) with 409 STATE_CONFLICT', async () => {
@@ -324,6 +327,8 @@ describe('Phase 3: Atomic Submission, Review and Redemption Lifecycle', () => {
 
       // Governance store balance must match (20 * 1,000 = 20,000 mJDQ)
       expect(governanceStore.balanceOf('usr_alice_tx')).toBe(20_000);
+      expect((await reconcileEconomy(testDb.pool)).legacy.find((row) => row.userId === 'usr_alice_tx')?.classification)
+        .toBe('exact');
     });
 
     it('ensures governance rollback cleans up ledger entries and does not share mutated arrays', async () => {

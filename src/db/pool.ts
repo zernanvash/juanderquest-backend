@@ -5,13 +5,38 @@ import {
   isDevelopmentSeedEnabled,
   isInMemoryFallbackAllowed,
 } from './policy.js';
-import { applyMigrations, seedDevelopmentData } from './migrations.js';
+import { applyMigrations, seedDevelopmentData, verifyMigrations } from './migrations.js';
 
 // Migration helpers live in a config-free module so scripts and the test
 // harness can migrate a database without loading runtime configuration.
-export { MIGRATIONS, applyMigrations, seedDevelopmentData } from './migrations.js';
+export { MIGRATIONS, applyMigrations, seedDevelopmentData, verifyMigrations } from './migrations.js';
 
 let pool: Pool | null = null;
+const benchmarkDurationsMs: number[] = [];
+let benchmarkQueryCount = 0;
+let benchmarkQueryErrors = 0;
+const benchmarkTelemetryEnabled = process.env.ECONOMY_BENCH_TRACE === 'true' &&
+  process.env.JDQ_ENV === 'dev' && process.env.NODE_ENV !== 'production' &&
+  /\/jdq_economy_lab_[a-f0-9]{12}_dev(?:\?|$)/.test(process.env.DATABASE_URL || '');
+
+function recordBenchmarkQuery(begin: bigint, failed: boolean) {
+  benchmarkQueryCount++;
+  if (failed) benchmarkQueryErrors++;
+  benchmarkDurationsMs.push(Number(process.hrtime.bigint() - begin) / 1_000_000);
+  if (benchmarkDurationsMs.length > 20000) benchmarkDurationsMs.shift();
+}
+
+export function getEconomyBenchmarkTelemetry() {
+  if (!benchmarkTelemetryEnabled || !pool) return null;
+  const sorted = [...benchmarkDurationsMs].sort((a, b) => a - b);
+  const percentile = (fraction: number) => sorted.length
+    ? Math.round(sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1)] * 100) / 100 : null;
+  return { enabled: true, query_count: benchmarkQueryCount, query_errors: benchmarkQueryErrors,
+    sql_roundtrip_ms: { sample_count: sorted.length, p50: percentile(0.5), p95: percentile(0.95),
+      p99: percentile(0.99), max: sorted.length ? Math.round(sorted.at(-1)! * 100) / 100 : null },
+    pool: { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount, max: 5 },
+    note: 'Client-side PostgreSQL query round trip, including network/lock wait; not server execution-only time.' };
+}
 
 export function getPool(): Pool | null {
   return pool;
@@ -48,6 +73,19 @@ export async function initPostgres(options: InitPostgresOptions = {}): Promise<b
     query_timeout: 5000,
     max: 5,
   });
+  if (benchmarkTelemetryEnabled && !options.poolFactory) {
+    candidate.on('connect', (client) => {
+      const target = client as unknown as { query: (...args: unknown[]) => Promise<unknown> };
+      const original = target.query.bind(client);
+      target.query = (...args: unknown[]) => {
+        const begin = process.hrtime.bigint();
+        const outcome = original(...args);
+        if (!outcome || typeof outcome.then !== 'function') return outcome;
+        return outcome.then(value => { recordBenchmarkQuery(begin, false); return value; },
+          error => { recordBenchmarkQuery(begin, true); throw error; });
+      };
+    });
+  }
 
   // pg emits errors from idle clients on the Pool itself. Without this
   // listener, a database restart terminates the entire API process.
@@ -59,7 +97,8 @@ export async function initPostgres(options: InitPostgresOptions = {}): Promise<b
 
   try {
     await candidate.query('SELECT 1');
-    await applyMigrations(candidate);
+    if (env.DB_MIGRATION_MODE === 'verify') await verifyMigrations(candidate);
+    else await applyMigrations(candidate);
     if (isDevelopmentSeedEnabled(policy)) {
       await seedDevelopmentData(candidate);
     }

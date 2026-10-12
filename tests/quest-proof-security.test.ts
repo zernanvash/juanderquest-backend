@@ -10,7 +10,7 @@ import { submissionsService } from '../src/services/submissions.js';
 describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
   const authorUserId = '11111111-1111-1111-1111-111111111111'; // Juan Dela Cruz
   const travelerUserId = '33333333-3333-3333-3333-333333333333'; // Scout Traveler
-  const otherTravelerUserId = '44444444-4444-4444-4444-444444444444'; // Impersonator Traveler
+  const otherTravelerUserId = '66666666-6666-6666-6666-666666666666'; // Same-scope second traveler
   const qaUserId = '55555555-5555-5555-5555-555555555555'; // QA Evaluator
 
   const travelerToken = jwt.sign(
@@ -19,7 +19,7 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
   );
 
   const otherTravelerToken = jwt.sign(
-    { id: otherTravelerUserId, seed_id: 'demo-traveler-2', role: 'user' },
+    { id: otherTravelerUserId, seed_id: 'proof-security-traveler-2', role: 'user' },
     env.JWT_SECRET
   );
 
@@ -44,6 +44,13 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
   const questRadius = 150; // meters
 
   beforeAll(() => {
+    // The legacy 4444 account is synthetic; using it against this live-scope
+    // quest now correctly fails at the scope gate before challenge validation.
+    // A separate same-scope actor keeps these challenge assertions meaningful.
+    db.users.push({ ...db.findUserById(travelerUserId)!, id: otherTravelerUserId,
+      seed_id: 'proof-security-traveler-2', display_name: 'Proof Security Traveler',
+      email: 'proof-security-traveler@example.invalid', handle: 'proofsecuritytraveler',
+      is_test: false });
     // Register spot authored by Juan Dela Cruz
     spotStore.spots.push({
       id: testSpotId,
@@ -115,6 +122,7 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
   });
 
   afterAll(() => {
+    db.users = db.users.filter((u) => u.id !== otherTravelerUserId);
     spotStore.spots = spotStore.spots.filter((s) => s.id !== testSpotId);
     db.quests = db.quests.filter((q) => q.id !== testQuestId && q.id !== otherQuestId);
   });

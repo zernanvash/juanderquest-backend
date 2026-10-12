@@ -59,7 +59,12 @@ describe('local-only discrepancy guardrails', () => {
       expect(response.body.data.balance_mjdq).toBe(20550);
       expect(response.body.data.demo_points).toBe(20);
       expect(response.body.data.scout_reputation).toBe(42);
-      expect(query).toHaveBeenCalledTimes(1);
+      // The wallet also reads the isolated Explorer Coin balance in local/test
+      // mode. Keep the legacy points + snapshot assertion scoped to its query.
+      expect(query).toHaveBeenCalledWith(
+        'SELECT u.demo_points, u.scout_reputation, gs.data FROM users u CROSS JOIN governance_snapshot gs WHERE u.id = $1 AND gs.id = 1',
+        [userId]
+      );
     } finally {
       db.usersRepo.setPool(previousPool);
     }

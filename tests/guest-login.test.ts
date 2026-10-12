@@ -59,6 +59,7 @@ describe('guest user sessions', () => {
       idempotency_key: randomUUID(), quest_id: quest.id, scanned_marker_code: quest.marker_code,
       captured_lat: quest.gps_lat, captured_lng: quest.gps_lng, captured_accuracy: 5,
     });
+    expect(submission.body.error).toBeUndefined();
     expect(submission.status).toBe(201);
     expect(submission.body.data.user_id).toBe(user.id);
     const admin = db.users.find(u => u.role === 'admin')!;
