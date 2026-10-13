@@ -6,23 +6,132 @@ import { validateRequest } from '../middleware/validate.js';
 
 export const affiliatesRouter = Router();
 
+// Options catalog for Pangasinan affiliate applications
+export const AFFILIATE_CATEGORIES = [
+  { id: 'dining', label: 'Dining & Native Delicacies', description: 'Restaurants, grills, seafood shacks, and native food pasalubong' },
+  { id: 'hospitality', label: 'Lodging & Hospitality', description: 'Resorts, transient homes, eco-lodges, beachfront stays' },
+  { id: 'souvenirs', label: 'Handicrafts & Souvenirs', description: 'Local weaving, pottery, artisanal crafts, and Pangasinan keepsakes' },
+  { id: 'activities', label: 'Tours & Coastal Activities', description: 'Island boatmen, kayak rentals, surf schools, guided heritage walks' },
+  { id: 'wellness', label: 'Eco-Farm & Agritourism', description: 'Salt farms, mango orchards, aquaculture ponds, farm-to-table stops' },
+];
+
+export const PANGASINAN_MUNICIPALITIES = [
+  'Agno', 'Aguilar', 'Alaminos City', 'Alcala', 'Anda', 'Asingan', 'Balungao', 'Bani', 'Basista', 'Bautista',
+  'Bayambang', 'Binalonan', 'Binmaley', 'Bolinao', 'Bugallon', 'Burgos', 'Calasiao', 'Dasol', 'Infanta',
+  'Labrador', 'Laoac', 'Lingayen', 'Mabini', 'Malasiqui', 'Manaoag', 'Mangaldan', 'Mangatarem', 'Mapandan',
+  'Natividad', 'Pozorrubio', 'Rosales', 'San Carlos City', 'San Fabian', 'San Jacinto', 'San Manuel',
+  'San Nicolas', 'San Quintin', 'Santa Barbara', 'Santa Maria', 'Santo Tomas', 'Sison', 'Sual', 'Tayug',
+  'Umingan', 'Urbiztondo', 'Urdaneta City', 'Villasis', 'Dagupan City'
+];
+
+export const SPONSORSHIP_GOALS = [
+  { id: 'quest_stop', label: 'Host a Quest Checkpoint', description: 'Feature as a GPS discovery or verification waypoint' },
+  { id: 'voucher_perk', label: 'Offer In-Store Traveler Perks', description: 'Provide special discounts or welcome gifts for quest completers' },
+  { id: 'storytelling', label: 'Cultural & Heritage Storytelling', description: 'Share historical lore and traditional Pangasinan craftsmanship' },
+  { id: 'event_sponsor', label: 'Community Eco-Raid Co-Host', description: 'Partner with local youth and LGU environmental cleanups' },
+];
+
+// GET /api/v1/affiliate/options (Public options lookup)
+affiliatesRouter.get('/affiliate/options', (_req, res: Response) => {
+  return res.status(200).json({
+    success: true,
+    data: {
+      categories: AFFILIATE_CATEGORIES,
+      municipalities: PANGASINAN_MUNICIPALITIES,
+      sponsorship_goals: SPONSORSHIP_GOALS,
+      declaration_version: '1.0',
+      terms_summary: 'Participation in JuanDerQuest promotes sovereign, sustainable Pangasinan tourism. All claims are community-verified without speculative token obligations.'
+    },
+  });
+});
+
+// Draft validation schema
+const saveDraftSchema = z.object({
+  body: z.object({
+    draft_data: z.record(z.any()),
+    current_step: z.number().int().min(1).max(5).default(1),
+    expected_revision: z.number().int().optional(),
+  }),
+});
+
+// GET /api/v1/affiliate/application-draft (Applicant load draft)
+affiliatesRouter.get(
+  '/affiliate/application-draft',
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    const userId = req.user!.id;
+    const draft = db.getAffiliateDraft(userId);
+    return res.status(200).json({
+      success: true,
+      data: draft || null,
+    });
+  }
+);
+
+// PUT /api/v1/affiliate/application-draft (Applicant auto-save draft)
+affiliatesRouter.put(
+  '/affiliate/application-draft',
+  authenticateToken,
+  validateRequest(saveDraftSchema),
+  async (req: AuthRequest, res: Response) => {
+    const userId = req.user!.id;
+    try {
+      const saved = db.saveAffiliateDraft(
+        userId,
+        req.body.draft_data,
+        req.body.current_step,
+        req.body.expected_revision
+      );
+      return res.status(200).json({
+        success: true,
+        data: saved,
+      });
+    } catch (err: any) {
+      if (err.code === 'VERSION_CONFLICT') {
+        return res.status(409).json({
+          success: false,
+          error: {
+            code: 'VERSION_CONFLICT',
+            message: 'Draft was updated in another session.',
+            current_revision: err.currentRevision,
+          },
+        });
+      }
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_SERVER_ERROR', message: err.message },
+      });
+    }
+  }
+);
+
+// DELETE /api/v1/affiliate/application-draft (Clear draft)
+affiliatesRouter.delete(
+  '/affiliate/application-draft',
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    const userId = req.user!.id;
+    db.deleteAffiliateDraft(userId);
+    return res.status(200).json({ success: true, message: 'Draft discarded' });
+  }
+);
+
 const createApplicationSchema = z.object({
   body: z.object({
     business_name: z.string().trim().min(2, 'Business name must be at least 2 characters').max(200),
     category: z.string().trim().min(2).max(50),
     municipality: z.string().trim().min(2).max(100),
+    business_address: z.string().trim().max(500).optional(),
+    business_province: z.string().trim().max(100).optional().default('Pangasinan'),
+    gps_lat: z.number().optional().nullable(),
+    gps_lng: z.number().optional().nullable(),
     contact_name: z.string().trim().min(2, 'Contact name must be at least 2 characters').max(100),
     contact_email: z.string().trim().email('Invalid contact email address').max(255),
     contact_phone: z.string().trim().min(7, 'Phone number must be at least 7 characters').max(50),
+    preferred_contact_method: z.enum(['email', 'phone', 'sms']).optional().default('email'),
     sponsorship_goals: z.array(z.string().min(1)).min(1, 'Select at least one sponsorship goal'),
     proposal_details: z.string().max(2000).optional(),
-  }),
-});
-
-const updateApplicationSchema = z.object({
-  body: z.object({
-    status: z.enum(['in_review', 'approved', 'rejected'] as const),
-    reviewer_notes: z.string().max(1000).optional(),
+    declaration_version: z.string().optional().default('1.0'),
   }),
 });
 
@@ -39,11 +148,17 @@ affiliatesRouter.post(
         business_name: req.body.business_name,
         category: req.body.category,
         municipality: req.body.municipality,
+        business_address: req.body.business_address || '',
+        business_province: req.body.business_province || 'Pangasinan',
+        gps_lat: req.body.gps_lat ?? null,
+        gps_lng: req.body.gps_lng ?? null,
         contact_name: req.body.contact_name,
         contact_email: req.body.contact_email,
         contact_phone: req.body.contact_phone,
+        preferred_contact_method: req.body.preferred_contact_method || 'email',
         sponsorship_goals: req.body.sponsorship_goals,
         proposal_details: req.body.proposal_details || '',
+        declaration_version: req.body.declaration_version || '1.0',
       });
 
       return res.status(201).json({
@@ -71,6 +186,53 @@ affiliatesRouter.post(
   }
 );
 
+// Resubmit schema for needs_changes applications
+const resubmitApplicationSchema = z.object({
+  body: z.object({
+    business_name: z.string().trim().min(2).max(200).optional(),
+    category: z.string().trim().min(2).max(50).optional(),
+    municipality: z.string().trim().min(2).max(100).optional(),
+    business_address: z.string().trim().max(500).optional(),
+    gps_lat: z.number().optional().nullable(),
+    gps_lng: z.number().optional().nullable(),
+    contact_name: z.string().trim().min(2).max(100).optional(),
+    contact_email: z.string().trim().email().max(255).optional(),
+    contact_phone: z.string().trim().min(7).max(50).optional(),
+    preferred_contact_method: z.enum(['email', 'phone', 'sms']).optional(),
+    sponsorship_goals: z.array(z.string().min(1)).min(1).optional(),
+    proposal_details: z.string().max(2000).optional(),
+  }),
+});
+
+// POST /api/v1/affiliate/applications/:id/resubmit (Owner resubmit after revision requested)
+affiliatesRouter.post(
+  '/affiliate/applications/:id/resubmit',
+  authenticateToken,
+  validateRequest(resubmitApplicationSchema),
+  async (req: AuthRequest, res: Response) => {
+    const { id } = req.params;
+    const userId = req.user!.id;
+    try {
+      const updated = db.resubmitAffiliateApplication(id, userId, req.body);
+      return res.status(200).json({
+        success: true,
+        data: updated,
+      });
+    } catch (err: any) {
+      if (err.code === 'APPLICATION_NOT_FOUND') {
+        return res.status(404).json({ success: false, error: { code: 'APPLICATION_NOT_FOUND', message: 'Application not found' } });
+      }
+      if (err.code === 'FORBIDDEN') {
+        return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Not authorized to edit this application' } });
+      }
+      if (err.code === 'INVALID_STATE_TRANSITION') {
+        return res.status(400).json({ success: false, error: { code: 'INVALID_STATE_TRANSITION', message: err.message } });
+      }
+      return res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+);
+
 // GET /api/v1/affiliate/applications/me (Authenticated applicant self-status lookup)
 affiliatesRouter.get(
   '/affiliate/applications/me',
@@ -79,9 +241,18 @@ affiliatesRouter.get(
     const userId = req.user!.id;
     const application = db.findAffiliateApplicationByUser(userId);
 
+    // Also look up if caller already has an active merchant workspace
+    const merchantInfo = db.getMerchantMembershipForUser(userId);
+
     return res.status(200).json({
       success: true,
       data: application || null,
+      merchant: merchantInfo ? {
+        id: merchantInfo.merchant.id,
+        name: merchantInfo.merchant.name,
+        role: merchantInfo.membership.role,
+        is_published: merchantInfo.merchant.is_published,
+      } : null,
     });
   }
 );
@@ -102,7 +273,43 @@ affiliatesRouter.get(
   }
 );
 
-// PATCH /api/v1/admin/affiliate/applications/:id (Admin review decision)
+// GET /api/v1/admin/affiliate/applications/:id (Admin get application detail with audits)
+affiliatesRouter.get(
+  '/admin/affiliate/applications/:id',
+  authenticateToken,
+  requireAdmin,
+  async (req: AuthRequest, res: Response) => {
+    const { id } = req.params;
+    const application = db.findAffiliateApplicationById(id);
+    if (!application) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'APPLICATION_NOT_FOUND', message: 'Application not found' },
+      });
+    }
+
+    const audits = db.getApplicationAudits(id);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...application,
+        audits,
+      },
+    });
+  }
+);
+
+const updateApplicationSchema = z.object({
+  body: z.object({
+    status: z.enum(['in_review', 'approved', 'rejected', 'needs_changes'] as const),
+    reviewer_notes: z.string().max(1000).optional(),
+    applicant_feedback: z.string().max(1000).optional(),
+    expected_version: z.number().int().optional(),
+  }),
+});
+
+// PATCH /api/v1/admin/affiliate/applications/:id (Admin review decision & atomic provisioning)
 affiliatesRouter.patch(
   '/admin/affiliate/applications/:id',
   authenticateToken,
@@ -110,7 +317,7 @@ affiliatesRouter.patch(
   validateRequest(updateApplicationSchema),
   async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
-    const { status, reviewer_notes } = req.body;
+    const { status, reviewer_notes, applicant_feedback, expected_version } = req.body;
     const adminId = req.user!.id;
 
     const existing = db.findAffiliateApplicationById(id);
@@ -124,15 +331,47 @@ affiliatesRouter.patch(
       });
     }
 
-    const updated = db.updateAffiliateApplicationStatus(id, {
-      status,
-      reviewer_id: adminId,
-      reviewer_notes,
-    });
+    // Prohibit self-approval (Admin reviewing their own application)
+    if (status === 'approved' && existing.user_id === adminId) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'SELF_APPROVAL_FORBIDDEN',
+          message: 'Administrators cannot approve their own affiliate application.',
+        },
+      });
+    }
 
-    return res.status(200).json({
-      success: true,
-      data: updated,
-    });
+    try {
+      const updated = db.updateAffiliateApplicationStatus(id, {
+        status,
+        reviewer_id: adminId,
+        reviewer_notes,
+        applicant_feedback,
+        expected_version,
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: updated,
+      });
+    } catch (err: any) {
+      if (err.code === 'VERSION_CONFLICT') {
+        return res.status(409).json({
+          success: false,
+          error: {
+            code: 'VERSION_CONFLICT',
+            message: 'Application has been modified by another reviewer or applicant.',
+          },
+        });
+      }
+      return res.status(500).json({
+        success: false,
+        error: {
+          code: 'INTERNAL_SERVER_ERROR',
+          message: err.message,
+        },
+      });
+    }
   }
 );

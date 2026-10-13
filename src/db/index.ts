@@ -129,7 +129,7 @@ export interface QuestAttemptRow {
   completed_at?: string | null;
 }
 
-export type AffiliateApplicationStatus = 'received' | 'in_review' | 'approved' | 'rejected';
+export type AffiliateApplicationStatus = 'received' | 'in_review' | 'approved' | 'rejected' | 'needs_changes';
 
 export interface AffiliateApplicationRow {
   id: string;
@@ -143,9 +143,63 @@ export interface AffiliateApplicationRow {
   sponsorship_goals: string[];
   proposal_details: string;
   status: AffiliateApplicationStatus;
+  version?: number;
+  business_address?: string;
+  business_province?: string;
+  gps_lat?: number | null;
+  gps_lng?: number | null;
+  preferred_contact_method?: string;
+  applicant_feedback?: string | null;
+  declaration_version?: string;
   reviewer_id?: string | null;
   reviewer_notes?: string | null;
   reviewed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MerchantAffiliateDraftRow {
+  user_id: string;
+  draft_data: Record<string, any>;
+  current_step: number;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MerchantApplicationAuditRow {
+  id: string;
+  application_id: string;
+  actor_id?: string | null;
+  from_status: string;
+  to_status: string;
+  revision: number;
+  notes?: string | null;
+  applicant_feedback?: string | null;
+  created_at: string;
+}
+
+export interface MerchantMembershipRow {
+  id: string;
+  merchant_id: string;
+  user_id: string;
+  role: 'owner' | 'staff';
+  status: 'active' | 'suspended';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MerchantProductRow {
+  id: string;
+  merchant_id: string;
+  name: string;
+  description: string;
+  price?: number | null;
+  currency: string;
+  image_url?: string | null;
+  is_published: boolean;
+  is_archived: boolean;
+  display_order: number;
   created_at: string;
   updated_at: string;
 }
@@ -252,6 +306,15 @@ export interface MerchantRow {
   name: string;
   location: string;
   description: string;
+  status?: 'active' | 'suspended';
+  is_published?: boolean;
+  category?: string;
+  municipality?: string;
+  contact_email?: string;
+  contact_phone?: string;
+  logo_url?: string | null;
+  banner_url?: string | null;
+  source_application_id?: string | null;
   created_at: string;
 }
 
@@ -792,6 +855,10 @@ export class MemoryDb {
   web_analytics_events: WebAnalyticsEventRow[] = [];
   quest_attempts: QuestAttemptRow[] = [];
   affiliate_applications: AffiliateApplicationRow[] = [];
+  merchant_affiliate_drafts: MerchantAffiliateDraftRow[] = [];
+  merchant_application_audits: MerchantApplicationAuditRow[] = [];
+  merchant_memberships: MerchantMembershipRow[] = [];
+  merchant_products: MerchantProductRow[] = [];
 
   private pg: Pool | null = null;
   private _usersRepo: UsersRepository | null = null;
@@ -897,6 +964,14 @@ export class MemoryDb {
         sponsorship_goals: Array.isArray(row.sponsorship_goals) ? row.sponsorship_goals : [],
         proposal_details: row.proposal_details ?? '',
         status: row.status,
+        version: row.version ? Number(row.version) : 1,
+        business_address: row.business_address ?? '',
+        business_province: row.business_province ?? 'Pangasinan',
+        gps_lat: row.gps_lat != null ? Number(row.gps_lat) : null,
+        gps_lng: row.gps_lng != null ? Number(row.gps_lng) : null,
+        preferred_contact_method: row.preferred_contact_method ?? 'email',
+        applicant_feedback: row.applicant_feedback ?? null,
+        declaration_version: row.declaration_version ?? '1.0',
         reviewer_id: row.reviewer_id ?? null,
         reviewer_notes: row.reviewer_notes ?? null,
         reviewed_at: row.reviewed_at ? toIso(row.reviewed_at) : null,
@@ -906,6 +981,60 @@ export class MemoryDb {
     } catch {
       // merchant_affiliate_applications may not exist in legacy fixtures
     }
+    try {
+      const { rows: drafts } = await pool.query('SELECT * FROM merchant_affiliate_drafts');
+      this.merchant_affiliate_drafts = drafts.map((row: any) => ({
+        user_id: row.user_id,
+        draft_data: row.draft_data || {},
+        current_step: Number(row.current_step) || 1,
+        revision: Number(row.revision) || 1,
+        created_at: toIso(row.created_at),
+        updated_at: toIso(row.updated_at),
+      }));
+    } catch {}
+    try {
+      const { rows: audits } = await pool.query('SELECT * FROM merchant_application_audits ORDER BY created_at ASC');
+      this.merchant_application_audits = audits.map((row: any) => ({
+        id: row.id,
+        application_id: row.application_id,
+        actor_id: row.actor_id ?? null,
+        from_status: row.from_status,
+        to_status: row.to_status,
+        revision: Number(row.revision) || 1,
+        notes: row.notes ?? null,
+        applicant_feedback: row.applicant_feedback ?? null,
+        created_at: toIso(row.created_at),
+      }));
+    } catch {}
+    try {
+      const { rows: memberships } = await pool.query('SELECT * FROM merchant_memberships');
+      this.merchant_memberships = memberships.map((row: any) => ({
+        id: row.id,
+        merchant_id: row.merchant_id,
+        user_id: row.user_id,
+        role: row.role,
+        status: row.status,
+        created_at: toIso(row.created_at),
+        updated_at: toIso(row.updated_at),
+      }));
+    } catch {}
+    try {
+      const { rows: products } = await pool.query('SELECT * FROM merchant_products ORDER BY display_order ASC, created_at DESC');
+      this.merchant_products = products.map((row: any) => ({
+        id: row.id,
+        merchant_id: row.merchant_id,
+        name: row.name,
+        description: row.description ?? '',
+        price: row.price != null ? Number(row.price) : null,
+        currency: row.currency ?? 'PHP',
+        image_url: row.image_url ?? null,
+        is_published: Boolean(row.is_published),
+        is_archived: Boolean(row.is_archived),
+        display_order: Number(row.display_order) || 0,
+        created_at: toIso(row.created_at),
+        updated_at: toIso(row.updated_at),
+      }));
+    } catch {}
     const { rows: submissions } = await pool.query('SELECT * FROM submissions ORDER BY created_at');
     this.submissions = submissions.map((row: any) => ({
       id: row.id, idempotency_key: row.idempotency_key, user_id: row.user_id, quest_id: row.quest_id,
@@ -917,7 +1046,19 @@ export class MemoryDb {
     }));
     const { rows: merchants } = await pool.query('SELECT * FROM merchants ORDER BY created_at');
     this.merchants = merchants.map((row: any) => ({
-      id: row.id, name: row.name, location: row.location, description: row.description,
+      id: row.id,
+      name: row.name,
+      location: row.location,
+      description: row.description,
+      status: row.status ?? 'active',
+      is_published: Boolean(row.is_published),
+      category: row.category ?? null,
+      municipality: row.municipality ?? null,
+      contact_email: row.contact_email ?? null,
+      contact_phone: row.contact_phone ?? null,
+      logo_url: row.logo_url ?? null,
+      banner_url: row.banner_url ?? null,
+      source_application_id: row.source_application_id ?? null,
       created_at: toIso(row.created_at),
     }));
     const { rows: vouchers } = await pool.query('SELECT * FROM vouchers ORDER BY id');
@@ -1674,7 +1815,7 @@ export class MemoryDb {
 
   findAffiliateApplicationByUser(userId: string): AffiliateApplicationRow | undefined {
     const userApps = this.affiliate_applications.filter((a) => a.user_id === userId);
-    const active = userApps.find((a) => a.status === 'received' || a.status === 'in_review');
+    const active = userApps.find((a) => a.status === 'received' || a.status === 'in_review' || a.status === 'needs_changes');
     if (active) return active;
     return userApps[0];
   }
@@ -1691,9 +1832,60 @@ export class MemoryDb {
     return [...list].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }
 
+  getAffiliateDraft(userId: string): MerchantAffiliateDraftRow | undefined {
+    return this.merchant_affiliate_drafts.find((d) => d.user_id === userId);
+  }
+
+  saveAffiliateDraft(userId: string, draftData: Record<string, any>, currentStep: number, expectedRevision?: number): MerchantAffiliateDraftRow {
+    const existing = this.getAffiliateDraft(userId);
+    const now = new Date().toISOString();
+
+    if (existing) {
+      if (expectedRevision !== undefined && existing.revision !== expectedRevision) {
+        const err: any = new Error('Draft revision conflict');
+        err.code = 'VERSION_CONFLICT';
+        err.currentRevision = existing.revision;
+        throw err;
+      }
+      existing.draft_data = draftData;
+      existing.current_step = currentStep;
+      existing.revision += 1;
+      existing.updated_at = now;
+      this.persist(
+        `INSERT INTO merchant_affiliate_drafts (user_id, draft_data, current_step, revision, updated_at)
+         VALUES ($1, $2, $3, $4, NOW())
+         ON CONFLICT (user_id) DO UPDATE SET draft_data = EXCLUDED.draft_data, current_step = EXCLUDED.current_step, revision = EXCLUDED.revision, updated_at = NOW()`,
+        [userId, JSON.stringify(draftData), currentStep, existing.revision]
+      );
+      return existing;
+    }
+
+    const newDraft: MerchantAffiliateDraftRow = {
+      user_id: userId,
+      draft_data: draftData,
+      current_step: currentStep,
+      revision: 1,
+      created_at: now,
+      updated_at: now,
+    };
+    this.merchant_affiliate_drafts.push(newDraft);
+    this.persist(
+      `INSERT INTO merchant_affiliate_drafts (user_id, draft_data, current_step, revision, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, NOW(), NOW())
+       ON CONFLICT (user_id) DO UPDATE SET draft_data = EXCLUDED.draft_data, current_step = EXCLUDED.current_step, revision = EXCLUDED.revision, updated_at = NOW()`,
+      [userId, JSON.stringify(draftData), currentStep, 1]
+    );
+    return newDraft;
+  }
+
+  deleteAffiliateDraft(userId: string): void {
+    this.merchant_affiliate_drafts = this.merchant_affiliate_drafts.filter((d) => d.user_id !== userId);
+    this.persist('DELETE FROM merchant_affiliate_drafts WHERE user_id = $1', [userId]);
+  }
+
   createAffiliateApplication(payload: Omit<AffiliateApplicationRow, 'id' | 'status' | 'reviewer_id' | 'reviewer_notes' | 'reviewed_at' | 'created_at' | 'updated_at'>): AffiliateApplicationRow {
     const existingActive = this.affiliate_applications.find(
-      (a) => a.user_id === payload.user_id && (a.status === 'received' || a.status === 'in_review')
+      (a) => a.user_id === payload.user_id && (a.status === 'received' || a.status === 'in_review' || a.status === 'needs_changes')
     );
     if (existingActive) {
       const error: any = new Error('You already have an active application under review.');
@@ -1715,15 +1907,27 @@ export class MemoryDb {
       sponsorship_goals: payload.sponsorship_goals,
       proposal_details: payload.proposal_details || '',
       status: 'received',
+      version: payload.version ?? 1,
+      business_address: payload.business_address ?? '',
+      business_province: payload.business_province ?? 'Pangasinan',
+      gps_lat: payload.gps_lat ?? null,
+      gps_lng: payload.gps_lng ?? null,
+      preferred_contact_method: payload.preferred_contact_method ?? 'email',
+      applicant_feedback: null,
+      declaration_version: payload.declaration_version ?? '1.0',
       created_at: now,
       updated_at: now,
     };
 
     this.affiliate_applications.unshift(newApp);
+    this.deleteAffiliateDraft(payload.user_id);
+
+    this.recordApplicationAudit(newApp.id, payload.user_id, 'draft', 'received', 1, 'Initial submission');
+
     this.persist(
       `INSERT INTO merchant_affiliate_applications 
-       (id, user_id, business_name, category, municipality, contact_name, contact_email, contact_phone, sponsorship_goals, proposal_details, status, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())`,
+       (id, user_id, business_name, category, municipality, contact_name, contact_email, contact_phone, sponsorship_goals, proposal_details, status, version, business_address, business_province, gps_lat, gps_lng, preferred_contact_method, declaration_version, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW(), NOW())`,
       [
         newApp.id,
         newApp.user_id,
@@ -1736,29 +1940,306 @@ export class MemoryDb {
         JSON.stringify(newApp.sponsorship_goals),
         newApp.proposal_details,
         newApp.status,
+        newApp.version ?? 1,
+        newApp.business_address ?? '',
+        newApp.business_province ?? 'Pangasinan',
+        newApp.gps_lat,
+        newApp.gps_lng,
+        newApp.preferred_contact_method ?? 'email',
+        newApp.declaration_version ?? '1.0',
       ]
     );
     return newApp;
   }
 
-  updateAffiliateApplicationStatus(id: string, update: { status: AffiliateApplicationStatus; reviewer_id: string; reviewer_notes?: string | null }): AffiliateApplicationRow | null {
+  resubmitAffiliateApplication(id: string, userId: string, payload: Partial<AffiliateApplicationRow>): AffiliateApplicationRow {
+    const app = this.findAffiliateApplicationById(id);
+    if (!app) {
+      const err: any = new Error('Application not found');
+      err.code = 'APPLICATION_NOT_FOUND';
+      throw err;
+    }
+    if (app.user_id !== userId) {
+      const err: any = new Error('Forbidden');
+      err.code = 'FORBIDDEN';
+      throw err;
+    }
+    if (app.status !== 'needs_changes') {
+      const err: any = new Error('Only applications marked needs_changes can be resubmitted.');
+      err.code = 'INVALID_STATE_TRANSITION';
+      throw err;
+    }
+
+    const now = new Date().toISOString();
+    const oldStatus = app.status;
+    app.status = 'received';
+    app.version = (app.version || 1) + 1;
+    if (payload.business_name) app.business_name = payload.business_name;
+    if (payload.category) app.category = payload.category;
+    if (payload.municipality) app.municipality = payload.municipality;
+    if (payload.contact_name) app.contact_name = payload.contact_name;
+    if (payload.contact_email) app.contact_email = payload.contact_email;
+    if (payload.contact_phone) app.contact_phone = payload.contact_phone;
+    if (payload.sponsorship_goals) app.sponsorship_goals = payload.sponsorship_goals;
+    if (payload.proposal_details !== undefined) app.proposal_details = payload.proposal_details;
+    if (payload.business_address !== undefined) app.business_address = payload.business_address;
+    if (payload.gps_lat !== undefined) app.gps_lat = payload.gps_lat;
+    if (payload.gps_lng !== undefined) app.gps_lng = payload.gps_lng;
+    if (payload.preferred_contact_method) app.preferred_contact_method = payload.preferred_contact_method;
+    app.applicant_feedback = null;
+    app.updated_at = now;
+
+    this.recordApplicationAudit(app.id, userId, oldStatus, 'received', app.version, 'Applicant resubmission');
+
+    this.persist(
+      `UPDATE merchant_affiliate_applications 
+       SET status = 'received', version = $1, business_name = $2, category = $3, municipality = $4,
+           contact_name = $5, contact_email = $6, contact_phone = $7, sponsorship_goals = $8,
+           proposal_details = $9, business_address = $10, gps_lat = $11, gps_lng = $12,
+           preferred_contact_method = $13, applicant_feedback = NULL, updated_at = NOW()
+       WHERE id = $14`,
+      [
+        app.version,
+        app.business_name,
+        app.category,
+        app.municipality,
+        app.contact_name,
+        app.contact_email,
+        app.contact_phone,
+        JSON.stringify(app.sponsorship_goals),
+        app.proposal_details,
+        app.business_address ?? '',
+        app.gps_lat,
+        app.gps_lng,
+        app.preferred_contact_method ?? 'email',
+        app.id,
+      ]
+    );
+    return app;
+  }
+
+  recordApplicationAudit(applicationId: string, actorId: string | null, fromStatus: string, toStatus: string, revision: number, notes?: string | null, applicantFeedback?: string | null): MerchantApplicationAuditRow {
+    const audit: MerchantApplicationAuditRow = {
+      id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      application_id: applicationId,
+      actor_id: actorId,
+      from_status: fromStatus,
+      to_status: toStatus,
+      revision,
+      notes: notes ?? null,
+      applicant_feedback: applicantFeedback ?? null,
+      created_at: new Date().toISOString(),
+    };
+    this.merchant_application_audits.push(audit);
+    this.persist(
+      `INSERT INTO merchant_application_audits (id, application_id, actor_id, from_status, to_status, revision, notes, applicant_feedback, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+      [audit.id, audit.application_id, audit.actor_id, audit.from_status, audit.to_status, audit.revision, audit.notes, audit.applicant_feedback]
+    );
+    return audit;
+  }
+
+  getApplicationAudits(applicationId: string): MerchantApplicationAuditRow[] {
+    return this.merchant_application_audits.filter((a) => a.application_id === applicationId).sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+  }
+
+  updateAffiliateApplicationStatus(id: string, update: { status: AffiliateApplicationStatus; reviewer_id: string; reviewer_notes?: string | null; applicant_feedback?: string | null; expected_version?: number }): AffiliateApplicationRow | null {
     const app = this.findAffiliateApplicationById(id);
     if (!app) return null;
 
+    if (update.expected_version !== undefined && app.version !== undefined && app.version !== update.expected_version) {
+      const err: any = new Error('Application version conflict');
+      err.code = 'VERSION_CONFLICT';
+      throw err;
+    }
+
+    const fromStatus = app.status;
     const now = new Date().toISOString();
     app.status = update.status;
     app.reviewer_id = update.reviewer_id;
     app.reviewer_notes = update.reviewer_notes ?? null;
+    if (update.applicant_feedback !== undefined) {
+      app.applicant_feedback = update.applicant_feedback;
+    }
     app.reviewed_at = now;
     app.updated_at = now;
 
+    this.recordApplicationAudit(app.id, update.reviewer_id, fromStatus, update.status, app.version || 1, update.reviewer_notes, update.applicant_feedback);
+
     this.persist(
       `UPDATE merchant_affiliate_applications 
-       SET status = $1, reviewer_id = $2, reviewer_notes = $3, reviewed_at = NOW(), updated_at = NOW()
-       WHERE id = $4`,
-      [app.status, app.reviewer_id, app.reviewer_notes, app.id]
+       SET status = $1, reviewer_id = $2, reviewer_notes = $3, applicant_feedback = $4, reviewed_at = NOW(), updated_at = NOW()
+       WHERE id = $5`,
+      [app.status, app.reviewer_id, app.reviewer_notes, app.applicant_feedback ?? null, app.id]
     );
+
+    // If status is 'approved', atomically provision merchant and owner membership
+    if (update.status === 'approved') {
+      this.provisionMerchantForApplication(app);
+    }
+
     return app;
+  }
+
+  private provisionMerchantForApplication(app: AffiliateApplicationRow): MerchantRow {
+    let merchant = this.merchants.find((m) => m.source_application_id === app.id);
+    const now = new Date().toISOString();
+
+    if (!merchant) {
+      const merchantId = `m_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      merchant = {
+        id: merchantId,
+        name: app.business_name,
+        location: `${app.municipality}, Pangasinan`,
+        description: app.proposal_details || `${app.business_name} in ${app.municipality}`,
+        status: 'active',
+        is_published: false,
+        category: app.category,
+        municipality: app.municipality,
+        contact_email: app.contact_email,
+        contact_phone: app.contact_phone,
+        source_application_id: app.id,
+        created_at: now,
+      };
+      this.merchants.push(merchant);
+      this.persist(
+        `INSERT INTO merchants (id, name, location, description, status, is_published, category, municipality, contact_email, contact_phone, source_application_id, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+         ON CONFLICT (id) DO NOTHING`,
+        [merchant.id, merchant.name, merchant.location, merchant.description, merchant.status, merchant.is_published, merchant.category, merchant.municipality, merchant.contact_email, merchant.contact_phone, merchant.source_application_id]
+      );
+    }
+
+    // Ensure applicant is active owner in merchant_memberships
+    const existingMembership = this.merchant_memberships.find(
+      (m) => m.merchant_id === merchant!.id && m.user_id === app.user_id
+    );
+    if (!existingMembership) {
+      const membershipId = `memb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const newMembership: MerchantMembershipRow = {
+        id: membershipId,
+        merchant_id: merchant.id,
+        user_id: app.user_id,
+        role: 'owner',
+        status: 'active',
+        created_at: now,
+        updated_at: now,
+      };
+      this.merchant_memberships.push(newMembership);
+      this.persist(
+        `INSERT INTO merchant_memberships (id, merchant_id, user_id, role, status, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+         ON CONFLICT (merchant_id, user_id) DO UPDATE SET status = 'active', updated_at = NOW()`,
+        [newMembership.id, newMembership.merchant_id, newMembership.user_id, newMembership.role, newMembership.status]
+      );
+    }
+
+    return merchant;
+  }
+
+  // Merchant membership and resource helpers
+  getMerchantMembershipForUser(userId: string): { membership: MerchantMembershipRow; merchant: MerchantRow } | undefined {
+    const membership = this.merchant_memberships.find((m) => m.user_id === userId && m.status === 'active');
+    if (!membership) return undefined;
+    const merchant = this.merchants.find((m) => m.id === membership.merchant_id && m.status === 'active');
+    if (!merchant) return undefined;
+    return { membership, merchant };
+  }
+
+  findMerchantById(id: string): MerchantRow | undefined {
+    return this.merchants.find((m) => m.id === id);
+  }
+
+  updateMerchantProfile(merchantId: string, updates: Partial<MerchantRow>): MerchantRow | undefined {
+    const merchant = this.merchants.find((m) => m.id === merchantId);
+    if (!merchant) return undefined;
+
+    if (updates.name !== undefined) merchant.name = updates.name;
+    if (updates.description !== undefined) merchant.description = updates.description;
+    if (updates.location !== undefined) merchant.location = updates.location;
+    if (updates.municipality !== undefined) merchant.municipality = updates.municipality;
+    if (updates.contact_email !== undefined) merchant.contact_email = updates.contact_email;
+    if (updates.contact_phone !== undefined) merchant.contact_phone = updates.contact_phone;
+    if (updates.logo_url !== undefined) merchant.logo_url = updates.logo_url;
+    if (updates.banner_url !== undefined) merchant.banner_url = updates.banner_url;
+    if (updates.is_published !== undefined) merchant.is_published = updates.is_published;
+
+    this.persist(
+      `UPDATE merchants 
+       SET name = $1, description = $2, location = $3, municipality = $4, contact_email = $5,
+           contact_phone = $6, logo_url = $7, banner_url = $8, is_published = $9
+       WHERE id = $10`,
+      [
+        merchant.name,
+        merchant.description,
+        merchant.location,
+        merchant.municipality ?? null,
+        merchant.contact_email ?? null,
+        merchant.contact_phone ?? null,
+        merchant.logo_url ?? null,
+        merchant.banner_url ?? null,
+        merchant.is_published ?? false,
+        merchant.id,
+      ]
+    );
+    return merchant;
+  }
+
+  listMerchantProducts(merchantId: string, includeArchived = false): MerchantProductRow[] {
+    return this.merchant_products
+      .filter((p) => p.merchant_id === merchantId && (includeArchived || !p.is_archived))
+      .sort((a, b) => a.display_order - b.display_order || new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }
+
+  findMerchantProductById(productId: string): MerchantProductRow | undefined {
+    return this.merchant_products.find((p) => p.id === productId);
+  }
+
+  createMerchantProduct(payload: Omit<MerchantProductRow, 'id' | 'created_at' | 'updated_at'>): MerchantProductRow {
+    const now = new Date().toISOString();
+    const id = `prod_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const product: MerchantProductRow = {
+      ...payload,
+      id,
+      created_at: now,
+      updated_at: now,
+    };
+    this.merchant_products.push(product);
+    this.persist(
+      `INSERT INTO merchant_products (id, merchant_id, name, description, price, currency, image_url, is_published, is_archived, display_order, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())`,
+      [product.id, product.merchant_id, product.name, product.description, product.price ?? null, product.currency, product.image_url ?? null, product.is_published, product.is_archived, product.display_order]
+    );
+    return product;
+  }
+
+  updateMerchantProduct(productId: string, updates: Partial<MerchantProductRow>): MerchantProductRow | undefined {
+    const product = this.merchant_products.find((p) => p.id === productId);
+    if (!product) return undefined;
+
+    const now = new Date().toISOString();
+    if (updates.name !== undefined) product.name = updates.name;
+    if (updates.description !== undefined) product.description = updates.description;
+    if (updates.price !== undefined) product.price = updates.price;
+    if (updates.currency !== undefined) product.currency = updates.currency;
+    if (updates.image_url !== undefined) product.image_url = updates.image_url;
+    if (updates.is_published !== undefined) product.is_published = updates.is_published;
+    if (updates.is_archived !== undefined) product.is_archived = updates.is_archived;
+    if (updates.display_order !== undefined) product.display_order = updates.display_order;
+    product.updated_at = now;
+
+    this.persist(
+      `UPDATE merchant_products 
+       SET name = $1, description = $2, price = $3, currency = $4, image_url = $5, is_published = $6, is_archived = $7, display_order = $8, updated_at = NOW()
+       WHERE id = $9`,
+      [product.name, product.description, product.price ?? null, product.currency, product.image_url ?? null, product.is_published, product.is_archived, product.display_order, product.id]
+    );
+    return product;
+  }
+
+  archiveMerchantProduct(productId: string): boolean {
+    const updated = this.updateMerchantProduct(productId, { is_archived: true, is_published: false });
+    return Boolean(updated);
   }
 
   // User-scoped idempotency lookup (Fix 4.4)
