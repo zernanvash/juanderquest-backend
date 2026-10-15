@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { randomUUID } from 'crypto';
 import { env } from '../config/env.js';
 import { isDevelopmentSeedEnabled } from './policy.js';
 import { UsersRepository, CreateUserData } from '../repositories/users.js';
@@ -114,6 +115,29 @@ export interface QuestStep {
   hint?: string;
 }
 
+export type QuestStepStatus = 'not_started' | 'ready' | 'pending_review' | 'needs_changes' | 'verified' | 'skipped_optional';
+
+export interface QuestStepEvidenceRow {
+  id: string;
+  attempt_id: string;
+  quest_id: string;
+  user_id: string;
+  step_order: number;
+  checkpoint_type: 'location' | 'qr' | 'photo' | 'action';
+  status: QuestStepStatus;
+  required: boolean;
+  title: string;
+  description?: string | null;
+  idempotency_key?: string | null;
+  evidence_payload?: Record<string, any> | null;
+  rejection_reason?: string | null;
+  verified_at?: string | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type QuestAttemptStatus = 'in_progress' | 'submitted' | 'completed' | 'abandoned';
 
 export interface QuestAttemptRow {
@@ -124,6 +148,12 @@ export interface QuestAttemptRow {
   current_step: number;
   total_steps: number;
   status: QuestAttemptStatus;
+  steps_snapshot?: QuestStep[];
+  verified_steps?: number;
+  required_steps?: number;
+  review_notes?: string | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
   created_at: string;
   updated_at: string;
   completed_at?: string | null;
@@ -854,6 +884,7 @@ export class MemoryDb {
   ] : [];
   web_analytics_events: WebAnalyticsEventRow[] = [];
   quest_attempts: QuestAttemptRow[] = [];
+  quest_step_evidence: QuestStepEvidenceRow[] = [];
   affiliate_applications: AffiliateApplicationRow[] = [];
   merchant_affiliate_drafts: MerchantAffiliateDraftRow[] = [];
   merchant_application_audits: MerchantApplicationAuditRow[] = [];
@@ -1773,14 +1804,76 @@ export class MemoryDb {
     return this.quest_attempts.filter((a) => a.user_id === userId);
   }
 
+  getStepEvidence(attemptId: string): QuestStepEvidenceRow[] {
+    return this.quest_step_evidence
+      .filter((e) => e.attempt_id === attemptId)
+      .sort((a, b) => a.step_order - b.step_order);
+  }
+
+  findStepEvidence(attemptId: string, stepOrder: number): QuestStepEvidenceRow | undefined {
+    return this.quest_step_evidence.find((e) => e.attempt_id === attemptId && e.step_order === stepOrder);
+  }
+
+  saveStepEvidence(evidence: QuestStepEvidenceRow): QuestStepEvidenceRow {
+    const existingIndex = this.quest_step_evidence.findIndex(
+      (e) => e.attempt_id === evidence.attempt_id && e.step_order === evidence.step_order
+    );
+    if (existingIndex >= 0) {
+      this.quest_step_evidence[existingIndex] = evidence;
+    } else {
+      this.quest_step_evidence.push(evidence);
+    }
+    return evidence;
+  }
+
   createAttempt(payload: Omit<QuestAttemptRow, 'created_at' | 'updated_at' | 'completed_at'>): QuestAttemptRow {
+    const stepsSnapshot = payload.steps_snapshot && payload.steps_snapshot.length > 0
+      ? payload.steps_snapshot
+      : [
+          {
+            step_order: 1,
+            title: 'Destination check-in',
+            description: 'Submit location proof for verification.',
+            checkpoint_type: 'location',
+            required: true,
+          } as QuestStep,
+        ];
+    const requiredCount = stepsSnapshot.filter((s) => s.required !== false).length;
+
     const newAttempt: QuestAttemptRow = {
       ...payload,
+      steps_snapshot: stepsSnapshot,
+      verified_steps: payload.verified_steps ?? 0,
+      required_steps: payload.required_steps ?? requiredCount,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       completed_at: null,
     };
     this.quest_attempts.push(newAttempt);
+
+    // Initialize per-step evidence records in memory
+    for (const step of stepsSnapshot) {
+      this.saveStepEvidence({
+        id: `step_ev_${randomUUID()}`,
+        attempt_id: newAttempt.id,
+        quest_id: newAttempt.quest_id,
+        user_id: newAttempt.user_id,
+        step_order: step.step_order,
+        checkpoint_type: step.checkpoint_type,
+        status: step.step_order === 1 ? 'ready' : 'not_started',
+        required: step.required !== false,
+        title: step.title,
+        description: step.description,
+        evidence_payload: null,
+        rejection_reason: null,
+        verified_at: null,
+        reviewed_by: null,
+        reviewed_at: null,
+        created_at: newAttempt.created_at,
+        updated_at: newAttempt.updated_at,
+      });
+    }
+
     this.persist(
       `INSERT INTO quest_attempts (id, quest_id, user_id, version, current_step, total_steps, status, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())

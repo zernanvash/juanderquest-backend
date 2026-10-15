@@ -16,7 +16,7 @@ import jwt from 'jsonwebtoken';
 const CHALLENGE_NONCE_TTL_MS = 15 * 60 * 1000;
 const usedChallengeNonces = new Map<string, number>();
 
-function claimChallengeNonce(nonce: string): boolean {
+export function claimChallengeNonce(nonce: string): boolean {
   const now = Date.now();
   for (const [key, expiresAt] of usedChallengeNonces) {
     if (expiresAt <= now) {

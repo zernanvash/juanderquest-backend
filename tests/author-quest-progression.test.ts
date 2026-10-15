@@ -238,6 +238,14 @@ describe('Phase 2: Progressive Destination-Author Quest Slice', () => {
   });
 
   describe('3. Progressive Attempt Tracking & Idempotency', () => {
+    it('rejects a quest author attempting their own published quest', async () => {
+      const res = await request(app)
+        .post(`/api/v1/quests/${questId}/attempts`)
+        .set('Authorization', `Bearer ${authorToken}`);
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('CREATOR_SELF_ATTEMPT');
+    });
+
     it('starts a new attempt for traveler on published quest (201 Created)', async () => {
       const res = await request(app)
         .post(`/api/v1/quests/${questId}/attempts`)
