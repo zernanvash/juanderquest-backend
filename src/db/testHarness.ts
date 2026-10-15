@@ -138,6 +138,9 @@ export async function createTestDb(options: { poolMax?: number } = {}): Promise<
         sql.includes('-- ECONOMY_REAL_PG_LIFECYCLE') ||
         sql.includes('-- ECONOMY_REAL_PG_REFUND')) return [];
     if (sql.includes('-- CHAIN_REAL_PG_INDEXER')) return [];
+    // pg-mem cannot ALTER TYPE ... ADD VALUE. Additive enum values guarded by
+    // IF NOT EXISTS are treated as no-ops; pg-mem stores enum columns as text.
+    if (/^\s*ALTER\s+TYPE\s+["\w.]+\s+ADD\s+VALUE\s+IF\s+NOT\s+EXISTS/i.test(sql)) return [];
     // pg-mem's ANY(ARRAY[...]::text[]) silently returns no rows for this
     // PostgreSQL-valid batched identity query. Keep the production query intact
     // and translate only its exact test-harness shape to an equivalent IN list.

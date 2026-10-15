@@ -96,6 +96,19 @@ describe('Phase 3: Durable Affiliate Application & Admin Review Foundation', () 
     expect(res.body.success).toBe(false);
   });
 
+  test('2b. Reject out-of-range business map coordinates', async () => {
+    const res = await request(app)
+      .post('/api/v1/affiliate/applications')
+      .set('Authorization', `Bearer ${applicantToken}`)
+      .send({
+        business_name: 'Invalid Pin Cafe', category: 'dining', municipality: 'Baguio City',
+        business_province: 'Benguet', gps_lat: 99, gps_lng: 120.596,
+        contact_name: 'Maria Santos', contact_email: 'maria@example.com',
+        contact_phone: '+639171234567', sponsorship_goals: ['storytelling'],
+      });
+    expect(res.status).toBe(400);
+  });
+
   test('3. Successfully submit application with status "received"', async () => {
     const res = await request(app)
       .post('/api/v1/affiliate/applications')
@@ -227,5 +240,51 @@ describe('Phase 3: Durable Affiliate Application & Admin Review Foundation', () 
     const user = db.findUserById(applicantUserId);
     expect(user).toBeDefined();
     expect(user?.role).toBe('user'); // Does not grant unvetted admin or bypass roles
+  });
+
+  test('12. Non-Pangasinan application retains its region through approval and merchant provisioning', async () => {
+    const created = await request(app)
+      .post('/api/v1/affiliate/applications')
+      .set('Authorization', `Bearer ${otherApplicantToken}`)
+      .send({
+        business_name: 'Baguio Heritage Cafe',
+        category: 'dining',
+        municipality: 'Baguio City',
+        business_province: 'Benguet',
+        gps_lat: 16.4023,
+        gps_lng: 120.596,
+        contact_name: 'Maria Santos',
+        contact_email: 'maria@example.com',
+        contact_phone: '+639171234567',
+        sponsorship_goals: ['storytelling'],
+      });
+    expect(created.status).toBe(201);
+    expect(created.body.data.business_province).toBe('Benguet');
+
+    const approved = await request(app)
+      .patch(`/api/v1/admin/affiliate/applications/${created.body.data.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'approved', reviewer_notes: 'Location reviewed.' });
+    expect(approved.status).toBe(200);
+    const merchant = db.merchants.find((item) => item.source_application_id === created.body.data.id);
+    expect(merchant?.location).toBe('Baguio City, Benguet');
+  });
+
+  test('13. Authenticated Philippine place search returns bounded locations and caches repeats', async () => {
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify([
+      { name: 'Baguio City', display_name: 'Baguio City, Benguet, Philippines', lat: '16.4023', lon: '120.596', addresstype: 'city' },
+    ]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    try {
+      const unauthorized = await request(app).get('/api/v1/affiliate/places?q=Baguio');
+      expect(unauthorized.status).toBe(401);
+      const first = await request(app).get('/api/v1/affiliate/places?q=Baguio').set('Authorization', `Bearer ${applicantToken}`);
+      expect(first.status).toBe(200);
+      expect(first.body.data[0]).toMatchObject({ name: 'Baguio City', lat: 16.4023, lng: 120.596 });
+      const repeat = await request(app).get('/api/v1/affiliate/places?q=Baguio').set('Authorization', `Bearer ${applicantToken}`);
+      expect(repeat.status).toBe(200);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 });

@@ -22,6 +22,15 @@ describe('Unified Sign-In, Email Recovery, and Guest Retirement', () => {
   let devSignupCode: string = '';
   let sessionToken: string = '';
 
+  it('rejects a forged Google ID token without creating a session', async () => {
+    const forged = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url')
+      + '.' + Buffer.from(JSON.stringify({ sub: 'victim-google-id', email: 'victim@example.com' })).toString('base64url') + '.';
+    const res = await request(app).post('/api/v1/auth/google').send({ credential: forged });
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe('GOOGLE_SIGNIN_UNAVAILABLE');
+    expect(res.headers['set-cookie']).toBeUndefined();
+  });
+
   it('1. Registers an account with email/password and onboarding policy declaration', async () => {
     const res = await request(app)
       .post('/api/v1/auth/register')

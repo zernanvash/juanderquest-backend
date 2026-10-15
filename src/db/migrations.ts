@@ -56,6 +56,7 @@ export const MIGRATIONS = [
   '040_pangasinan_expanded_commons_photos.sql',
   '041_clear_unverified_stock_images.sql',
   '042_merchant_affiliation_and_dashboard.sql',
+  '043_admin_settings.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so

@@ -100,6 +100,85 @@ router.post('/admin/quizzes', authenticateToken, requireAdmin, async (req: AuthR
   }
 });
 
+// GET /api/v1/admin/quizzes/:id - Admin quiz detail (current version + questions with correctness)
+router.get('/admin/quizzes/:id', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const detail = await service.getQuizForAdmin(req.params.id);
+    if (!detail) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'QUIZ_NOT_FOUND', message: 'Cultural quiz not found.' },
+      });
+    }
+    return res.status(200).json({ success: true, data: detail });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: err?.message || 'Failed to load quiz detail.' },
+    });
+  }
+});
+
+// PATCH /api/v1/admin/quizzes/:id - Replace an unpublished draft (published versions are immutable)
+router.patch('/admin/quizzes/:id', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const parsed = createDraftSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'Invalid quiz draft payload.', details: parsed.error.issues },
+    });
+  }
+
+  try {
+    const result = await service.updateQuizDraft(req.params.id, {
+      destinationId: parsed.data.destination_id,
+      title: parsed.data.title,
+      description: parsed.data.description,
+      language: parsed.data.language,
+      radiusMeters: parsed.data.radius_meters,
+      xpReward: parsed.data.xp_reward,
+      timeLimitMinutes: parsed.data.time_limit_minutes,
+      cooldownHours: parsed.data.cooldown_hours,
+      adminUserId: req.user!.id,
+      isTest: parsed.data.is_test,
+      questions: parsed.data.questions.map((q) => ({
+        ordinal: q.ordinal,
+        questionText: q.question_text,
+        explanation: q.explanation,
+        sourceUrl: q.source_url,
+        options: q.options.map((opt) => ({
+          ordinal: opt.ordinal,
+          optionText: opt.option_text,
+          isCorrect: opt.is_correct,
+        })),
+      })),
+    });
+
+    return res.status(200).json({ success: true, data: result });
+  } catch (err: any) {
+    const message: string = err?.message || '';
+    if (message.startsWith('QUIZ_NOT_FOUND')) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'QUIZ_NOT_FOUND', message: 'Cultural quiz not found.' },
+      });
+    }
+    if (message.startsWith('QUIZ_IMMUTABLE')) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'QUIZ_IMMUTABLE',
+          message: 'Only draft quizzes can be edited. Published versions are immutable; pause, archive or revoke instead.',
+        },
+      });
+    }
+    return res.status(400).json({
+      success: false,
+      error: { code: 'UPDATE_FAILED', message: message || 'Failed to update quiz draft.' },
+    });
+  }
+});
+
 // POST /api/v1/admin/quizzes/:id/publish - Publish quiz
 router.post('/admin/quizzes/:id/publish', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {

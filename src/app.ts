@@ -29,6 +29,8 @@ import { economyAdminRouter } from './routes/economyAdmin.js';
 import { economyReadsRouter } from './routes/economyReads.js';
 import quizzesRouter from './routes/quizzes.js';
 import adminQuizzesRouter from './routes/adminQuizzes.js';
+import adminMerchantsRouter from './routes/adminMerchants.js';
+import adminSettingsRouter from './routes/adminSettings.js';
 import { errorHandler } from './middleware/error.js';
 
 import path from 'path';
@@ -102,6 +104,8 @@ app.use('/api/v1', leaderboardRouter);
 app.use('/api/v1', economyAdminRouter);
 app.use('/api/v1', quizzesRouter);
 app.use('/api/v1', adminQuizzesRouter);
+app.use('/api/v1', adminMerchantsRouter);
+app.use('/api/v1', adminSettingsRouter);
 
 // JSON parse errors -> 400 instead of 500
 app.use((err: Error & { type?: string }, _req: express.Request, res: express.Response, next: express.NextFunction) => {

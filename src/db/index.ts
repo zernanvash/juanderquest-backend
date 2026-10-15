@@ -1977,6 +1977,7 @@ export class MemoryDb {
     if (payload.business_name) app.business_name = payload.business_name;
     if (payload.category) app.category = payload.category;
     if (payload.municipality) app.municipality = payload.municipality;
+    if (payload.business_province) app.business_province = payload.business_province;
     if (payload.contact_name) app.contact_name = payload.contact_name;
     if (payload.contact_email) app.contact_email = payload.contact_email;
     if (payload.contact_phone) app.contact_phone = payload.contact_phone;
@@ -1996,8 +1997,8 @@ export class MemoryDb {
        SET status = 'received', version = $1, business_name = $2, category = $3, municipality = $4,
            contact_name = $5, contact_email = $6, contact_phone = $7, sponsorship_goals = $8,
            proposal_details = $9, business_address = $10, gps_lat = $11, gps_lng = $12,
-           preferred_contact_method = $13, applicant_feedback = NULL, updated_at = NOW()
-       WHERE id = $14`,
+           preferred_contact_method = $13, business_province = $14, applicant_feedback = NULL, updated_at = NOW()
+       WHERE id = $15`,
       [
         app.version,
         app.business_name,
@@ -2012,6 +2013,7 @@ export class MemoryDb {
         app.gps_lat,
         app.gps_lng,
         app.preferred_contact_method ?? 'email',
+        app.business_province ?? 'Pangasinan',
         app.id,
       ]
     );
@@ -2090,7 +2092,7 @@ export class MemoryDb {
       merchant = {
         id: merchantId,
         name: app.business_name,
-        location: `${app.municipality}, Pangasinan`,
+        location: `${app.municipality}, ${app.business_province || 'Pangasinan'}`,
         description: app.proposal_details || `${app.business_name} in ${app.municipality}`,
         status: 'active',
         is_published: false,
@@ -2148,6 +2150,14 @@ export class MemoryDb {
 
   findMerchantById(id: string): MerchantRow | undefined {
     return this.merchants.find((m) => m.id === id);
+  }
+
+  listMerchants(): MerchantRow[] {
+    return [...this.merchants].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  }
+
+  listMerchantMemberships(merchantId: string): MerchantMembershipRow[] {
+    return this.merchant_memberships.filter((m) => m.merchant_id === merchantId);
   }
 
   updateMerchantProfile(merchantId: string, updates: Partial<MerchantRow>): MerchantRow | undefined {

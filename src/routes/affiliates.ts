@@ -3,14 +3,54 @@ import { z } from 'zod';
 import { db, AffiliateApplicationStatus } from '../db/index.js';
 import { authenticateToken, requireAdmin, AuthRequest } from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
+import { rateLimit } from '../middleware/rateLimit.js';
 
 export const affiliatesRouter = Router();
 
-// Options catalog for Pangasinan affiliate applications
+type PlaceResult = { name: string; subtitle: string; lat: number; lng: number; type: string };
+const placeCache = new Map<string, { expires: number; results: PlaceResult[] }>();
+let nextPlaceLookupAt = 0;
+
+// Authenticated, bounded Philippine place lookup for native affiliate map picking.
+affiliatesRouter.get('/affiliate/places', authenticateToken,
+  rateLimit({ policyId: 'affiliate:places', windowMs: 60_000, max: 10, keyStrategy: 'actor' }),
+  async (req: AuthRequest, res: Response) => {
+    const parsed = z.string().trim().min(2).max(100).safeParse(req.query.q);
+    if (!parsed.success) return res.status(400).json({ success: false, error: { code: 'INVALID_QUERY', message: 'Enter 2–100 characters.' } });
+    const key = parsed.data.toLowerCase();
+    const cached = placeCache.get(key);
+    if (cached && cached.expires > Date.now()) return res.json({ success: true, data: cached.results });
+    if (Date.now() < nextPlaceLookupAt) return res.status(429).json({ success: false, error: { code: 'SEARCH_BUSY', message: 'Please retry place search shortly.' } });
+    nextPlaceLookupAt = Date.now() + 1100;
+    try {
+      const url = new URL('https://nominatim.openstreetmap.org/search');
+      url.search = new URLSearchParams({ q: parsed.data, format: 'json', countrycodes: 'ph', limit: '4', addressdetails: '1' }).toString();
+      const upstream = await fetch(url, {
+        headers: { 'User-Agent': 'JuanDerQuest/1.0 (travel@juanderquest.app; +https://juanderquest.app)', Accept: 'application/json' },
+        signal: AbortSignal.timeout(4500),
+      });
+      if (!upstream.ok) throw new Error('Place provider unavailable');
+      const raw = await upstream.json() as Array<{ name?: string; display_name?: string; lat: string; lon: string; addresstype?: string }>;
+      const results = raw.flatMap((item): PlaceResult[] => {
+        const lat = Number(item.lat);
+        const lng = Number(item.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return [];
+        return [{ name: item.name || item.display_name?.split(',')[0]?.trim() || parsed.data,
+          subtitle: item.display_name || '', lat, lng, type: item.addresstype || 'place' }];
+      });
+      if (placeCache.size >= 200) placeCache.delete(placeCache.keys().next().value!);
+      placeCache.set(key, { expires: Date.now() + 2 * 60 * 60 * 1000, results });
+      return res.json({ success: true, data: results });
+    } catch {
+      return res.status(502).json({ success: false, error: { code: 'PLACE_SEARCH_UNAVAILABLE', message: 'Place search is temporarily unavailable. You can still place a pin manually.' } });
+    }
+  });
+
+// Starter options catalog; locality selection is not limited to this province.
 export const AFFILIATE_CATEGORIES = [
   { id: 'dining', label: 'Dining & Native Delicacies', description: 'Restaurants, grills, seafood shacks, and native food pasalubong' },
   { id: 'hospitality', label: 'Lodging & Hospitality', description: 'Resorts, transient homes, eco-lodges, beachfront stays' },
-  { id: 'souvenirs', label: 'Handicrafts & Souvenirs', description: 'Local weaving, pottery, artisanal crafts, and Pangasinan keepsakes' },
+  { id: 'souvenirs', label: 'Handicrafts & Souvenirs', description: 'Local weaving, pottery, artisanal crafts, and regional keepsakes' },
   { id: 'activities', label: 'Tours & Coastal Activities', description: 'Island boatmen, kayak rentals, surf schools, guided heritage walks' },
   { id: 'wellness', label: 'Eco-Farm & Agritourism', description: 'Salt farms, mango orchards, aquaculture ponds, farm-to-table stops' },
 ];
@@ -27,7 +67,7 @@ export const PANGASINAN_MUNICIPALITIES = [
 export const SPONSORSHIP_GOALS = [
   { id: 'quest_stop', label: 'Host a Quest Checkpoint', description: 'Feature as a GPS discovery or verification waypoint' },
   { id: 'voucher_perk', label: 'Offer In-Store Traveler Perks', description: 'Provide special discounts or welcome gifts for quest completers' },
-  { id: 'storytelling', label: 'Cultural & Heritage Storytelling', description: 'Share historical lore and traditional Pangasinan craftsmanship' },
+  { id: 'storytelling', label: 'Cultural & Heritage Storytelling', description: 'Share local history and traditional craftsmanship' },
   { id: 'event_sponsor', label: 'Community Eco-Raid Co-Host', description: 'Partner with local youth and LGU environmental cleanups' },
 ];
 
@@ -40,7 +80,7 @@ affiliatesRouter.get('/affiliate/options', (_req, res: Response) => {
       municipalities: PANGASINAN_MUNICIPALITIES,
       sponsorship_goals: SPONSORSHIP_GOALS,
       declaration_version: '1.0',
-      terms_summary: 'Participation in JuanDerQuest promotes sovereign, sustainable Pangasinan tourism. All claims are community-verified without speculative token obligations.'
+      terms_summary: 'Participation in JuanDerQuest promotes sustainable local tourism. Applications are reviewed and do not create speculative token obligations.'
     },
   });
 });
@@ -123,8 +163,8 @@ const createApplicationSchema = z.object({
     municipality: z.string().trim().min(2).max(100),
     business_address: z.string().trim().max(500).optional(),
     business_province: z.string().trim().max(100).optional().default('Pangasinan'),
-    gps_lat: z.number().optional().nullable(),
-    gps_lng: z.number().optional().nullable(),
+    gps_lat: z.number().min(-90).max(90).optional().nullable(),
+    gps_lng: z.number().min(-180).max(180).optional().nullable(),
     contact_name: z.string().trim().min(2, 'Contact name must be at least 2 characters').max(100),
     contact_email: z.string().trim().email('Invalid contact email address').max(255),
     contact_phone: z.string().trim().min(7, 'Phone number must be at least 7 characters').max(50),
@@ -192,9 +232,10 @@ const resubmitApplicationSchema = z.object({
     business_name: z.string().trim().min(2).max(200).optional(),
     category: z.string().trim().min(2).max(50).optional(),
     municipality: z.string().trim().min(2).max(100).optional(),
+    business_province: z.string().trim().min(2).max(100).optional(),
     business_address: z.string().trim().max(500).optional(),
-    gps_lat: z.number().optional().nullable(),
-    gps_lng: z.number().optional().nullable(),
+    gps_lat: z.number().min(-90).max(90).optional().nullable(),
+    gps_lng: z.number().min(-180).max(180).optional().nullable(),
     contact_name: z.string().trim().min(2).max(100).optional(),
     contact_email: z.string().trim().email().max(255).optional(),
     contact_phone: z.string().trim().min(7).max(50).optional(),

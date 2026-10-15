@@ -478,61 +478,12 @@ router.post(
   ),
   async (req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');
-    const { credential, remember_me } = req.body;
-
-    try {
-      // Decode JWT payload (standard Google ID token exchange structure)
-      const decoded: any = jwt.decode(credential);
-      if (!decoded || !decoded.sub) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_CREDENTIAL', message: 'Google credential payload is malformed.' },
-        });
-      }
-
-      const googleSub = String(decoded.sub);
-      const googleEmail = decoded.email ? db.identityService.normalizeEmail(decoded.email) : null;
-      const displayName = decoded.name || (googleEmail ? googleEmail.split('@')[0] : `Traveler ${googleSub.slice(0, 6)}`);
-
-      let identity = await db.identityService.findIdentity('google', googleSub);
-      let user: any = null;
-
-      if (identity) {
-        user = db.usersRepo.getPool() ? await db.usersRepo.findById(identity.user_id) : db.findUserById(identity.user_id);
-      } else {
-        const seedId = `goog-${googleSub.slice(0, 12)}`;
-        user = await db.findOrCreateUserDurable({
-          seed_id: seedId,
-          display_name: displayName,
-          email: googleEmail ?? `${googleSub}@google.juanderquest.local`,
-          avatar_url: decoded.picture ?? `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(googleSub)}`,
-          role: 'user',
-          demo_points: 100,
-          mjdq_balance: 100000,
-          jdq_governance_balance: 15,
-          scout_reputation: 250,
-          is_public: false,
-        });
-
-        await db.identityService.linkIdentity(user.id, 'google', googleSub);
-        if (googleEmail) {
-          await db.identityService.recordAccountEmail(user.id, googleEmail, Boolean(decoded.email_verified));
-        }
-        await db.identityService.declareOnboardingPolicy(user.id, '1.0.0');
-      }
-
-      const remember = remember_me === true;
-      const token = issueToken(user, remember);
-      setSessionCookie(res, token, remember);
-
-      return res.status(200).json({
-        success: true,
-        data: { token, user, auth_method: 'google' },
-      });
-    } catch (err) {
-      console.error('[auth] google auth error:', err);
-      return res.status(503).json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Google sign-in unavailable.' } });
-    }
+    // Never trust an unverified ID token. Google sign-in stays unavailable until
+    // signature, issuer, audience, expiry, and email verification are checked.
+    return res.status(503).json({
+      success: false,
+      error: { code: 'GOOGLE_SIGNIN_UNAVAILABLE', message: 'Google sign-in is not available yet. Use email or wallet sign-in.' },
+    });
   }
 );
 

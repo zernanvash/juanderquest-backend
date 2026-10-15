@@ -622,8 +622,144 @@ export class CulturalQuizService {
     }
   }
 
-  async publishQuiz(quizId: string): Promise<CulturalQuiz> {
+  async getQuizForAdmin(quizId: string): Promise<{
+    quiz: CulturalQuiz;
+    version: CulturalQuizVersion;
+    destination: { id: string; name: string; municipality: string; gps_lat: number; gps_lng: number };
+    questions: CulturalQuizQuestion[];
+  } | null> {
+    const quiz = await this.repo.findQuizById(quizId);
+    if (!quiz) return null;
+
+    const version = await this.repo.findVersion(quiz.id, quiz.current_version);
+    if (!version) return null;
+
+    const questions = await this.repo.findQuestionsWithOptions(version.id);
+
     const pool = this.getPool();
+    const { rows } = await pool.query(
+      `SELECT id, name, municipality, gps_lat, gps_lng FROM spots WHERE id = $1`,
+      [quiz.destination_id]
+    );
+    if (!rows.length) return null;
+
+    return {
+      quiz,
+      version,
+      questions,
+      destination: {
+        id: rows[0].id,
+        name: rows[0].name,
+        municipality: rows[0].municipality,
+        gps_lat: Number(rows[0].gps_lat),
+        gps_lng: Number(rows[0].gps_lng),
+      },
+    };
+  }
+
+  async updateQuizDraft(quizId: string, params: CreateQuizDraftParams): Promise<{
+    quiz: CulturalQuiz;
+    version: CulturalQuizVersion;
+    destination: { id: string; name: string; municipality: string; gps_lat: number; gps_lng: number };
+    questions: CulturalQuizQuestion[];
+  }> {
+    if (params.questions.length !== 5) {
+      throw new Error('A cultural quiz draft must have exactly 5 questions.');
+    }
+    for (const q of params.questions) {
+      if (q.options.length !== 4) {
+        throw new Error(`Question ${q.ordinal} must have exactly 4 options.`);
+      }
+      const correctCount = q.options.filter((opt) => opt.isCorrect).length;
+      if (correctCount !== 1) {
+        throw new Error(`Question ${q.ordinal} must have exactly 1 correct answer.`);
+      }
+    }
+
+    const pool = this.getPool();
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const { rows: quizRows } = await client.query(
+        'SELECT * FROM cultural_quizzes WHERE id = $1 FOR UPDATE',
+        [quizId]
+      );
+      if (!quizRows.length) {
+        throw new Error('QUIZ_NOT_FOUND: Cultural quiz does not exist.');
+      }
+      const quiz = quizRows[0];
+      if (quiz.status !== 'draft') {
+        throw new Error('QUIZ_IMMUTABLE: Published quiz versions are immutable. Pause or archive this quiz, or create a new draft.');
+      }
+
+      const version = await this.repo.findVersion(quiz.id, Number(quiz.current_version), client);
+      if (!version) {
+        throw new Error('QUIZ_VERSION_NOT_FOUND: Current version is missing.');
+      }
+      if (version.published_at) {
+        throw new Error('QUIZ_IMMUTABLE: A published version can never be edited in place.');
+      }
+
+      await client.query(
+        `UPDATE cultural_quizzes SET destination_id = $1, is_test = $2, updated_at = NOW() WHERE id = $3`,
+        [params.destinationId, params.isTest === undefined ? Boolean(quiz.is_test) : Boolean(params.isTest), quiz.id]
+      );
+
+      await client.query(
+        `UPDATE cultural_quiz_versions
+         SET title = $1, description = $2, language = $3, radius_meters = $4,
+             xp_reward = $5, time_limit_minutes = $6, cooldown_hours = $7, created_by = $8
+         WHERE id = $9`,
+        [
+          params.title,
+          params.description,
+          params.language || version.language,
+          params.radiusMeters || version.radius_meters,
+          params.xpReward || version.xp_reward,
+          params.timeLimitMinutes || version.time_limit_minutes,
+          params.cooldownHours || version.cooldown_hours,
+          params.adminUserId,
+          version.id,
+        ]
+      );
+
+      // Draft-only replacement: no attempts can exist for an unpublished quiz.
+      await client.query('DELETE FROM cultural_quiz_questions WHERE version_id = $1', [version.id]);
+
+      for (const q of params.questions) {
+        const qId = randomUUID();
+        await client.query(
+          `INSERT INTO cultural_quiz_questions (id, version_id, ordinal, question_text, explanation, source_url)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [qId, version.id, q.ordinal, q.questionText, q.explanation, q.sourceUrl || null]
+        );
+
+        for (const opt of q.options) {
+          const optId = randomUUID();
+          await client.query(
+            `INSERT INTO cultural_quiz_options (id, question_id, ordinal, option_text, is_correct)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [optId, qId, opt.ordinal, opt.optionText, opt.isCorrect]
+          );
+        }
+      }
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    const detail = await this.getQuizForAdmin(quizId);
+    if (!detail) throw new Error('QUIZ_NOT_FOUND: Cultural quiz does not exist.');
+    return detail;
+  }
+
+  async publishQuiz(quizId: string): Promise<CulturalQuiz> {    const pool = this.getPool();
     const client = await pool.connect();
 
     try {
