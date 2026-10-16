@@ -183,7 +183,7 @@ affiliatesRouter.post(
   async (req: AuthRequest, res: Response) => {
     const userId = req.user!.id;
     try {
-      const application = db.createAffiliateApplication({
+      const application = await db.createAffiliateApplication({
         user_id: userId,
         business_name: req.body.business_name,
         category: req.body.category,
@@ -212,6 +212,15 @@ affiliatesRouter.post(
           error: {
             code: 'ACTIVE_APPLICATION_EXISTS',
             message: 'You already have an active application under review.',
+          },
+        });
+      }
+      if (err.code === 'STORAGE_UNAVAILABLE') {
+        return res.status(503).json({
+          success: false,
+          error: {
+            code: 'STORAGE_UNAVAILABLE',
+            message: 'The application could not be saved durably. Nothing was submitted — please retry.',
           },
         });
       }
@@ -254,7 +263,7 @@ affiliatesRouter.post(
     const { id } = req.params;
     const userId = req.user!.id;
     try {
-      const updated = db.resubmitAffiliateApplication(id, userId, req.body);
+      const updated = await db.resubmitAffiliateApplication(id, userId, req.body);
       return res.status(200).json({
         success: true,
         data: updated,
@@ -268,6 +277,15 @@ affiliatesRouter.post(
       }
       if (err.code === 'INVALID_STATE_TRANSITION') {
         return res.status(400).json({ success: false, error: { code: 'INVALID_STATE_TRANSITION', message: err.message } });
+      }
+      if (err.code === 'STORAGE_UNAVAILABLE') {
+        return res.status(503).json({
+          success: false,
+          error: {
+            code: 'STORAGE_UNAVAILABLE',
+            message: 'The resubmission could not be saved durably. Nothing changed — please retry.',
+          },
+        });
       }
       return res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
     }
@@ -384,7 +402,7 @@ affiliatesRouter.patch(
     }
 
     try {
-      const updated = db.updateAffiliateApplicationStatus(id, {
+      const updated = await db.updateAffiliateApplicationStatus(id, {
         status,
         reviewer_id: adminId,
         reviewer_notes,
@@ -403,6 +421,15 @@ affiliatesRouter.patch(
           error: {
             code: 'VERSION_CONFLICT',
             message: 'Application has been modified by another reviewer or applicant.',
+          },
+        });
+      }
+      if (err.code === 'STORAGE_UNAVAILABLE') {
+        return res.status(503).json({
+          success: false,
+          error: {
+            code: 'STORAGE_UNAVAILABLE',
+            message: 'The review decision could not be saved durably. Nothing changed — please retry.',
           },
         });
       }

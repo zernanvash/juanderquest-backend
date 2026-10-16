@@ -32,6 +32,9 @@ import adminQuizzesRouter from './routes/adminQuizzes.js';
 import adminMerchantsRouter from './routes/adminMerchants.js';
 import adminSettingsRouter from './routes/adminSettings.js';
 import { errorHandler } from './middleware/error.js';
+import { readinessGate } from './middleware/readiness.js';
+import { appVersionGate } from './middleware/appVersionGate.js';
+import { publicReadCache } from './middleware/publicReadCache.js';
 
 import path from 'path';
 import { requestTracingMiddleware } from './middleware/observability.js';
@@ -75,6 +78,14 @@ const downloadsDir = path.resolve(process.cwd(), 'downloads');
 app.use('/downloads', express.static(downloadsDir));
 
 // Routes
+// Boot/readiness gate: while hydrating or draining, every API route except
+// health returns a JSON 503 MAINTENANCE with Retry-After.
+app.use('/api/v1', readinessGate);
+// Android build gate: reads always pass; mutations below the manifest's
+// supported build return 426 UPGRADE_REQUIRED.
+app.use('/api/v1', appVersionGate);
+// Anonymous public reads get ETag + public cache headers (C6).
+app.use('/api/v1', publicReadCache);
 app.use('/api/v1', healthRouter);
 app.use('/api/v1', authRouter);
 app.use('/api/v1', questsRouter);
