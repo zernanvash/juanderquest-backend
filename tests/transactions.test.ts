@@ -56,6 +56,11 @@ describe('Phase 3: Atomic Submission, Review and Redemption Lifecycle', () => {
   });
 
   describe('Submissions Idempotency and Conflict Detection', () => {
+    beforeEach(async () => {
+      await testDb.pool.query('DELETE FROM submissions WHERE user_id = $1 AND quest_id = $2', ['usr_alice_tx', 'q_active_tx']);
+      db.submissions = db.submissions.filter((submission) => !(submission.user_id === 'usr_alice_tx' && submission.quest_id === 'q_active_tx'));
+    });
+
     it('creates submission, and safely replays when receiving the same idempotency key with identical payload', async () => {
       const key = randomUUID();
       const payload = {
@@ -109,6 +114,11 @@ describe('Phase 3: Atomic Submission, Review and Redemption Lifecycle', () => {
   });
 
   describe('Atomic Review Transitions and Anti-Double-Award Invariants', () => {
+    beforeEach(async () => {
+      await testDb.pool.query('DELETE FROM submissions WHERE user_id = $1 AND quest_id = $2', ['usr_alice_tx', 'q_active_tx']);
+      db.submissions = db.submissions.filter((submission) => !(submission.user_id === 'usr_alice_tx' && submission.quest_id === 'q_active_tx'));
+    });
+
     it('concurrent approves award points only once, and second review call replays with awarded_points = 0', async () => {
       // Create a fresh pending submission
       const subRes = await submissionsService.createSubmission({

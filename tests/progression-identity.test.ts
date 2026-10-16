@@ -19,9 +19,9 @@ describe('Phase 1: Progression & Identity Foundation', () => {
   const testUserId = '99999999-9999-9999-9999-999999999999';
   const adminId = '22222222-2222-2222-2222-222222222222';
 
-  const tokenTraveler = jwt.sign({ id: travelerId, role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
-  const tokenPrivateUser = jwt.sign({ id: privateUserId, role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
-  const tokenAdmin = jwt.sign({ id: adminId, role: 'admin' }, env.JWT_SECRET, { expiresIn: '1h' });
+  const tokenTraveler = jwt.sign({ id: travelerId, seed_id: 'progression-identity-traveler', role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
+  const tokenPrivateUser = jwt.sign({ id: privateUserId, seed_id: 'progression-identity-private', role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
+  const tokenAdmin = jwt.sign({ id: adminId, seed_id: 'progression-identity-admin', role: 'admin' }, env.JWT_SECRET, { expiresIn: '1h' });
 
   const mappedQuestId = 'q1111111-1111-1111-1111-111111111111';
   const unmappedQuestId = 'q2222222-2222-2222-2222-222222222222';

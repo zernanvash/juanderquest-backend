@@ -1,5 +1,4 @@
 import { Router, Response } from 'express';
-import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { db } from '../db/index.js';
 import { env } from '../config/env.js';
@@ -9,6 +8,7 @@ import { rateLimit } from '../middleware/rateLimit.js';
 import { randomUUID } from 'crypto';
 import { getAddress, verifyMessage } from 'ethers';
 import { clearSessionCookie, setSessionCookie } from '../auth/sessionCookie.js';
+import { signSessionToken } from '../auth/tokens.js';
 
 const router = Router();
 
@@ -25,11 +25,7 @@ const walletAddressSchema = z.string().transform((value, ctx) => {
 });
 const localWalletIdentifierSchema = z.coerce.string().trim().min(1, 'A local wallet identifier is required').max(100);
 
-const issueToken = (user: (typeof db.users)[number], rememberMe = false) => jwt.sign(
-  { id: user.id, seed_id: user.seed_id, role: user.role },
-  env.JWT_SECRET,
-  { expiresIn: rememberMe ? '7d' : '24h' }
-);
+const issueToken = (user: (typeof db.users)[number], rememberMe = false) => signSessionToken(user, rememberMe);
 
 const findOrCreateWalletUser = async (address: string): Promise<(typeof db.users)[number]> => {
   const normalized = address.toLowerCase();
@@ -858,15 +854,7 @@ router.post('/auth/demo-login', rateLimit({ policyId: 'auth:demo-login', windowM
     });
   }
 
-  const token = jwt.sign(
-    {
-      id: user.id,
-      seed_id: user.seed_id,
-      role: user.role,
-    },
-    env.JWT_SECRET,
-    { expiresIn: '24h' }
-  );
+  const token = signSessionToken(user);
   setSessionCookie(res, token, false);
 
   return res.status(200).json({
@@ -885,19 +873,26 @@ const simulatedWalletLoginSchema = z.object({
   }),
 });
 
-router.post('/auth/simulated-wallet-login', validateRequest(simulatedWalletLoginSchema), async (req, res) => {
-  if (env.NODE_ENV === 'production' || (env.NODE_ENV !== 'test' && !env.ALLOW_INSECURE_LOCAL_WALLET_AUTH)) return res.status(403).json({ success: false, error: { code: 'SIMULATED_LOGIN_DISABLED', message: 'Simulated wallet login is disabled for this environment.' } });
+const reservedSimulatedSeeds = new Set(['user-1', 'user-2', 'user-3', 'admin-1']);
+
+router.post('/auth/simulated-wallet-login', rateLimit({ policyId: 'auth:simulated-wallet-login', windowMs: 60_000, max: 20 }), validateRequest(simulatedWalletLoginSchema), async (req, res) => {
+  if (env.NODE_ENV === 'production' || (env.NODE_ENV !== 'test' && !env.ALLOW_INSECURE_LOCAL_WALLET_AUTH)) return res.status(403).json({ success: false, error: { code: 'SIMULATED_LOGIN_DISABLED', message: 'Simulated login is unavailable on this server. Connect a wallet instead.' } });
   const { username } = req.body;
   const cleanUsername = username.trim();
   const seedId = `user-${cleanUsername.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
 
-  let user = await db.findUserBySeedDurable(seedId);
-  if (!user) {
-    user = db.users.find(
-      (u) =>
-        u.display_name.toLowerCase() === cleanUsername.toLowerCase() ||
-        u.seed_id.toLowerCase() === cleanUsername.toLowerCase()
-    );
+  if (reservedSimulatedSeeds.has(cleanUsername.toLowerCase()) || reservedSimulatedSeeds.has(seedId)) {
+    return res.status(403).json({ success: false, error: { code: 'SIMULATED_LOGIN_RESERVED', message: 'Simulated login is unavailable on this server. Connect a wallet instead.' } });
+  }
+
+  // Passwordless by design: anyone who knows a simulated username can enter
+  // that simulated account. Never expose this route on a public host.
+  let user = db.usersRepo.getPool()
+    ? await db.findUserBySeedDurable(seedId)
+    : db.findUserBySeed(seedId);
+
+  if (user && (user.role !== 'user' || Boolean(user.is_test))) {
+    return res.status(403).json({ success: false, error: { code: 'SIMULATED_LOGIN_RESERVED', message: 'Simulated login is unavailable on this server. Connect a wallet instead.' } });
   }
 
   if (!user) {
@@ -937,15 +932,7 @@ router.post('/auth/simulated-wallet-login', validateRequest(simulatedWalletLogin
     }
   }
 
-  const token = jwt.sign(
-    {
-      id: user.id,
-      seed_id: user.seed_id,
-      role: user.role,
-    },
-    env.JWT_SECRET,
-    { expiresIn: '24h' }
-  );
+  const token = signSessionToken(user);
   setSessionCookie(res, token, false);
 
   const simulatedAddress = `0x${Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join('')}`;

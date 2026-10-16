@@ -1,9 +1,30 @@
 import request from 'supertest';
 import { app, parseCorsOrigin } from '../src/app';
+import { db } from '../src/db/index.js';
+import { getPool } from '../src/db/pool.js';
+import { env } from '../src/config/env.js';
+
+const clearApiSubmissionFixture = async () => {
+  const userId = db.users.find((user) => user.seed_id === 'user-1')?.id;
+  if (!userId) throw new Error('API test fixture user-1 is missing');
+  const pool = getPool();
+  let isolatedTestDatabase = false;
+  try {
+    const databaseUrl = new URL(env.DATABASE_URL);
+    isolatedTestDatabase = env.NODE_ENV === 'test' && ['localhost', '127.0.0.1', '::1'].includes(databaseUrl.hostname) && /(?:^|_)test$/i.test(databaseUrl.pathname.slice(1));
+  } catch {
+    isolatedTestDatabase = false;
+  }
+  if (pool && isolatedTestDatabase) {
+    await pool.query('DELETE FROM submissions WHERE user_id = $1 AND quest_id = $2', [userId, 'q1111111-1111-1111-1111-111111111111']);
+  }
+  db.submissions = db.submissions.filter((submission) => !(submission.user_id === userId && submission.quest_id === 'q1111111-1111-1111-1111-111111111111'));
+};
 
 describe('JuanderQuest Backend REST API & QA Rules', () => {
   let userToken: string;
   let adminToken: string;
+  let apiSubmissionId: string;
   const testIdempotencyKey = 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d';
 
   it('supports comma-separated CORS origins for local web development', () => {
@@ -95,6 +116,7 @@ it('filters spots by category and optional quest availability', async () => {
   });
 
   it('Reject submission with HTTP 422 if GPS distance exceeds radius', async () => {
+    await clearApiSubmissionFixture();
     const res = await request(app)
       .post('/api/v1/submissions')
       .set('Authorization', `Bearer ${userToken}`)
@@ -112,6 +134,7 @@ it('filters spots by category and optional quest availability', async () => {
   });
 
   it('POST /api/v1/submissions succeeds within valid GPS radius', async () => {
+    await clearApiSubmissionFixture();
     const res = await request(app)
       .post('/api/v1/submissions')
       .set('Authorization', `Bearer ${userToken}`)
@@ -126,6 +149,7 @@ it('filters spots by category and optional quest availability', async () => {
 
     expect(res.status).toBe(201);
     expect(res.body.data.status).toBe('pending');
+    apiSubmissionId = res.body.data.id;
   });
 
   it('GET /api/v1/admin/submissions lists pending submission', async () => {
@@ -138,13 +162,8 @@ it('filters spots by category and optional quest availability', async () => {
   });
 
   it('PATCH /api/v1/admin/submissions/:id approves submission and awards points', async () => {
-    const listRes = await request(app)
-      .get('/api/v1/admin/submissions?status=pending')
-      .set('Authorization', `Bearer ${adminToken}`);
-    const subId = listRes.body.data[0].id;
-
     const approveRes = await request(app)
-      .patch(`/api/v1/admin/submissions/${subId}`)
+      .patch(`/api/v1/admin/submissions/${apiSubmissionId}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ action: 'approve' });
 
@@ -158,13 +177,8 @@ it('filters spots by category and optional quest availability', async () => {
   });
 
   it('Re-approving an already approved submission does NOT inflate points', async () => {
-    const listRes = await request(app)
-      .get('/api/v1/admin/submissions?status=approved')
-      .set('Authorization', `Bearer ${adminToken}`);
-    const subId = listRes.body.data[0].id;
-
     const reApproveRes = await request(app)
-      .patch(`/api/v1/admin/submissions/${subId}`)
+      .patch(`/api/v1/admin/submissions/${apiSubmissionId}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ action: 'approve' });
 

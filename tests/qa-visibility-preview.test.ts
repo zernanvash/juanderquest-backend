@@ -15,19 +15,19 @@ describe('Phase 0 & 1: QA Visibility & Evaluator Preview Mode', () => {
   const adminUserId = '33333333-3333-3333-3333-333333333333';
 
   const tokenAdmin = jwt.sign(
-    { id: adminUserId, role: 'admin' },
+    { id: adminUserId, seed_id: 'qa-visibility-admin', role: 'admin' },
     env.JWT_SECRET,
     { expiresIn: '1h' }
   );
 
   const tokenQA = jwt.sign(
-    { id: qaUserId, role: 'qa' },
+    { id: qaUserId, seed_id: 'qa-visibility-qa', role: 'qa' },
     env.JWT_SECRET,
     { expiresIn: '1h' }
   );
 
   const tokenUser = jwt.sign(
-    { id: genuineUserId, role: 'user' },
+    { id: genuineUserId, seed_id: 'qa-visibility-user', role: 'user' },
     env.JWT_SECRET,
     { expiresIn: '1h' }
   );

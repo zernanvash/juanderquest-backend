@@ -21,6 +21,9 @@ if (requestedProfile) {
   dotenv.config();
 }
 
+export const insecureLocalWalletAuthForbidden = (profile: string | undefined, nodeEnv: string, enabled: boolean) =>
+  enabled && (nodeEnv === 'production' || profile === 'prod');
+
 const isLocalRuntime = process.env.NODE_ENV !== 'production';
 
 const rawEnv = cleanEnv(process.env, {
@@ -123,6 +126,10 @@ if (env.NODE_ENV === 'production' && env.ALLOW_IN_MEMORY_FALLBACK) {
 
 if (env.NODE_ENV === 'production' && env.ALLOW_LEGACY_MARKER_PROOF) {
   throw new Error('ALLOW_LEGACY_MARKER_PROOF cannot be enabled in production');
+}
+
+if (insecureLocalWalletAuthForbidden(requestedProfile, env.NODE_ENV, env.ALLOW_INSECURE_LOCAL_WALLET_AUTH)) {
+  throw new Error('ALLOW_INSECURE_LOCAL_WALLET_AUTH cannot be enabled in production or the prod profile');
 }
 
 if (env.NODE_ENV === 'production' && env.SEED_DEVELOPMENT_DATA) {

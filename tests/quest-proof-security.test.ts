@@ -189,6 +189,12 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
   });
 
   describe('3. Submission Verification & Fraud Prevention', () => {
+    beforeEach(() => {
+      // Each proof-policy case starts a fresh review cycle; a pending proof
+      // intentionally blocks a second independent submission for that pair.
+      db.submissions = db.submissions.filter((submission) => submission.quest_id !== testQuestId);
+    });
+
     it('accepts valid challenge token within GPS radius and creates pending submission', async () => {
       // Obtain challenge token
       const challengeRes = await request(app)
@@ -317,7 +323,7 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
       expect(res.body.error.code).toBe('CHALLENGE_QUEST_MISMATCH');
     });
 
-    it('rejects replay of already consumed challenge token with 409 CHALLENGE_ALREADY_USED', async () => {
+    it('reports a consumed challenge after the first proof is rejected', async () => {
       // Issue challenge
       const challengeRes = await request(app)
         .post(`/api/v1/quests/${testQuestId}/challenge`)
@@ -337,6 +343,7 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
           captured_accuracy: 5,
         });
       expect(firstRes.status).toBe(201);
+      db.reviewSubmission(firstRes.body.data.id, 'reject', 'independent-reviewer', 'Proof rejected for test replay.');
 
       // Replay attempt with different idempotency key fails
       const replayRes = await request(app)
@@ -376,6 +383,19 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
       expect(res.status).toBe(422);
       expect(res.body.success).toBe(false);
       expect(res.body.error.code).toBe('OUT_OF_RANGE');
+
+      const retry = await request(app)
+        .post('/api/v1/submissions')
+        .set('Authorization', `Bearer ${travelerToken}`)
+        .send({
+          idempotency_key: randomUUID(),
+          quest_id: testQuestId,
+          challenge_token: challengeToken,
+          captured_lat: questLat,
+          captured_lng: questLng,
+          captured_accuracy: 5,
+        });
+      expect(retry.status).toBe(201);
     });
 
     it('rejects deprecated marker-code proof when the legacy path is disabled', async () => {
@@ -470,7 +490,7 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
       expect(conflict.body.error.code).toBe('IDEMPOTENCY_CONFLICT');
     });
 
-    it('consumes a challenge token exactly once under concurrent submissions', async () => {
+    it('admits only one concurrent submission for a quest and traveler', async () => {
       const challengeRes = await request(app)
         .post(`/api/v1/quests/${testQuestId}/challenge`)
         .set('Authorization', `Bearer ${otherTravelerToken}`);
@@ -493,7 +513,7 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
       const statuses = results.map((r) => r.status).sort();
       expect(statuses).toEqual([201, 409]);
       const rejected = results.find((r) => r.status === 409);
-      expect(rejected?.body.error.code).toBe('CHALLENGE_ALREADY_USED');
+      expect(rejected?.body.error.code).toBe('SUBMISSION_PENDING');
     });
   });
 

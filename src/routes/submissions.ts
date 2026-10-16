@@ -33,18 +33,19 @@ router.post(
   async (req: AuthRequest, res: Response) => {
     const userId = req.user!.id;
     const { idempotency_key, quest_id, scanned_marker_code, challenge_token, captured_lat, captured_lng, captured_accuracy } = req.body;
+    const submissionInput = {
+      idempotency_key,
+      user_id: userId,
+      quest_id,
+      scanned_marker_code,
+      challenge_token,
+      captured_lat,
+      captured_lng,
+      captured_accuracy,
+    };
 
     try {
-      const result = await submissionsService.createSubmission({
-        idempotency_key,
-        user_id: userId,
-        quest_id,
-        scanned_marker_code,
-        challenge_token,
-        captured_lat,
-        captured_lng,
-        captured_accuracy,
-      });
+      const result = await submissionsService.createSubmission(submissionInput);
 
       if (!result.success) {
         return res.status(result.statusCode || 400).json({
@@ -57,8 +58,27 @@ router.post(
         success: true,
         data: result.data,
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error('[submissions] creation failed:', err);
+      if (err?.code === '23505' && err?.constraint === 'idx_submissions_unique_pending') {
+        return res.status(409).json({ success: false,
+          error: { code: 'SUBMISSION_PENDING', message: 'A proof for this quest is already awaiting review.' } });
+      }
+      if (err?.code === '23505' && err?.constraint === 'idx_submissions_challenge_nonce') {
+        return res.status(409).json({ success: false,
+          error: { code: 'CHALLENGE_ALREADY_USED', message: 'This challenge token has already been consumed.' } });
+      }
+      if (err?.code === '23505' && err?.constraint === 'submissions_idempotency_key_key') {
+        try {
+          const replay = await submissionsService.createSubmission(submissionInput);
+          if (replay.success) return res.status(replay.statusCode || 200).json({ success: true, data: replay.data });
+          if (replay.error?.code === 'IDEMPOTENCY_CONFLICT') {
+            return res.status(replay.statusCode || 409).json({ success: false, error: replay.error });
+          }
+        } catch (replayError) {
+          console.error('[submissions] idempotency replay lookup failed:', replayError);
+        }
+      }
       return res.status(503).json({
         success: false,
         error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable submission storage is unavailable. Please try again later.' },

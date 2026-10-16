@@ -151,7 +151,7 @@ describe('JuanChoice presentation HTTP contracts (Cookies, Exact-Origin CSRF, Wr
     let sessionToken: string;
 
     beforeAll(() => {
-      sessionToken = jwt.sign({ id: testUserId, role: 'user' }, env.JWT_SECRET);
+      sessionToken = jwt.sign({ id: testUserId, seed_id: testUserId, role: 'user' }, env.JWT_SECRET);
     });
 
     it('accepts ballot mutation when request has exact public Origin header', async () => {
@@ -226,7 +226,7 @@ describe('JuanChoice presentation HTTP contracts (Cookies, Exact-Origin CSRF, Wr
       env.CORS_ORIGIN = 'https://presentation.juanderquest.app';
       env.JUANCHOICE_WRITES_ENABLED = false; // Writes turned off!
 
-      const sessionToken = jwt.sign({ id: testUserId, role: 'user' }, env.JWT_SECRET);
+      const sessionToken = jwt.sign({ id: testUserId, seed_id: testUserId, role: 'user' }, env.JWT_SECRET);
 
       // 1. Ballot mutation fails with 503 WRITES_DISABLED
       const voteRes = await request(app)

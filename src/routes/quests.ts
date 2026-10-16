@@ -1,24 +1,53 @@
 import { Router, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
-import { randomUUID, createHash } from 'crypto';
+import { randomUUID, createHash, timingSafeEqual } from 'crypto';
 import multer from 'multer';
+import { z } from 'zod';
 import path from 'path';
 import fs from 'fs';
-import { db, QuestAttemptRow, QuestStepEvidenceRow, QuestStep, calculateHaversineDistance } from '../db/index.js';
+import { db, QuestAttemptRow, QuestStepEvidenceRow, QuestStep, withinRadius } from '../db/index.js';
 import { getPool } from '../db/pool.js';
 import { EconomyError, EconomyService } from '../economy/service.js';
 import { isLocalEconomyProfile } from '../economy/profile.js';
 import { env } from '../config/env.js';
+import { signQuestChallenge, verifyQuestChallengeToken } from '../auth/tokens.js';
 import { spotStore } from '../spots/store.js';
 import { optionalAuthenticateToken, authenticateToken, checkQAAuthorization, isAuthorizedQA, AuthRequest } from '../middleware/auth.js';
-import { claimChallengeNonce } from '../services/submissions.js';
+import { claimChallengeNonce, releaseChallengeNonce } from '../services/submissions.js';
 import { detectValidatedMediaMime } from '../utils/media-mime.js';
+import { validateRequest } from '../middleware/validate.js';
+import { optionalAccuracy, optionalLat, optionalLng } from '../middleware/coerce.js';
+import { sanitizeAttemptSnapshot, sanitizeQuestForViewer, sanitizeQuestSteps } from '../quests/sanitize.js';
 
 const router = Router();
+
+function secureCodeEquals(expected: unknown, supplied: unknown): boolean {
+  if (typeof expected !== 'string' || typeof supplied !== 'string') return false;
+  const expectedBytes = Buffer.from(expected, 'utf8');
+  const suppliedBytes = Buffer.from(supplied, 'utf8');
+  return expectedBytes.length === suppliedBytes.length && timingSafeEqual(expectedBytes, suppliedBytes);
+}
 
 const evidenceUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024 + 1024 }, // 8 MB limit for photo evidence
+});
+
+const stepEvidenceSchema = z.object({
+  params: z.object({ id: z.string().min(1), stepOrder: z.string().regex(/^[1-9]\d{0,2}$/) }),
+  body: z.object({
+    idempotency_key: z.string().min(8).max(100).optional(),
+    captured_lat: optionalLat,
+    captured_lng: optionalLng,
+    captured_accuracy: optionalAccuracy,
+    qr_code: z.string().trim().min(1).max(200).optional(),
+    scanned_marker_code: z.string().trim().min(1).max(200).optional(),
+    challenge_token: z.string().min(1).max(4096).optional(),
+    action_name: z.string().max(50).optional(),
+    photo_base64: z.string().max(14_000_000).optional(),
+    photo_url: z.string().url().max(2048).optional(),
+    photo_sha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+    gallery_opt_in: z.union([z.boolean(), z.enum(['true', 'false'])]).optional(),
+  }).passthrough(),
 });
 
 const PRIVATE_EVIDENCE_DIR = path.resolve(process.cwd(), 'uploads/private-evidence');
@@ -38,7 +67,7 @@ function mapAttempt(row: any): QuestAttemptRow {
     current_step: Number(row.current_step),
     total_steps: Number(row.total_steps),
     status: row.status,
-    steps_snapshot: Array.isArray(row.steps_snapshot) ? row.steps_snapshot : undefined,
+    steps_snapshot: sanitizeQuestSteps(Array.isArray(row.steps_snapshot) ? row.steps_snapshot : undefined),
     verified_steps: row.verified_steps !== undefined && row.verified_steps !== null ? Number(row.verified_steps) : 0,
     required_steps: row.required_steps !== undefined && row.required_steps !== null ? Number(row.required_steps) : 1,
     review_notes: row.review_notes ?? null,
@@ -83,7 +112,7 @@ router.get('/quests', optionalAuthenticateToken, checkQAAuthorization, (req: Aut
   // Filter out archived or draft quests for general public
   const quests = db.listQuests(category, allowTest)
     .filter(q => q.status !== 'archived' && (q.status !== 'draft' || isAuthorizedQA(req)))
-    .map(({ marker_code, ...quest }) => quest);
+    .map((quest) => sanitizeQuestForViewer(quest, false));
 
   return res.status(200).json({
     success: true,
@@ -132,7 +161,7 @@ router.get('/quests/:id', optionalAuthenticateToken, checkQAAuthorization, (req:
 
   // Phase 1 Security Repair: Do not leak marker_code to unauthorized/public viewers.
   const canInspectMarker = allowTest || isAuthor || isAdminOrQA;
-  let responseData: any = canInspectMarker ? { ...quest } : (({ marker_code, ...rest }) => rest)(quest);
+  let responseData: any = sanitizeQuestForViewer(quest, canInspectMarker);
 
   // Author & Admin operational metrics (attempt statistics without leaking private traveler GPS/identities)
   if (isAuthor || isAdminOrQA) {
@@ -380,7 +409,7 @@ router.post('/quests/:id/attempts', authenticateToken, async (req: AuthRequest, 
   if (existing) {
     return res.status(200).json({
       success: true,
-      data: rewardReservation ? { ...existing, reward_reservation: rewardReservation } : existing,
+      data: rewardReservation ? { ...sanitizeAttemptSnapshot(existing), reward_reservation: rewardReservation } : sanitizeAttemptSnapshot(existing),
       message: 'Resumed existing quest attempt.',
     });
   }
@@ -400,7 +429,7 @@ router.post('/quests/:id/attempts', authenticateToken, async (req: AuthRequest, 
 
   return res.status(201).json({
     success: true,
-    data: rewardReservation ? { ...newAttempt, reward_reservation: rewardReservation } : newAttempt,
+    data: rewardReservation ? { ...sanitizeAttemptSnapshot(newAttempt), reward_reservation: rewardReservation } : sanitizeAttemptSnapshot(newAttempt),
     message: 'Quest attempt started.',
   });
 });
@@ -441,7 +470,7 @@ router.get('/quests/:id/progress', authenticateToken, async (req: AuthRequest, r
       return res.status(200).json({ success: true, data: {
         quest_id: id,
         has_completed: Boolean(completed.rowCount),
-        active_attempt: activeAttempt,
+        active_attempt: activeAttempt ? sanitizeAttemptSnapshot(activeAttempt) : null,
       } });
     } catch (error) { return next(error); }
   }
@@ -458,7 +487,7 @@ router.get('/quests/:id/progress', authenticateToken, async (req: AuthRequest, r
     data: {
       quest_id: id,
       has_completed: hasCompleted,
-      active_attempt: activeAttempt,
+      active_attempt: activeAttempt ? sanitizeAttemptSnapshot(activeAttempt) : null,
     },
   });
 });
@@ -484,15 +513,15 @@ router.post(
       next();
     });
   },
+  validateRequest(stepEvidenceSchema),
   async (req: AuthRequest, res: Response, next: NextFunction) => {
-    const { id } = req.params;
-    const stepOrder = parseInt(req.params.stepOrder, 10);
-    if (isNaN(stepOrder) || stepOrder < 1) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_STEP_ORDER', message: 'Step order must be a positive integer.' },
-      });
-    }
+    const validated = res.locals.validatedRequest as {
+      params: { id: string; stepOrder: string };
+      body: Record<string, any>;
+    };
+    const body = validated.body;
+    const { id } = validated.params;
+    const stepOrder = Number(validated.params.stepOrder);
 
     const quest = db.findQuestById(id, true);
     if (!quest) {
@@ -553,12 +582,12 @@ router.post(
     }
 
     // 2. Check current step status & idempotency
-    const idempotencyKey = req.body.idempotency_key;
+    const idempotencyKey = body.idempotency_key;
     if (stepEvidence.status === 'verified') {
       if (idempotencyKey && stepEvidence.idempotency_key === idempotencyKey) {
         return res.status(200).json({
           success: true,
-          data: { step: stepEvidence, attempt: activeAttempt },
+          data: { step: stepEvidence, attempt: sanitizeAttemptSnapshot(activeAttempt) },
           message: 'Step already verified.',
         });
       }
@@ -572,7 +601,7 @@ router.post(
       if (idempotencyKey && stepEvidence.idempotency_key === idempotencyKey) {
         return res.status(200).json({
           success: true,
-          data: { step: stepEvidence, attempt: activeAttempt },
+          data: { step: stepEvidence, attempt: sanitizeAttemptSnapshot(activeAttempt) },
           message: 'Step proof already submitted for review.',
         });
       }
@@ -591,9 +620,9 @@ router.post(
 
     // 3. Extract and validate evidence based on checkpoint type
     const checkpointType = stepEvidence.checkpoint_type;
-    const capturedLat = req.body.captured_lat !== undefined ? Number(req.body.captured_lat) : undefined;
-    const capturedLng = req.body.captured_lng !== undefined ? Number(req.body.captured_lng) : undefined;
-    const capturedAccuracy = req.body.captured_accuracy !== undefined ? Number(req.body.captured_accuracy) : undefined;
+    const capturedLat = body.captured_lat;
+    const capturedLng = body.captured_lng;
+    const capturedAccuracy = body.captured_accuracy;
 
     let targetLat = quest.gps_lat;
     let targetLng = quest.gps_lng;
@@ -610,6 +639,7 @@ router.post(
 
     let newStatus: any = 'verified';
     let evidencePayload: Record<string, any> = {};
+    let claimedChallengeNonce: string | undefined;
 
     if (checkpointType === 'location') {
       if (capturedLat === undefined || capturedLng === undefined) {
@@ -619,14 +649,15 @@ router.post(
         });
       }
 
-      const distance = calculateHaversineDistance(capturedLat, capturedLng, targetLat, targetLng);
-      const maxAllowed = allowedRadius + Math.min(Math.max(capturedAccuracy || 0, 0), 25);
-      if (distance > maxAllowed) {
+      const distance = withinRadius(capturedLat, capturedLng, targetLat, targetLng, allowedRadius, capturedAccuracy || 0);
+      if (!distance.ok) {
         return res.status(400).json({
           success: false,
           error: {
             code: 'GPS_RADIUS_EXCEEDED',
-            message: `You are ${Math.round(distance)}m away from this checkpoint. Must be within ${allowedRadius}m.`,
+            message: Number.isFinite(distance.distance)
+              ? `You are ${Math.round(distance.distance)}m away from this checkpoint. Must be within ${allowedRadius}m.`
+              : 'The captured GPS coordinates are invalid.',
           },
         });
       }
@@ -636,7 +667,7 @@ router.post(
           lat: capturedLat,
           lng: capturedLng,
           accuracy: capturedAccuracy ?? 5,
-          distance_meters: Math.round(distance),
+          distance_meters: Math.round(distance.distance),
         },
         verified_at: new Date().toISOString(),
       };
@@ -649,27 +680,28 @@ router.post(
         });
       }
 
-      const distance = calculateHaversineDistance(capturedLat, capturedLng, targetLat, targetLng);
-      const maxAllowed = allowedRadius + Math.min(Math.max(capturedAccuracy || 0, 0), 25);
-      if (distance > maxAllowed) {
+      const distance = withinRadius(capturedLat, capturedLng, targetLat, targetLng, allowedRadius, capturedAccuracy || 0);
+      if (!distance.ok) {
         return res.status(400).json({
           success: false,
           error: {
             code: 'GPS_RADIUS_EXCEEDED',
-            message: `Fresh GPS reading (${Math.round(distance)}m) exceeds allowed radius of ${allowedRadius}m.`,
+            message: Number.isFinite(distance.distance)
+              ? `Fresh GPS reading (${Math.round(distance.distance)}m) exceeds allowed radius of ${allowedRadius}m.`
+              : 'The captured GPS coordinates are invalid.',
           },
         });
       }
 
-      const qrCode = req.body.qr_code || req.body.scanned_marker_code;
-      const challengeToken = req.body.challenge_token;
+      const qrCode = body.qr_code || body.scanned_marker_code;
+      const challengeToken = body.challenge_token;
 
       let qrValid = false;
       let qrDetails: any = {};
 
       if (qrCode) {
-        const matchesQuest = qrCode === quest.marker_code;
-        const matchesStep = questStepDef && ((questStepDef as any).marker_code === qrCode || questStepDef.hint === qrCode);
+        const matchesQuest = secureCodeEquals(quest.marker_code, qrCode);
+        const matchesStep = questStepDef && secureCodeEquals(questStepDef.marker_code, qrCode);
         if (matchesQuest || matchesStep) {
           qrValid = true;
           qrDetails = { scanned_qr: qrCode };
@@ -678,10 +710,11 @@ router.post(
 
       if (!qrValid && challengeToken) {
         try {
-          const decoded = jwt.verify(challengeToken, env.JWT_SECRET) as any;
-          if (decoded.sub === 'quest_challenge' && decoded.quest_id === quest.id && decoded.user_id === userId) {
+          const decoded = verifyQuestChallengeToken(challengeToken);
+          if (decoded && decoded.quest_id === quest.id && decoded.user_id === userId) {
             const claimed = claimChallengeNonce(decoded.nonce);
             if (claimed) {
+              claimedChallengeNonce = decoded.nonce;
               qrValid = true;
               qrDetails = { challenge_nonce: decoded.nonce };
             }
@@ -716,9 +749,9 @@ router.post(
         if (detected && detected.mediaType === 'image') {
           fileExt = detected.ext;
         }
-      } else if (req.body.photo_base64) {
+      } else if (body.photo_base64) {
         try {
-          fileBuffer = Buffer.from(req.body.photo_base64.replace(/^data:image\/\w+;base64,/, ''), 'base64');
+          fileBuffer = Buffer.from(body.photo_base64.replace(/^data:image\/\w+;base64,/, ''), 'base64');
           const detected = detectValidatedMediaMime(fileBuffer);
           if (detected && detected.mediaType === 'image') {
             fileExt = detected.ext;
@@ -726,7 +759,7 @@ router.post(
         } catch {}
       }
 
-      let sha256Hash = req.body.photo_sha256;
+      let sha256Hash = body.photo_sha256;
       let storedFilename = '';
 
       if (fileBuffer) {
@@ -736,19 +769,19 @@ router.post(
         fs.writeFileSync(path.resolve(dir, storedFilename), fileBuffer);
       }
 
-      if (!fileBuffer && !req.body.photo_url && !req.body.photo_sha256) {
+      if (!fileBuffer && !body.photo_url && !body.photo_sha256) {
         return res.status(400).json({
           success: false,
           error: { code: 'VALIDATION_ERROR', message: 'No photo evidence provided.' },
         });
       }
 
-      const galleryOptIn = req.body.gallery_opt_in === true || req.body.gallery_opt_in === 'true';
+      const galleryOptIn = body.gallery_opt_in === true || body.gallery_opt_in === 'true';
 
       evidencePayload = {
         sha256: sha256Hash || 'sha256_mock',
         file_path: storedFilename || null,
-        photo_url: req.body.photo_url || (storedFilename ? `/api/v1/quests/evidence/${stepEvidence.id}/file` : null),
+        photo_url: body.photo_url || (storedFilename ? `/api/v1/quests/evidence/${stepEvidence.id}/file` : null),
         gallery_opt_in: galleryOptIn,
         gps: capturedLat !== undefined ? { lat: capturedLat, lng: capturedLng, accuracy: capturedAccuracy } : null,
         submitted_at: new Date().toISOString(),
@@ -756,7 +789,7 @@ router.post(
       newStatus = 'pending_review';
     } else if (checkpointType === 'action') {
       const allowedActions = ['like_destination', 'quiz_completed', 'view_story'];
-      const actionName = req.body.action_name;
+      const actionName = body.action_name;
       if (!actionName || !allowedActions.includes(actionName)) {
         return res.status(400).json({
           success: false,
@@ -812,6 +845,7 @@ router.post(
         activeAttempt.verified_steps = verifiedCount;
         activeAttempt.current_step = Math.max(activeAttempt.current_step, nextStepOrder);
       } catch (err) {
+        if (claimedChallengeNonce) releaseChallengeNonce(claimedChallengeNonce);
         return next(err);
       }
     }
@@ -827,12 +861,13 @@ router.post(
     const memSteps = db.getStepEvidence(activeAttempt.id);
     activeAttempt.verified_steps = memSteps.filter((s) => s.status === 'verified').length;
     activeAttempt.current_step = Math.max(activeAttempt.current_step, nextStepOrder);
+    claimedChallengeNonce = undefined;
 
     return res.status(200).json({
       success: true,
       data: {
         step: stepEvidence,
-        attempt: activeAttempt,
+        attempt: sanitizeAttemptSnapshot(activeAttempt),
       },
       message: newStatus === 'verified' ? 'Step verified successfully.' : 'Step proof submitted for independent review.',
     });
@@ -910,7 +945,7 @@ router.post('/quests/:id/submit-for-review', authenticateToken, async (req: Auth
 
   return res.status(200).json({
     success: true,
-    data: activeAttempt,
+    data: sanitizeAttemptSnapshot(activeAttempt),
     message: 'Quest attempt submitted for independent review. Rewards will be granted upon review approval.',
   });
 });
@@ -1012,16 +1047,7 @@ router.post('/quests/:id/challenge', authenticateToken, (req: AuthRequest, res: 
 
   const nonce = randomUUID();
   const expiresInSec = 600; // 10 minutes
-  const token = jwt.sign(
-    {
-      sub: 'quest_challenge',
-      user_id: userId,
-      quest_id: id,
-      nonce,
-    },
-    env.JWT_SECRET,
-    { expiresIn: expiresInSec }
-  );
+  const token = signQuestChallenge({ user_id: userId, quest_id: id, nonce }, expiresInSec);
 
   return res.status(200).json({
     success: true,

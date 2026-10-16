@@ -113,6 +113,8 @@ export interface QuestStep {
   gps_lng?: number;
   radius_meters?: number;
   hint?: string;
+  /** Server-generated QR secret. Never included in traveler-facing snapshots. */
+  marker_code?: string;
 }
 
 export type QuestStepStatus = 'not_started' | 'ready' | 'pending_review' | 'needs_changes' | 'verified' | 'skipped_optional';
@@ -841,6 +843,22 @@ export function calculateHaversineDistance(lat1: number, lon1: number, lat2: num
     Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return Math.round(R * c * 10) / 10;
+}
+
+export function withinRadius(
+  lat: number,
+  lng: number,
+  targetLat: number,
+  targetLng: number,
+  radiusMeters: number,
+  accuracyMeters = 0
+): { ok: boolean; distance: number } {
+  const distance = calculateHaversineDistance(lat, lng, targetLat, targetLng);
+  if (!Number.isFinite(distance)) return { ok: false, distance };
+  const accuracyAllowance = Number.isFinite(accuracyMeters)
+    ? Math.min(Math.max(accuracyMeters, 0), 25)
+    : 0;
+  return { ok: distance <= radiusMeters + accuracyAllowance, distance };
 }
 
 export class MemoryDb {
@@ -2458,6 +2476,10 @@ export class MemoryDb {
     return this.submissions.some((s) => s.user_id === userId && s.quest_id === questId && s.status === 'approved');
   }
 
+  hasPendingSubmission(userId: string, questId: string): boolean {
+    return this.submissions.some((s) => s.user_id === userId && s.quest_id === questId && s.status === 'pending');
+  }
+
   createSubmission(payload: Omit<SubmissionRow, 'id' | 'created_at' | 'updated_at'>): SubmissionRow {
     const newSub: SubmissionRow = {
       ...payload,
@@ -2510,11 +2532,16 @@ export class MemoryDb {
   }
 
   // Idempotent state transition & single point award (Fix 4.5 & 4.7)
-  reviewSubmission(id: string, action: 'approve' | 'reject', adminId: string, reason?: string): { submission: SubmissionRow; alreadyReviewed: boolean; conflicting: boolean } | undefined {
+  reviewSubmission(id: string, action: 'approve' | 'reject', adminId: string, reason?: string): { submission: SubmissionRow; alreadyReviewed: boolean; conflicting: boolean; reason?: 'ALREADY_COMPLETED' } | undefined {
     const sub = this.submissions.find((s) => s.id === id);
     if (!sub) return undefined;
 
     const targetStatus = action === 'approve' ? 'approved' : 'rejected';
+
+    if (action === 'approve' && this.submissions.some((candidate) =>
+      candidate.id !== id && candidate.user_id === sub.user_id && candidate.quest_id === sub.quest_id && candidate.status === 'approved')) {
+      return { submission: sub, alreadyReviewed: false, conflicting: true, reason: 'ALREADY_COMPLETED' };
+    }
 
     // Idempotent check: if already in target status, return without re-adding points
     if (sub.status === targetStatus) {
