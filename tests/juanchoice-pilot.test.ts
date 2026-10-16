@@ -233,7 +233,7 @@ describe('JuanChoice Phase 2 pilot', () => {
     expect(standings.status).toBe(200);
     expect(JSON.stringify(standings.body)).not.toContain(user);
     expect((await request(app).get(`/api/v1/juanchoice/campaigns/${campaign}/me`)).status).toBe(401);
-    const token = jwt.sign({id:user,role:'user'},env.JWT_SECRET);
+    const token = jwt.sign({id:user,seed_id:user,role:'user'},env.JWT_SECRET);
     const mine = await request(app).get(`/api/v1/juanchoice/campaigns/${campaign}/me`).set('Authorization',`Bearer ${token}`);
     expect(mine.status).toBe(200);
     expect(mine.body.data.ballot.version).toBe(2);
@@ -241,7 +241,7 @@ describe('JuanChoice Phase 2 pilot', () => {
     expect(mine.body.data.can_vote_now).toBe(false);
     expect(mine.body.data.vote_unavailable_reason).toBe('ROUND_CLOSED');
     expect(Number.isFinite(Date.parse(mine.body.data.server_time))).toBe(true);
-    const youngToken = jwt.sign({id:young,role:'user'},env.JWT_SECRET);
+    const youngToken = jwt.sign({id:young,seed_id:young,role:'user'},env.JWT_SECRET);
     const youngMine = await request(app).get(`/api/v1/juanchoice/campaigns/${secondCampaign}/me`)
       .set('Authorization',`Bearer ${youngToken}`);
     expect(youngMine.status).toBe(200);
@@ -265,7 +265,7 @@ describe('JuanChoice Phase 2 pilot', () => {
       [submissionId,randomUUID(),young,questId,questId]);
     await db.pool.query(`INSERT INTO verified_visits(id,user_id,spot_id,source_submission_id,occurred_at,verified_at,is_test)
       VALUES($1,$2,$3,$4,NOW(),NOW(),false)`,[visitId,young,'jc-spot-1',submissionId]);
-    const token = jwt.sign({id:young,role:'user'},env.JWT_SECRET);
+    const token = jwt.sign({id:young,seed_id:young,role:'user'},env.JWT_SECRET);
     const eligible = await request(app).get(`/api/v1/juanchoice/campaigns/${secondCampaign}/me`)
       .set('Authorization',`Bearer ${token}`);
     expect(eligible.status).toBe(200);
@@ -284,7 +284,7 @@ describe('JuanChoice Phase 2 pilot', () => {
     expect(list.status).toBe(200);
     expect(list.body.data.items.some((row: any) => row.id === synthetic)).toBe(false);
     expect((await request(app).get(`/api/v1/juanchoice/campaigns/${synthetic}`)).status).toBe(404);
-    const token = jwt.sign({id:user,role:'user'},env.JWT_SECRET);
+    const token = jwt.sign({id:user,seed_id:user,role:'user'},env.JWT_SECRET);
     expect((await request(app).get(`/api/v1/juanchoice/campaigns/${synthetic}/me`).set('Authorization',`Bearer ${token}`)).status).toBe(404);
   });
 
@@ -315,7 +315,7 @@ describe('JuanChoice Phase 2 pilot', () => {
     await db.pool.query('INSERT INTO juanchoice_candidates(id,campaign_id,spot_id) VALUES($1,$2,$3)',[nominee,draft,'jc-spot-1']);
     const guest = await request(app).get('/api/v1/juanchoice/admin/campaigns');
     expect(guest.status).toBe(401);
-    const token=jwt.sign({id:admin,role:'admin'},env.JWT_SECRET);
+    const token=jwt.sign({id:admin,seed_id:admin,role:'admin'},env.JWT_SECRET);
     const list=await request(app).get('/api/v1/juanchoice/admin/campaigns').set('Authorization',`Bearer ${token}`);
     expect(list.status).toBe(200);
     expect(list.body.data.items.some((item:any)=>item.id===draft)).toBe(true);
@@ -384,7 +384,7 @@ describe('JuanChoice Phase 2 pilot', () => {
     expect((await claimSupporterQuest(visitCampaign,young)).replayed).toBe(true);
     expect(Number((await db.pool.query('SELECT explorer_xp FROM progression_totals WHERE user_id=$1',[young])).rows[0].explorer_xp)).toBe(300);
     expect((await db.pool.query('SELECT * FROM juanchoice_ballots WHERE campaign_id=$1 AND user_id=$2',[visitCampaign,young])).rowCount).toBe(0);
-    const token=jwt.sign({id:young,role:'user'},env.JWT_SECRET);
+    const token=jwt.sign({id:young,seed_id:young,role:'user'},env.JWT_SECRET);
     const api=await request(app).get('/api/v1/juanchoice/supporter-quest').set('Authorization',`Bearer ${token}`);
     expect(api.status).toBe(200); expect(api.body.data.claimed).toBe(true);
   });

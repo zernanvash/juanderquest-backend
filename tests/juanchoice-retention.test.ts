@@ -19,7 +19,7 @@ describe('Phase 5: JuanChoice retention and measured conversion', () => {
   let database: TestDbInstance;
   const userId = '51111111-1111-1111-1111-111111111111';
   const adminId = '52222222-2222-2222-2222-222222222222';
-  const token = jwt.sign({ id: userId, role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
+  const token = jwt.sign({ id: userId, seed_id: 'ret-user', role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
   const campaigns = Array.from({ length: 6 }, () => randomUUID());
 
   beforeAll(async () => {
@@ -155,7 +155,7 @@ describe('Phase 5: JuanChoice retention and measured conversion', () => {
     expect(offers).toHaveLength(0);
     await expect(database.pool.query("UPDATE juanchoice_merchant_offers SET status='approved', partner_consent_at=NOW() WHERE id=$1",[draft.id]))
       .rejects.toBeDefined();
-    const adminToken = jwt.sign({ id: adminId, role: 'admin' }, env.JWT_SECRET);
+    const adminToken = jwt.sign({ id: adminId, seed_id: 'ret-admin', role: 'admin' }, env.JWT_SECRET);
     const endpoint = `/api/v1/juanchoice/admin/campaigns/${campaigns[2]}/offers`;
     const body = { merchant_id:'m1', voucher_id:'v1', terms_snapshot:{label:'Pilot offer'},
       starts_at:new Date(Date.now()-60_000).toISOString(), ends_at:new Date(Date.now()+86_400_000).toISOString() };
@@ -170,7 +170,7 @@ describe('Phase 5: JuanChoice retention and measured conversion', () => {
   });
 
   it('does not turn an admin reference into a funded promotional budget', async () => {
-    const adminToken = jwt.sign({ id: adminId, role: 'admin' }, env.JWT_SECRET);
+    const adminToken = jwt.sign({ id: adminId, seed_id: 'ret-admin', role: 'admin' }, env.JWT_SECRET);
     const endpoint = `/api/v1/juanchoice/admin/campaigns/${campaigns[0]}/budget`;
     const requestBody = { budget_mjdq: 1_000, request_reference: 'Draft proposal only' };
     expect((await request(app).post(endpoint).set('Authorization',`Bearer ${adminToken}`).send(requestBody)).status).toBe(503);

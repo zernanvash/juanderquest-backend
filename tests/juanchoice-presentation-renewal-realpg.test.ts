@@ -91,7 +91,7 @@ describe('JuanChoice presentation round v2 renewal and allowlist cutover regress
   });
 
   it('allows voting on allowlisted Round 1, closes Round 1 on v2 creation, and redirects allowlist to Round 2', async () => {
-    const token1 = jwt.sign({ id: guest1Id, role: 'user' }, env.JWT_SECRET);
+    const token1 = jwt.sign({ id: guest1Id, seed_id: guest1Id, role: 'user' }, env.JWT_SECRET);
 
     // 1. Overview initially shows round 1 as current
     const overviewRes = await request(app).get('/api/v1/juanchoice/overview');
@@ -146,7 +146,7 @@ describe('JuanChoice presentation round v2 renewal and allowlist cutover regress
     expect(voteRound1AfterClose.body.error.code).toBe('ROUND_CLOSED');
 
     // Trying to vote on campaign2Id before allowlist switch fails because it's not the allowlisted presentation campaign
-    const token2 = jwt.sign({ id: guest2Id, role: 'user' }, env.JWT_SECRET);
+    const token2 = jwt.sign({ id: guest2Id, seed_id: guest2Id, role: 'user' }, env.JWT_SECRET);
     const voteRound2BeforeSwitch = await request(app)
       .put(`/api/v1/juanchoice/campaigns/${campaign2Id}/ballot`)
       .set('Authorization', `Bearer ${token2}`)

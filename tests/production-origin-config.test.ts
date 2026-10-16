@@ -10,6 +10,7 @@ describe('production origin configuration', () => {
       WALLET_AUTH_MODE: process.env.WALLET_AUTH_MODE,
       ALLOW_IN_MEMORY_FALLBACK: process.env.ALLOW_IN_MEMORY_FALLBACK,
       SEED_DEVELOPMENT_DATA: process.env.SEED_DEVELOPMENT_DATA,
+      ALLOW_INSECURE_LOCAL_WALLET_AUTH: process.env.ALLOW_INSECURE_LOCAL_WALLET_AUTH,
     };
     try {
       process.env.NODE_ENV = 'production';
@@ -18,6 +19,7 @@ describe('production origin configuration', () => {
       process.env.WALLET_AUTH_MODE = 'signature';
       process.env.ALLOW_IN_MEMORY_FALLBACK = 'false';
       process.env.SEED_DEVELOPMENT_DATA = 'false';
+      process.env.ALLOW_INSECURE_LOCAL_WALLET_AUTH = 'false';
       if (host === undefined) delete process.env.HOST;
       else process.env.HOST = host;
       jest.isolateModules(assertion);

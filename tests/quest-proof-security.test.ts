@@ -323,7 +323,7 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
       expect(res.body.error.code).toBe('CHALLENGE_QUEST_MISMATCH');
     });
 
-    it('blocks a second proof while the first proof is pending review', async () => {
+    it('reports a consumed challenge after the first proof is rejected', async () => {
       // Issue challenge
       const challengeRes = await request(app)
         .post(`/api/v1/quests/${testQuestId}/challenge`)
@@ -343,6 +343,7 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
           captured_accuracy: 5,
         });
       expect(firstRes.status).toBe(201);
+      db.reviewSubmission(firstRes.body.data.id, 'reject', 'independent-reviewer', 'Proof rejected for test replay.');
 
       // Replay attempt with different idempotency key fails
       const replayRes = await request(app)
@@ -357,7 +358,7 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
           captured_accuracy: 5,
         });
       expect(replayRes.status).toBe(409);
-      expect(replayRes.body.error.code).toBe('SUBMISSION_PENDING');
+      expect(replayRes.body.error.code).toBe('CHALLENGE_ALREADY_USED');
     });
 
     it('rejects submission with out-of-radius coordinates with 422 OUT_OF_RANGE', async () => {
@@ -382,6 +383,19 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
       expect(res.status).toBe(422);
       expect(res.body.success).toBe(false);
       expect(res.body.error.code).toBe('OUT_OF_RANGE');
+
+      const retry = await request(app)
+        .post('/api/v1/submissions')
+        .set('Authorization', `Bearer ${travelerToken}`)
+        .send({
+          idempotency_key: randomUUID(),
+          quest_id: testQuestId,
+          challenge_token: challengeToken,
+          captured_lat: questLat,
+          captured_lng: questLng,
+          captured_accuracy: 5,
+        });
+      expect(retry.status).toBe(201);
     });
 
     it('rejects deprecated marker-code proof when the legacy path is disabled', async () => {

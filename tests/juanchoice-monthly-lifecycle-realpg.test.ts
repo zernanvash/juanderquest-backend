@@ -109,7 +109,7 @@ describe('monthly JuanChoice API lifecycle on isolated real PostgreSQL', () => {
     ]);
     expect(sameStandingsA).toBe(sameStandingsB);
     expect(sameStandingsA.standings.reduce((sum: number, item: { votes: number }) => sum + Number(item.votes), 0)).toBe(0);
-    const token = jwt.sign({ id: voterId, role: 'user' }, env.JWT_SECRET);
+    const token = jwt.sign({ id: voterId, seed_id: voterId, role: 'user' }, env.JWT_SECRET);
     const voteUrl = `/api/v1/juanchoice/campaigns/${prepared.campaign_id}/ballot`;
     const ballotBody = { candidate_id: candidates[0].id, expected_version: 0 };
     const key = randomUUID();
@@ -146,7 +146,7 @@ describe('monthly JuanChoice API lifecycle on isolated real PostgreSQL', () => {
       .set('Idempotency-Key', randomUUID()).send({ candidate_id: candidates[0].id, expected_version: 1 });
     expect(late.status).toBe(409);
     expect(late.body.error.code).toBe('ROUND_CLOSED');
-    const adminToken = jwt.sign({ id: adminId, role: 'admin' }, env.JWT_SECRET);
+    const adminToken = jwt.sign({ id: adminId, seed_id: adminId, role: 'admin' }, env.JWT_SECRET);
     const finalizeUrl = `/api/v1/juanchoice/admin/campaigns/${prepared.campaign_id}/finalize`;
     const finalized = await request(app).post(finalizeUrl).set('Authorization', `Bearer ${adminToken}`);
     expect(finalized.status).toBe(200);

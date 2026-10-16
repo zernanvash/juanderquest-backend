@@ -42,8 +42,8 @@ describe('JuanChoice autonomous scheduler operating rehearsal', () => {
       await fixture.pool.query(`INSERT INTO users(id,seed_id,display_name,email,role) VALUES
         ('scheduler-admin','scheduler-admin','Scheduler Admin','scheduler-admin@example.test','admin'),
         ('scheduler-user','scheduler-user','Scheduler User','scheduler-user@example.test','user')`);
-      const adminToken = jwt.sign({id:'scheduler-admin',role:'admin'},env.JWT_SECRET);
-      const userToken = jwt.sign({id:'scheduler-user',role:'user'},env.JWT_SECRET);
+      const adminToken = jwt.sign({id:'scheduler-admin',seed_id:'scheduler-admin',role:'admin'},env.JWT_SECRET);
+      const userToken = jwt.sign({id:'scheduler-user',seed_id:'scheduler-user',role:'user'},env.JWT_SECRET);
       const endpoint = '/api/v1/juanchoice/admin/scheduler';
       expect((await request(app).get(endpoint)).status).toBe(401);
       expect((await request(app).get(endpoint).set('Authorization',`Bearer ${userToken}`)).status).toBe(403);

@@ -60,6 +60,7 @@ export const MIGRATIONS = [
   '044_quest_step_evidence.sql',
   '045_quest_step_marker_codes.sql',
   '046_submissions_single_pending.sql',
+  '047_submissions_challenge_nonce_unique.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so

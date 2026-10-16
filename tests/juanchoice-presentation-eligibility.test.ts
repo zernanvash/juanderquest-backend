@@ -357,7 +357,7 @@ describe('JuanChoice Presentation Mode Voter Eligibility Predicate & Service', (
     it('blocks fresh guest on both projection and castBallot when presentation mode is OFF', async () => {
       env.JUANCHOICE_PRESENTATION_MODE = false;
 
-      const token = jwt.sign({ id: freshUser, role: 'user' }, env.JWT_SECRET);
+      const token = jwt.sign({ id: freshUser, seed_id: freshUser, role: 'user' }, env.JWT_SECRET);
       const res = await request(app)
         .get(`/api/v1/juanchoice/campaigns/${allowedCampaignId}/me`)
         .set('Authorization', `Bearer ${token}`);
@@ -384,7 +384,7 @@ describe('JuanChoice Presentation Mode Voter Eligibility Predicate & Service', (
       env.JUANCHOICE_PRESENTATION_DB_NAME = 'juanderquest_presentation_test';
       env.DATABASE_URL = 'postgres://postgres:postgres@localhost:5432/juanderquest_presentation_test';
 
-      const token = jwt.sign({ id: freshUser, role: 'user' }, env.JWT_SECRET);
+      const token = jwt.sign({ id: freshUser, seed_id: freshUser, role: 'user' }, env.JWT_SECRET);
       const res = await request(app)
         .get(`/api/v1/juanchoice/campaigns/${allowedCampaignId}/me`)
         .set('Authorization', `Bearer ${token}`);

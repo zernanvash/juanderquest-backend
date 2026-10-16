@@ -1,5 +1,4 @@
 import { Router, Response } from 'express';
-import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { db } from '../db/index.js';
 import { env } from '../config/env.js';
@@ -9,6 +8,7 @@ import { rateLimit } from '../middleware/rateLimit.js';
 import { randomUUID } from 'crypto';
 import { getAddress, verifyMessage } from 'ethers';
 import { clearSessionCookie, setSessionCookie } from '../auth/sessionCookie.js';
+import { signSessionToken } from '../auth/tokens.js';
 
 const router = Router();
 
@@ -25,11 +25,7 @@ const walletAddressSchema = z.string().transform((value, ctx) => {
 });
 const localWalletIdentifierSchema = z.coerce.string().trim().min(1, 'A local wallet identifier is required').max(100);
 
-const issueToken = (user: (typeof db.users)[number], rememberMe = false) => jwt.sign(
-  { id: user.id, seed_id: user.seed_id, role: user.role },
-  env.JWT_SECRET,
-  { expiresIn: rememberMe ? '7d' : '24h' }
-);
+const issueToken = (user: (typeof db.users)[number], rememberMe = false) => signSessionToken(user, rememberMe);
 
 const findOrCreateWalletUser = async (address: string): Promise<(typeof db.users)[number]> => {
   const normalized = address.toLowerCase();
@@ -858,15 +854,7 @@ router.post('/auth/demo-login', rateLimit({ policyId: 'auth:demo-login', windowM
     });
   }
 
-  const token = jwt.sign(
-    {
-      id: user.id,
-      seed_id: user.seed_id,
-      role: user.role,
-    },
-    env.JWT_SECRET,
-    { expiresIn: '24h' }
-  );
+  const token = signSessionToken(user);
   setSessionCookie(res, token, false);
 
   return res.status(200).json({
@@ -944,15 +932,7 @@ router.post('/auth/simulated-wallet-login', rateLimit({ policyId: 'auth:simulate
     }
   }
 
-  const token = jwt.sign(
-    {
-      id: user.id,
-      seed_id: user.seed_id,
-      role: user.role,
-    },
-    env.JWT_SECRET,
-    { expiresIn: '24h' }
-  );
+  const token = signSessionToken(user);
   setSessionCookie(res, token, false);
 
   const simulatedAddress = `0x${Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join('')}`;

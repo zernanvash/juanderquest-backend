@@ -1,8 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import jwt from 'jsonwebtoken';
-import { env } from '../config/env.js';
 import { computeLeaderboard } from '../services/leaderboard.js';
+import { verifySessionToken } from '../auth/tokens.js';
 
 export const leaderboardRouter = Router();
 
@@ -31,8 +30,7 @@ leaderboardRouter.get('/leaderboard', (req: Request, res: Response) => {
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.substring(7);
     try {
-      const decoded = jwt.verify(token, env.JWT_SECRET) as { id?: string };
-      currentUserId = decoded.id;
+      currentUserId = verifySessionToken(token)?.id;
     } catch {
       // Ignored for unauthenticated lookups
     }

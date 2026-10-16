@@ -1,5 +1,4 @@
 import { Router, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
 import { randomUUID, createHash, timingSafeEqual } from 'crypto';
 import multer from 'multer';
 import { z } from 'zod';
@@ -10,9 +9,10 @@ import { getPool } from '../db/pool.js';
 import { EconomyError, EconomyService } from '../economy/service.js';
 import { isLocalEconomyProfile } from '../economy/profile.js';
 import { env } from '../config/env.js';
+import { signQuestChallenge, verifyQuestChallengeToken } from '../auth/tokens.js';
 import { spotStore } from '../spots/store.js';
 import { optionalAuthenticateToken, authenticateToken, checkQAAuthorization, isAuthorizedQA, AuthRequest } from '../middleware/auth.js';
-import { claimChallengeNonce } from '../services/submissions.js';
+import { claimChallengeNonce, releaseChallengeNonce } from '../services/submissions.js';
 import { detectValidatedMediaMime } from '../utils/media-mime.js';
 import { validateRequest } from '../middleware/validate.js';
 import { optionalAccuracy, optionalLat, optionalLng } from '../middleware/coerce.js';
@@ -639,6 +639,7 @@ router.post(
 
     let newStatus: any = 'verified';
     let evidencePayload: Record<string, any> = {};
+    let claimedChallengeNonce: string | undefined;
 
     if (checkpointType === 'location') {
       if (capturedLat === undefined || capturedLng === undefined) {
@@ -709,10 +710,11 @@ router.post(
 
       if (!qrValid && challengeToken) {
         try {
-          const decoded = jwt.verify(challengeToken, env.JWT_SECRET) as any;
-          if (decoded.sub === 'quest_challenge' && decoded.quest_id === quest.id && decoded.user_id === userId) {
+          const decoded = verifyQuestChallengeToken(challengeToken);
+          if (decoded && decoded.quest_id === quest.id && decoded.user_id === userId) {
             const claimed = claimChallengeNonce(decoded.nonce);
             if (claimed) {
+              claimedChallengeNonce = decoded.nonce;
               qrValid = true;
               qrDetails = { challenge_nonce: decoded.nonce };
             }
@@ -843,6 +845,7 @@ router.post(
         activeAttempt.verified_steps = verifiedCount;
         activeAttempt.current_step = Math.max(activeAttempt.current_step, nextStepOrder);
       } catch (err) {
+        if (claimedChallengeNonce) releaseChallengeNonce(claimedChallengeNonce);
         return next(err);
       }
     }
@@ -858,6 +861,7 @@ router.post(
     const memSteps = db.getStepEvidence(activeAttempt.id);
     activeAttempt.verified_steps = memSteps.filter((s) => s.status === 'verified').length;
     activeAttempt.current_step = Math.max(activeAttempt.current_step, nextStepOrder);
+    claimedChallengeNonce = undefined;
 
     return res.status(200).json({
       success: true,
@@ -1043,16 +1047,7 @@ router.post('/quests/:id/challenge', authenticateToken, (req: AuthRequest, res: 
 
   const nonce = randomUUID();
   const expiresInSec = 600; // 10 minutes
-  const token = jwt.sign(
-    {
-      sub: 'quest_challenge',
-      user_id: userId,
-      quest_id: id,
-      nonce,
-    },
-    env.JWT_SECRET,
-    { expiresIn: expiresInSec }
-  );
+  const token = signQuestChallenge({ user_id: userId, quest_id: id, nonce }, expiresInSec);
 
   return res.status(200).json({
     success: true,

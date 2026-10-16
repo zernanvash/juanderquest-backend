@@ -74,7 +74,7 @@ describe('Fast-alpha launcher JuanChoice flag closure', () => {
       Reflect.set(env, 'JUANCHOICE_WRITES_ENABLED', false);
       Reflect.set(env, 'JUANCHOICE_SCHEDULER_ENABLED', false);
 
-      const adminToken = jwt.sign({ id: 'alpha-admin-test', role: 'admin' }, env.JWT_SECRET);
+      const adminToken = jwt.sign({ id: 'alpha-admin-test', seed_id: 'alpha-admin-test', role: 'admin' }, env.JWT_SECRET);
 
       const response = await request(app)
         .post('/api/v1/juanchoice/admin/schedules')

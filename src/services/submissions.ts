@@ -8,6 +8,7 @@ import { EconomyService } from '../economy/service.js';
 import { isLocalEconomyProfile } from '../economy/profile.js';
 import { randomUUID } from 'crypto';
 import jwt from 'jsonwebtoken';
+import { verifyQuestChallengeToken } from '../auth/tokens.js';
 
 // Single-use challenge nonces are claimed in memory before any await so that
 // concurrent requests cannot both pass the replay check. Entries expire shortly
@@ -28,6 +29,20 @@ export function claimChallengeNonce(nonce: string): boolean {
   }
   usedChallengeNonces.set(nonce, now + CHALLENGE_NONCE_TTL_MS);
   return true;
+}
+
+export function isChallengeNonceClaimed(nonce: string): boolean {
+  const expiry = usedChallengeNonces.get(nonce);
+  if (expiry === undefined) return false;
+  if (expiry <= Date.now()) {
+    usedChallengeNonces.delete(nonce);
+    return false;
+  }
+  return true;
+}
+
+export function releaseChallengeNonce(nonce: string): void {
+  usedChallengeNonces.delete(nonce);
 }
 
 export interface CreateSubmissionInput {
@@ -186,11 +201,23 @@ export class SubmissionsService {
 
     // 4. Verify Proof (Challenge Token or Physical Scanned Marker)
     let finalMarkerCode: string;
+    let challengeNonce: string | undefined;
+    let claimedNonceForInsert: string | undefined;
+    const claimNonceForInsert = (): boolean => {
+      if (!challengeNonce) return true;
+      if (!claimChallengeNonce(challengeNonce)) return false;
+      claimedNonceForInsert = challengeNonce;
+      return true;
+    };
+    const releaseInsertNonce = () => {
+      if (claimedNonceForInsert) releaseChallengeNonce(claimedNonceForInsert);
+      claimedNonceForInsert = undefined;
+    };
 
     if (payload.challenge_token) {
       try {
-        const decoded = jwt.verify(payload.challenge_token, env.JWT_SECRET) as any;
-        if (!decoded || decoded.sub !== 'quest_challenge') {
+        const decoded = verifyQuestChallengeToken(payload.challenge_token);
+        if (!decoded) {
           return {
             success: false,
             statusCode: 401,
@@ -212,16 +239,15 @@ export class SubmissionsService {
           };
         }
         const nonce = decoded.nonce;
-        if (!nonce) {
+        if (typeof nonce !== 'string' || nonce.length < 1 || nonce.length > 200) {
           return {
             success: false,
             statusCode: 401,
             error: { code: 'INVALID_CHALLENGE', message: 'Challenge token is missing its nonce.' },
           };
         }
-        // Claim the nonce synchronously before any await: two concurrent requests
-        // presenting the same token must not both pass the replay check.
-        if (!claimChallengeNonce(nonce)) {
+        challengeNonce = nonce;
+        if (isChallengeNonceClaimed(nonce)) {
           return {
             success: false,
             statusCode: 409,
@@ -366,6 +392,11 @@ export class SubmissionsService {
               return { success: false, statusCode: 409,
                 error: { code: 'FUNDED_ATTEMPT_EXPIRED', message: 'The funded attempt deadline has passed.' } };
             }
+            if (!claimNonceForInsert()) {
+              await client.query('ROLLBACK');
+              return { success: false, statusCode: 409,
+                error: { code: 'CHALLENGE_ALREADY_USED', message: 'This challenge token has already been consumed.' } };
+            }
             const inserted = await client.query(
               `INSERT INTO submissions
                (id, idempotency_key, user_id, quest_id, scanned_marker_code,
@@ -388,12 +419,14 @@ export class SubmissionsService {
             );
             const commit = await client.query('COMMIT');
             if (commit.command !== 'COMMIT') throw new Error('FUNDED_SUBMISSION_COMMIT_ABORTED');
+            claimedNonceForInsert = undefined;
             const created = this.mapSubmissionRow(inserted.rows[0]);
             db.submissions.push(created);
             const cachedAttempt = db.quest_attempts.find((a) => a.id === reservation.attempt_id);
             if (cachedAttempt) cachedAttempt.status = 'submitted';
             return { success: true, statusCode: 201, data: created };
           } catch (error) {
+            releaseInsertNonce();
             await client.query('ROLLBACK');
             throw error;
           } finally {
@@ -422,11 +455,23 @@ export class SubmissionsService {
         payload.captured_lng,
         payload.captured_accuracy,
       ];
-      const { rows } = await pool.query(insertQuery, values);
+      if (!claimNonceForInsert()) {
+        return { success: false, statusCode: 409,
+          error: { code: 'CHALLENGE_ALREADY_USED', message: 'This challenge token has already been consumed.' } };
+      }
+      let rows: any[];
+      try {
+        ({ rows } = await pool.query(insertQuery, values));
+      } catch (error) {
+        releaseInsertNonce();
+        throw error;
+      }
       if (!rows[0]) {
+        releaseInsertNonce();
         return { success: false, statusCode: 403,
           error: { code: 'SCOPE_MISMATCH', message: 'Traveler and quest scopes do not match.' } };
       }
+      claimedNonceForInsert = undefined;
       const created = this.mapSubmissionRow(rows[0]);
       db.submissions.push(created);
       return {
@@ -436,7 +481,13 @@ export class SubmissionsService {
       };
     }
 
-    const created = db.createSubmission({
+    if (!claimNonceForInsert()) {
+      return { success: false, statusCode: 409,
+        error: { code: 'CHALLENGE_ALREADY_USED', message: 'This challenge token has already been consumed.' } };
+    }
+    let created: SubmissionRow;
+    try {
+      created = db.createSubmission({
       idempotency_key: payload.idempotency_key,
       user_id: payload.user_id,
       quest_id: payload.quest_id,
@@ -446,7 +497,12 @@ export class SubmissionsService {
       captured_accuracy: payload.captured_accuracy,
       status: 'pending',
       is_test: Boolean(actor.is_test),
-    });
+      });
+    } catch (error) {
+      releaseInsertNonce();
+      throw error;
+    }
+    claimedNonceForInsert = undefined;
     return {
       success: true,
       statusCode: 201,
@@ -487,6 +543,11 @@ export class SubmissionsService {
         }
 
         const sub = subRows[0];
+        if (sub.user_id === adminId) {
+          await client.query('ROLLBACK');
+          return { success: false, statusCode: 403,
+            error: { code: 'SELF_REVIEW_FORBIDDEN', message: 'Reviewers cannot approve or reject their own proof.' } };
+        }
         if (action === 'approve') {
           const duplicate = await client.query(
             "SELECT 1 FROM submissions WHERE user_id = $1 AND quest_id = $2 AND status = 'approved' AND id <> $3 LIMIT 1",
@@ -761,6 +822,11 @@ export class SubmissionsService {
     }
 
     // In-memory fallback
+    const existingSubmission = db.submissions.find((submission) => submission.id === id);
+    if (existingSubmission?.user_id === adminId) {
+      return { success: false, statusCode: 403,
+        error: { code: 'SELF_REVIEW_FORBIDDEN', message: 'Reviewers cannot approve or reject their own proof.' } };
+    }
     const result = db.reviewSubmission(id, action, adminId, rejectionReason);
     if (!result) {
       return {

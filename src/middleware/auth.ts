@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
 import { readSessionCookie } from '../auth/sessionCookie.js';
+import { verifySessionToken } from '../auth/tokens.js';
 
 export interface AuthenticatedUser {
   id: string;
@@ -17,7 +17,7 @@ export interface AuthRequest extends Request {
 export const optionalAuthenticateToken = (req: AuthRequest, _res: Response, next: NextFunction) => {
   const token = req.headers.authorization?.split(' ')[1] || readSessionCookie(req);
   if (!token) return next();
-  try { req.user = jwt.verify(token, env.JWT_SECRET) as AuthenticatedUser; } catch { /* Continue as guest. */ }
+  req.user = verifySessionToken(token) ?? undefined;
   next();
 };
 
@@ -35,20 +35,12 @@ export const authenticateToken = (req: AuthRequest, res: Response, next: NextFun
     });
   }
 
-  jwt.verify(token, env.JWT_SECRET, (err, decoded) => {
-    if (err) {
-      return res.status(401).json({
-        success: false,
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Invalid or expired JWT authentication token.',
-        },
-      });
-    }
-
-    req.user = decoded as AuthenticatedUser;
-    next();
-  });
+  const user = verifySessionToken(token);
+  if (!user) {
+    return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid or expired JWT authentication token.' } });
+  }
+  req.user = user;
+  next();
 };
 
 import { db, UserRow } from '../db/index.js';

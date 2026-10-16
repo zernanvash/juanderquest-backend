@@ -8,6 +8,7 @@ import { createTestDb } from '../src/db/testHarness.js';
 import { applyMigrations } from '../src/db/migrations.js';
 
 const auditUserId = 'qa-audit-traveler-20261016';
+const auditSelfReviewerId = 'qa-audit-self-reviewer-20261016';
 const auditQuestId = 'qa-audit-quest-20261016';
 const auditStepQr = 'JDQ-STEP-AUDIT-SECRET-20261016';
 const auditToken = jwt.sign({ id: auditUserId, seed_id: 'qa-audit-traveler', role: 'user' }, env.JWT_SECRET);
@@ -83,7 +84,7 @@ describe('2026-10-16 QA logic audit regression coverage', () => {
     db.quest_attempts = db.quest_attempts.filter((item) => item.quest_id !== auditQuestId);
     db.submissions = db.submissions.filter((item) => item.quest_id !== auditQuestId);
     db.quests = db.quests.filter((item) => item.id !== auditQuestId);
-    db.users = db.users.filter((item) => item.id !== auditUserId);
+    db.users = db.users.filter((item) => ![auditUserId, auditSelfReviewerId].includes(item.id));
   });
 
   it('rejects non-numeric and blank step GPS without verifying the checkpoint', async () => {
@@ -225,6 +226,32 @@ describe('2026-10-16 QA logic audit regression coverage', () => {
     expect(duplicate.statusCode).toBe(409);
     expect(duplicate.error?.code).toBe('ALREADY_COMPLETED');
     expect(db.findUserById(auditUserId)!.demo_points).toBe(pointsBefore + 10);
+  });
+
+  it('forbids self-approval and self-rejection, while allowing a different reviewer', async () => {
+    const selfReviewer = { ...db.findUserById(auditUserId)!, id: auditSelfReviewerId,
+      seed_id: 'qa-audit-self-reviewer-seed', display_name: 'Self Review Admin',
+      email: 'qa-audit-self-reviewer@example.test', role: 'admin' as const, demo_points: 0 };
+    db.users.push(selfReviewer);
+    const ownSubmission = db.createSubmission({
+      idempotency_key: 'qa-audit-self-review-proof', user_id: auditSelfReviewerId, quest_id: auditQuestId,
+      scanned_marker_code: 'CHALLENGE:self-review', captured_lat: 16.0219, captured_lng: 120.2312,
+      captured_accuracy: 5, status: 'pending', is_test: false,
+    });
+    const pointsBefore = selfReviewer.demo_points;
+
+    const selfApprove = await submissionsService.reviewSubmission(ownSubmission.id, 'approve', auditSelfReviewerId);
+    const selfReject = await submissionsService.reviewSubmission(ownSubmission.id, 'reject', auditSelfReviewerId, 'Self reject');
+    expect(selfApprove.statusCode).toBe(403);
+    expect(selfApprove.error?.code).toBe('SELF_REVIEW_FORBIDDEN');
+    expect(selfReject.statusCode).toBe(403);
+    expect(selfReject.error?.code).toBe('SELF_REVIEW_FORBIDDEN');
+    expect(ownSubmission.status).toBe('pending');
+    expect(selfReviewer.demo_points).toBe(pointsBefore);
+
+    const independent = await submissionsService.reviewSubmission(ownSubmission.id, 'approve', 'qa-audit-independent-admin');
+    expect(independent.success).toBe(true);
+    expect(independent.data?.awarded_points).toBe(10);
   });
 
   const realPostgresTest = process.env.JDQ_REAL_PG_URL ? it : it.skip;

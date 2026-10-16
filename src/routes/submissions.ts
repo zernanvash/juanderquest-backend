@@ -64,6 +64,10 @@ router.post(
         return res.status(409).json({ success: false,
           error: { code: 'SUBMISSION_PENDING', message: 'A proof for this quest is already awaiting review.' } });
       }
+      if (err?.code === '23505' && err?.constraint === 'idx_submissions_challenge_nonce') {
+        return res.status(409).json({ success: false,
+          error: { code: 'CHALLENGE_ALREADY_USED', message: 'This challenge token has already been consumed.' } });
+      }
       if (err?.code === '23505' && err?.constraint === 'submissions_idempotency_key_key') {
         try {
           const replay = await submissionsService.createSubmission(submissionInput);

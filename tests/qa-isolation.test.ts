@@ -15,13 +15,13 @@ describe('Phase 5: Synthetic QA Data Isolation', () => {
   const adminUserId = '80808080-8080-8080-8080-808080808080';
 
   const tokenUser = jwt.sign(
-    { id: genuineUserId, role: 'user' },
+    { id: genuineUserId, seed_id: 'qa-isolation-user', role: 'user' },
     env.JWT_SECRET,
     { expiresIn: '1h' }
   );
 
   const tokenAdmin = jwt.sign(
-    { id: adminUserId, role: 'admin' },
+    { id: adminUserId, seed_id: 'qa-isolation-admin', role: 'admin' },
     env.JWT_SECRET,
     { expiresIn: '1h' }
   );

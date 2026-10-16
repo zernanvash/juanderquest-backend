@@ -276,8 +276,8 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
   });
 
   it('admin REST API endpoints: GET and POST /promotion-assessment', async () => {
-    const adminToken = jwt.sign({ id: adminId, role: 'admin' }, env.JWT_SECRET);
-    const userToken = jwt.sign({ id: normalUserId, role: 'user' }, env.JWT_SECRET);
+    const adminToken = jwt.sign({ id: adminId, seed_id: adminId, role: 'admin' }, env.JWT_SECRET);
+    const userToken = jwt.sign({ id: normalUserId, seed_id: normalUserId, role: 'user' }, env.JWT_SECRET);
 
     // 1. Unauthorized for non-admin
     const unauthorized = await request(app)
@@ -520,7 +520,7 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
     });
 
     it('wrong campaign GET returns 404 with no unrelated assessment leak', async () => {
-      const adminToken = jwt.sign({ id: adminId, role: 'admin' }, env.JWT_SECRET);
+      const adminToken = jwt.sign({ id: adminId, seed_id: adminId, role: 'admin' }, env.JWT_SECRET);
       const wrongCampaignId = randomUUID();
 
       const res = await request(app)
