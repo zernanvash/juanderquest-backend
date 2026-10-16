@@ -41,4 +41,11 @@ describe('Anonymous public read cache (ETag + Cache-Control)', () => {
     const post = await request(app).post('/api/v1/spots').send({});
     expect(post.status).not.toBe(304);
   });
+
+  it('varies on Cookie and Authorization so shared caches never cross identities', async () => {
+    const res = await request(app).get('/api/v1/spots');
+    const vary = String(res.headers['vary'] || '').toLowerCase();
+    expect(vary).toContain('cookie');
+    expect(vary).toContain('authorization');
+  });
 });

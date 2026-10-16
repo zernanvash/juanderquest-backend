@@ -5,6 +5,8 @@ let shuttingDown = false;
 
 export const setServiceReady = (value: boolean): void => {
   ready = value;
+  // Becoming ready again means any earlier drain is over; keep state coherent.
+  if (value) shuttingDown = false;
 };
 
 export const isServiceReady = (): boolean => ready;

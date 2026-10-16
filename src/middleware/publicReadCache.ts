@@ -36,6 +36,10 @@ export const publicReadCache = (req: Request, res: Response, next: NextFunction)
     const etag = `W/"${createHash('sha256').update(text).digest('base64url').slice(0, 24)}"`;
     res.setHeader('ETag', etag);
     res.setHeader('Cache-Control', PUBLIC_READ_CACHE_CONTROL);
+    // Identity changes the representation (QA/alpha scope, own data); a shared
+    // cache must never hand the anonymous copy to a credentialed request.
+    res.vary('Cookie');
+    res.vary('Authorization');
 
     const ifNoneMatch = req.headers['if-none-match'];
     if (typeof ifNoneMatch === 'string') {
