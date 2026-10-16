@@ -22,7 +22,12 @@ describe('Destination-Author Quests System', () => {
   const testSpotId = `spot-author-test-${Date.now()}`;
   const testSpotSlug = `author-test-spot-${Date.now()}`;
 
+  // This suite covers the ungated (legacy) publish-immediately flow. Funded-quest
+  // gating (new author quests start as drafts) is covered by the funding suites.
+  const originalFundingFlag = env.QUEST_FUNDING_ENABLED;
+
   beforeAll(() => {
+    env.QUEST_FUNDING_ENABLED = false;
     // Register a spot authored by Juan Dela Cruz
     spotStore.spots.push({
       id: testSpotId,
@@ -51,6 +56,7 @@ describe('Destination-Author Quests System', () => {
   });
 
   afterAll(() => {
+    env.QUEST_FUNDING_ENABLED = originalFundingFlag;
     spotStore.spots = spotStore.spots.filter((s) => s.id !== testSpotId);
   });
 
