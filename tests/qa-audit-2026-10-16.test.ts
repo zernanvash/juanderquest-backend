@@ -3,6 +3,9 @@ import jwt from 'jsonwebtoken';
 import { app } from '../src/app.js';
 import { db, QuestRow, UserRow, withinRadius } from '../src/db/index.js';
 import { env } from '../src/config/env.js';
+import { submissionsService } from '../src/services/submissions.js';
+import { createTestDb } from '../src/db/testHarness.js';
+import { applyMigrations } from '../src/db/migrations.js';
 
 const auditUserId = 'qa-audit-traveler-20261016';
 const auditQuestId = 'qa-audit-quest-20261016';
@@ -171,5 +174,111 @@ describe('2026-10-16 QA logic audit regression coverage', () => {
       .send({ idempotency_key: 'qa-audit-private-step-code', captured_lat: '16.0219', captured_lng: '120.2312', qr_code: auditStepQr });
     expect(valid.status).toBe(200);
     expect(valid.body.data.step.status).toBe('verified');
+  });
+
+  it('allows only one pending submission and reopens the slot after rejection', async () => {
+    db.submissions = db.submissions.filter((item) => item.quest_id !== auditQuestId);
+    const pending = db.createSubmission({
+      idempotency_key: 'qa-audit-pending-original', user_id: auditUserId, quest_id: auditQuestId,
+      scanned_marker_code: 'CHALLENGE:pending-original', captured_lat: 16.0219, captured_lng: 120.2312,
+      captured_accuracy: 5, status: 'pending', is_test: false,
+    });
+    const blocked = await request(app)
+      .post('/api/v1/submissions')
+      .set('Authorization', `Bearer ${auditToken}`)
+      .send({ idempotency_key: '0f713893-6307-4bbd-8e0e-745013b7415e', quest_id: auditQuestId,
+        challenge_token: 'not-even-a-valid-token', captured_lat: 16.0219, captured_lng: 120.2312, captured_accuracy: 5 });
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error.code).toBe('SUBMISSION_PENDING');
+
+    db.reviewSubmission(pending.id, 'reject', 'qa-audit-reviewer', 'Proof needs correction.');
+    const challenge = jwt.sign({ sub: 'quest_challenge', user_id: auditUserId, quest_id: auditQuestId, nonce: 'qa-audit-after-rejection' }, env.JWT_SECRET, { expiresIn: '10m' });
+    const retried = await request(app)
+      .post('/api/v1/submissions')
+      .set('Authorization', `Bearer ${auditToken}`)
+      .send({ idempotency_key: 'e48ed53d-3a64-4a23-8588-c737d3b8f43f', quest_id: auditQuestId,
+        challenge_token: challenge, captured_lat: 16.0219, captured_lng: 120.2312, captured_accuracy: 5 });
+    expect(retried.status).toBe(201);
+    expect(retried.body.data.status).toBe('pending');
+  });
+
+  it('rejects a second approval for the same traveler and quest without a second reward', async () => {
+    db.submissions = db.submissions.filter((item) => item.quest_id !== auditQuestId);
+    const first = db.createSubmission({
+      idempotency_key: 'qa-audit-approval-first', user_id: auditUserId, quest_id: auditQuestId,
+      scanned_marker_code: 'CHALLENGE:first', captured_lat: 16.0219, captured_lng: 120.2312,
+      captured_accuracy: 5, status: 'pending', is_test: false,
+    });
+    const second = db.createSubmission({
+      idempotency_key: 'qa-audit-approval-second', user_id: auditUserId, quest_id: auditQuestId,
+      scanned_marker_code: 'CHALLENGE:second', captured_lat: 16.0219, captured_lng: 120.2312,
+      captured_accuracy: 5, status: 'pending', is_test: false,
+    });
+    const pointsBefore = db.findUserById(auditUserId)!.demo_points;
+
+    const approved = await submissionsService.reviewSubmission(first.id, 'approve', 'qa-audit-admin');
+    const duplicate = await submissionsService.reviewSubmission(second.id, 'approve', 'qa-audit-admin');
+
+    expect(approved.success).toBe(true);
+    expect(approved.data?.awarded_points).toBe(10);
+    expect(duplicate.success).toBe(false);
+    expect(duplicate.statusCode).toBe(409);
+    expect(duplicate.error?.code).toBe('ALREADY_COMPLETED');
+    expect(db.findUserById(auditUserId)!.demo_points).toBe(pointsBefore + 10);
+  });
+
+  const realPostgresTest = process.env.JDQ_REAL_PG_URL ? it : it.skip;
+  realPostgresTest('rotates exposed step QR codes and reconciles duplicate pending rows on disposable PostgreSQL', async () => {
+    const fixture = await createTestDb();
+    try {
+      await fixture.pool.query('DROP INDEX IF EXISTS idx_submissions_unique_pending');
+      await fixture.pool.query("DELETE FROM schema_migrations WHERE filename IN ('045_quest_step_marker_codes.sql', '046_submissions_single_pending.sql')");
+      const userA = `qa-migration-a-${Date.now()}`;
+      const userB = `qa-migration-b-${Date.now()}`;
+      const questId = `qa-migration-quest-${Date.now()}`;
+      await fixture.pool.query(
+        `INSERT INTO users(id, seed_id, display_name, email, role, is_test)
+         VALUES ($1,$2,'Migration A',$3,'user',false), ($4,$5,'Migration B',$6,'user',false)`,
+        [userA, `${userA}-seed`, `${userA}@example.test`, userB, `${userB}-seed`, `${userB}@example.test`]
+      );
+      await fixture.pool.query(
+        `INSERT INTO quests(id,title,description,category,location_name,gps_lat,gps_lng,marker_code,marker_image_url,steps)
+         VALUES ($1,'Migration fixture','Migration fixture quest','eco','Test',16,120,'MIGRATION-MARKER','',
+           $2::jsonb)`,
+        [questId, JSON.stringify([{ step_order: 1, checkpoint_type: 'qr', marker_code: 'EXPOSED_OLD_QR', hint: 'find the painted post' }])]
+      );
+      const submissions = [
+        ['migration-approved', userA, 'approved', '2026-10-01T00:00:00Z'],
+        ['migration-older-pending', userA, 'pending', '2026-10-02T00:00:00Z'],
+        ['migration-newer-pending', userA, 'pending', '2026-10-03T00:00:00Z'],
+        ['migration-older-only', userB, 'pending', '2026-10-01T00:00:00Z'],
+        ['migration-newer-only', userB, 'pending', '2026-10-04T00:00:00Z'],
+      ] as const;
+      for (const [id, userId, status, createdAt] of submissions) {
+        await fixture.pool.query(
+          `INSERT INTO submissions(id,idempotency_key,user_id,quest_id,scanned_marker_code,captured_lat,captured_lng,captured_accuracy,status,created_at,updated_at,is_test)
+           VALUES ($1,$2,$3,$4,$5,16,120,5,$6,$7,$7,false)`,
+          [id, `${id}-key`, userId, questId, `CHALLENGE:${id}`, status, createdAt]
+        );
+      }
+
+      await applyMigrations(fixture.pool);
+      const step = (await fixture.pool.query('SELECT steps FROM quests WHERE id = $1', [questId])).rows[0].steps[0];
+      expect(step.marker_code).toMatch(/^JDQ-STEP-[A-F0-9]{32}$/);
+      expect(step.marker_code).not.toBe('EXPOSED_OLD_QR');
+      expect(step.hint).toBe('find the painted post');
+      const statuses = (await fixture.pool.query(
+        'SELECT id,status,reviewed_by,rejection_reason FROM submissions WHERE id LIKE $1 ORDER BY id', ['migration-%']
+      )).rows;
+      expect(statuses.find((row: any) => row.id === 'migration-older-pending')).toMatchObject({
+        status: 'rejected', reviewed_by: null,
+        rejection_reason: 'system: duplicate of an approved submission (QA 2026-10-16)',
+      });
+      expect(statuses.find((row: any) => row.id === 'migration-newer-pending')?.status).toBe('rejected');
+      expect(statuses.find((row: any) => row.id === 'migration-older-only')?.status).toBe('rejected');
+      expect(statuses.find((row: any) => row.id === 'migration-newer-only')?.status).toBe('pending');
+    } finally {
+      await fixture.close();
+    }
   });
 });

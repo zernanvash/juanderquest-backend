@@ -168,6 +168,22 @@ export class SubmissionsService {
       };
     }
 
+    // One proof per active traveler/quest review cycle. This check precedes
+    // proof/nonce validation so a second device cannot reserve a new token.
+    if (pool) {
+      const pending = await pool.query(
+        "SELECT 1 FROM submissions WHERE user_id = $1 AND quest_id = $2 AND status = 'pending' LIMIT 1",
+        [payload.user_id, payload.quest_id]
+      );
+      if (pending.rowCount) {
+        return { success: false, statusCode: 409,
+          error: { code: 'SUBMISSION_PENDING', message: 'A proof for this quest is already awaiting review.' } };
+      }
+    } else if (db.hasPendingSubmission(payload.user_id, payload.quest_id)) {
+      return { success: false, statusCode: 409,
+        error: { code: 'SUBMISSION_PENDING', message: 'A proof for this quest is already awaiting review.' } };
+    }
+
     // 4. Verify Proof (Challenge Token or Physical Scanned Marker)
     let finalMarkerCode: string;
 
@@ -471,6 +487,17 @@ export class SubmissionsService {
         }
 
         const sub = subRows[0];
+        if (action === 'approve') {
+          const duplicate = await client.query(
+            "SELECT 1 FROM submissions WHERE user_id = $1 AND quest_id = $2 AND status = 'approved' AND id <> $3 LIMIT 1",
+            [sub.user_id, sub.quest_id, id]
+          );
+          if (duplicate.rowCount) {
+            await client.query('ROLLBACK');
+            return { success: false, statusCode: 409,
+              error: { code: 'ALREADY_COMPLETED', message: 'This traveler already has an approved proof for this quest. Reject this one as a duplicate.' } };
+          }
+        }
         if (appealDecision) {
           if (action !== 'approve' || appealDecision.reason.trim().length < 10 ||
               appealDecision.reason.trim().length > 2000) {
@@ -553,13 +580,23 @@ export class SubmissionsService {
           WHERE id = $1 AND status = $5
           RETURNING *
         `;
-        const { rows: updatedSubRows } = await client.query(updateSubQuery, [
-          id,
-          targetStatus,
-          action === 'reject' ? (rejectionReason ?? null) : null,
-          adminId,
-          appealDecision ? 'rejected' : 'pending',
-        ]);
+        let updatedSubRows: any[];
+        try {
+          ({ rows: updatedSubRows } = await client.query(updateSubQuery, [
+            id,
+            targetStatus,
+            action === 'reject' ? (rejectionReason ?? null) : null,
+            adminId,
+            appealDecision ? 'rejected' : 'pending',
+          ]));
+        } catch (error: any) {
+          if (error.code === '23505' && error.constraint === 'idx_submissions_unique_approved') {
+            await client.query('ROLLBACK');
+            return { success: false, statusCode: 409,
+              error: { code: 'ALREADY_COMPLETED', message: 'This traveler already has an approved proof for this quest. Reject this one as a duplicate.' } };
+          }
+          throw error;
+        }
 
         if (updatedSubRows.length === 0) {
           const { rows: currentRows } = await client.query('SELECT * FROM submissions WHERE id = $1', [id]);
@@ -713,6 +750,10 @@ export class SubmissionsService {
         };
       } catch (error) {
         await client.query('ROLLBACK');
+        if ((error as any)?.code === '23505' && (error as any)?.constraint === 'idx_submissions_unique_approved') {
+          return { success: false, statusCode: 409,
+            error: { code: 'ALREADY_COMPLETED', message: 'This traveler already has an approved proof for this quest. Reject this one as a duplicate.' } };
+        }
         throw error;
       } finally {
         client.release();
@@ -733,8 +774,10 @@ export class SubmissionsService {
         success: false,
         statusCode: 409,
         error: {
-          code: 'STATE_CONFLICT',
-          message: `Submission '${id}' has already been reviewed as '${result.submission.status}' and cannot transition.`,
+          code: result.reason ?? 'STATE_CONFLICT',
+          message: result.reason === 'ALREADY_COMPLETED'
+            ? 'This traveler already has an approved proof for this quest. Reject this one as a duplicate.'
+            : `Submission '${id}' has already been reviewed as '${result.submission.status}' and cannot transition.`,
         },
       };
     }

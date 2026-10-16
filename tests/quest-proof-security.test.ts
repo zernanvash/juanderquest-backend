@@ -189,6 +189,12 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
   });
 
   describe('3. Submission Verification & Fraud Prevention', () => {
+    beforeEach(() => {
+      // Each proof-policy case starts a fresh review cycle; a pending proof
+      // intentionally blocks a second independent submission for that pair.
+      db.submissions = db.submissions.filter((submission) => submission.quest_id !== testQuestId);
+    });
+
     it('accepts valid challenge token within GPS radius and creates pending submission', async () => {
       // Obtain challenge token
       const challengeRes = await request(app)
@@ -317,7 +323,7 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
       expect(res.body.error.code).toBe('CHALLENGE_QUEST_MISMATCH');
     });
 
-    it('rejects replay of already consumed challenge token with 409 CHALLENGE_ALREADY_USED', async () => {
+    it('blocks a second proof while the first proof is pending review', async () => {
       // Issue challenge
       const challengeRes = await request(app)
         .post(`/api/v1/quests/${testQuestId}/challenge`)
@@ -351,7 +357,7 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
           captured_accuracy: 5,
         });
       expect(replayRes.status).toBe(409);
-      expect(replayRes.body.error.code).toBe('CHALLENGE_ALREADY_USED');
+      expect(replayRes.body.error.code).toBe('SUBMISSION_PENDING');
     });
 
     it('rejects submission with out-of-radius coordinates with 422 OUT_OF_RANGE', async () => {
@@ -470,7 +476,7 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
       expect(conflict.body.error.code).toBe('IDEMPOTENCY_CONFLICT');
     });
 
-    it('consumes a challenge token exactly once under concurrent submissions', async () => {
+    it('admits only one concurrent submission for a quest and traveler', async () => {
       const challengeRes = await request(app)
         .post(`/api/v1/quests/${testQuestId}/challenge`)
         .set('Authorization', `Bearer ${otherTravelerToken}`);
@@ -493,7 +499,7 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
       const statuses = results.map((r) => r.status).sort();
       expect(statuses).toEqual([201, 409]);
       const rejected = results.find((r) => r.status === 409);
-      expect(rejected?.body.error.code).toBe('CHALLENGE_ALREADY_USED');
+      expect(rejected?.body.error.code).toBe('SUBMISSION_PENDING');
     });
   });
 

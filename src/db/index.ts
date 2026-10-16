@@ -2372,6 +2372,10 @@ export class MemoryDb {
     return this.submissions.some((s) => s.user_id === userId && s.quest_id === questId && s.status === 'approved');
   }
 
+  hasPendingSubmission(userId: string, questId: string): boolean {
+    return this.submissions.some((s) => s.user_id === userId && s.quest_id === questId && s.status === 'pending');
+  }
+
   createSubmission(payload: Omit<SubmissionRow, 'id' | 'created_at' | 'updated_at'>): SubmissionRow {
     const newSub: SubmissionRow = {
       ...payload,
@@ -2424,11 +2428,16 @@ export class MemoryDb {
   }
 
   // Idempotent state transition & single point award (Fix 4.5 & 4.7)
-  reviewSubmission(id: string, action: 'approve' | 'reject', adminId: string, reason?: string): { submission: SubmissionRow; alreadyReviewed: boolean; conflicting: boolean } | undefined {
+  reviewSubmission(id: string, action: 'approve' | 'reject', adminId: string, reason?: string): { submission: SubmissionRow; alreadyReviewed: boolean; conflicting: boolean; reason?: 'ALREADY_COMPLETED' } | undefined {
     const sub = this.submissions.find((s) => s.id === id);
     if (!sub) return undefined;
 
     const targetStatus = action === 'approve' ? 'approved' : 'rejected';
+
+    if (action === 'approve' && this.submissions.some((candidate) =>
+      candidate.id !== id && candidate.user_id === sub.user_id && candidate.quest_id === sub.quest_id && candidate.status === 'approved')) {
+      return { submission: sub, alreadyReviewed: false, conflicting: true, reason: 'ALREADY_COMPLETED' };
+    }
 
     // Idempotent check: if already in target status, return without re-adding points
     if (sub.status === targetStatus) {
