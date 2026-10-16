@@ -14,6 +14,7 @@ import { getSpotPhotoStorageProvider } from '../storage/spot-photos.js';
 import { detectValidatedMediaMime } from '../utils/media-mime.js';
 import { fieldLogStore, FieldLogTag, SpotReportReason } from '../spots/field-logs.js';
 import { hiddenGemHighlights } from '../spots/highlights.js';
+import { sanitizeQuestForViewer } from '../quests/sanitize.js';
 
 const router = Router();
 const csv = (value: unknown) => typeof value === 'string' && value ? value.split(',').map(v => v.trim()).filter(Boolean) : [];
@@ -353,7 +354,13 @@ router.post('/spots/:id/quests', authenticateToken, validateRequest(createAuthor
   const nowIso = new Date().toISOString();
 
   const questStatus = req.body.status ?? 'published';
-  const questSteps = Array.isArray(req.body.steps) ? req.body.steps : [];
+  const requestedSteps = Array.isArray(req.body.steps) ? req.body.steps : [];
+  const priorQuest = spot.quest_id ? db.findQuestById(spot.quest_id, true) : undefined;
+  const questSteps = requestedSteps.map((step: any) => {
+    if (step.checkpoint_type !== 'qr') return step;
+    const oldStep = priorQuest?.steps?.find((candidate) => candidate.step_order === step.step_order);
+    return { ...step, marker_code: oldStep?.marker_code || `JDQ-STEP-${randomUUID().replace(/-/g, '').toUpperCase()}` };
+  });
 
   const newQuest: QuestRow = {
     id: questId,
@@ -528,7 +535,7 @@ router.get('/spots/:id/quests', optionalAuthenticateToken, checkQAAuthorization,
   // Sanitize: strip marker_code unless authorized
   const sanitized = quests.map((quest) => {
     const canInspectMarker = allowTest || isAuthor || isAdminOrQA;
-    const base = canInspectMarker ? { ...quest } : (({ marker_code, ...rest }) => rest)(quest);
+    const base = sanitizeQuestForViewer(quest, canInspectMarker);
     if (isAuthor || isAdminOrQA) {
       return {
         ...base,

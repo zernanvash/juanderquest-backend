@@ -1,6 +1,7 @@
 import { newDb, DataType, IMemoryDb } from 'pg-mem';
 import { Pool } from 'pg';
 import { applyMigrations } from './pool.js';
+import { registerPgMemMigrationAdapter } from './migrations.js';
 import { randomUUID } from 'crypto';
 
 export interface TestDbInstance {
@@ -167,6 +168,7 @@ export async function createTestDb(options: { poolMax?: number } = {}): Promise<
 
   const { Pool: MemPool } = memDb.adapters.createPg();
   const pool = new MemPool() as unknown as Pool;
+  registerPgMemMigrationAdapter(pool);
 
   await applyMigrations(pool);
 

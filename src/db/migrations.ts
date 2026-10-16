@@ -57,11 +57,19 @@ export const MIGRATIONS = [
   '041_clear_unverified_stock_images.sql',
   '042_merchant_affiliation_and_dashboard.sql',
   '043_admin_settings.sql',
+  '044_quest_step_evidence.sql',
+  '045_quest_step_marker_codes.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
 // two processes cannot apply the same migration twice.
 const MIGRATION_ADVISORY_LOCK_KEY = 0x4a445130;
+const pgMemMigrationAdapters = new WeakSet<object>();
+
+/** Mark pg-mem pools that need compatibility handling for unsupported SQL features. */
+export function registerPgMemMigrationAdapter(pool: Pool): void {
+  pgMemMigrationAdapters.add(pool as object);
+}
 
 function migrationChecksum(sql: string): string {
   return createHash('sha256').update(sql).digest('hex');
@@ -135,7 +143,12 @@ export async function applyMigrations(pg: Pool) {
 
       try {
         await client.query('BEGIN');
-        await client.query(sql);
+        // pg-mem does not implement jsonb_array_elements. The 045 production
+        // backfill remains in SQL; unit fixtures cover route behavior while
+        // the adapter records the migration so ordering/ledger tests proceed.
+        if (!(file === '045_quest_step_marker_codes.sql' && pgMemMigrationAdapters.has(pg as object))) {
+          await client.query(sql);
+        }
         await client.query('INSERT INTO schema_migrations (filename, checksum) VALUES ($1, $2)', [file, checksum]);
         await client.query('COMMIT');
       } catch (error) {

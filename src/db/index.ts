@@ -113,6 +113,8 @@ export interface QuestStep {
   gps_lng?: number;
   radius_meters?: number;
   hint?: string;
+  /** Server-generated QR secret. Never included in traveler-facing snapshots. */
+  marker_code?: string;
 }
 
 export type QuestStepStatus = 'not_started' | 'ready' | 'pending_review' | 'needs_changes' | 'verified' | 'skipped_optional';

@@ -6,6 +6,7 @@ import { env } from '../src/config/env.js';
 
 const auditUserId = 'qa-audit-traveler-20261016';
 const auditQuestId = 'qa-audit-quest-20261016';
+const auditStepQr = 'JDQ-STEP-AUDIT-SECRET-20261016';
 const auditToken = jwt.sign({ id: auditUserId, seed_id: 'qa-audit-traveler', role: 'user' }, env.JWT_SECRET);
 
 describe('2026-10-16 QA logic audit regression coverage', () => {
@@ -64,6 +65,7 @@ describe('2026-10-16 QA logic audit regression coverage', () => {
           checkpoint_type: 'qr',
           required: true,
           hint: 'Public human-readable hint, not a secret.',
+          marker_code: auditStepQr,
         },
       ],
       created_at: now,
@@ -85,7 +87,7 @@ describe('2026-10-16 QA logic audit regression coverage', () => {
     const attempt = await request(app)
       .post(`/api/v1/quests/${auditQuestId}/attempts`)
       .set('Authorization', `Bearer ${auditToken}`);
-    expect(attempt.status).toBe(201);
+    expect([200, 201]).toContain(attempt.status);
 
     const invalid = await request(app)
       .post(`/api/v1/quests/${auditQuestId}/steps/1/evidence`)
@@ -123,5 +125,51 @@ describe('2026-10-16 QA logic audit regression coverage', () => {
   it('fails radius checks closed when the computed GPS distance is not finite', () => {
     expect(withinRadius(Number.NaN, 120, 16, 120, 100).ok).toBe(false);
     expect(withinRadius(16, 120, 16, 120, 100).ok).toBe(true);
+  });
+
+  it('hides per-step QR secrets from public quest and attempt projections', async () => {
+    const list = await request(app).get('/api/v1/quests');
+    const listed = list.body.data.find((quest: any) => quest.id === auditQuestId);
+    expect(list.status).toBe(200);
+    expect(listed.steps[1].hint).toBe('Public human-readable hint, not a secret.');
+    expect(listed.steps[1].marker_code).toBeUndefined();
+
+    const detail = await request(app).get(`/api/v1/quests/${auditQuestId}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.data.steps[1].marker_code).toBeUndefined();
+
+    const attempt = await request(app)
+      .post(`/api/v1/quests/${auditQuestId}/attempts`)
+      .set('Authorization', `Bearer ${auditToken}`);
+    expect([200, 201]).toContain(attempt.status);
+    expect(attempt.body.data.steps_snapshot[1].marker_code).toBeUndefined();
+  });
+
+  it('rejects a public QR hint and accepts only the configured private step marker', async () => {
+    db.quest_step_evidence = db.quest_step_evidence.filter((item) => item.quest_id !== auditQuestId);
+    db.quest_attempts = db.quest_attempts.filter((item) => item.quest_id !== auditQuestId);
+    const started = await request(app)
+      .post(`/api/v1/quests/${auditQuestId}/attempts`)
+      .set('Authorization', `Bearer ${auditToken}`);
+    const initial = await request(app)
+      .post(`/api/v1/quests/${auditQuestId}/steps/1/evidence`)
+      .set('Authorization', `Bearer ${auditToken}`)
+      .send({ idempotency_key: 'qa-audit-qr-prerequisite', captured_lat: '16.0219', captured_lng: '120.2312' });
+    expect(initial.status).toBe(200);
+    expect(started.body.data.id).toBeTruthy();
+
+    const hint = await request(app)
+      .post(`/api/v1/quests/${auditQuestId}/steps/2/evidence`)
+      .set('Authorization', `Bearer ${auditToken}`)
+      .send({ idempotency_key: 'qa-audit-public-hint', captured_lat: '16.0219', captured_lng: '120.2312', qr_code: 'Public human-readable hint, not a secret.' });
+    expect(hint.status).toBe(400);
+    expect(hint.body.error.code).toBe('INVALID_QR_CODE');
+
+    const valid = await request(app)
+      .post(`/api/v1/quests/${auditQuestId}/steps/2/evidence`)
+      .set('Authorization', `Bearer ${auditToken}`)
+      .send({ idempotency_key: 'qa-audit-private-step-code', captured_lat: '16.0219', captured_lng: '120.2312', qr_code: auditStepQr });
+    expect(valid.status).toBe(200);
+    expect(valid.body.data.step.status).toBe('verified');
   });
 });

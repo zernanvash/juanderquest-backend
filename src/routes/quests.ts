@@ -1,6 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { randomUUID, createHash } from 'crypto';
+import { randomUUID, createHash, timingSafeEqual } from 'crypto';
 import multer from 'multer';
 import { z } from 'zod';
 import path from 'path';
@@ -16,8 +16,16 @@ import { claimChallengeNonce } from '../services/submissions.js';
 import { detectValidatedMediaMime } from '../utils/media-mime.js';
 import { validateRequest } from '../middleware/validate.js';
 import { optionalAccuracy, optionalLat, optionalLng } from '../middleware/coerce.js';
+import { sanitizeAttemptSnapshot, sanitizeQuestForViewer, sanitizeQuestSteps } from '../quests/sanitize.js';
 
 const router = Router();
+
+function secureCodeEquals(expected: unknown, supplied: unknown): boolean {
+  if (typeof expected !== 'string' || typeof supplied !== 'string') return false;
+  const expectedBytes = Buffer.from(expected, 'utf8');
+  const suppliedBytes = Buffer.from(supplied, 'utf8');
+  return expectedBytes.length === suppliedBytes.length && timingSafeEqual(expectedBytes, suppliedBytes);
+}
 
 const evidenceUpload = multer({
   storage: multer.memoryStorage(),
@@ -59,7 +67,7 @@ function mapAttempt(row: any): QuestAttemptRow {
     current_step: Number(row.current_step),
     total_steps: Number(row.total_steps),
     status: row.status,
-    steps_snapshot: Array.isArray(row.steps_snapshot) ? row.steps_snapshot : undefined,
+    steps_snapshot: sanitizeQuestSteps(Array.isArray(row.steps_snapshot) ? row.steps_snapshot : undefined),
     verified_steps: row.verified_steps !== undefined && row.verified_steps !== null ? Number(row.verified_steps) : 0,
     required_steps: row.required_steps !== undefined && row.required_steps !== null ? Number(row.required_steps) : 1,
     review_notes: row.review_notes ?? null,
@@ -104,7 +112,7 @@ router.get('/quests', optionalAuthenticateToken, checkQAAuthorization, (req: Aut
   // Filter out archived or draft quests for general public
   const quests = db.listQuests(category, allowTest)
     .filter(q => q.status !== 'archived' && (q.status !== 'draft' || isAuthorizedQA(req)))
-    .map(({ marker_code, ...quest }) => quest);
+    .map((quest) => sanitizeQuestForViewer(quest, false));
 
   return res.status(200).json({
     success: true,
@@ -153,7 +161,7 @@ router.get('/quests/:id', optionalAuthenticateToken, checkQAAuthorization, (req:
 
   // Phase 1 Security Repair: Do not leak marker_code to unauthorized/public viewers.
   const canInspectMarker = allowTest || isAuthor || isAdminOrQA;
-  let responseData: any = canInspectMarker ? { ...quest } : (({ marker_code, ...rest }) => rest)(quest);
+  let responseData: any = sanitizeQuestForViewer(quest, canInspectMarker);
 
   // Author & Admin operational metrics (attempt statistics without leaking private traveler GPS/identities)
   if (isAuthor || isAdminOrQA) {
@@ -401,7 +409,7 @@ router.post('/quests/:id/attempts', authenticateToken, async (req: AuthRequest, 
   if (existing) {
     return res.status(200).json({
       success: true,
-      data: rewardReservation ? { ...existing, reward_reservation: rewardReservation } : existing,
+      data: rewardReservation ? { ...sanitizeAttemptSnapshot(existing), reward_reservation: rewardReservation } : sanitizeAttemptSnapshot(existing),
       message: 'Resumed existing quest attempt.',
     });
   }
@@ -421,7 +429,7 @@ router.post('/quests/:id/attempts', authenticateToken, async (req: AuthRequest, 
 
   return res.status(201).json({
     success: true,
-    data: rewardReservation ? { ...newAttempt, reward_reservation: rewardReservation } : newAttempt,
+    data: rewardReservation ? { ...sanitizeAttemptSnapshot(newAttempt), reward_reservation: rewardReservation } : sanitizeAttemptSnapshot(newAttempt),
     message: 'Quest attempt started.',
   });
 });
@@ -462,7 +470,7 @@ router.get('/quests/:id/progress', authenticateToken, async (req: AuthRequest, r
       return res.status(200).json({ success: true, data: {
         quest_id: id,
         has_completed: Boolean(completed.rowCount),
-        active_attempt: activeAttempt,
+        active_attempt: activeAttempt ? sanitizeAttemptSnapshot(activeAttempt) : null,
       } });
     } catch (error) { return next(error); }
   }
@@ -479,7 +487,7 @@ router.get('/quests/:id/progress', authenticateToken, async (req: AuthRequest, r
     data: {
       quest_id: id,
       has_completed: hasCompleted,
-      active_attempt: activeAttempt,
+      active_attempt: activeAttempt ? sanitizeAttemptSnapshot(activeAttempt) : null,
     },
   });
 });
@@ -579,7 +587,7 @@ router.post(
       if (idempotencyKey && stepEvidence.idempotency_key === idempotencyKey) {
         return res.status(200).json({
           success: true,
-          data: { step: stepEvidence, attempt: activeAttempt },
+          data: { step: stepEvidence, attempt: sanitizeAttemptSnapshot(activeAttempt) },
           message: 'Step already verified.',
         });
       }
@@ -593,7 +601,7 @@ router.post(
       if (idempotencyKey && stepEvidence.idempotency_key === idempotencyKey) {
         return res.status(200).json({
           success: true,
-          data: { step: stepEvidence, attempt: activeAttempt },
+          data: { step: stepEvidence, attempt: sanitizeAttemptSnapshot(activeAttempt) },
           message: 'Step proof already submitted for review.',
         });
       }
@@ -691,8 +699,8 @@ router.post(
       let qrDetails: any = {};
 
       if (qrCode) {
-        const matchesQuest = qrCode === quest.marker_code;
-        const matchesStep = questStepDef && (questStepDef as QuestStep & { marker_code?: string }).marker_code === qrCode;
+        const matchesQuest = secureCodeEquals(quest.marker_code, qrCode);
+        const matchesStep = questStepDef && secureCodeEquals(questStepDef.marker_code, qrCode);
         if (matchesQuest || matchesStep) {
           qrValid = true;
           qrDetails = { scanned_qr: qrCode };
@@ -855,7 +863,7 @@ router.post(
       success: true,
       data: {
         step: stepEvidence,
-        attempt: activeAttempt,
+        attempt: sanitizeAttemptSnapshot(activeAttempt),
       },
       message: newStatus === 'verified' ? 'Step verified successfully.' : 'Step proof submitted for independent review.',
     });
@@ -933,7 +941,7 @@ router.post('/quests/:id/submit-for-review', authenticateToken, async (req: Auth
 
   return res.status(200).json({
     success: true,
-    data: activeAttempt,
+    data: sanitizeAttemptSnapshot(activeAttempt),
     message: 'Quest attempt submitted for independent review. Rewards will be granted upon review approval.',
   });
 });
