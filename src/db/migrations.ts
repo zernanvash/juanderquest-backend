@@ -61,6 +61,8 @@ export const MIGRATIONS = [
   '045_quest_step_marker_codes.sql',
   '046_submissions_single_pending.sql',
   '047_submissions_challenge_nonce_unique.sql',
+  '048_quest_attempts_single_completion.sql',
+  '049_quest_funding.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
@@ -154,6 +156,9 @@ export async function applyMigrations(pg: Pool) {
         } else if (file === '046_submissions_single_pending.sql' && pgMemMigrationAdapters.has(pg as object)) {
           await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_submissions_unique_pending
             ON submissions(user_id, quest_id) WHERE status = 'pending'`);
+        } else if (file === '048_quest_attempts_single_completion.sql' && pgMemMigrationAdapters.has(pg as object)) {
+          await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_quest_attempts_single_completion
+            ON quest_attempts(user_id, quest_id) WHERE status = 'completed'`);
         } else {
           await client.query(sql);
         }

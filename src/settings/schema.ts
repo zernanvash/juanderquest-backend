@@ -3,7 +3,7 @@ export type SettingValue = string | number | boolean;
 export interface SettingDefinition {
   key: string;
   label: string;
-  category: 'branding_support' | 'quiz_defaults';
+  category: 'branding_support' | 'quiz_defaults' | 'quest_funding';
   type: 'email' | 'url' | 'text' | 'integer' | 'boolean' | 'string';
   defaultValue: SettingValue;
   min?: number;
@@ -101,6 +101,51 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     max: 500,
     restartRequired: false,
     description: 'Applies to new quiz drafts only; existing XP is never changed.',
+  },
+  {
+    key: 'quest_funding_fee_bps', label: 'Quest funding platform fee (basis points)', category: 'quest_funding',
+    type: 'integer', defaultValue: 500, min: 0, max: 1000, restartRequired: false,
+    description: 'Snapshotted when a funding plan is submitted; does not change active plans.',
+  },
+  {
+    key: 'merchant_purchase_daily_cap', label: 'Merchant simulated-purchase daily cap (points)', category: 'quest_funding',
+    type: 'integer', defaultValue: 5000, min: 0, max: 100000, restartRequired: false,
+    description: 'Maximum simulated merchant points issuance per merchant per UTC day.',
+  },
+  {
+    key: 'merchant_purchase_monthly_cap', label: 'Merchant simulated-purchase monthly cap (points)', category: 'quest_funding',
+    type: 'integer', defaultValue: 20000, min: 0, max: 1000000, restartRequired: false,
+    description: 'Maximum simulated merchant points issuance per merchant per UTC month.',
+  },
+  {
+    key: 'sponsorship_deadline_days', label: 'Quest sponsorship deadline (days)', category: 'quest_funding',
+    type: 'integer', defaultValue: 7, min: 1, max: 30, restartRequired: false,
+    description: 'Snapshotted when a plan is submitted.',
+  },
+  {
+    key: 'funding_hold_ttl_hours', label: 'Quest reward hold duration (hours)', category: 'quest_funding',
+    type: 'integer', defaultValue: 48, min: 1, max: 168, restartRequired: false,
+    description: 'Snapshotted when a plan is submitted; hold cannot outlive the plan grace window.',
+  },
+  {
+    key: 'funding_window_min_days', label: 'Minimum funding window (days)', category: 'quest_funding',
+    type: 'integer', defaultValue: 1, min: 1, max: 365, restartRequired: false,
+    description: 'Minimum permitted duration for new funding plans.',
+  },
+  {
+    key: 'funding_window_max_days', label: 'Maximum funding window (days)', category: 'quest_funding',
+    type: 'integer', defaultValue: 90, min: 1, max: 365, restartRequired: false,
+    description: 'Maximum permitted duration for new funding plans.',
+  },
+  {
+    key: 'max_open_sponsorship_requests_per_plan', label: 'Open sponsor requests per plan', category: 'quest_funding',
+    type: 'integer', defaultValue: 10, min: 1, max: 50, restartRequired: false,
+    description: 'Caps outstanding sponsorship requests for each funding plan.',
+  },
+  {
+    key: 'voucher_income_enabled', label: 'Enable merchant voucher income', category: 'quest_funding',
+    type: 'boolean', defaultValue: false, restartRequired: false,
+    description: 'Optional future prototype accounting path; no real money is involved.',
   },
 ];
 

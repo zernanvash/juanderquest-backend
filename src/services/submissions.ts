@@ -9,6 +9,11 @@ import { isLocalEconomyProfile } from '../economy/profile.js';
 import { randomUUID } from 'crypto';
 import jwt from 'jsonwebtoken';
 import { verifyQuestChallengeToken } from '../auth/tokens.js';
+import { hasCompletedQuest } from './quest-completion.js';
+import { settleReward } from '../funding/rewardSettlement.js';
+import { hasFundingPlan, requireFundingHold } from '../funding/holds.js';
+import { FundingError, publishFunding } from '../funding/transaction.js';
+import type { CommittedLedgerGroup } from '../funding/ledger.js';
 
 // Single-use challenge nonces are claimed in memory before any await so that
 // concurrent requests cannot both pass the replay check. Entries expire shortly
@@ -129,13 +134,16 @@ export class SubmissionsService {
     }
 
     // 2. Quest existence check
-    const quest = db.findQuestById(payload.quest_id);
+    const quest = db.findQuestById(payload.quest_id, true);
     if (!quest) {
       return {
         success: false,
         statusCode: 404,
         error: { code: 'NOT_FOUND', message: `Quest '${payload.quest_id}' not found.` },
       };
+    }
+    if (quest.status === 'draft' || (!quest.is_active && !quest.status)) {
+      return { success: false, statusCode: 404, error: { code: 'NOT_FOUND', message: 'Quest not found.' } };
     }
 
     // A proof inherits its actor/quest scope. Never let PostgreSQL's default
@@ -163,24 +171,20 @@ export class SubmissionsService {
     }
 
     // 3. Duplicate approved completion check
-    if (pool) {
-      const { rows } = await pool.query(
-        "SELECT 1 FROM submissions WHERE user_id = $1 AND quest_id = $2 AND status = 'approved' LIMIT 1",
-        [payload.user_id, payload.quest_id]
-      );
-      if (rows.length > 0) {
-        return {
-          success: false,
-          statusCode: 409,
-          error: { code: 'ALREADY_COMPLETED', message: 'You have already completed this quest.' },
-        };
-      }
-    } else if (db.hasApprovedSubmission(payload.user_id, payload.quest_id)) {
+    if (await hasCompletedQuest(db, payload.user_id, payload.quest_id, pool)) {
       return {
         success: false,
         statusCode: 409,
         error: { code: 'ALREADY_COMPLETED', message: 'You have already completed this quest.' },
       };
+    }
+
+    if (pool) {
+      try { await requireFundingHold(pool, payload.user_id, payload.quest_id); }
+      catch (error) {
+        if (error instanceof FundingError) return { success: false, statusCode: error.status, error: { code: error.code, message: error.message } };
+        throw error;
+      }
     }
 
     // One proof per active traveler/quest review cycle. This check precedes
@@ -337,6 +341,38 @@ export class SubmissionsService {
     // 6. Create pending submission record
     const subId = `sub_${Date.now()}_${randomUUID().slice(0, 6)}`;
     if (pool) {
+      if (await hasFundingPlan(pool, payload.quest_id)) {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          await lockGovernanceSnapshot(client);
+          await requireFundingHold(client, payload.user_id, payload.quest_id);
+          const held = await client.query(
+            `SELECT h.*, p.quest_id FROM quest_funding_holds h JOIN quest_funding_plans p ON p.id=h.plan_id
+             WHERE p.quest_id=$1 AND h.user_id=$2 AND h.status='held' FOR UPDATE OF h`, [payload.quest_id, payload.user_id]);
+          const hold = held.rows[0];
+          if (!hold || new Date(hold.expires_at).getTime() <= Date.now()) throw new FundingError('FUNDING_HOLD_EXPIRED', 409, 'This reward reservation has expired.');
+          if (!claimNonceForInsert()) throw new FundingError('CHALLENGE_ALREADY_USED', 409, 'This challenge has already been used.');
+          const inserted = await client.query(
+            `INSERT INTO submissions(id,idempotency_key,user_id,quest_id,scanned_marker_code,captured_lat,captured_lng,captured_accuracy,status,is_test)
+             VALUES($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9) RETURNING *`,
+            [subId,payload.idempotency_key,payload.user_id,payload.quest_id,finalMarkerCode,payload.captured_lat,payload.captured_lng,payload.captured_accuracy,Boolean(quest.is_test)]);
+          await client.query('UPDATE quest_funding_holds SET submission_id=$2 WHERE id=$1', [hold.id,subId]);
+          await client.query("UPDATE quest_attempts SET status='submitted',updated_at=NOW() WHERE id=$1", [hold.attempt_id]);
+          await commitGovernanceTransaction(client);
+          claimedNonceForInsert = undefined;
+          const created = this.mapSubmissionRow(inserted.rows[0]);
+          db.submissions.push(created);
+          const attempt = db.quest_attempts.find(a => a.id === hold.attempt_id);
+          if (attempt) attempt.status = 'submitted';
+          return { success: true, statusCode: 201, data: created };
+        } catch (error) {
+          releaseInsertNonce();
+          await client.query('ROLLBACK').catch(() => undefined);
+          if (error instanceof FundingError) return { success: false, statusCode: error.status, error: { code: error.code, message: error.message } };
+          throw error;
+        } finally { client.release(); }
+      }
       const durableEconomy = process.env.NODE_ENV !== 'test' || Boolean(process.env.JDQ_REAL_PG_URL);
       if (durableEconomy && isLocalEconomyProfile()) {
         const fundedContext = await pool.query(
@@ -549,11 +585,10 @@ export class SubmissionsService {
             error: { code: 'SELF_REVIEW_FORBIDDEN', message: 'Reviewers cannot approve or reject their own proof.' } };
         }
         if (action === 'approve') {
-          const duplicate = await client.query(
-            "SELECT 1 FROM submissions WHERE user_id = $1 AND quest_id = $2 AND status = 'approved' AND id <> $3 LIMIT 1",
-            [sub.user_id, sub.quest_id, id]
-          );
-          if (duplicate.rowCount) {
+          // Use the same traveler lock as progressive-attempt approval so a
+          // legacy proof and a reviewed attempt cannot both pay out in parallel.
+          await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [sub.user_id]);
+          if (await hasCompletedQuest(db, sub.user_id, sub.quest_id, client, id)) {
             await client.query('ROLLBACK');
             return { success: false, statusCode: 409,
               error: { code: 'ALREADY_COMPLETED', message: 'This traveler already has an approved proof for this quest. Reject this one as a duplicate.' } };
@@ -689,6 +724,8 @@ export class SubmissionsService {
         let explorerCoinTransactionId: string | undefined;
         let newPoints: number | undefined;
         let govResult: any = null;
+        let fundedGroups: CommittedLedgerGroup[] | undefined;
+        let fundedAttemptId: string | undefined;
         if (action === 'approve') {
           // Lock user row
           await client.query('SELECT demo_points FROM users WHERE id = $1 FOR UPDATE', [sub.user_id]);
@@ -696,26 +733,15 @@ export class SubmissionsService {
           const quest = questRows[0];
           if (quest) {
             awardedPoints = quest.reward_points;
-            const balanceResult = await client.query(
-              'UPDATE users SET demo_points = demo_points + ($2)::int, updated_at = NOW() WHERE id = $1 RETURNING demo_points',
-              [sub.user_id, awardedPoints]
-            );
-            newPoints = balanceResult.rows[0]?.demo_points;
-            if (newPoints === undefined) throw new Error('USER_NOT_FOUND');
-            // Atomically record ledger reward credit in the SAME transaction BEFORE commit
-            try {
-              govResult = await governanceStore.creditQuestReward(
-                updatedSub.user_id,
-                quest.id,
-                updatedSub.id,
-                awardedPoints,
-                adminId,
-                client
-              );
-            } catch (govErr) {
-              await client.query('ROLLBACK');
-              throw govErr;
-            }
+            const rewardSettlement = await settleReward({
+              client, userId: updatedSub.user_id, questId: quest.id,
+              referenceId: updatedSub.id, actorId: adminId, rewardPoints: awardedPoints,
+            });
+            newPoints = rewardSettlement.newPoints;
+            govResult = rewardSettlement.governanceResult;
+            fundedGroups = rewardSettlement.fundedGroups;
+            fundedAttemptId = rewardSettlement.fundedAttemptId;
+            awardedPoints = rewardSettlement.awardedPoints;
           }
 
           if (isLocalEconomyProfile()) {
@@ -765,7 +791,18 @@ export class SubmissionsService {
           await new EconomyService(pool).holdRejectedSubmissionInTx(client, updatedSub);
         }
 
+        if (action === 'reject') {
+          await client.query(
+            `UPDATE quest_attempts SET status='in_progress',updated_at=NOW() WHERE id IN
+             (SELECT h.attempt_id FROM quest_funding_holds h WHERE h.submission_id=$1 AND h.status='held')`, [id]);
+        }
+
         await commitGovernanceTransaction(client);
+        if (fundedGroups) publishFunding(fundedGroups);
+        if (fundedAttemptId) {
+          const attempt = db.quest_attempts.find(row => row.id === fundedAttemptId);
+          if (attempt) attempt.status = 'completed';
+        }
 
         // Sync in-memory representation after successful commit
         const memSub = db.submissions.find((s) => s.id === id);
@@ -811,6 +848,7 @@ export class SubmissionsService {
         };
       } catch (error) {
         await client.query('ROLLBACK');
+        if (error instanceof FundingError) return { success: false, statusCode: error.status, error: { code: error.code, message: error.message } };
         if ((error as any)?.code === '23505' && (error as any)?.constraint === 'idx_submissions_unique_approved') {
           return { success: false, statusCode: 409,
             error: { code: 'ALREADY_COMPLETED', message: 'This traveler already has an approved proof for this quest. Reject this one as a duplicate.' } };
@@ -853,7 +891,10 @@ export class SubmissionsService {
     if (action === 'approve') {
       db.completeAttempt(result.submission.user_id, result.submission.quest_id);
       if (!result.alreadyReviewed && quest) {
-        void governanceStore.creditQuestReward(result.submission.user_id, quest.id, result.submission.id, awardedPoints, adminId);
+        await settleReward({
+          userId: result.submission.user_id, questId: quest.id,
+          referenceId: result.submission.id, actorId: adminId, rewardPoints: awardedPoints,
+        });
       }
     }
 

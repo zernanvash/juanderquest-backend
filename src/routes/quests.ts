@@ -17,6 +17,11 @@ import { detectValidatedMediaMime } from '../utils/media-mime.js';
 import { validateRequest } from '../middleware/validate.js';
 import { optionalAccuracy, optionalLat, optionalLng } from '../middleware/coerce.js';
 import { sanitizeAttemptSnapshot, sanitizeQuestForViewer, sanitizeQuestSteps } from '../quests/sanitize.js';
+import { hasCompletedQuest } from '../services/quest-completion.js';
+import { hasFundingPlan, requireFundingHold, startFundedAttempt } from '../funding/holds.js';
+import { FundingError } from '../funding/transaction.js';
+import { fundingErrorResponse } from './fundingPlans.js';
+import { lockGovernanceSnapshot } from '../governance/transaction.js';
 
 const router = Router();
 
@@ -178,7 +183,7 @@ router.get('/quests/:id', optionalAuthenticateToken, checkQAAuthorization, (req:
 });
 
 // PATCH /quests/:id/status - Author or admin quest lifecycle management
-router.patch('/quests/:id/status', authenticateToken, (req: AuthRequest, res: Response) => {
+router.patch('/quests/:id/status', authenticateToken, async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const quest = db.findQuestById(id, true);
 
@@ -219,6 +224,17 @@ router.patch('/quests/:id/status', authenticateToken, (req: AuthRequest, res: Re
     });
   }
 
+  const statusPool = getPool();
+  try {
+    if (statusPool && status === 'published') {
+      const required = await statusPool.query('SELECT funding_required FROM quests WHERE id=$1', [id]);
+      if (required.rows[0]?.funding_required) return res.status(409).json({ success: false, error: { code: 'FUNDING_PLAN_REQUIRED', message: 'Fund this Eco-Quest before publishing it.' } });
+    }
+    if (statusPool && await hasFundingPlan(statusPool, id)) {
+      return res.status(409).json({ success: false, error: { code: 'FUNDING_PLAN_STATE', message: 'Use the funding round controls to manage this quest.' } });
+    }
+  } catch (error) { return fundingErrorResponse(res, error); }
+
   quest.status = status;
   quest.is_active = (status === 'published');
   quest.updated_at = new Date().toISOString();
@@ -234,6 +250,21 @@ router.patch('/quests/:id/status', authenticateToken, (req: AuthRequest, res: Re
 // POST /quests/:id/attempts - Start or resume progressive quest attempt
 router.post('/quests/:id/attempts', authenticateToken, async (req: AuthRequest, res: Response, next: NextFunction) => {
   const { id } = req.params;
+  const fundingPool = getPool();
+  if (fundingPool) {
+    try {
+      const funded = await startFundedAttempt(fundingPool, id, req.user!.id);
+      if (funded) {
+        const attempt = mapAttempt(funded.attempt);
+        const cached = db.quest_attempts.find(row => row.id === attempt.id);
+        if (cached) Object.assign(cached, attempt); else db.quest_attempts.push(attempt);
+        return res.status(funded.resumed ? 200 : 201).json({ success: true, data: { ...sanitizeAttemptSnapshot(attempt), funding_hold: funded.funding_hold } });
+      }
+    } catch (error) {
+      if (error instanceof FundingError) return fundingErrorResponse(res, error);
+      return next(error);
+    }
+  }
   const quest = db.findQuestById(id, true);
 
   if (!quest) {
@@ -272,7 +303,7 @@ router.post('/quests/:id/attempts', authenticateToken, async (req: AuthRequest, 
       error: { code: 'CREATOR_SELF_ATTEMPT', message: 'Quest authors cannot earn rewards from their own quest.' },
     });
   }
-  if (!pool && db.hasApprovedSubmission(userId, id)) {
+  if (!pool && await hasCompletedQuest(db, userId, id)) {
     return res.status(409).json({
       success: false,
       error: { code: 'ALREADY_COMPLETED', message: 'You have already completed this quest.' },
@@ -336,10 +367,7 @@ router.post('/quests/:id/attempts', authenticateToken, async (req: AuthRequest, 
         await client.query('ROLLBACK');
         return res.status(409).json({ success: false, error: { code: 'QUEST_NOT_OPEN', message: 'This quest is not open for new attempts.' } });
       }
-      const completed = await client.query(
-        "SELECT 1 FROM submissions WHERE user_id = $1 AND quest_id = $2 AND status = 'approved' LIMIT 1",
-        [userId, id]);
-      if (completed.rowCount) {
+      if (await hasCompletedQuest(db, userId, id, client)) {
         await client.query('ROLLBACK');
         return res.status(409).json({ success: false, error: { code: 'ALREADY_COMPLETED', message: 'You have already completed this quest.' } });
       }
@@ -451,7 +479,7 @@ router.get('/quests/:id/progress', authenticateToken, async (req: AuthRequest, r
   if (pool) {
     try {
       const [completed, active] = await Promise.all([
-        pool.query("SELECT 1 FROM submissions WHERE user_id = $1 AND quest_id = $2 AND status = 'approved' LIMIT 1", [userId, id]),
+        hasCompletedQuest(db, userId, id, pool),
         pool.query("SELECT * FROM quest_attempts WHERE user_id = $1 AND quest_id = $2 ORDER BY created_at DESC LIMIT 1", [userId, id]),
       ]);
       let activeAttempt: any = null;
@@ -469,12 +497,12 @@ router.get('/quests/:id/progress', authenticateToken, async (req: AuthRequest, r
       }
       return res.status(200).json({ success: true, data: {
         quest_id: id,
-        has_completed: Boolean(completed.rowCount),
+        has_completed: completed,
         active_attempt: activeAttempt ? sanitizeAttemptSnapshot(activeAttempt) : null,
       } });
     } catch (error) { return next(error); }
   }
-  const hasCompleted = db.hasApprovedSubmission(userId, id);
+  const hasCompleted = await hasCompletedQuest(db, userId, id);
   const rawAttempt = db.getActiveAttempt(userId, id) ?? null;
   let activeAttempt: any = null;
   if (rawAttempt) {
@@ -929,19 +957,25 @@ router.post('/quests/:id/submit-for-review', authenticateToken, async (req: Auth
     });
   }
 
-  activeAttempt.status = 'submitted';
-  activeAttempt.updated_at = new Date().toISOString();
-
   if (pool) {
+    const client = await pool.connect();
     try {
-      await pool.query(
+      await client.query('BEGIN');
+      await lockGovernanceSnapshot(client);
+      await requireFundingHold(client, userId, id);
+      await client.query(
         "UPDATE quest_attempts SET status = 'submitted', updated_at = NOW() WHERE id = $1",
         [activeAttempt.id]
       );
+      await client.query('COMMIT');
     } catch (err) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      if (err instanceof FundingError) return fundingErrorResponse(res, err);
       return next(err);
-    }
+    } finally { client.release(); }
   }
+  activeAttempt.status = 'submitted';
+  activeAttempt.updated_at = new Date().toISOString();
 
   return res.status(200).json({
     success: true,
@@ -1005,8 +1039,13 @@ router.get('/quests/evidence/:evidenceId/file', authenticateToken, async (req: A
   return res.sendFile(fullPath);
 });
 
-router.post('/quests/:id/challenge', authenticateToken, (req: AuthRequest, res: Response) => {
+router.post('/quests/:id/challenge', authenticateToken, async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
+  const fundingPool = getPool();
+  if (fundingPool) {
+    try { await requireFundingHold(fundingPool, req.user!.id, id); }
+    catch (error) { return fundingErrorResponse(res, error); }
+  }
   const quest = db.findQuestById(id, true);
 
   if (!quest) {
@@ -1038,7 +1077,7 @@ router.post('/quests/:id/challenge', authenticateToken, (req: AuthRequest, res: 
   }
 
   const userId = req.user!.id;
-  if (db.hasApprovedSubmission(userId, id)) {
+  if (await hasCompletedQuest(db, userId, id, getPool())) {
     return res.status(409).json({
       success: false,
       error: { code: 'ALREADY_COMPLETED', message: 'You have already completed this quest.' },

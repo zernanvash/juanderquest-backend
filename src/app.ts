@@ -31,6 +31,8 @@ import quizzesRouter from './routes/quizzes.js';
 import adminQuizzesRouter from './routes/adminQuizzes.js';
 import adminMerchantsRouter from './routes/adminMerchants.js';
 import adminSettingsRouter from './routes/adminSettings.js';
+import { merchantPointsRouter } from './routes/merchantPoints.js';
+import { fundingPlansRouter } from './routes/fundingPlans.js';
 import { errorHandler } from './middleware/error.js';
 import { readinessGate } from './middleware/readiness.js';
 import { appVersionGate } from './middleware/appVersionGate.js';
@@ -117,6 +119,8 @@ app.use('/api/v1', quizzesRouter);
 app.use('/api/v1', adminQuizzesRouter);
 app.use('/api/v1', adminMerchantsRouter);
 app.use('/api/v1', adminSettingsRouter);
+app.use('/api/v1', merchantPointsRouter);
+app.use('/api/v1', fundingPlansRouter);
 
 // JSON parse errors -> 400 instead of 500
 app.use((err: Error & { type?: string }, _req: express.Request, res: express.Response, next: express.NextFunction) => {

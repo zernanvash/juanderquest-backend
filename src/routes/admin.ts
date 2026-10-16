@@ -7,10 +7,14 @@ import { authenticateToken, requireAdmin, AuthRequest } from '../middleware/auth
 import { validateRequest } from '../middleware/validate.js';
 import { submissionsService } from '../services/submissions.js';
 import { lockGovernanceSnapshot, commitGovernanceTransaction } from '../governance/transaction.js';
-import { governanceStore } from './proposals.js';
 import { progressionService } from '../progression/service.js';
 import { env } from '../config/env.js';
 import { spotStore } from '../spots/store.js';
+import { hasCompletedQuest } from '../services/quest-completion.js';
+import { settleReward } from '../funding/rewardSettlement.js';
+import { hasFundingPlan } from '../funding/holds.js';
+import { publishFunding, FundingError } from '../funding/transaction.js';
+import { governanceStore } from './proposals.js';
 
 const router = Router();
 
@@ -114,6 +118,15 @@ router.patch('/admin/quest-attempts/:id', validateRequest(questAttemptReviewSche
       await client.query('BEGIN');
       await lockGovernanceSnapshot(client);
 
+      // Read the owner first, then acquire user -> attempt locks. Attempt starts
+      // also lock the traveler before inspecting an active attempt, so keep one
+      // order to avoid a start-vs-approval deadlock.
+      const ownerRes = await client.query('SELECT user_id FROM quest_attempts WHERE id = $1', [id]);
+      if (!ownerRes.rows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: `Quest attempt '${id}' not found.` } });
+      }
+      await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [ownerRes.rows[0].user_id]);
       const attemptRes = await client.query('SELECT * FROM quest_attempts WHERE id = $1 FOR UPDATE', [id]);
       if (!attemptRes.rows[0]) {
         await client.query('ROLLBACK');
@@ -144,6 +157,17 @@ router.patch('/admin/quest-attempts/:id', validateRequest(questAttemptReviewSche
       }
 
       if (action === 'approve') {
+        if (await hasFundingPlan(client, quest.id) && attempt.status !== 'submitted') {
+          throw new FundingError('FUNDING_PLAN_STATE', 409, 'Submit all required quest steps before approval.');
+        }
+        // The traveler row is already locked before the attempt row above.
+        // This serializes attempt and proof approvals across review paths.
+        if (await hasCompletedQuest(db, attempt.user_id, quest.id, client)) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ success: false, error: {
+            code: 'ALREADY_COMPLETED', message: 'This traveler has already completed this quest and cannot receive another reward.'
+          } });
+        }
         const awardedPoints = quest.reward_points || 0;
 
         // Mark any pending_review steps as verified
@@ -152,25 +176,14 @@ router.patch('/admin/quest-attempts/:id', validateRequest(questAttemptReviewSche
           [adminId, id]
         );
 
-        // Update attempt
+        const rewardSettlement = await settleReward({
+          client, userId: attempt.user_id, questId: quest.id, referenceId: id,
+          actorId: adminId, rewardPoints: awardedPoints,
+        });
         const updatedAttemptRes = await client.query(
           "UPDATE quest_attempts SET status = 'completed', completed_at = NOW(), reviewed_by = $1, reviewed_at = NOW(), updated_at = NOW() WHERE id = $2 RETURNING *",
           [adminId, id]
         );
-
-        // Award points to traveler
-        await client.query(
-          'UPDATE users SET demo_points = demo_points + ($2)::int, updated_at = NOW() WHERE id = $1',
-          [attempt.user_id, awardedPoints]
-        );
-
-        // Record governance credit
-        try {
-          await governanceStore.creditQuestReward(attempt.user_id, quest.id, id, awardedPoints, adminId, client);
-        } catch (govErr) {
-          await client.query('ROLLBACK');
-          throw govErr;
-        }
 
         // Progression outbox
         if (env.PROGRESSION_ENABLED && env.PROGRESSION_EMIT_OUTBOX_ENABLED) {
@@ -201,6 +214,10 @@ router.patch('/admin/quest-attempts/:id', validateRequest(questAttemptReviewSche
         }
 
         await commitGovernanceTransaction(client);
+        if (rewardSettlement.fundedGroups) publishFunding(rewardSettlement.fundedGroups);
+        const gov = rewardSettlement.governanceResult;
+        if (gov) governanceStore.publishCommittedTransaction({ entries: gov.entries, audit: [gov.audit],
+          userBalanceUpdate: { userId: attempt.user_id, demoPoints: rewardSettlement.newPoints } });
 
         // Mirror in memory
         const memAttempt = db.quest_attempts.find((a) => a.id === id);
@@ -218,11 +235,11 @@ router.patch('/admin/quest-attempts/:id', validateRequest(questAttemptReviewSche
           }
         }
         const traveler = db.users.find((u) => u.id === attempt.user_id);
-        if (traveler) traveler.demo_points += awardedPoints;
+        if (traveler) traveler.demo_points = rewardSettlement.newPoints;
 
         return res.status(200).json({
           success: true,
-          data: { attempt: updatedAttemptRes.rows[0], awarded_points: awardedPoints },
+          data: { attempt: updatedAttemptRes.rows[0], awarded_points: rewardSettlement.awardedPoints },
           message: 'Quest attempt approved and reward points granted.',
         });
       } else if (action === 'request_changes') {
@@ -255,15 +272,17 @@ router.patch('/admin/quest-attempts/:id', validateRequest(questAttemptReviewSche
           message: 'Changes requested for quest attempt.',
         });
       } else if (action === 'reject') {
+        const retryable = await hasFundingPlan(client, quest.id);
+        if (retryable) await client.query("UPDATE quest_step_evidence SET status='needs_changes',rejection_reason=$2,updated_at=NOW() WHERE attempt_id=$1 AND status='pending_review'",[id,rejection_reason]);
         const updatedAttemptRes = await client.query(
-          "UPDATE quest_attempts SET status = 'abandoned', review_notes = $1, reviewed_by = $2, reviewed_at = NOW(), updated_at = NOW() WHERE id = $3 RETURNING *",
-          [rejection_reason, adminId, id]
+          "UPDATE quest_attempts SET status = $4, review_notes = $1, reviewed_by = $2, reviewed_at = NOW(), updated_at = NOW() WHERE id = $3 RETURNING *",
+          [rejection_reason, adminId, id, retryable ? 'in_progress' : 'abandoned']
         );
         await commitGovernanceTransaction(client);
 
         const memAttempt = db.quest_attempts.find((a) => a.id === id);
         if (memAttempt) {
-          memAttempt.status = 'abandoned';
+          memAttempt.status = retryable ? 'in_progress' : 'abandoned';
           memAttempt.review_notes = rejection_reason;
         }
 
@@ -275,6 +294,12 @@ router.patch('/admin/quest-attempts/:id', validateRequest(questAttemptReviewSche
       }
     } catch (err) {
       await client.query('ROLLBACK').catch(() => undefined);
+      if (err instanceof FundingError) return res.status(err.status).json({ success: false, error: { code: err.code, message: err.message } });
+      if ((err as any)?.code === '23505' && (err as any)?.constraint === 'idx_quest_attempts_single_completion') {
+        return res.status(409).json({ success: false, error: {
+          code: 'ALREADY_COMPLETED', message: 'This traveler has already completed this quest and cannot receive another reward.'
+        } });
+      }
       console.error('[admin] quest-attempt review error:', err);
       return res.status(500).json({ success: false, error: { code: 'REVIEW_FAILED', message: 'Internal review processing failure.' } });
     } finally {
@@ -305,6 +330,11 @@ router.patch('/admin/quest-attempts/:id', validateRequest(questAttemptReviewSche
     if (attempt.status === 'completed') {
       return res.status(200).json({ success: true, data: { attempt, awarded_points: 0 }, message: 'Attempt already completed.' });
     }
+    if (await hasCompletedQuest(db, attempt.user_id, quest.id)) {
+      return res.status(409).json({ success: false, error: {
+        code: 'ALREADY_COMPLETED', message: 'This traveler has already completed this quest and cannot receive another reward.'
+      } });
+    }
     const awardedPoints = quest.reward_points || 0;
     attempt.status = 'completed';
     attempt.completed_at = new Date().toISOString();
@@ -319,10 +349,10 @@ router.patch('/admin/quest-attempts/:id', validateRequest(questAttemptReviewSche
       }
     }
 
-    const traveler = db.users.find((u) => u.id === attempt.user_id);
-    if (traveler) traveler.demo_points += awardedPoints;
-
-    governanceStore.creditQuestReward(attempt.user_id, quest.id, id, awardedPoints, adminId).catch(() => undefined);
+    const rewardSettlement = await settleReward({
+      userId: attempt.user_id, questId: quest.id, referenceId: id,
+      actorId: adminId, rewardPoints: awardedPoints,
+    });
 
     // Gallery publication check
     for (const ev of db.quest_step_evidence.filter((e) => e.attempt_id === id && e.checkpoint_type === 'photo')) {
@@ -341,7 +371,7 @@ router.patch('/admin/quest-attempts/:id', validateRequest(questAttemptReviewSche
 
     return res.status(200).json({
       success: true,
-      data: { attempt, awarded_points: awardedPoints },
+      data: { attempt, awarded_points: rewardSettlement.awardedPoints },
       message: 'Quest attempt approved and reward points granted.',
     });
   } else if (action === 'request_changes') {

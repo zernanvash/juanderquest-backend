@@ -26,6 +26,12 @@ export const insecureLocalWalletAuthForbidden = (profile: string | undefined, no
 
 const isLocalRuntime = process.env.NODE_ENV !== 'production';
 
+export function questFundingEnabledByDefault(profile = requestedProfile, nodeEnv = process.env.NODE_ENV): boolean {
+  if (nodeEnv === 'production') return false;
+  if (!profile) return true; // Unprofiled local development.
+  return ['dev', 'development', 'test', 'local'].includes(profile.trim().toLowerCase());
+}
+
 const rawEnv = cleanEnv(process.env, {
   PORT: port({ default: process.env.NODE_ENV === 'production' ? 4000 : 4100 }),
   HOST: str({ default: '127.0.0.1' }),
@@ -54,6 +60,10 @@ const rawEnv = cleanEnv(process.env, {
   ALPHA_WALLET_SIMULATION_ENABLED: bool({ default: false }),
   // Merchant offers in the prototype migrations are fixtures, not live deals.
   MARKETPLACE_ENABLED: bool({ default: isLocalRuntime }),
+  // Only explicit local profiles or unprofiled local development enable the
+  // prototype by default; named deployment profiles stay closed even if a
+  // legacy profile file accidentally says NODE_ENV=development.
+  QUEST_FUNDING_ENABLED: bool({ default: questFundingEnabledByDefault() }),
   SPOT_PHOTO_STORAGE: str({ choices: ['local', 'azure'], default: 'local' }),
   AZURE_STORAGE_CONNECTION_STRING: str({ default: '' }),
   AZURE_STORAGE_CONTAINER_NAME: str({ default: 'spot-photos' }),

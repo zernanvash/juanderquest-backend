@@ -27,4 +27,31 @@ describe('read-only runtime migration gate', () => {
       await fixture.close();
     }
   });
+
+  it('applies the single-completed-attempt backstop and rejects a second completion', async () => {
+    const fixture = await createTestDb();
+    try {
+      await fixture.pool.query(
+        `INSERT INTO users (id, seed_id, display_name, email) VALUES
+         ('completion-user', 'completion-user', 'Completion User', 'completion-user@example.test'),
+         ('completion-author', 'completion-author', 'Completion Author', 'completion-author@example.test')`
+      );
+      await fixture.pool.query(
+        `INSERT INTO quests (id, title, description, category, location_name, gps_lat, gps_lng, marker_code, marker_image_url, author_id)
+         VALUES ('completion-quest', 'Completion test', 'Test quest', 'eco', 'Test place', 16, 120, 'completion-marker', '', 'completion-author')`
+      );
+      await fixture.pool.query(
+        `INSERT INTO quest_attempts (id, quest_id, user_id, status) VALUES ('completion-attempt-1', 'completion-quest', 'completion-user', 'completed')`
+      );
+      await expect(fixture.pool.query(
+        `INSERT INTO quest_attempts (id, quest_id, user_id, status) VALUES ('completion-attempt-2', 'completion-quest', 'completion-user', 'completed')`
+      )).rejects.toThrow();
+      const migration = await fixture.pool.query(
+        "SELECT 1 FROM schema_migrations WHERE filename = '048_quest_attempts_single_completion.sql'"
+      );
+      expect(migration.rowCount).toBe(1);
+    } finally {
+      await fixture.close();
+    }
+  });
 });

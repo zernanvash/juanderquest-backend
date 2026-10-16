@@ -8,6 +8,7 @@ import { initJuanChoiceFinalizer } from './jobs/juanchoice-finalizer.js';
 import { initJuanChoiceScheduler } from './jobs/juanchoice-scheduler.js';
 import { initEconomyReservationWorker } from './jobs/economy-reservations.js';
 import { initEconomicOutboxWorker } from './jobs/economy-outbox.js';
+import { initFundingScheduler } from './funding/scheduler.js';
 
 // Boot orchestration: connect PostgreSQL (when available), hydrate memory + governance, fall back to in-memory.
 export async function bootstrap() {
@@ -26,6 +27,7 @@ export async function bootstrap() {
   initJuanChoiceScheduler();
   initEconomyReservationWorker();
   initEconomicOutboxWorker();
+  initFundingScheduler();
   console.log(
     `[bootstrap] storage: ${pgAvailable ? 'postgres' : 'in-memory'} (${db.users.length} users, ${db.quests.length} quests, ${db.submissions.length} submissions, ${db.vouchers.length} vouchers)`
   );

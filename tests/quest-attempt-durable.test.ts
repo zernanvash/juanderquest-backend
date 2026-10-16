@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { newDb } from 'pg-mem';
 import { app } from '../src/app.js';
 import { db } from '../src/db/index.js';
-import { setPool } from '../src/db/pool.js';
+import { getPool, setPool } from '../src/db/pool.js';
 import { env } from '../src/config/env.js';
 
 describe('quest attempt durable authority', () => {
@@ -16,12 +16,14 @@ describe('quest attempt durable authority', () => {
     const mem = newDb();
     mem.public.none(`CREATE TABLE users (id text PRIMARY KEY, is_test boolean NOT NULL DEFAULT false);
       CREATE TABLE quests (id text PRIMARY KEY, author_id text, is_test boolean NOT NULL DEFAULT false,
-        status text NOT NULL, version integer NOT NULL, steps jsonb NOT NULL);
+        status text NOT NULL, version integer NOT NULL, steps jsonb NOT NULL, funding_required boolean DEFAULT false);
       CREATE TABLE submissions (id text PRIMARY KEY, user_id text, quest_id text, status text);
       CREATE TABLE quest_attempts (id text PRIMARY KEY, quest_id text, user_id text,
         version integer, current_step integer, total_steps integer, status text,
         created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(), completed_at timestamptz);
-      CREATE TABLE reward_pools (id text, quest_id text, asset_code text, status text);`);
+      CREATE UNIQUE INDEX idx_quest_attempts_single_completion ON quest_attempts(user_id, quest_id) WHERE status = 'completed';
+      CREATE TABLE reward_pools (id text, quest_id text, asset_code text, status text);
+      CREATE TABLE quest_funding_plans (id text, quest_id text);`);
     mem.public.none(`INSERT INTO users(id) VALUES ('${userId}'), ('${authorId}');
       INSERT INTO quests(id, author_id, status, version, steps)
       VALUES ('${questId}', '${authorId}', 'published', 1,
@@ -69,4 +71,22 @@ describe('quest attempt durable authority', () => {
     expect(resumed.status).toBe(200);
     expect(resumed.body.data.id).toBe(attemptId);
   });
+
+  it('blocks a new attempt when the durable store records a completed attempt', async () => {
+    await setPoolStatusCompletedAttempt();
+    const started = await request(app).post(`/api/v1/quests/${questId}/attempts`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(started.status).toBe(409);
+    expect(started.body.error.code).toBe('ALREADY_COMPLETED');
+  });
+
+  async function setPoolStatusCompletedAttempt() {
+    const pool = getPool();
+    if (!pool) throw new Error('test pool missing');
+    const current = await pool.query(
+      'UPDATE quest_attempts SET status = $1 WHERE quest_id = $2 AND user_id = $3',
+      ['completed', questId, userId],
+    );
+    expect(current.rowCount).toBe(1);
+  }
 });

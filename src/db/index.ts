@@ -2476,8 +2476,25 @@ export class MemoryDb {
     return this.submissions.some((s) => s.user_id === userId && s.quest_id === questId && s.status === 'approved');
   }
 
+  hasCompletedQuest(userId: string, questId: string, excludeApprovedSubmissionId?: string): boolean {
+    return this.submissions.some((s) => s.user_id === userId && s.quest_id === questId && s.status === 'approved' && s.id !== excludeApprovedSubmissionId) ||
+      this.quest_attempts.some((attempt) => attempt.user_id === userId && attempt.quest_id === questId && attempt.status === 'completed');
+  }
+
   hasPendingSubmission(userId: string, questId: string): boolean {
     return this.submissions.some((s) => s.user_id === userId && s.quest_id === questId && s.status === 'pending');
+  }
+
+  applyDemoPointsDelta(userId: string, delta: number): number {
+    if (!Number.isSafeInteger(delta)) throw new Error('INVALID_DEMO_POINT_DELTA');
+    const user = this.findUserById(userId);
+    if (!user) throw new Error('USER_NOT_FOUND');
+    const next = user.demo_points + delta;
+    if (!Number.isSafeInteger(next) || next < 0) throw new Error('INVALID_DEMO_POINT_BALANCE');
+    user.demo_points = next;
+    user.updated_at = new Date().toISOString();
+    this.persistUserPoints(userId, next);
+    return next;
   }
 
   createSubmission(payload: Omit<SubmissionRow, 'id' | 'created_at' | 'updated_at'>): SubmissionRow {
@@ -2538,14 +2555,13 @@ export class MemoryDb {
 
     const targetStatus = action === 'approve' ? 'approved' : 'rejected';
 
-    if (action === 'approve' && this.submissions.some((candidate) =>
-      candidate.id !== id && candidate.user_id === sub.user_id && candidate.quest_id === sub.quest_id && candidate.status === 'approved')) {
-      return { submission: sub, alreadyReviewed: false, conflicting: true, reason: 'ALREADY_COMPLETED' };
-    }
-
     // Idempotent check: if already in target status, return without re-adding points
     if (sub.status === targetStatus) {
       return { submission: sub, alreadyReviewed: true, conflicting: false };
+    }
+
+    if (action === 'approve' && this.hasCompletedQuest(sub.user_id, sub.quest_id, id)) {
+      return { submission: sub, alreadyReviewed: false, conflicting: true, reason: 'ALREADY_COMPLETED' };
     }
 
     // Conflicting terminal state (e.g. reject after approve): explicit conflict, not silent success

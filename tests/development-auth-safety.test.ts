@@ -49,7 +49,7 @@ describe('development authentication safety', () => {
   it('never resolves the simulated username to a reserved admin or demo seed', async () => {
     Reflect.set(env, 'NODE_ENV', 'development');
     Reflect.set(env, 'ALLOW_INSECURE_LOCAL_WALLET_AUTH', true);
-    for (const username of ['admin-1', 'user-1', 'user-2', 'user-3']) {
+    for (const username of ['admin-1', 'user-1', 'user-2', 'user-3', 'coastal', 'maya', 'pao']) {
       const response = await request(app).post('/api/v1/auth/simulated-wallet-login')
         .send({ username, password: 'ignored-password' });
       expect(response.status).toBe(403);
