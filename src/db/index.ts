@@ -836,6 +836,22 @@ export function calculateHaversineDistance(lat1: number, lon1: number, lat2: num
   return Math.round(R * c * 10) / 10;
 }
 
+export function withinRadius(
+  lat: number,
+  lng: number,
+  targetLat: number,
+  targetLng: number,
+  radiusMeters: number,
+  accuracyMeters = 0
+): { ok: boolean; distance: number } {
+  const distance = calculateHaversineDistance(lat, lng, targetLat, targetLng);
+  if (!Number.isFinite(distance)) return { ok: false, distance };
+  const accuracyAllowance = Number.isFinite(accuracyMeters)
+    ? Math.min(Math.max(accuracyMeters, 0), 25)
+    : 0;
+  return { ok: distance <= radiusMeters + accuracyAllowance, distance };
+}
+
 export class MemoryDb {
   users = developmentFixturesEnabled ? [...mockUsers] : [];
   quests = developmentFixturesEnabled ? [...mockQuests] : [];
