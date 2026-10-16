@@ -21,7 +21,7 @@ realPg('author-funded Eco-Quest lifecycle (disposable PostgreSQL)', () => {
   const token = (id: string, role = 'user') => `Bearer ${jwt.sign({ id, seed_id: id, role }, env.JWT_SECRET)}`;
 
   async function user(id: string, points = 0, role = 'user') {
-    await fixture.pool.query('INSERT INTO users(id,seed_id,display_name,email,role,demo_points) VALUES($1,$1,$1,$2,$3,$4)', [id,`${id}@example.test`,role,points]);
+    await fixture.pool.query('INSERT INTO users(id,seed_id,display_name,email,role,demo_points) VALUES($1,$2,$3,$4,$5,$6)', [id,id,id,`${id}@example.test`,role,points]);
     db.users.push({ id, seed_id: id, display_name: id, email: `${id}@example.test`, role, demo_points: points, is_test: false } as any);
   }
   async function setup(mode: 'budget' | 'window', completions: number, contribution: number) {

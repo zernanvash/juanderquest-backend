@@ -584,7 +584,10 @@ export class SubmissionsService {
           return { success: false, statusCode: 403,
             error: { code: 'SELF_REVIEW_FORBIDDEN', message: 'Reviewers cannot approve or reject their own proof.' } };
         }
-        if (action === 'approve') {
+        // A replayed approval of an already-approved submission is idempotent: it must
+        // reach the shortcut below instead of tripping on the attempt its own first
+        // approval completed.
+        if (action === 'approve' && sub.status !== 'approved') {
           // Use the same traveler lock as progressive-attempt approval so a
           // legacy proof and a reviewed attempt cannot both pay out in parallel.
           await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [sub.user_id]);
