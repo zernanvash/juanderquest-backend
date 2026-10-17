@@ -51,9 +51,9 @@ describe('JuanChoice presentation round v2 renewal and allowlist cutover regress
     for (const spotId of spotIds) {
       await fixture.pool.query(
         `INSERT INTO spots(id, slug, name, description, category, subcategory, municipality, address, gps_lat, gps_lng, status, is_test, recommendation_suppressed, source_type, source_name)
-         VALUES($1, $1, $1, 'Test spot description', 'nature_outdoors', 'beach', 'Test Muni', 'Test Addr', 16.0, 120.0, 'published', false, false, 'editorial', 'Editorial')
+         VALUES($1, $2, $3, 'Test spot description', 'nature_outdoors', 'beach', 'Test Muni', 'Test Addr', 16.0, 120.0, 'published', false, false, 'editorial', 'Editorial')
          ON CONFLICT (id) DO NOTHING`,
-        [spotId]
+        [spotId, spotId, spotId]
       );
     }
 

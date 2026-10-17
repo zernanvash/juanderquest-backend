@@ -26,9 +26,9 @@ describe('JuanChoice presentation overview contract', () => {
     // Seed test spots
     await fixture.pool.query(
       `INSERT INTO spots(id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,source_type,source_name,is_test)
-       VALUES ($1,$1,'Demo Spot 1','Desc','nature_outdoors','beach','Bolinao','Bolinao',16,120,'lgu','LGU',false),
-              ($2,$2,'Demo Spot 2','Desc','nature_outdoors','beach','Bolinao','Bolinao',16,120,'lgu','LGU',false)`,
-      [spotId1, spotId2]
+       VALUES ($1,$2,'Demo Spot 1','Desc','nature_outdoors','beach','Bolinao','Bolinao',16,120,'lgu','LGU',false),
+              ($3,$4,'Demo Spot 2','Desc','nature_outdoors','beach','Bolinao','Bolinao',16,120,'lgu','LGU',false)`,
+      [spotId1, spotId1, spotId2, spotId2]
     );
   });
 
@@ -334,8 +334,8 @@ describe('JuanChoice presentation overview contract', () => {
     const qaUserId = randomUUID();
     await fixture.pool.query(
       `INSERT INTO users(id, seed_id, display_name, email, role, is_test)
-       VALUES ($1, $1, 'QA Tester', 'qa@juanderquest.test', 'qa', false)`,
-      [qaUserId]
+       VALUES ($1, $2, 'QA Tester', 'qa@juanderquest.test', 'qa', false)`,
+      [qaUserId, qaUserId]
     );
 
     const token = jwt.sign({ id: qaUserId, seed_id: qaUserId, role: 'qa' }, env.JWT_SECRET);
