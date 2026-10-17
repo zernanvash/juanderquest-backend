@@ -57,7 +57,8 @@ export function computeLeaderboard(options?: {
   const eligibleSubmissions = db.submissions.filter((s: SubmissionRow) => {
     if (s.status !== 'approved' || s.is_test) return false;
     if (timeframe === 'weekly') {
-      const subTime = new Date(s.created_at).getTime();
+      const approvalDate = s.reviewed_at || s.updated_at || s.created_at;
+      const subTime = new Date(approvalDate).getTime();
       return nowMs - subTime <= sevenDaysMs;
     }
     return true;
