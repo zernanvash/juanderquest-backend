@@ -70,6 +70,57 @@ describe('Valhalla Routing & Polyline Decoder', () => {
   });
 
   describe('API Endpoints /api/v1/routes', () => {
+    test('GET /api/v1/routes/coverage reports the Pangasinan bbox with one-hour caching', async () => {
+      const res = await request(app).get('/api/v1/routes/coverage');
+      expect(res.status).toBe(200);
+      expect(res.headers['cache-control']).toContain('max-age=3600');
+      expect(res.body).toEqual({
+        success: true,
+        data: { bbox: [119.7, 15.65, 121.05, 16.55], region: 'Pangasinan' },
+      });
+    });
+
+    test('POST outside the configured bbox skips Valhalla and labels the fallback', async () => {
+      const res = await request(app)
+        .post('/api/v1/routes')
+        .send({
+          start: { lat: 14.5995, lng: 120.9842 }, // Manila
+          end: { lat: 16.194, lng: 119.98 }, // Hundred Islands
+          costing: 'auto',
+        });
+
+      expect(res.status).toBe(200);
+      expect(jest.mocked(global.fetch)).not.toHaveBeenCalled();
+      expect(res.body.data).toMatchObject({
+        degraded: true,
+        navigationMode: 'straight_line_estimate',
+        warning: {
+          code: 'OUTSIDE_ROUTING_COVERAGE',
+          coverageLabel: 'Pangasinan',
+        },
+        maneuvers: [],
+      });
+    });
+
+    test('POST in coverage still queries Valhalla', async () => {
+      const shape = encodePolyline6([[16.0433, 120.3333], [16.0218, 120.2319]]);
+      jest.mocked(global.fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          trip: { summary: { length: 11.2, time: 900 }, legs: [{ shape, maneuvers: [] }] },
+        }),
+      } as Response);
+
+      const res = await request(app).post('/api/v1/routes').send({
+        start: { lat: 16.0433, lng: 120.3333 },
+        end: { lat: 16.0218, lng: 120.2319 },
+      });
+
+      expect(res.status).toBe(200);
+      expect(jest.mocked(global.fetch)).toHaveBeenCalledTimes(1);
+      expect(res.body.data.navigationMode).toBe('turn_by_turn');
+    });
+
     test('GET /api/v1/routes labels straight-line fallback as degraded and non-turn-by-turn', async () => {
       const res = await request(app)
         .get('/api/v1/routes')
