@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { app } from '../src/app.js';
+import * as envModule from '../src/config/env.js';
 import { env } from '../src/config/env.js';
 import { setPool } from '../src/db/pool.js';
 import { db as domainDb } from '../src/db/index.js';
@@ -11,6 +12,7 @@ import { getMonthlyOverview } from '../src/juanchoice/monthly-overview.js';
 
 describe('JuanChoice presentation overview contract', () => {
   let fixture: TestDbInstance;
+  let currentDb: string;
   const presentationCampaignId = '33333333-3333-4333-8333-333333333333';
   const otherCampaignId = '44444444-4444-4444-8444-444444444444';
   const spotId1 = 'demo-spot-1';
@@ -23,11 +25,13 @@ describe('JuanChoice presentation overview contract', () => {
     setPool(fixture.pool);
     domainDb.usersRepo.setPool(fixture.pool);
 
-    if (process.env.JDQ_REAL_PG_URL) {
-      await fixture.pool.query(
-        "CREATE OR REPLACE FUNCTION current_database() RETURNS text AS $$ SELECT 'juanderquest_presentation_test'::text $$ LANGUAGE sql;"
-      );
-    }
+    const dbRes = await fixture.pool.query('SELECT current_database() AS db');
+    currentDb = dbRes.rows[0].db;
+
+    jest.spyOn(envModule, 'isPresentationDatabaseName').mockImplementation((db: string) => {
+      if (db === currentDb || db === 'juanderquest_presentation_test' || db === 'juanderquest_presentation') return true;
+      return envModule.isPresentationDatabaseName(db);
+    });
 
     // Seed test spots
     await fixture.pool.query(
@@ -45,6 +49,7 @@ describe('JuanChoice presentation overview contract', () => {
     env.JUANCHOICE_PRESENTATION_MODE = false;
     env.JUANCHOICE_ENABLED = false;
     env.JUANCHOICE_WRITES_ENABLED = false;
+    jest.restoreAllMocks();
   });
 
   beforeEach(async () => {
@@ -55,8 +60,8 @@ describe('JuanChoice presentation overview contract', () => {
     env.JUANCHOICE_PRESENTATION_MODE = false;
     env.ALLOW_IN_MEMORY_FALLBACK = false;
     env.JUANCHOICE_PRESENTATION_CAMPAIGN_ID = presentationCampaignId;
-    env.JUANCHOICE_PRESENTATION_DB_NAME = 'juanderquest_presentation_test';
-    env.DATABASE_URL = 'postgres://localhost:5432/juanderquest_presentation_test';
+    env.JUANCHOICE_PRESENTATION_DB_NAME = currentDb;
+    env.DATABASE_URL = `postgres://localhost:5432/${currentDb}`;
 
     // Clean campaign / results rows
     await fixture.pool.query('DELETE FROM juanchoice_results');

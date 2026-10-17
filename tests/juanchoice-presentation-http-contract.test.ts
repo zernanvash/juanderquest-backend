@@ -2,6 +2,7 @@ import request from 'supertest';
 import { randomUUID } from 'crypto';
 import jwt from 'jsonwebtoken';
 import { app } from '../src/app.js';
+import * as envModule from '../src/config/env.js';
 import { env } from '../src/config/env.js';
 import { db as domainDb } from '../src/db/index.js';
 import { setPool } from '../src/db/pool.js';
@@ -35,14 +36,13 @@ describe('JuanChoice presentation HTTP contracts (Cookies, Exact-Origin CSRF, Wr
     setPool(fixture.pool);
     domainDb.usersRepo.setPool(fixture.pool);
 
-    if (process.env.JDQ_REAL_PG_URL) {
-      await fixture.pool.query(
-        "CREATE OR REPLACE FUNCTION current_database() RETURNS text AS $$ SELECT 'juanderquest_presentation'::text $$ LANGUAGE sql;"
-      );
-    }
-
     const dbRes = await fixture.pool.query('SELECT current_database() AS db');
     const currentDb = dbRes.rows[0].db;
+
+    jest.spyOn(envModule, 'isPresentationDatabaseName').mockImplementation((db: string) => {
+      if (db === currentDb || db === 'juanderquest_presentation_test' || db === 'juanderquest_presentation') return true;
+      return envModule.isPresentationDatabaseName(db);
+    });
 
     Object.assign(env, {
       NODE_ENV: 'test',
@@ -98,6 +98,7 @@ describe('JuanChoice presentation HTTP contracts (Cookies, Exact-Origin CSRF, Wr
       Object.assign(env, originalEnv);
       await fixture.close();
     }
+    jest.restoreAllMocks();
   });
 
   describe('Real Backend Set-Cookie Behavior', () => {

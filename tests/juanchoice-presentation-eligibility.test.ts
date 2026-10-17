@@ -2,7 +2,8 @@ import { randomUUID } from 'crypto';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { app } from '../src/app.js';
-import { env, validatePresentationModeConfig, extractDatabaseName } from '../src/config/env.js';
+import * as envModule from '../src/config/env.js';
+const { env, validatePresentationModeConfig, extractDatabaseName } = envModule;
 import { setPool } from '../src/db/pool.js';
 import { db as domainDb } from '../src/db/index.js';
 import { createTestDb, TestDbInstance } from '../src/db/testHarness.js';
@@ -304,6 +305,7 @@ describe('JuanChoice Presentation Mode Voter Eligibility Predicate & Service', (
 
   describe('Integration with castBallot and getMyJuanChoiceCampaignState', () => {
     let db: TestDbInstance;
+    let currentDb: string;
     const freshUser = 'fresh-guest-uuid';
     const cand1 = randomUUID();
     const cand2 = randomUUID();
@@ -313,11 +315,13 @@ describe('JuanChoice Presentation Mode Voter Eligibility Predicate & Service', (
       setPool(db.pool);
       domainDb.usersRepo.setPool(db.pool);
 
-      if (process.env.JDQ_REAL_PG_URL) {
-        await db.pool.query(
-          "CREATE OR REPLACE FUNCTION current_database() RETURNS text AS $$ SELECT 'juanderquest_presentation_test'::text $$ LANGUAGE sql;"
-        );
-      }
+      const dbRes = await db.pool.query('SELECT current_database() AS db');
+      currentDb = dbRes.rows[0].db;
+
+      jest.spyOn(envModule, 'isPresentationDatabaseName').mockImplementation((dbName: string) => {
+        if (dbName === currentDb || dbName === 'juanderquest_presentation_test' || dbName === 'juanderquest_presentation') return true;
+        return envModule.isPresentationDatabaseName(dbName);
+      });
 
       env.JUANCHOICE_ENABLED = true;
       env.JUANCHOICE_WRITES_ENABLED = true;
@@ -358,6 +362,7 @@ describe('JuanChoice Presentation Mode Voter Eligibility Predicate & Service', (
       await db.close();
       env.JUANCHOICE_ENABLED = false;
       env.JUANCHOICE_WRITES_ENABLED = false;
+      jest.restoreAllMocks();
     });
 
     it('blocks fresh guest on both projection and castBallot when presentation mode is OFF', async () => {
@@ -387,8 +392,8 @@ describe('JuanChoice Presentation Mode Voter Eligibility Predicate & Service', (
       env.JUANCHOICE_PRESENTATION_MODE = true;
       env.ALLOW_IN_MEMORY_FALLBACK = false;
       env.JUANCHOICE_PRESENTATION_CAMPAIGN_ID = allowedCampaignId;
-      env.JUANCHOICE_PRESENTATION_DB_NAME = 'juanderquest_presentation_test';
-      env.DATABASE_URL = 'postgres://postgres:postgres@localhost:5432/juanderquest_presentation_test';
+      env.JUANCHOICE_PRESENTATION_DB_NAME = currentDb;
+      env.DATABASE_URL = `postgres://postgres:postgres@localhost:5432/${currentDb}`;
 
       const token = jwt.sign({ id: freshUser, seed_id: freshUser, role: 'user' }, env.JWT_SECRET);
       const res = await request(app)
