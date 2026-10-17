@@ -9,6 +9,7 @@ import { initJuanChoiceScheduler } from './jobs/juanchoice-scheduler.js';
 import { initEconomyReservationWorker } from './jobs/economy-reservations.js';
 import { initEconomicOutboxWorker } from './jobs/economy-outbox.js';
 import { initFundingScheduler } from './funding/scheduler.js';
+import { startStandingsJob } from './social/standingsJob.js';
 
 // Boot orchestration: connect PostgreSQL (when available), hydrate memory + governance, fall back to in-memory.
 export async function bootstrap() {
@@ -19,6 +20,7 @@ export async function bootstrap() {
     await governanceStore.hydrateFromPg(pool);
     await spotStore.hydrateFromPg(pool);
     await assetStore.hydrateFromPg(pool);
+    startStandingsJob();
   } else {
     governanceStore.refreshBalances();
   }

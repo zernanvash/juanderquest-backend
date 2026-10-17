@@ -3,6 +3,7 @@ import { env } from './config/env.js';
 import { bootstrap } from './bootstrap.js';
 import { closePool } from './db/pool.js';
 import { beginServiceShutdown, setServiceReady } from './middleware/readiness.js';
+import { stopStandingsJob } from './social/standingsJob.js';
 
 const startedAt = Date.now();
 
@@ -33,6 +34,7 @@ let draining = false;
 function shutdown(signal: NodeJS.Signals): void {
   if (draining) return;
   draining = true;
+  stopStandingsJob();
   beginServiceShutdown();
   console.log(`[shutdown] ${signal} received — draining in-flight requests (10 s cap)`);
 

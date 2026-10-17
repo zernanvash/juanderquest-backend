@@ -88,6 +88,10 @@ const rawEnv = cleanEnv(process.env, {
   JUANCHOICE_PRESENTATION_CAMPAIGN_ID: str({ default: '' }),
   JUANCHOICE_PRESENTATION_DB_NAME: str({ default: '' }),
   JDQ_PRESENTATION_PROFILE: str({ default: 'local' }),
+  PUSH_ENABLED: bool({ default: false }),
+  FCM_SERVICE_ACCOUNT_FILE: str({ default: '' }),
+  PLAZA_STANDINGS_INTERVAL_MS: num({ default: 300000 }),
+  PUSH_DISPATCH_INTERVAL_MS: num({ default: 30000 }),
 });
 
 const flagOverrides: Record<string, any> = {};

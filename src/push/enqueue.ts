@@ -11,13 +11,29 @@ export interface EnqueueFriendActivityInput {
 }
 
 /**
- * Phase 1 stub for friend push notifications.
- * Full batching, follower fan-out (capped at 500), and FCM delivery
- * will be completed in Phase 4 per Plan 41 §8.3.
  */
 export async function enqueueFriendActivityPush(
   _client: Queryable,
   _activity: EnqueueFriendActivityInput,
 ): Promise<void> {
   // Phase 1 stub: no-op until Phase 4 push dispatcher and batching queue land
+}
+
+export interface EnqueuePushInput {
+  userId: string;
+  category: 'overtaken' | 'friend_activity' | 'social' | 'weekly_recap';
+  collapseKey: string;
+  notificationId?: string | null;
+  title: string;
+  body: string;
+  href: string;
+  actorName?: string;
+  isTest: boolean;
+}
+
+export async function enqueuePush(
+  _client: Queryable,
+  _input: EnqueuePushInput,
+): Promise<void> {
+  // Phase 1/2 stub: full batching, quiet hours, and FCM queue land in Phase 4
 }

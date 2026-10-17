@@ -5,6 +5,8 @@ import { optionalAuthenticateToken, checkQAAuthorization, isAuthorizedQA, AuthRe
 import { rateLimit } from '../middleware/rateLimit.js';
 import { validateRequest } from '../middleware/validate.js';
 import { getFeed, getActivityById, PlazaError } from '../social/feed.js';
+import { getBoard, getTownBoard, computeHomeTowns } from '../social/standings.js';
+import { weekStartUtc, nextWeekStartUtc, weekStartDate, weekId } from '../social/time.js';
 
 export const plazaRouter = Router();
 
@@ -22,11 +24,41 @@ const activityRateLimiter = rateLimit({
   keyStrategy: 'actor_or_ip',
 });
 
+const standingsRateLimiter = rateLimit({
+  policyId: 'plaza:standings',
+  windowMs: 60 * 1000,
+  max: 120,
+  keyStrategy: 'ip',
+});
+
+const townsRateLimiter = rateLimit({
+  policyId: 'plaza:towns',
+  windowMs: 60 * 1000,
+  max: 120,
+  keyStrategy: 'ip',
+});
+
 const feedQuerySchema = z.object({
   query: z.object({
     scope: z.enum(['mixed', 'following']).default('mixed'),
     cursor: z.string().optional(),
     limit: z.coerce.number().int().min(1).max(50).default(20),
+  }),
+});
+
+const standingsQuerySchema = z.object({
+  query: z.object({
+    board: z.enum(['everyone', 'following', 'town']).default('everyone'),
+    period: z.enum(['weekly', 'all_time']).default('weekly'),
+    metric: z.enum(['scout_reputation', 'quests_completed', 'points']).default('scout_reputation'),
+    limit: z.coerce.number().int().min(1).max(50).default(20),
+    after_rank: z.coerce.number().int().min(0).optional(),
+  }),
+});
+
+const townsQuerySchema = z.object({
+  query: z.object({
+    period: z.enum(['weekly']).default('weekly'),
   }),
 });
 
@@ -138,3 +170,140 @@ plazaRouter.get(
     }
   },
 );
+
+// GET /plaza/standings
+plazaRouter.get(
+  '/plaza/standings',
+  optionalAuthenticateToken,
+  checkQAAuthorization,
+  standingsRateLimiter,
+  validateRequest(standingsQuerySchema),
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    res.set('Cache-Control', 'no-store');
+    const isTest = isAuthorizedQA(req);
+    if (isTest) res.set('X-Robots-Tag', 'noindex, nofollow');
+
+    const pool = getPool();
+    if (!pool) {
+      const now = new Date();
+      const ws = weekStartUtc(now);
+      const we = nextWeekStartUtc(now);
+      return res.status(200).json({
+        success: true,
+        data: {
+          board: 'everyone',
+          period: 'weekly',
+          week: {
+            id: weekId(now),
+            starts_at: ws.toISOString(),
+            ends_at: we.toISOString(),
+            resets_in_seconds: Math.max(0, Math.floor((we.getTime() - now.getTime()) / 1000)),
+          },
+          me: null,
+          podium: [],
+          entries: [],
+          rivals: { above: [], below: [] },
+          town: null,
+          total: 0,
+          next_after_rank: null,
+          degraded: true,
+        },
+      });
+    }
+
+    try {
+      const validatedQuery = res.locals.validatedRequest?.query ?? req.query;
+      const board = validatedQuery.board as 'everyone' | 'following' | 'town';
+      const period = validatedQuery.period as 'weekly' | 'all_time';
+      const metric = validatedQuery.metric as 'scout_reputation' | 'quests_completed' | 'points';
+      const limit = Number(validatedQuery.limit ?? 20);
+      const afterRank = validatedQuery.after_rank != null ? Number(validatedQuery.after_rank) : null;
+
+      const result = await getBoard({
+        client: pool,
+        viewerId: req.user?.id ?? null,
+        isTest,
+        board,
+        period,
+        metric,
+        limit,
+        afterRank,
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (err: any) {
+      if (err instanceof PlazaError) {
+        return res.status(err.statusCode).json({
+          success: false,
+          error: { code: err.code, message: err.message },
+        });
+      }
+      return next(err);
+    }
+  },
+);
+
+// GET /plaza/towns
+plazaRouter.get(
+  '/plaza/towns',
+  optionalAuthenticateToken,
+  checkQAAuthorization,
+  townsRateLimiter,
+  validateRequest(townsQuerySchema),
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    res.set('Cache-Control', 'no-store');
+    const isTest = isAuthorizedQA(req);
+    if (isTest) res.set('X-Robots-Tag', 'noindex, nofollow');
+
+    const pool = getPool();
+    if (!pool) {
+      const now = new Date();
+      const ws = weekStartUtc(now);
+      const we = nextWeekStartUtc(now);
+      return res.status(200).json({
+        success: true,
+        data: {
+          week: {
+            id: weekId(now),
+            starts_at: ws.toISOString(),
+            ends_at: we.toISOString(),
+            resets_in_seconds: Math.max(0, Math.floor((we.getTime() - now.getTime()) / 1000)),
+          },
+          towns: [],
+          degraded: true,
+        },
+      });
+    }
+
+    try {
+      let viewerTown: string | null = null;
+      if (req.user?.id) {
+        const townsMap = await computeHomeTowns(pool, isTest);
+        viewerTown = townsMap.get(req.user.id) ?? null;
+      }
+
+      const result = await getTownBoard({
+        client: pool,
+        isTest,
+        viewerHomeTown: viewerTown,
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (err: any) {
+      if (err instanceof PlazaError) {
+        return res.status(err.statusCode).json({
+          success: false,
+          error: { code: err.code, message: err.message },
+        });
+      }
+      return next(err);
+    }
+  },
+);
+
