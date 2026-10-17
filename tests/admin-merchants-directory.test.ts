@@ -13,7 +13,7 @@ const ownerToken = jwt.sign({ id: OWNER_ID, seed_id: 'merchant-owner-seed', role
 const MERCHANT_ID = 'merchant-admin-directory-1';
 
 describe('Admin merchant directory (read-only inspection)', () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     const now = new Date().toISOString();
 
     db.users.push({
@@ -32,7 +32,7 @@ describe('Admin merchant directory (read-only inspection)', () => {
       updated_at: now,
     });
 
-    const application = db.createAffiliateApplication({
+    const application = await db.createAffiliateApplication({
       user_id: OWNER_ID,
       business_name: 'Alaminos Island Sweets',
       category: 'pasalubong',

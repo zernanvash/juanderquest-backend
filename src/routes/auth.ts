@@ -873,7 +873,12 @@ const simulatedWalletLoginSchema = z.object({
   }),
 });
 
-const reservedSimulatedSeeds = new Set(['user-1', 'user-2', 'user-3', 'admin-1']);
+// These IDs belong to deterministic development/demo fixtures, not accounts
+// created through simulated login. Never let a public username claim them.
+const reservedSimulatedSeeds = new Set([
+  'user-1', 'user-2', 'user-3', 'admin-1',
+  'coastal', 'maya', 'pao', 'user-coastal', 'user-maya', 'user-pao',
+]);
 
 router.post('/auth/simulated-wallet-login', rateLimit({ policyId: 'auth:simulated-wallet-login', windowMs: 60_000, max: 20 }), validateRequest(simulatedWalletLoginSchema), async (req, res) => {
   if (env.NODE_ENV === 'production' || (env.NODE_ENV !== 'test' && !env.ALLOW_INSECURE_LOCAL_WALLET_AUTH)) return res.status(403).json({ success: false, error: { code: 'SIMULATED_LOGIN_DISABLED', message: 'Simulated login is unavailable on this server. Connect a wallet instead.' } });

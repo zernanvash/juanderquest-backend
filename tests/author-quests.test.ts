@@ -21,8 +21,11 @@ describe('Destination-Author Quests System', () => {
 
   const testSpotId = `spot-author-test-${Date.now()}`;
   const testSpotSlug = `author-test-spot-${Date.now()}`;
+  let originalQuestFunding: boolean;
 
   beforeAll(() => {
+    originalQuestFunding = env.QUEST_FUNDING_ENABLED;
+    env.QUEST_FUNDING_ENABLED = false;
     // Register a spot authored by Juan Dela Cruz
     spotStore.spots.push({
       id: testSpotId,
@@ -51,6 +54,7 @@ describe('Destination-Author Quests System', () => {
   });
 
   afterAll(() => {
+    env.QUEST_FUNDING_ENABLED = originalQuestFunding;
     spotStore.spots = spotStore.spots.filter((s) => s.id !== testSpotId);
   });
 

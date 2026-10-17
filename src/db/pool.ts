@@ -46,6 +46,13 @@ export function setPool(nextPool: Pool | null): void {
   pool = nextPool;
 }
 
+// Graceful shutdown helper: stop handing out connections and close the pool.
+export async function closePool(): Promise<void> {
+  const current = pool;
+  pool = null;
+  if (current) await current.end();
+}
+
 export interface InitPostgresOptions {
   policy?: DatabaseRuntimePolicy;
   poolFactory?: () => Pool;

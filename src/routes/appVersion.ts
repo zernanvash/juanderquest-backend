@@ -33,6 +33,9 @@ export interface AppVersionData {
   signingKeyGeneration?: number;
   legacyInstallRequiresReinstall?: boolean;
   content?: ContentManifestMetadata;
+  // Manifest v2 (per-ABI releases): base build number and its floor.
+  buildNumber?: number;
+  minSupportedBuildNumber?: number;
 }
 
 let cachedGitCommit: string | null = null;
@@ -135,6 +138,8 @@ export const getLatestAppVersion = (): AppVersionData => {
         sizeBytes: typeof parsed.sizeBytes === 'number' ? parsed.sizeBytes : undefined,
         signingKeyGeneration: typeof parsed.signingKeyGeneration === 'number' ? parsed.signingKeyGeneration : undefined,
         legacyInstallRequiresReinstall: typeof parsed.legacyInstallRequiresReinstall === 'boolean' ? parsed.legacyInstallRequiresReinstall : undefined,
+        buildNumber: typeof parsed.buildNumber === 'number' ? parsed.buildNumber : undefined,
+        minSupportedBuildNumber: typeof parsed.minSupportedBuildNumber === 'number' ? parsed.minSupportedBuildNumber : undefined,
         content: parsed.content ? {
           version: String(parsed.content.version || ''),
           manifestUrl: String(parsed.content.manifestUrl || ''),

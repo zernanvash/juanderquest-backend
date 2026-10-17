@@ -221,6 +221,13 @@ export interface MerchantMembershipRow {
   updated_at: string;
 }
 
+interface MerchantProvision {
+  merchant: MerchantRow;
+  newMerchant: boolean;
+  membership: MerchantMembershipRow | null;
+  newMembership: boolean;
+}
+
 export interface MerchantProductRow {
   id: string;
   merchant_id: string;
@@ -1139,6 +1146,72 @@ export class MemoryDb {
     }
   }
 
+  // Test/maintenance hook: attach a pool for durability without full hydration.
+  // Production boot uses hydrateFromPg; this exists so FK-enforcing tests and
+  // maintenance scripts can exercise the write-through paths on a minimal schema.
+  attachDurabilityPool(pool: Pool | null): void {
+    this.pg = pool;
+  }
+
+  // Runs ordered durable statements on a single connection inside one
+  // transaction. Parent rows are written before children so foreign keys are
+  // always satisfiable, and any failure aborts the whole write and surfaces as
+  // STORAGE_UNAVAILABLE instead of silently diverging from PostgreSQL.
+  private async runDurableTransaction(statements: Array<{ query: string; params: unknown[] }>): Promise<void> {
+    if (!this.pg) return;
+    let client;
+    try {
+      client = await this.pg.connect();
+    } catch (error) {
+      console.error('[db] durable transaction could not acquire a connection:', (error as Error).message);
+      const storageError: any = new Error('Durable storage is unavailable.');
+      storageError.code = 'STORAGE_UNAVAILABLE';
+      throw storageError;
+    }
+    try {
+      await client.query('BEGIN');
+      for (const statement of statements) {
+        await client.query(statement.query, statement.params);
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Preserve the original failure.
+      }
+      console.error('[db] durable transaction failed:', (error as Error).message);
+      const storageError: any = new Error('Durable storage is unavailable.');
+      storageError.code = 'STORAGE_UNAVAILABLE';
+      storageError.cause = error;
+      throw storageError;
+    } finally {
+      client.release();
+    }
+  }
+
+  private buildApplicationAudit(applicationId: string, actorId: string | null, fromStatus: string, toStatus: string, revision: number, notes?: string | null, applicantFeedback?: string | null): MerchantApplicationAuditRow {
+    return {
+      id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      application_id: applicationId,
+      actor_id: actorId,
+      from_status: fromStatus,
+      to_status: toStatus,
+      revision,
+      notes: notes ?? null,
+      applicant_feedback: applicantFeedback ?? null,
+      created_at: new Date().toISOString(),
+    };
+  }
+
+  private applicationAuditStatement(audit: MerchantApplicationAuditRow) {
+    return {
+      query: `INSERT INTO merchant_application_audits (id, application_id, actor_id, from_status, to_status, revision, notes, applicant_feedback, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+      params: [audit.id, audit.application_id, audit.actor_id, audit.from_status, audit.to_status, audit.revision, audit.notes, audit.applicant_feedback],
+    };
+  }
+
   recordWebAnalyticsEvent(event: WebAnalyticsEventRow) {
     this.web_analytics_events.push(event);
     if (this.web_analytics_events.length > 20000) this.web_analytics_events.splice(0, this.web_analytics_events.length - 20000);
@@ -1994,7 +2067,7 @@ export class MemoryDb {
     this.persist('DELETE FROM merchant_affiliate_drafts WHERE user_id = $1', [userId]);
   }
 
-  createAffiliateApplication(payload: Omit<AffiliateApplicationRow, 'id' | 'status' | 'reviewer_id' | 'reviewer_notes' | 'reviewed_at' | 'created_at' | 'updated_at'>): AffiliateApplicationRow {
+  async createAffiliateApplication(payload: Omit<AffiliateApplicationRow, 'id' | 'status' | 'reviewer_id' | 'reviewer_notes' | 'reviewed_at' | 'created_at' | 'updated_at'>): Promise<AffiliateApplicationRow> {
     const existingActive = this.affiliate_applications.find(
       (a) => a.user_id === payload.user_id && (a.status === 'received' || a.status === 'in_review' || a.status === 'needs_changes')
     );
@@ -2030,40 +2103,46 @@ export class MemoryDb {
       updated_at: now,
     };
 
+    const audit = this.buildApplicationAudit(newApp.id, payload.user_id, 'draft', 'received', 1, 'Initial submission');
+
+    // Durable first, parent before children: the application row must exist in
+    // PostgreSQL before its audit row can reference it.
+    await this.runDurableTransaction([
+      {
+        query: `INSERT INTO merchant_affiliate_applications 
+         (id, user_id, business_name, category, municipality, contact_name, contact_email, contact_phone, sponsorship_goals, proposal_details, status, version, business_address, business_province, gps_lat, gps_lng, preferred_contact_method, declaration_version, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW(), NOW())`,
+        params: [
+          newApp.id,
+          newApp.user_id,
+          newApp.business_name,
+          newApp.category,
+          newApp.municipality,
+          newApp.contact_name,
+          newApp.contact_email,
+          newApp.contact_phone,
+          JSON.stringify(newApp.sponsorship_goals),
+          newApp.proposal_details,
+          newApp.status,
+          newApp.version ?? 1,
+          newApp.business_address ?? '',
+          newApp.business_province ?? 'Pangasinan',
+          newApp.gps_lat,
+          newApp.gps_lng,
+          newApp.preferred_contact_method ?? 'email',
+          newApp.declaration_version ?? '1.0',
+        ],
+      },
+      this.applicationAuditStatement(audit),
+    ]);
+
     this.affiliate_applications.unshift(newApp);
+    this.merchant_application_audits.push(audit);
     this.deleteAffiliateDraft(payload.user_id);
-
-    this.recordApplicationAudit(newApp.id, payload.user_id, 'draft', 'received', 1, 'Initial submission');
-
-    this.persist(
-      `INSERT INTO merchant_affiliate_applications 
-       (id, user_id, business_name, category, municipality, contact_name, contact_email, contact_phone, sponsorship_goals, proposal_details, status, version, business_address, business_province, gps_lat, gps_lng, preferred_contact_method, declaration_version, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW(), NOW())`,
-      [
-        newApp.id,
-        newApp.user_id,
-        newApp.business_name,
-        newApp.category,
-        newApp.municipality,
-        newApp.contact_name,
-        newApp.contact_email,
-        newApp.contact_phone,
-        JSON.stringify(newApp.sponsorship_goals),
-        newApp.proposal_details,
-        newApp.status,
-        newApp.version ?? 1,
-        newApp.business_address ?? '',
-        newApp.business_province ?? 'Pangasinan',
-        newApp.gps_lat,
-        newApp.gps_lng,
-        newApp.preferred_contact_method ?? 'email',
-        newApp.declaration_version ?? '1.0',
-      ]
-    );
     return newApp;
   }
 
-  resubmitAffiliateApplication(id: string, userId: string, payload: Partial<AffiliateApplicationRow>): AffiliateApplicationRow {
+  async resubmitAffiliateApplication(id: string, userId: string, payload: Partial<AffiliateApplicationRow>): Promise<AffiliateApplicationRow> {
     const app = this.findAffiliateApplicationById(id);
     if (!app) {
       const err: any = new Error('Application not found');
@@ -2083,80 +2162,82 @@ export class MemoryDb {
 
     const now = new Date().toISOString();
     const oldStatus = app.status;
-    app.status = 'received';
-    app.version = (app.version || 1) + 1;
-    if (payload.business_name) app.business_name = payload.business_name;
-    if (payload.category) app.category = payload.category;
-    if (payload.municipality) app.municipality = payload.municipality;
-    if (payload.business_province) app.business_province = payload.business_province;
-    if (payload.contact_name) app.contact_name = payload.contact_name;
-    if (payload.contact_email) app.contact_email = payload.contact_email;
-    if (payload.contact_phone) app.contact_phone = payload.contact_phone;
-    if (payload.sponsorship_goals) app.sponsorship_goals = payload.sponsorship_goals;
-    if (payload.proposal_details !== undefined) app.proposal_details = payload.proposal_details;
-    if (payload.business_address !== undefined) app.business_address = payload.business_address;
-    if (payload.gps_lat !== undefined) app.gps_lat = payload.gps_lat;
-    if (payload.gps_lng !== undefined) app.gps_lng = payload.gps_lng;
-    if (payload.preferred_contact_method) app.preferred_contact_method = payload.preferred_contact_method;
+    const next = {
+      status: 'received' as AffiliateApplicationStatus,
+      version: (app.version || 1) + 1,
+      business_name: payload.business_name ?? app.business_name,
+      category: payload.category ?? app.category,
+      municipality: payload.municipality ?? app.municipality,
+      business_province: payload.business_province ?? app.business_province,
+      contact_name: payload.contact_name ?? app.contact_name,
+      contact_email: payload.contact_email ?? app.contact_email,
+      contact_phone: payload.contact_phone ?? app.contact_phone,
+      sponsorship_goals: payload.sponsorship_goals ?? app.sponsorship_goals,
+      proposal_details: payload.proposal_details !== undefined ? payload.proposal_details : app.proposal_details,
+      business_address: payload.business_address !== undefined ? payload.business_address : app.business_address,
+      gps_lat: payload.gps_lat !== undefined ? payload.gps_lat : app.gps_lat,
+      gps_lng: payload.gps_lng !== undefined ? payload.gps_lng : app.gps_lng,
+      preferred_contact_method: payload.preferred_contact_method ?? app.preferred_contact_method,
+    };
+
+    const audit = this.buildApplicationAudit(app.id, userId, oldStatus, 'received', next.version, 'Applicant resubmission');
+
+    // Durable first: application update, then the audit row that references it.
+    await this.runDurableTransaction([
+      {
+        query: `UPDATE merchant_affiliate_applications 
+         SET status = 'received', version = $1, business_name = $2, category = $3, municipality = $4,
+             contact_name = $5, contact_email = $6, contact_phone = $7, sponsorship_goals = $8,
+             proposal_details = $9, business_address = $10, gps_lat = $11, gps_lng = $12,
+             preferred_contact_method = $13, business_province = $14, applicant_feedback = NULL, updated_at = NOW()
+         WHERE id = $15`,
+        params: [
+          next.version,
+          next.business_name,
+          next.category,
+          next.municipality,
+          next.contact_name,
+          next.contact_email,
+          next.contact_phone,
+          JSON.stringify(next.sponsorship_goals),
+          next.proposal_details,
+          next.business_address ?? '',
+          next.gps_lat,
+          next.gps_lng,
+          next.preferred_contact_method ?? 'email',
+          next.business_province ?? 'Pangasinan',
+          app.id,
+        ],
+      },
+      this.applicationAuditStatement(audit),
+    ]);
+
+    app.status = next.status;
+    app.version = next.version;
+    app.business_name = next.business_name;
+    app.category = next.category;
+    app.municipality = next.municipality;
+    app.business_province = next.business_province;
+    app.contact_name = next.contact_name;
+    app.contact_email = next.contact_email;
+    app.contact_phone = next.contact_phone;
+    app.sponsorship_goals = next.sponsorship_goals;
+    app.proposal_details = next.proposal_details;
+    app.business_address = next.business_address;
+    app.gps_lat = next.gps_lat;
+    app.gps_lng = next.gps_lng;
+    app.preferred_contact_method = next.preferred_contact_method;
     app.applicant_feedback = null;
     app.updated_at = now;
-
-    this.recordApplicationAudit(app.id, userId, oldStatus, 'received', app.version, 'Applicant resubmission');
-
-    this.persist(
-      `UPDATE merchant_affiliate_applications 
-       SET status = 'received', version = $1, business_name = $2, category = $3, municipality = $4,
-           contact_name = $5, contact_email = $6, contact_phone = $7, sponsorship_goals = $8,
-           proposal_details = $9, business_address = $10, gps_lat = $11, gps_lng = $12,
-           preferred_contact_method = $13, business_province = $14, applicant_feedback = NULL, updated_at = NOW()
-       WHERE id = $15`,
-      [
-        app.version,
-        app.business_name,
-        app.category,
-        app.municipality,
-        app.contact_name,
-        app.contact_email,
-        app.contact_phone,
-        JSON.stringify(app.sponsorship_goals),
-        app.proposal_details,
-        app.business_address ?? '',
-        app.gps_lat,
-        app.gps_lng,
-        app.preferred_contact_method ?? 'email',
-        app.business_province ?? 'Pangasinan',
-        app.id,
-      ]
-    );
-    return app;
-  }
-
-  recordApplicationAudit(applicationId: string, actorId: string | null, fromStatus: string, toStatus: string, revision: number, notes?: string | null, applicantFeedback?: string | null): MerchantApplicationAuditRow {
-    const audit: MerchantApplicationAuditRow = {
-      id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      application_id: applicationId,
-      actor_id: actorId,
-      from_status: fromStatus,
-      to_status: toStatus,
-      revision,
-      notes: notes ?? null,
-      applicant_feedback: applicantFeedback ?? null,
-      created_at: new Date().toISOString(),
-    };
     this.merchant_application_audits.push(audit);
-    this.persist(
-      `INSERT INTO merchant_application_audits (id, application_id, actor_id, from_status, to_status, revision, notes, applicant_feedback, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
-      [audit.id, audit.application_id, audit.actor_id, audit.from_status, audit.to_status, audit.revision, audit.notes, audit.applicant_feedback]
-    );
-    return audit;
+    return app;
   }
 
   getApplicationAudits(applicationId: string): MerchantApplicationAuditRow[] {
     return this.merchant_application_audits.filter((a) => a.application_id === applicationId).sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   }
 
-  updateAffiliateApplicationStatus(id: string, update: { status: AffiliateApplicationStatus; reviewer_id: string; reviewer_notes?: string | null; applicant_feedback?: string | null; expected_version?: number }): AffiliateApplicationRow | null {
+  async updateAffiliateApplicationStatus(id: string, update: { status: AffiliateApplicationStatus; reviewer_id: string; reviewer_notes?: string | null; applicant_feedback?: string | null; expected_version?: number }): Promise<AffiliateApplicationRow | null> {
     const app = this.findAffiliateApplicationById(id);
     if (!app) return null;
 
@@ -2168,40 +2249,70 @@ export class MemoryDb {
 
     const fromStatus = app.status;
     const now = new Date().toISOString();
-    app.status = update.status;
-    app.reviewer_id = update.reviewer_id;
-    app.reviewer_notes = update.reviewer_notes ?? null;
-    if (update.applicant_feedback !== undefined) {
-      app.applicant_feedback = update.applicant_feedback;
+    const next = {
+      status: update.status,
+      reviewer_id: update.reviewer_id,
+      reviewer_notes: update.reviewer_notes ?? null,
+      applicant_feedback: update.applicant_feedback !== undefined ? update.applicant_feedback : app.applicant_feedback,
+    };
+
+    const audit = this.buildApplicationAudit(app.id, update.reviewer_id, fromStatus, update.status, app.version || 1, update.reviewer_notes, update.applicant_feedback);
+
+    // Durable first, one transaction, parent rows before children:
+    // application update -> merchant -> owner membership -> audit.
+    const statements: Array<{ query: string; params: unknown[] }> = [
+      {
+        query: `UPDATE merchant_affiliate_applications 
+         SET status = $1, reviewer_id = $2, reviewer_notes = $3, applicant_feedback = $4, reviewed_at = NOW(), updated_at = NOW()
+         WHERE id = $5`,
+        params: [next.status, next.reviewer_id, next.reviewer_notes, next.applicant_feedback ?? null, app.id],
+      },
+    ];
+
+    let provision: MerchantProvision | null = null;
+    if (update.status === 'approved') {
+      provision = this.buildMerchantProvision(app, now);
+      if (provision.newMerchant) {
+        statements.push({
+          query: `INSERT INTO merchants (id, name, location, description, status, is_published, category, municipality, contact_email, contact_phone, source_application_id, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+           ON CONFLICT (id) DO NOTHING`,
+          params: [provision.merchant.id, provision.merchant.name, provision.merchant.location, provision.merchant.description, provision.merchant.status, provision.merchant.is_published, provision.merchant.category, provision.merchant.municipality, provision.merchant.contact_email, provision.merchant.contact_phone, provision.merchant.source_application_id],
+        });
+      }
+      if (provision.newMembership && provision.membership) {
+        statements.push({
+          query: `INSERT INTO merchant_memberships (id, merchant_id, user_id, role, status, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+           ON CONFLICT (merchant_id, user_id) DO UPDATE SET status = 'active', updated_at = NOW()`,
+          params: [provision.membership.id, provision.membership.merchant_id, provision.membership.user_id, provision.membership.role, provision.membership.status],
+        });
+      }
     }
+    statements.push(this.applicationAuditStatement(audit));
+
+    await this.runDurableTransaction(statements);
+
+    app.status = next.status;
+    app.reviewer_id = next.reviewer_id;
+    app.reviewer_notes = next.reviewer_notes;
+    app.applicant_feedback = next.applicant_feedback;
     app.reviewed_at = now;
     app.updated_at = now;
-
-    this.recordApplicationAudit(app.id, update.reviewer_id, fromStatus, update.status, app.version || 1, update.reviewer_notes, update.applicant_feedback);
-
-    this.persist(
-      `UPDATE merchant_affiliate_applications 
-       SET status = $1, reviewer_id = $2, reviewer_notes = $3, applicant_feedback = $4, reviewed_at = NOW(), updated_at = NOW()
-       WHERE id = $5`,
-      [app.status, app.reviewer_id, app.reviewer_notes, app.applicant_feedback ?? null, app.id]
-    );
-
-    // If status is 'approved', atomically provision merchant and owner membership
-    if (update.status === 'approved') {
-      this.provisionMerchantForApplication(app);
+    this.merchant_application_audits.push(audit);
+    if (provision) {
+      this.applyMerchantProvision(provision);
     }
 
     return app;
   }
 
-  private provisionMerchantForApplication(app: AffiliateApplicationRow): MerchantRow {
+  private buildMerchantProvision(app: AffiliateApplicationRow, now: string): MerchantProvision {
     let merchant = this.merchants.find((m) => m.source_application_id === app.id);
-    const now = new Date().toISOString();
-
+    let newMerchant = false;
     if (!merchant) {
-      const merchantId = `m_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       merchant = {
-        id: merchantId,
+        id: `m_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         name: app.business_name,
         location: `${app.municipality}, ${app.business_province || 'Pangasinan'}`,
         description: app.proposal_details || `${app.business_name} in ${app.municipality}`,
@@ -2214,23 +2325,17 @@ export class MemoryDb {
         source_application_id: app.id,
         created_at: now,
       };
-      this.merchants.push(merchant);
-      this.persist(
-        `INSERT INTO merchants (id, name, location, description, status, is_published, category, municipality, contact_email, contact_phone, source_application_id, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
-         ON CONFLICT (id) DO NOTHING`,
-        [merchant.id, merchant.name, merchant.location, merchant.description, merchant.status, merchant.is_published, merchant.category, merchant.municipality, merchant.contact_email, merchant.contact_phone, merchant.source_application_id]
-      );
+      newMerchant = true;
     }
 
-    // Ensure applicant is active owner in merchant_memberships
     const existingMembership = this.merchant_memberships.find(
       (m) => m.merchant_id === merchant!.id && m.user_id === app.user_id
     );
+    let membership: MerchantMembershipRow | null = null;
+    let newMembership = false;
     if (!existingMembership) {
-      const membershipId = `memb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-      const newMembership: MerchantMembershipRow = {
-        id: membershipId,
+      membership = {
+        id: `memb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         merchant_id: merchant.id,
         user_id: app.user_id,
         role: 'owner',
@@ -2238,16 +2343,15 @@ export class MemoryDb {
         created_at: now,
         updated_at: now,
       };
-      this.merchant_memberships.push(newMembership);
-      this.persist(
-        `INSERT INTO merchant_memberships (id, merchant_id, user_id, role, status, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-         ON CONFLICT (merchant_id, user_id) DO UPDATE SET status = 'active', updated_at = NOW()`,
-        [newMembership.id, newMembership.merchant_id, newMembership.user_id, newMembership.role, newMembership.status]
-      );
+      newMembership = true;
     }
 
-    return merchant;
+    return { merchant, newMerchant, membership, newMembership };
+  }
+
+  private applyMerchantProvision(provision: MerchantProvision): void {
+    if (provision.newMerchant) this.merchants.push(provision.merchant);
+    if (provision.newMembership && provision.membership) this.merchant_memberships.push(provision.membership);
   }
 
   // Merchant membership and resource helpers
@@ -2372,8 +2476,25 @@ export class MemoryDb {
     return this.submissions.some((s) => s.user_id === userId && s.quest_id === questId && s.status === 'approved');
   }
 
+  hasCompletedQuest(userId: string, questId: string, excludeApprovedSubmissionId?: string): boolean {
+    return this.submissions.some((s) => s.user_id === userId && s.quest_id === questId && s.status === 'approved' && s.id !== excludeApprovedSubmissionId) ||
+      this.quest_attempts.some((attempt) => attempt.user_id === userId && attempt.quest_id === questId && attempt.status === 'completed');
+  }
+
   hasPendingSubmission(userId: string, questId: string): boolean {
     return this.submissions.some((s) => s.user_id === userId && s.quest_id === questId && s.status === 'pending');
+  }
+
+  applyDemoPointsDelta(userId: string, delta: number): number {
+    if (!Number.isSafeInteger(delta)) throw new Error('INVALID_DEMO_POINT_DELTA');
+    const user = this.findUserById(userId);
+    if (!user) throw new Error('USER_NOT_FOUND');
+    const next = user.demo_points + delta;
+    if (!Number.isSafeInteger(next) || next < 0) throw new Error('INVALID_DEMO_POINT_BALANCE');
+    user.demo_points = next;
+    user.updated_at = new Date().toISOString();
+    this.persistUserPoints(userId, next);
+    return next;
   }
 
   createSubmission(payload: Omit<SubmissionRow, 'id' | 'created_at' | 'updated_at'>): SubmissionRow {
@@ -2434,14 +2555,13 @@ export class MemoryDb {
 
     const targetStatus = action === 'approve' ? 'approved' : 'rejected';
 
-    if (action === 'approve' && this.submissions.some((candidate) =>
-      candidate.id !== id && candidate.user_id === sub.user_id && candidate.quest_id === sub.quest_id && candidate.status === 'approved')) {
-      return { submission: sub, alreadyReviewed: false, conflicting: true, reason: 'ALREADY_COMPLETED' };
-    }
-
     // Idempotent check: if already in target status, return without re-adding points
     if (sub.status === targetStatus) {
       return { submission: sub, alreadyReviewed: true, conflicting: false };
+    }
+
+    if (action === 'approve' && this.hasCompletedQuest(sub.user_id, sub.quest_id, id)) {
+      return { submission: sub, alreadyReviewed: false, conflicting: true, reason: 'ALREADY_COMPLETED' };
     }
 
     // Conflicting terminal state (e.g. reject after approve): explicit conflict, not silent success
@@ -2455,16 +2575,6 @@ export class MemoryDb {
     sub.updated_at = sub.reviewed_at;
     if (action === 'reject' && reason) {
       sub.rejection_reason = reason;
-    }
-
-    if (action === 'approve') {
-      const user = this.findUserById(sub.user_id);
-      const quest = this.findQuestById(sub.quest_id);
-      if (user && quest) {
-        user.demo_points += quest.reward_points;
-        user.updated_at = sub.updated_at;
-        this.persistUserPoints(user.id, user.demo_points);
-      }
     }
 
     this.persistReview(sub);

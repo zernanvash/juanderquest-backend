@@ -31,7 +31,14 @@ import quizzesRouter from './routes/quizzes.js';
 import adminQuizzesRouter from './routes/adminQuizzes.js';
 import adminMerchantsRouter from './routes/adminMerchants.js';
 import adminSettingsRouter from './routes/adminSettings.js';
+import { merchantPointsRouter } from './routes/merchantPoints.js';
+import { fundingPlansRouter } from './routes/fundingPlans.js';
+import { sponsorshipsRouter } from './routes/sponsorships.js';
+import { notificationsRouter } from './routes/notifications.js';
 import { errorHandler } from './middleware/error.js';
+import { readinessGate } from './middleware/readiness.js';
+import { appVersionGate } from './middleware/appVersionGate.js';
+import { publicReadCache } from './middleware/publicReadCache.js';
 
 import path from 'path';
 import { requestTracingMiddleware } from './middleware/observability.js';
@@ -75,6 +82,14 @@ const downloadsDir = path.resolve(process.cwd(), 'downloads');
 app.use('/downloads', express.static(downloadsDir));
 
 // Routes
+// Boot/readiness gate: while hydrating or draining, every API route except
+// health returns a JSON 503 MAINTENANCE with Retry-After.
+app.use('/api/v1', readinessGate);
+// Android build gate: reads always pass; mutations below the manifest's
+// supported build return 426 UPGRADE_REQUIRED.
+app.use('/api/v1', appVersionGate);
+// Anonymous public reads get ETag + public cache headers (C6).
+app.use('/api/v1', publicReadCache);
 app.use('/api/v1', healthRouter);
 app.use('/api/v1', authRouter);
 app.use('/api/v1', questsRouter);
@@ -106,6 +121,10 @@ app.use('/api/v1', quizzesRouter);
 app.use('/api/v1', adminQuizzesRouter);
 app.use('/api/v1', adminMerchantsRouter);
 app.use('/api/v1', adminSettingsRouter);
+app.use('/api/v1', merchantPointsRouter);
+app.use('/api/v1', fundingPlansRouter);
+app.use('/api/v1', sponsorshipsRouter);
+app.use('/api/v1', notificationsRouter);
 
 // JSON parse errors -> 400 instead of 500
 app.use((err: Error & { type?: string }, _req: express.Request, res: express.Response, next: express.NextFunction) => {

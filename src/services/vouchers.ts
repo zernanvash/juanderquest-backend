@@ -3,6 +3,10 @@ import { getPool } from '../db/pool.js';
 import { governanceStore } from '../routes/proposals.js';
 import { randomBytes, randomUUID } from 'crypto';
 import { lockGovernanceSnapshot, commitGovernanceTransaction } from '../governance/transaction.js';
+import { canonicalSettings } from '../settings/schema.js';
+import { env } from '../config/env.js';
+import { movePoints } from '../funding/ledger.js';
+import { publishFunding } from '../funding/transaction.js';
 
 export interface ServiceResult<T> {
   success: boolean;
@@ -34,7 +38,7 @@ export class VouchersService {
 
         // 2. Lock user account & verify point balance FIRST (serializes all redemptions for this user)
         const { rows: userRows } = await client.query(
-          'SELECT demo_points FROM users WHERE id = $1 FOR UPDATE',
+          'SELECT demo_points,is_test FROM users WHERE id = $1 FOR UPDATE',
           [userId]
         );
         if (!userRows.length) {
@@ -91,7 +95,8 @@ export class VouchersService {
 
         // 5. Voucher existence check
         const { rows: voucherRows } = await client.query(
-          'SELECT * FROM vouchers WHERE id = $1 AND is_active = TRUE',
+          `SELECT v.*,m.id AS owner_merchant_id,m.is_test AS merchant_is_test FROM vouchers v
+            JOIN merchants m ON m.id=v.merchant_id WHERE v.id = $1 AND v.is_active = TRUE`,
           [voucherId]
         );
         if (!voucherRows.length) {
@@ -175,28 +180,42 @@ export class VouchersService {
         }
         const redemption = this.mapRedemptionRow(createdRows[0]);
 
-        // 7. Atomic points deduction only after redemption insertion succeeded
-        const { rows: updateRows } = await client.query(
-          'UPDATE users SET demo_points = demo_points - ($2)::int, updated_at = NOW() WHERE id = $1 AND demo_points >= ($2)::int RETURNING demo_points',
-          [userId, voucher.cost_points]
-        );
-        if (!updateRows.length) {
-          await client.query('ROLLBACK');
-          return {
-            success: false,
-            statusCode: 409,
-            error: { code: 'INSUFFICIENT_POINTS', message: 'You do not have enough demo points for this voucher.' },
-          };
-        }
-        const newDemoPoints = updateRows[0].demo_points;
-
-        // 8. Atomic governance ledger write inside the SAME transaction BEFORE commit
+        // 7. Deduct traveler points and optionally route the matching amount to the merchant.
+        const settings = await client.query('SELECT values FROM system_settings_document WHERE id=1');
+        const voucherIncomeEnabled = env.QUEST_FUNDING_ENABLED && Boolean(canonicalSettings(settings.rows[0]?.values ?? {}).voucher_income_enabled);
+        let newDemoPoints: number;
         let govResult: any = null;
-        try {
+        let fundingGroup: any;
+        if (voucherIncomeEnabled) {
+          if (Boolean(user.is_test) !== Boolean(voucher.merchant_is_test)) {
+            await client.query('ROLLBACK');
+            return { success:false,statusCode:409,error:{code:'SCOPE_MISMATCH',message:'Voucher and traveler environments do not match.'} };
+          }
+          await client.query(
+            `INSERT INTO points_accounts(id,kind,merchant_id,is_test) VALUES($1,'merchant',$2,$3) ON CONFLICT(id) DO NOTHING`,
+            [`merchant:${voucher.owner_merchant_id}`,voucher.owner_merchant_id,voucher.merchant_is_test]);
+          const creditId=`mpc_${randomUUID()}`;
+          await client.query(
+            `INSERT INTO merchant_point_credits(id,merchant_id,source,points,reference,actor_id,idempotency_key,ledger_group_id)
+             VALUES($1,$2,'voucher_income',$3,$4,$5,$6,$1)`,
+            [creditId,voucher.owner_merchant_id,voucher.cost_points,`redemption:${redemption.id}`,userId,`voucher_income:${idempotencyKey}`]);
+          fundingGroup=await movePoints(client,{from:{id:userId,userId,kind:'traveler'},to:{id:`merchant:${voucher.owner_merchant_id}`,kind:'merchant'},
+            points:Number(voucher.cost_points),type:'merchant_points_voucher_income',referenceType:'voucher_redemption',referenceId:redemption.id,
+            actorId:userId,idempotencyKey,metadata:{voucher_id:voucherId,merchant_id:voucher.owner_merchant_id}});
+          await client.query('UPDATE merchant_point_credits SET ledger_group_id=$2 WHERE id=$1',[creditId,fundingGroup.entries[0].transaction_group_id]);
+          newDemoPoints=fundingGroup.userBalanceUpdate?.demoPoints;
+          if(newDemoPoints===undefined)throw new Error('VOUCHER_INCOME_BALANCE_UPDATE_MISSING');
+        } else {
+          const { rows: updateRows } = await client.query(
+            'UPDATE users SET demo_points = demo_points - ($2)::int, updated_at = NOW() WHERE id = $1 AND demo_points >= ($2)::int RETURNING demo_points',
+            [userId, voucher.cost_points]
+          );
+          if (!updateRows.length) {
+            await client.query('ROLLBACK');
+            return { success: false, statusCode: 409, error: { code: 'INSUFFICIENT_POINTS', message: 'You do not have enough demo points for this voucher.' } };
+          }
+          newDemoPoints = updateRows[0].demo_points;
           govResult = await governanceStore.consumePoints(userId, voucher.cost_points, voucherId, redemption.id, client);
-        } catch (govErr) {
-          await client.query('ROLLBACK');
-          throw govErr;
         }
 
         // 9. COMMIT transaction
@@ -209,6 +228,7 @@ export class VouchersService {
 
         // 10. Authoritative post-commit synchronization:
         // Publish committed transaction-local entries and set in-memory demo_points.
+        if(fundingGroup) publishFunding([fundingGroup]);
         if (govResult && govResult.entries) {
           governanceStore.publishCommittedTransaction({
             entries: govResult.entries,

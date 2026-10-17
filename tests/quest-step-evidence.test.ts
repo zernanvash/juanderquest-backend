@@ -447,4 +447,50 @@ describe('Durable Quest Step Evidence & Attempt State Contract (Phase 1-3)', () 
     const traveler = db.users.find((u) => u.id === travelerUserId);
     expect(traveler?.demo_points).toBe(100);
   });
+
+  it('blocks every repeat-completion path after an attempt approval', async () => {
+    const start = await request(app)
+      .post(`/api/v1/quests/${testQuestId}/attempts`)
+      .set('Authorization', `Bearer ${travelerToken}`);
+    expect(start.status).toBe(409);
+    expect(start.body.error.code).toBe('ALREADY_COMPLETED');
+
+    const challenge = await request(app)
+      .post(`/api/v1/quests/${testQuestId}/challenge`)
+      .set('Authorization', `Bearer ${travelerToken}`);
+    expect(challenge.status).toBe(409);
+    expect(challenge.body.error.code).toBe('ALREADY_COMPLETED');
+
+    const progress = await request(app)
+      .get(`/api/v1/quests/${testQuestId}/progress`)
+      .set('Authorization', `Bearer ${travelerToken}`);
+    expect(progress.status).toBe(200);
+    expect(progress.body.data.has_completed).toBe(true);
+
+    expect(db.hasCompletedQuest(travelerUserId, testQuestId)).toBe(true);
+    expect(db.users.find((u) => u.id === travelerUserId)?.demo_points).toBe(100);
+  });
+
+  it('refuses a second attempt approval even if that attempt was created before the first payout', async () => {
+    const secondAttempt = db.createAttempt({
+      id: `attempt-repeat-${Date.now()}`,
+      quest_id: testQuestId,
+      user_id: travelerUserId,
+      version: 1,
+      current_step: 3,
+      total_steps: 3,
+      status: 'submitted',
+      steps_snapshot: [],
+    });
+
+    const response = await request(app)
+      .patch(`/api/v1/admin/quest-attempts/${secondAttempt.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ action: 'approve' });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe('ALREADY_COMPLETED');
+    expect(db.users.find((u) => u.id === travelerUserId)?.demo_points).toBe(100);
+    expect(secondAttempt.status).toBe('submitted');
+  });
 });
