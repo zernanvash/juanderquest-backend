@@ -59,7 +59,7 @@ notificationsRouter.get(
   }
 );
 
-const markSchema = z.object({ params: z.object({ id: z.string().min(1) }) });
+const markSchema = z.object({ params: z.object({ id: z.string().uuid() }) });
 notificationsRouter.patch(
   '/notifications/:id/read',
   authenticateToken,

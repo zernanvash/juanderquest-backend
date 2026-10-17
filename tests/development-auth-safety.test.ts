@@ -65,3 +65,65 @@ describe('development authentication safety', () => {
     expect(response.status).toBe(403);
   });
 });
+
+// 2026-10-17 incident: production ran with ALLOW_DEMO_LOGIN=true and
+// ALPHA_WALLET_SIMULATION_ENABLED=true, so POST {seed_id:'admin-1'} auto-created
+// and returned an admin session. These tests pin the live configuration.
+describe('production demo login hardening', () => {
+  const { db } = jest.requireActual('../src/db/index.js') as typeof import('../src/db/index.js');
+  const original = {
+    NODE_ENV: env.NODE_ENV,
+    ALLOW_DEMO_LOGIN: env.ALLOW_DEMO_LOGIN,
+    ALPHA_WALLET_SIMULATION_ENABLED: env.ALPHA_WALLET_SIMULATION_ENABLED,
+  };
+  const liveConfig = () => {
+    Reflect.set(env, 'NODE_ENV', 'production');
+    Reflect.set(env, 'ALLOW_DEMO_LOGIN', true);
+    Reflect.set(env, 'ALPHA_WALLET_SIMULATION_ENABLED', true);
+  };
+  const stamp = Date.now();
+  const adminSeed = `rel-admin-${stamp}`;
+  const travelerSeed = `rel-traveler-${stamp}`;
+
+  beforeAll(() => {
+    db.users.push({ id: `${adminSeed}-id`, seed_id: adminSeed, display_name: 'Rel Admin', email: `${adminSeed}@x.test`,
+      role: 'admin', demo_points: 0, is_test: false } as any);
+    db.users.push({ id: `${travelerSeed}-id`, seed_id: travelerSeed, display_name: 'Rel Traveler', email: `${travelerSeed}@x.test`,
+      role: 'user', demo_points: 0, is_test: false } as any);
+  });
+  afterEach(() => {
+    for (const [key, value] of Object.entries(original)) Reflect.set(env, key, value);
+  });
+  afterAll(() => {
+    db.users = db.users.filter((u) => u.seed_id !== adminSeed && u.seed_id !== travelerSeed);
+  });
+
+  it('refuses an existing admin account even when demo login is switched on', async () => {
+    liveConfig();
+    const res = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: adminSeed });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('DEMO_LOGIN_RESERVED');
+    expect(res.body.data?.token).toBeUndefined();
+    expect(res.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('never auto-provisions the canonical admin-1 or user-1 in production', async () => {
+    liveConfig();
+    const before = db.users.filter((u) => u.seed_id === 'admin-1' || u.seed_id === 'user-1').length;
+    const admin = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'admin-1' });
+    expect(admin.status).not.toBe(200);
+    expect(admin.body.data?.token).toBeUndefined();
+    // user-1 may already exist as a traveler fixture (then it is allowed); it must never be created.
+    const traveler = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'user-1' });
+    if (traveler.status === 200) expect(traveler.body.data.user.role).toBe('user');
+    const after = db.users.filter((u) => u.seed_id === 'admin-1' || u.seed_id === 'user-1').length;
+    expect(after).toBe(before);
+  });
+
+  it('still allows an existing traveler account when demo login is deliberately enabled', async () => {
+    liveConfig();
+    const res = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: travelerSeed });
+    expect(res.status).toBe(200);
+    expect(res.body.data.user.role).toBe('user');
+  });
+});

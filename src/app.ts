@@ -33,6 +33,7 @@ import adminMerchantsRouter from './routes/adminMerchants.js';
 import adminSettingsRouter from './routes/adminSettings.js';
 import { merchantPointsRouter } from './routes/merchantPoints.js';
 import { fundingPlansRouter } from './routes/fundingPlans.js';
+import { sponsorshipsRouter } from './routes/sponsorships.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { plazaRouter } from './routes/plaza.js';
 import { errorHandler } from './middleware/error.js';
@@ -123,6 +124,7 @@ app.use('/api/v1', adminMerchantsRouter);
 app.use('/api/v1', adminSettingsRouter);
 app.use('/api/v1', merchantPointsRouter);
 app.use('/api/v1', fundingPlansRouter);
+app.use('/api/v1', sponsorshipsRouter);
 app.use('/api/v1', notificationsRouter);
 app.use('/api/v1', plazaRouter);
 

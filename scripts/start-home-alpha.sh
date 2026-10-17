@@ -60,7 +60,9 @@ export JWT_SECRET="$JDQ_ALPHA_JWT_SECRET"
 export CORS_ORIGIN='https://juanderquest.app,https://www.juanderquest.app,https://admin.juanderquest.app'
 export ALLOW_IN_MEMORY_FALLBACK=false
 export SEED_DEVELOPMENT_DATA=false
-export ALLOW_DEMO_LOGIN=true
+# Off by default (2026-10-17 incident). Enable only for a presentation via the
+# runtime overrides file below; production never issues admin demo sessions.
+export ALLOW_DEMO_LOGIN=false
 export GUEST_LOGIN_ENABLED=true
 export MARKETPLACE_ENABLED=false
 export WALLET_AUTH_MODE=signature
@@ -73,5 +75,24 @@ export JUANCHOICE_PROMOTION_ENABLED=false
 export JUANCHOICE_ECONOMY_ENABLED=false
 export JUANCHOICE_FINALIZER_WORKER_ENABLED=false
 export JUANCHOICE_SCHEDULER_ENABLED=false
+
+# Optional non-secret runtime overrides (release runbook Part B.3), e.g. after the
+# Valhalla Philippines rebuild. The file is parsed, never executed, and only the
+# allow-listed keys below are applied. Secrets never belong in this file.
+overrides="${JDQ_ALPHA_RUNTIME_ENV:-$HOME/.config/juanderquest-alpha/runtime.env}"
+if [ -f "$overrides" ]; then
+  while IFS='=' read -r key value || [ -n "$key" ]; do
+    key=$(printf '%s' "$key" | tr -d '\r[:space:]')
+    value=$(printf '%s' "$value" | tr -d '\r')
+    case "$key" in
+      ''|'#'*) continue ;;
+      ALLOW_DEMO_LOGIN|VALHALLA_URL|VALHALLA_COVERAGE_BBOX|VALHALLA_COVERAGE_LABEL|QUEST_FUNDING_ENABLED)
+        export "$key=$value"
+        echo "[start] runtime override applied: $key" >&2 ;;
+      *)
+        echo "[start] ignoring non-allow-listed runtime override: $key" >&2 ;;
+    esac
+  done < "$overrides"
+fi
 
 exec node dist/server.js

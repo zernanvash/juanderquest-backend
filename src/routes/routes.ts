@@ -1,8 +1,24 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { calculateRoute, TravelCosting } from '../services/routing.js';
+import { calculateRoute, getValhallaCoverage, TravelCosting } from '../services/routing.js';
 
 const routesRouter = Router();
+
+routesRouter.get('/routes/coverage', (_req: Request, res: Response) => {
+  try {
+    const coverage = getValhallaCoverage();
+    res.set('Cache-Control', 'public, max-age=3600, s-maxage=3600');
+    return res.json({
+      success: true,
+      data: { bbox: coverage.bbox, region: coverage.region },
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      error: { code: 'ROUTING_COVERAGE_CONFIG', message: error.message },
+    });
+  }
+});
 
 const RouteQuerySchema = z.object({
   start_lat: z.coerce.number().min(-90).max(90),

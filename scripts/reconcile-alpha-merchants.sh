@@ -25,5 +25,7 @@ export NODE_ENV=production
 export DATABASE_URL="postgres://jdq_alpha:${db_password}@127.0.0.1:55433/juanderquest_alpha"
 export JWT_SECRET="${JDQ_ALPHA_JWT_SECRET:-reconcile-only-placeholder-secret-placeholder-secret-placeholder}"
 export CORS_ORIGIN='https://juanderquest.app'
+# Read-only report: verify the migration ledger, never apply migrations.
+export DB_MIGRATION_MODE=verify
 
 exec npx tsx scripts/reconcile-merchants.ts

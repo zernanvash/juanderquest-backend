@@ -32,12 +32,34 @@ export interface RouteResponse {
   degraded: boolean;
   navigationMode: 'turn_by_turn' | 'straight_line_estimate';
   warning?: {
-    code: 'STRAIGHT_LINE_FALLBACK';
+    code: 'STRAIGHT_LINE_FALLBACK' | 'OUTSIDE_ROUTING_COVERAGE';
     message: string;
+    coverageLabel?: string;
   };
   summary: RouteSummary;
   coordinates: [number, number][]; // [lat, lng] pairs for GeoJSON / Leaflet
   maneuvers: RouteManeuver[];
+}
+
+export interface ValhallaCoverage {
+  bbox: [number, number, number, number];
+  region: string;
+}
+
+export function getValhallaCoverage(): ValhallaCoverage {
+  const values = env.VALHALLA_COVERAGE_BBOX.split(',').map((value) => Number(value.trim()));
+  if (
+    values.length !== 4 ||
+    values.some((value) => !Number.isFinite(value)) ||
+    values[0] >= values[2] ||
+    values[1] >= values[3]
+  ) {
+    throw new Error('VALHALLA_COVERAGE_BBOX must be minLng,minLat,maxLng,maxLat');
+  }
+  return {
+    bbox: [values[0], values[1], values[2], values[3]],
+    region: env.VALHALLA_COVERAGE_LABEL,
+  };
 }
 
 /**
@@ -117,6 +139,17 @@ export function computeHaversineDistanceKm(
 export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> {
   const costing = req.costing || 'auto';
   const avoidCongested = req.avoidCongested !== false;
+  const coverage = getValhallaCoverage();
+  const [minLng, minLat, maxLng, maxLat] = coverage.bbox;
+  const startCovered = req.startLng >= minLng && req.startLng <= maxLng && req.startLat >= minLat && req.startLat <= maxLat;
+  const endCovered = req.endLng >= minLng && req.endLng <= maxLng && req.endLat >= minLat && req.endLat <= maxLat;
+  if (!startCovered || !endCovered) {
+    return straightLineFallback(req, costing, {
+      code: 'OUTSIDE_ROUTING_COVERAGE',
+      coverageLabel: coverage.region,
+      message: `Turn-by-turn directions currently cover ${coverage.region} only.`,
+    });
+  }
 
   // 1. Gather crowd avoidance polygons if requested
   const avoidPolygons: [number, number][][][] = [];
@@ -226,36 +259,35 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
   } catch {
     // 4. Explicit degraded estimate if Valhalla is offline/indexing. This is
     // intentionally not represented as maneuver guidance or turn-by-turn navigation.
-    const directDistance = computeHaversineDistanceKm(
-      req.startLat,
-      req.startLng,
-      req.endLat,
-      req.endLng
-    );
-    // Estimated average speed: 45 km/h for auto, 15 km/h for bicycle, 4.5 km/h for pedestrian
-    const speedKmh = costing === 'pedestrian' ? 4.5 : costing === 'bicycle' ? 15 : 45;
-    const estSeconds = Math.round((directDistance / speedKmh) * 3600);
-
-    return {
-      degraded: true,
-      navigationMode: 'straight_line_estimate',
-      warning: {
-        code: 'STRAIGHT_LINE_FALLBACK',
-        message: 'Routing is degraded. This is a straight-line distance estimate only; turn-by-turn guidance is unavailable.',
-      },
-      summary: {
-        distanceKm: directDistance,
-        durationSeconds: estSeconds,
-        durationFormatted: formatDuration(estSeconds),
-        costing,
-        hasCrowdDiversion: false,
-        engine: 'fallback_straight_line',
-      },
-      coordinates: [
-        [req.startLat, req.startLng],
-        [req.endLat, req.endLng],
-      ],
-      maneuvers: [],
-    };
+    return straightLineFallback(req, costing, {
+      code: 'STRAIGHT_LINE_FALLBACK',
+      message: 'Routing is degraded. This is a straight-line distance estimate only; turn-by-turn guidance is unavailable.',
+    });
   }
+}
+
+function straightLineFallback(
+  req: RouteRequest,
+  costing: TravelCosting,
+  warning: NonNullable<RouteResponse['warning']>,
+): RouteResponse {
+  const directDistance = computeHaversineDistanceKm(req.startLat, req.startLng, req.endLat, req.endLng);
+  // Retain the legacy estimate for API compatibility; clients must not present it as travel time.
+  const speedKmh = costing === 'pedestrian' ? 4.5 : costing === 'bicycle' ? 15 : 45;
+  const estimatedSeconds = Math.round((directDistance / speedKmh) * 3600);
+  return {
+    degraded: true,
+    navigationMode: 'straight_line_estimate',
+    warning,
+    summary: {
+      distanceKm: directDistance,
+      durationSeconds: estimatedSeconds,
+      durationFormatted: formatDuration(estimatedSeconds),
+      costing,
+      hasCrowdDiversion: false,
+      engine: 'fallback_straight_line',
+    },
+    coordinates: [[req.startLat, req.startLng], [req.endLat, req.endLng]],
+    maneuvers: [],
+  };
 }

@@ -6,6 +6,13 @@ import { db } from '../src/db/index.js';
 // affiliation children (audits/memberships) whose parents are missing in the
 // database. It never auto-fixes anything.
 async function main(): Promise<void> {
+  // A read-only report must never migrate the database it inspects: initPostgres()
+  // applies pending migrations unless DB_MIGRATION_MODE=verify (2026-10-17 incident,
+  // where this script migrated the live alpha DB to 051 with no backup).
+  if (process.env.DB_MIGRATION_MODE !== 'verify') {
+    console.error('[reconcile] refusing to run: set DB_MIGRATION_MODE=verify so the report cannot migrate the database.');
+    process.exit(2);
+  }
   await initPostgres();
   const pool = getPool();
   if (!pool) {

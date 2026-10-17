@@ -809,7 +809,12 @@ router.post('/auth/demo-login', rateLimit({ policyId: 'auth:demo-login', windowM
     } });
   }
 
-  if (!user && (seed_id === 'user-1' || seed_id === 'admin-1')) {
+  // Production hardening (2026-10-17 incident): demo login must never create accounts
+  // or hand out privileged sessions there, even when the flag is switched on for a
+  // presentation. Development keeps the canonical auto-provisioned demo users.
+  const isProduction = env.NODE_ENV === 'production';
+
+  if (!user && !isProduction && (seed_id === 'user-1' || seed_id === 'admin-1')) {
     try {
       if (seed_id === 'user-1') {
         user = await db.findOrCreateUserDurable({
@@ -850,6 +855,16 @@ router.post('/auth/demo-login', rateLimit({ policyId: 'auth:demo-login', windowM
       error: {
         code: 'NOT_FOUND',
         message: `Seed user with ID '${seed_id}' not found.`,
+      },
+    });
+  }
+
+  if (isProduction && user.role !== 'user') {
+    return res.status(403).json({
+      success: false,
+      error: {
+        code: 'DEMO_LOGIN_RESERVED',
+        message: 'Demo login is limited to traveler accounts.',
       },
     });
   }

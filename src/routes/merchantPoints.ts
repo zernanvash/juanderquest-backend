@@ -6,6 +6,7 @@ import { rateLimit } from '../middleware/rateLimit.js';
 import { validateRequest } from '../middleware/validate.js';
 import { env } from '../config/env.js';
 import { MerchantPointsError, MerchantPointsService, MERCHANT_POINT_PACKAGES } from '../funding/merchantPoints.js';
+import { reconcileFunding } from '../funding/reconcile.js';
 
 export const merchantPointsRouter = Router();
 
@@ -67,6 +68,35 @@ merchantPointsRouter.get('/merchant/points', authenticateToken, async (req: Auth
   }
 });
 
+merchantPointsRouter.get('/merchant/vouchers', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (!env.QUEST_FUNDING_ENABLED) {
+    return res.status(404).json({ success: false, error: { code: 'NOT_AVAILABLE', message: 'Funded quest features are unavailable.' } });
+  }
+  const pool = getPool();
+  if (!pool) {
+    return res.status(503).json({ success: false, error: { code: 'DATABASE_REQUIRED', message: 'Durable storage is required for merchant vouchers.' } });
+  }
+  try {
+    const merchantId = await resolveOwnerMerchant(req.user!.id, false);
+    if (!merchantId) {
+      return res.status(403).json({ success: false, error: { code: 'MERCHANT_OWNER_REQUIRED', message: 'An active merchant membership is required.' } });
+    }
+    // This read validates membership and matching test/real scope.
+    await new MerchantPointsService(pool).getBalance(req.user!.id, merchantId, 1);
+    const result = await pool.query(
+      `SELECT v.id,v.title,v.description,v.cost_points
+         FROM vouchers v JOIN merchants m ON m.id=v.merchant_id
+        WHERE v.merchant_id=$1 AND m.status='active' AND m.is_published=TRUE AND v.is_active=TRUE
+        ORDER BY v.title,v.id`,
+      [merchantId]
+    );
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.status(200).json({ success: true, data: { merchant_id: merchantId, items: result.rows } });
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
 merchantPointsRouter.post(
   '/merchant/points/purchase',
   authenticateToken,
@@ -115,5 +145,41 @@ merchantPointsRouter.post(
     }
   }
 );
+
+merchantPointsRouter.get('/admin/merchant-point-credits',authenticateToken,requireAdmin,async(req:AuthRequest,res:Response)=>{
+  const service=fundingService(res);if(!service)return;
+  const pool=getPool()!;
+  const merchantId=typeof req.query.merchant_id==='string'?req.query.merchant_id:null;
+  const source=typeof req.query.source==='string'?req.query.source:null;
+  const allowed=['simulated_purchase','admin_grant','voucher_income','admin_correction'];
+  if(source&&!allowed.includes(source))return res.status(400).json({success:false,error:{code:'INVALID_SOURCE',message:'Unsupported merchant point source.'}});
+  const limit=Math.max(1,Math.min(200,Number.parseInt(String(req.query.limit??50),10)||50));
+  try{
+    const result=await pool.query(
+      `SELECT c.*,m.name AS merchant_name,
+         CASE WHEN c.points > 0 THEN GREATEST(c.points - COALESCE((
+           SELECT SUM(-reversal.points) FROM merchant_point_credits reversal
+           WHERE reversal.reverses_credit_id = c.id AND reversal.merchant_id = c.merchant_id
+         ),0),0)::bigint ELSE 0::bigint END AS reversible_points
+       FROM merchant_point_credits c JOIN merchants m ON m.id=c.merchant_id
+       WHERE ($1::text IS NULL OR c.merchant_id=$1) AND ($2::text IS NULL OR c.source=$2)
+       ORDER BY c.created_at DESC,c.id LIMIT $3`,[merchantId,source,limit]);
+    res.setHeader('Cache-Control','private, no-store');
+    return res.json({success:true,data:{items:result.rows,simulated:true}});
+  }catch(error){return sendError(res,error);}
+});
+
+merchantPointsRouter.get('/admin/treasury',authenticateToken,requireAdmin,async(_req:AuthRequest,res:Response)=>{
+  const service=fundingService(res);if(!service)return;
+  try{
+    const pool=getPool()!;
+    const [accounts,reconciliation]=await Promise.all([
+      pool.query("SELECT id,kind,balance_points,is_test FROM points_accounts WHERE kind='treasury' ORDER BY is_test,id"),
+      reconcileFunding(pool),
+    ]);
+    res.setHeader('Cache-Control','private, no-store');
+    return res.json({success:true,data:{accounts:accounts.rows,reconciliation,simulated:true}});
+  }catch(error){return sendError(res,error);}
+});
 
 export { MERCHANT_POINT_PACKAGES };

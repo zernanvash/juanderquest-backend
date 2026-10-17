@@ -69,6 +69,8 @@ const rawEnv = cleanEnv(process.env, {
   AZURE_STORAGE_CONTAINER_NAME: str({ default: 'spot-photos' }),
   LOCAL_UPLOAD_DIR: str({ default: 'uploads/spot-photos' }),
   VALHALLA_URL: str({ default: 'http://127.0.0.1:8002' }),
+  VALHALLA_COVERAGE_BBOX: str({ default: '119.70,15.65,121.05,16.55' }),
+  VALHALLA_COVERAGE_LABEL: str({ default: 'Pangasinan' }),
   PROGRESSION_ENABLED: bool({ default: true }),
   PROGRESSION_EMIT_OUTBOX_ENABLED: bool({ default: true }),
   PROGRESSION_OUTBOX_WORKER_ENABLED: bool({ default: false }),

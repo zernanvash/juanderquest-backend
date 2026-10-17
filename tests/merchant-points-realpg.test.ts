@@ -33,8 +33,8 @@ realPg('funded-quest merchant points (isolated real PostgreSQL)', () => {
       [ownerId, ownerId, `${ownerId}@test.invalid`, staffId, staffId, `${staffId}@test.invalid`, adminId, adminId, `${adminId}@test.invalid`]
     );
     await fixture.pool.query(
-      `INSERT INTO merchants(id,name,location,description,status,is_test)
-       VALUES($1,'Disposable Points Merchant','Test location','Fixture merchant', 'active', true)`,
+      `INSERT INTO merchants(id,name,location,description,status,is_published,is_test)
+       VALUES($1,'Disposable Points Merchant','Test location','Fixture merchant', 'active', true, true)`,
       [merchantId]
     );
     await fixture.pool.query('UPDATE users SET is_test=TRUE WHERE id IN ($1,$2)', [ownerId, staffId]);
@@ -42,6 +42,11 @@ realPg('funded-quest merchant points (isolated real PostgreSQL)', () => {
       `INSERT INTO merchant_memberships(id,merchant_id,user_id,role,status)
        VALUES($1,$2,$3,'owner','active'), ($4,$2,$5,'staff','active')`,
       [randomUUID(), merchantId, ownerId, randomUUID(), staffId]
+    );
+    await fixture.pool.query(
+      `INSERT INTO vouchers(id,merchant_id,title,description,cost_points,is_active)
+       VALUES($1,$2,'Demo snack','A voucher for the sponsorship picker',20,true)`,
+      [`points-voucher-${suffix}`, merchantId]
     );
   });
 
@@ -59,6 +64,9 @@ realPg('funded-quest merchant points (isolated real PostgreSQL)', () => {
     expect(staff.status).toBe(403);
     const staffRead = await request(app).get('/api/v1/merchant/points').set('Authorization', bearer(staffId,'user'));
     expect(staffRead.status).toBe(200);
+    const staffVouchers = await request(app).get('/api/v1/merchant/vouchers').set('Authorization', bearer(staffId,'user'));
+    expect(staffVouchers.status).toBe(200);
+    expect(staffVouchers.body.data.items).toEqual([expect.objectContaining({ title: 'Demo snack', cost_points: 20 })]);
 
     const first = await request(app).post('/api/v1/merchant/points/purchase')
       .set('Authorization', bearer(ownerId, 'user')).send({ package: 500, idempotency_key: key });
@@ -136,6 +144,12 @@ realPg('funded-quest merchant points (isolated real PostgreSQL)', () => {
       .send({ points: -30, reason: 'Reverse mistaken grant', reverses_credit_id: original.rows[0].id, idempotency_key: randomUUID() });
     expect(correction.status).toBe(200);
     expect(correction.body.data.balance_points).toBe(1570);
+
+    const auditRows = await request(app).get(`/api/v1/admin/merchant-point-credits?merchant_id=${merchantId}&limit=200`)
+      .set('Authorization', bearer(adminId, 'admin'));
+    expect(auditRows.status).toBe(200);
+    const originalCredit = auditRows.body.data.items.find((row: { id: string }) => row.id === original.rows[0].id);
+    expect(Number(originalCredit.reversible_points)).toBe(70);
 
     const excessive = await request(app).post(`/api/v1/admin/merchants/${merchantId}/points`)
       .set('Authorization', bearer(adminId, 'admin'))

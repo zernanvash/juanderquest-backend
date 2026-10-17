@@ -239,7 +239,25 @@ const contributionSchema = z.object({
     address: z.string().min(3).max(300),
     gps_lat: z.number().min(4.5).max(21.5),
     gps_lng: z.number().min(116).max(127),
-    price_level: z.number().int().min(0).max(4).default(0),
+    price_level: z.number().int().min(0).max(4).nullable().optional(),
+    good_for: z
+      .array(z.enum(['families', 'solo', 'couples', 'groups', 'seniors_access']))
+      .max(5)
+      .default([]),
+    best_time: z
+      .array(
+        z.enum([
+          'early_morning',
+          'daytime',
+          'sunset',
+          'night',
+          'weekdays',
+          'dry_season',
+          'rainy_season',
+        ])
+      )
+      .max(4)
+      .default([]),
     hours: z.record(z.string()).default({}),
     amenities: z.array(z.string()).max(20).default([]),
     image_url: z.string().url().or(z.literal('')).default(''),
@@ -416,9 +434,9 @@ router.post('/spots/:id/quests', authenticateToken, validateRequest(createAuthor
         `INSERT INTO quests (
           id, title, description, category, location_name, gps_lat, gps_lng,
           radius_meters, reward_points, marker_code, marker_image_url, is_active, is_test,
-          base_reward_php, difficulty_factor, geo_multiplier, author_id, status, version, steps,
+          author_id, status, version, steps,
           created_at, updated_at, funding_required
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title,
           description = EXCLUDED.description,
@@ -437,9 +455,9 @@ router.post('/spots/:id/quests', authenticateToken, validateRequest(createAuthor
           newQuest.marker_image_url,
           newQuest.is_active,
           newQuest.is_test,
-          newQuest.base_reward_php,
-          newQuest.difficulty_factor,
-          newQuest.geo_multiplier,
+          // base_reward_php / difficulty_factor / geo_multiplier are in-memory display
+          // values only: no migration creates those columns, and every reader defaults
+          // them. Writing them made every PostgreSQL author-quest insert fail.
           newQuest.author_id,
           newQuest.status,
           newQuest.version,

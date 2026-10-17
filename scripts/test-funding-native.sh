@@ -41,6 +41,7 @@ export DATABASE_URL="$JDQ_REAL_PG_URL"
 echo "Native test snapshot: $candidate; disposable container: $container"
 cd "$candidate"
 if [[ "$#" == 0 ]]; then
-  set -- tests/funding-plans-realpg.test.ts tests/merchant-points-realpg.test.ts tests/migrations-verify.test.ts
+  set -- tests/funding-allocate.test.ts tests/funding-ledger.test.ts tests/funding-plans-realpg.test.ts \
+    tests/sponsorship-lifecycle-realpg.test.ts tests/merchant-points-realpg.test.ts tests/migrations-verify.test.ts
 fi
 node node_modules/jest/bin/jest.js --runInBand --detectOpenHandles "$@"

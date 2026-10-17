@@ -729,6 +729,7 @@ export class SubmissionsService {
         let govResult: any = null;
         let fundedGroups: CommittedLedgerGroup[] | undefined;
         let fundedAttemptId: string | undefined;
+        let voucherPerk: { redemption_id: string; code: string; title: string } | undefined;
         if (action === 'approve') {
           // Lock user row
           await client.query('SELECT demo_points FROM users WHERE id = $1 FOR UPDATE', [sub.user_id]);
@@ -744,6 +745,7 @@ export class SubmissionsService {
             govResult = rewardSettlement.governanceResult;
             fundedGroups = rewardSettlement.fundedGroups;
             fundedAttemptId = rewardSettlement.fundedAttemptId;
+            voucherPerk = rewardSettlement.voucherPerk;
             awardedPoints = rewardSettlement.awardedPoints;
           }
 
@@ -847,6 +849,7 @@ export class SubmissionsService {
             awarded_points: awardedPoints,
             ...(awardedExplorerCoins ? { awarded_explorer_coins: awardedExplorerCoins } : {}),
             ...(explorerCoinTransactionId ? { explorer_coin_transaction_id: explorerCoinTransactionId } : {}),
+            ...(voucherPerk ? { voucher_perk: voucherPerk } : {}),
           },
         };
       } catch (error) {

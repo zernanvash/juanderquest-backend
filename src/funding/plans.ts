@@ -5,6 +5,7 @@ import { canonicalSettings } from '../settings/schema.js';
 import { feeForReward, targetForCompletions } from './allocate.js';
 import { FundingError, fundingCommand, type FundingTx } from './transaction.js';
 import type { PointAccountRef } from './ledger.js';
+import { notifyPlanStakeholders } from './notifications.js';
 
 export interface PlanTerms { mode: 'budget' | 'window'; planned_completions: number; starts_at: string; ends_at: string }
 export const OPEN_PLAN_STATES = ['draft', 'pending_sponsors', 'scheduled', 'active', 'closing'];
@@ -83,6 +84,11 @@ export async function activateIfFunded(tx: FundingTx, plan: any) {
        activated_at=CASE WHEN starts_at<=clock_timestamp() THEN NOW() ELSE NULL END,version=version+1,updated_at=NOW()
      WHERE id=$1 RETURNING *`, [plan.id]);
   await setQuestFundingState(tx.client, plan.quest_id, result.rows[0].status);
+  await notifyPlanStakeholders(tx.client, result.rows[0], `funding-plan:${plan.id}:activated`,
+    result.rows[0].status === 'active' ? 'Eco-Quest funding is active' : 'Eco-Quest funding is scheduled',
+    result.rows[0].status === 'active'
+      ? 'The reward pool met its target. Travelers can now start this funded Eco-Quest.'
+      : 'The reward pool met its target. This Eco-Quest will open at its scheduled start time.');
   return result.rows[0];
 }
 
@@ -104,6 +110,11 @@ export async function finalizePlan(tx: FundingTx, plan: any, actorId: string, te
   await tx.client.query('UPDATE quest_funding_plans SET status=$2,closed_at=NOW(),version=version+1,updated_at=NOW() WHERE id=$1', [plan.id, terminal]);
   await tx.client.query("UPDATE quest_sponsorships SET status='expired',updated_at=NOW() WHERE plan_id=$1 AND status IN ('requested','countered')", [plan.id]);
   await setQuestFundingState(tx.client, plan.quest_id, terminal);
+  await notifyPlanStakeholders(tx.client, plan, `funding-plan:${plan.id}:${terminal}`,
+    terminal === 'expired' ? 'Eco-Quest funding round expired' : 'Eco-Quest funding round closed',
+    terminal === 'expired'
+      ? 'The sponsorship window ended. Remaining locked demo points were returned to their funders.'
+      : 'This funding round has ended. Any unused locked demo points were returned to their funders.');
   return true;
 }
 
@@ -246,5 +257,15 @@ export class FundingPlansService {
       await client.query('COMMIT');
       return { ...plan, contributions: contributions.rows, holds: holds.rows, sponsorships: sponsorships.rows, simulated: true };
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+  }
+
+  async latestForQuest(actorId:string,questId:string,admin=false){
+    const quest=(await this.pool.query('SELECT author_id,is_test FROM quests WHERE id=$1',[questId])).rows[0];
+    if(!quest)throw new FundingError('NOT_FOUND',404,'Quest not found.');
+    const actor=(await this.pool.query('SELECT is_test FROM users WHERE id=$1',[actorId])).rows[0];
+    if(!admin&&(!actor||quest.author_id!==actorId||Boolean(actor.is_test)!==Boolean(quest.is_test)))throw new FundingError('QUEST_NOT_DESTINATION_AUTHOR',403,'Only this quest author may view its funding plans.');
+    const plan=(await this.pool.query('SELECT id FROM quest_funding_plans WHERE quest_id=$1 ORDER BY round_number DESC LIMIT 1',[questId])).rows[0];
+    if(!plan)return {plan:null};
+    return {plan:await this.get(actorId,plan.id,admin)};
   }
 }
