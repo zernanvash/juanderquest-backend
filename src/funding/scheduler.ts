@@ -12,9 +12,9 @@ export async function runFundingScheduler(pool: Pool) {
   const quests = new Set<string>();
   try {
     await client.query('BEGIN');
+    await lockGovernanceSnapshot(client);
     const lease = await client.query('SELECT pg_try_advisory_xact_lock(78639471) AS acquired');
     if (!lease.rows[0]?.acquired) { await client.query('ROLLBACK'); return { acquired: false, processed: 0 }; }
-    await lockGovernanceSnapshot(client);
     const due = await client.query(
       `SELECT DISTINCT p.id FROM quest_funding_plans p WHERE
        (p.status='pending_sponsors' AND (p.sponsorship_deadline<=clock_timestamp() OR p.ends_at<=clock_timestamp()))

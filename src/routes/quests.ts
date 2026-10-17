@@ -22,6 +22,7 @@ import { hasFundingPlan, requireFundingHold, startFundedAttempt } from '../fundi
 import { FundingError } from '../funding/transaction.js';
 import { fundingErrorResponse } from './fundingPlans.js';
 import { lockGovernanceSnapshot } from '../governance/transaction.js';
+import { publicFundingSummaries } from '../funding/readModel.js';
 
 const router = Router();
 
@@ -107,7 +108,7 @@ function mapStepEvidence(row: any): QuestStepEvidenceRow {
   };
 }
 
-router.get('/quests', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res: Response) => {
+router.get('/quests', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res: Response) => {
   const category = req.query.category as string | undefined;
   const allowTest = isAuthorizedQA(req);
   if (allowTest) {
@@ -118,6 +119,15 @@ router.get('/quests', optionalAuthenticateToken, checkQAAuthorization, (req: Aut
   const quests = db.listQuests(category, allowTest)
     .filter(q => q.status !== 'archived' && (q.status !== 'draft' || isAuthorizedQA(req)))
     .map((quest) => sanitizeQuestForViewer(quest, false));
+  if (env.QUEST_FUNDING_ENABLED) {
+    const pool=getPool();
+    if(pool) {
+      try {
+        const summaries=await publicFundingSummaries(pool,quests.map(q=>q.id),allowTest);
+        for(const quest of quests) if(summaries.has(quest.id)) (quest as any).funding=summaries.get(quest.id);
+      } catch(error) { console.error('[funding] public quest summary unavailable:',error); }
+    }
+  }
 
   return res.status(200).json({
     success: true,
@@ -125,7 +135,7 @@ router.get('/quests', optionalAuthenticateToken, checkQAAuthorization, (req: Aut
   });
 });
 
-router.get('/quests/:id', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res: Response) => {
+router.get('/quests/:id', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const allowTest = isAuthorizedQA(req);
   const quest = db.findQuestById(id, true);
@@ -167,6 +177,13 @@ router.get('/quests/:id', optionalAuthenticateToken, checkQAAuthorization, (req:
   // Phase 1 Security Repair: Do not leak marker_code to unauthorized/public viewers.
   const canInspectMarker = allowTest || isAuthor || isAdminOrQA;
   let responseData: any = sanitizeQuestForViewer(quest, canInspectMarker);
+  if(env.QUEST_FUNDING_ENABLED) {
+    const pool=getPool();
+    if(pool) {
+      try { responseData.funding=(await publicFundingSummaries(pool,[quest.id],Boolean(quest.is_test))).get(quest.id)??null; }
+      catch(error) { console.error('[funding] quest detail summary unavailable:',error); }
+    }
+  }
 
   // Author & Admin operational metrics (attempt statistics without leaking private traveler GPS/identities)
   if (isAuthor || isAdminOrQA) {

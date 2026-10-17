@@ -239,7 +239,8 @@ router.patch('/admin/quest-attempts/:id', validateRequest(questAttemptReviewSche
 
         return res.status(200).json({
           success: true,
-          data: { attempt: updatedAttemptRes.rows[0], awarded_points: rewardSettlement.awardedPoints },
+          data: { attempt: updatedAttemptRes.rows[0], awarded_points: rewardSettlement.awardedPoints,
+            ...(rewardSettlement.voucherPerk?{voucher_perk:rewardSettlement.voucherPerk}:{}) },
           message: 'Quest attempt approved and reward points granted.',
         });
       } else if (action === 'request_changes') {

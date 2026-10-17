@@ -42,6 +42,14 @@ function createSchemaDb() {
       applicant_feedback TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE merchant_affiliate_drafts (
+      user_id TEXT PRIMARY KEY,
+      draft_data JSONB NOT NULL,
+      current_step TEXT NOT NULL DEFAULT 'business',
+      revision INTEGER NOT NULL DEFAULT 1,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     CREATE TABLE merchants (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,

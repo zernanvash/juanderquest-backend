@@ -16,7 +16,8 @@ export interface Spot {
   id: string; slug: string; name: string; description: string;
   category: SpotCategory; subcategory: string; tags: string[];
   municipality: string; address: string; gps_lat: number; gps_lng: number;
-  price_level: number; hours: Record<string, string>; amenities: string[];
+  price_level: number | null; hours: Record<string, string>; amenities: string[];
+  good_for?: string[]; best_time?: string[];
   image_url: string; asset_ids?: string[]; source_type: SpotSource; source_name: string; source_url?: string;
   trust_level: SpotTrust; status: 'published' | 'needs_review' | 'unpublished';
   quest_id?: string; created_by?: string; created_at: string; updated_at: string;
@@ -74,7 +75,7 @@ export class SpotStore {
   async hydrateFromPg(pool: Pool) {
     this.pg = pool;
     const { rows } = await pool.query('SELECT * FROM spots ORDER BY created_at');
-    if (rows.length) this.spots = rows.map((r:any)=>({...r,tags:r.tags||[],amenities:r.amenities||[],hours:r.hours||{},created_at:new Date(r.created_at).toISOString(),updated_at:new Date(r.updated_at).toISOString()}));
+    if (rows.length) this.spots = rows.map((r:any)=>({...r,tags:r.tags||[],amenities:r.amenities||[],good_for:r.good_for||[],best_time:r.best_time||[],hours:r.hours||{},created_at:new Date(r.created_at).toISOString(),updated_at:new Date(r.updated_at).toISOString()}));
     else for (const spot of this.spots) await this.persistSpot(spot);
     const { rows: preferences } = await pool.query('SELECT * FROM discovery_preferences');
     for (const p of preferences) this.preferences.set(p.user_id, { categories:p.categories||[],tags:p.tags||[],occasions:p.occasions||[],price_levels:p.price_levels||[],radius_km:p.radius_km,onboarding_state:p.onboarding_state });
@@ -86,7 +87,7 @@ export class SpotStore {
 
   private async persistSpot(s: Spot) {
     if (!this.pg) return;
-    await this.pg.query(`INSERT INTO spots (id,slug,name,description,category,subcategory,tags,municipality,address,gps_lat,gps_lng,price_level,hours,amenities,image_url,source_type,source_name,source_url,trust_level,status,quest_id,created_by,is_test,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,is_test=EXCLUDED.is_test,updated_at=EXCLUDED.updated_at`,[s.id,s.slug,s.name,s.description,s.category,s.subcategory,JSON.stringify(s.tags),s.municipality,s.address,s.gps_lat,s.gps_lng,s.price_level,JSON.stringify(s.hours),JSON.stringify(s.amenities),s.image_url,s.source_type,s.source_name,s.source_url||null,s.trust_level,s.status,s.quest_id||null,s.created_by||null,Boolean(s.is_test),s.created_at,s.updated_at]);
+    await this.pg.query(`INSERT INTO spots (id,slug,name,description,category,subcategory,tags,municipality,address,gps_lat,gps_lng,price_level,hours,amenities,good_for,best_time,image_url,source_type,source_name,source_url,trust_level,status,quest_id,created_by,is_test,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,is_test=EXCLUDED.is_test,updated_at=EXCLUDED.updated_at`,[s.id,s.slug,s.name,s.description,s.category,s.subcategory,JSON.stringify(s.tags),s.municipality,s.address,s.gps_lat,s.gps_lng,s.price_level,JSON.stringify(s.hours),JSON.stringify(s.amenities),JSON.stringify(s.good_for || []),JSON.stringify(s.best_time || []),s.image_url,s.source_type,s.source_name,s.source_url||null,s.trust_level,s.status,s.quest_id||null,s.created_by||null,Boolean(s.is_test),s.created_at,s.updated_at]);
   }
 
   getPreferences(userId:string): DiscoveryPreferences { return this.preferences.get(userId) || {categories:[],tags:[],occasions:[],price_levels:[],radius_km:25,onboarding_state:'pending'}; }

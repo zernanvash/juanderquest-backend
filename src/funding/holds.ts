@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import type { Pool, PoolClient } from 'pg';
 import { env } from '../config/env.js';
 import { db } from '../db/index.js';
@@ -7,6 +7,7 @@ import { hasCompletedQuest } from '../services/quest-completion.js';
 import { allocatePoints } from './allocate.js';
 import { FundingError, fundingCommand, fundingTx, publishFunding, type FundingTx } from './transaction.js';
 import { ensurePlanAccounts, finalizePlan, funderAccount, lockPlan, refreshQuestMirror, setQuestFundingState } from './plans.js';
+import { notifyPlanStakeholders, insertFundingNotification } from './notifications.js';
 
 export async function hasFundingPlan(client: Pick<PoolClient, 'query'>, questId: string): Promise<boolean> {
   return (await client.query('SELECT 1 FROM quest_funding_plans WHERE quest_id=$1 LIMIT 1', [questId])).rows.length > 0;
@@ -60,11 +61,13 @@ export async function startFundedAttempt(pool: Pool, questId: string, userId: st
   const client = await pool.connect();
   const tx = fundingTx(client);
   let committed = false;
+  let notificationPlan: any = null;
   try {
     await client.query('BEGIN');
     await lockGovernanceSnapshot(client);
     const latest = await client.query('SELECT id FROM quest_funding_plans WHERE quest_id=$1 ORDER BY round_number DESC LIMIT 1', [questId]);
     const plan = await lockPlan(client, latest.rows[0].id);
+    notificationPlan = plan;
     const quest = (await client.query('SELECT * FROM quests WHERE id=$1', [questId])).rows[0];
     const user = (await client.query('SELECT id,is_test FROM users WHERE id=$1', [userId])).rows[0];
     if (!user || Boolean(user.is_test) !== Boolean(plan.is_test)) throw new FundingError('SCOPE_MISMATCH', 403, 'Traveler and quest scopes do not match.');
@@ -155,7 +158,20 @@ export async function startFundedAttempt(pool: Pool, questId: string, userId: st
     await commitGovernanceTransaction(client); committed = true; publishFunding(tx.groups);
     await refreshQuestMirror(pool, questId);
     return { attempt, funding_hold: hold, resumed: false };
-  } catch (error) { if (!committed) await client.query('ROLLBACK').catch(() => undefined); throw error; }
+  } catch (error) {
+    if (!committed) await client.query('ROLLBACK').catch(() => undefined);
+    if (!committed && error instanceof FundingError && error.code === 'QUEST_FUNDING_UNAVAILABLE' && notificationPlan) {
+      try {
+        await client.query('BEGIN');
+        const current = (await client.query('SELECT * FROM quest_funding_plans WHERE id=$1 FOR UPDATE',[notificationPlan.id])).rows[0];
+        if (current) await notifyPlanStakeholders(client,current,`funding-plan:${current.id}:capacity-warning`,
+          'Eco-Quest reward capacity is temporarily unavailable',
+          'Available demo points cannot reserve another traveler reward. Add funding or close the round to restore availability.');
+        await client.query('COMMIT');
+      } catch { await client.query('ROLLBACK').catch(() => undefined); }
+    }
+    throw error;
+  }
   finally { client.release(); }
 }
 
@@ -187,8 +203,31 @@ export async function settleFundingHold(client: PoolClient, userId: string, ques
     points: Number(hold.fee_points), type: 'quest_fee', referenceType: 'quest_funding_hold', referenceId: hold.id, actorId });
   await client.query("UPDATE quest_funding_holds SET status='paid',settled_at=NOW() WHERE id=$1", [hold.id]);
   await client.query("UPDATE quest_attempts SET status='completed',completed_at=NOW(),updated_at=NOW() WHERE id=$1", [hold.attempt_id]);
+  await insertFundingNotification(client,{
+    userId,isTest:Boolean(plan.is_test),eventKey:`quest-reward:${hold.id}:paid`,kind:'quest_reward',
+    title:'Funded Eco-Quest reward approved',
+    message:`Your proof was approved and ${Number(hold.reward_points)} simulated demo points were added${hold.fee_points>0?' from the reserved reward pool':''}.`,
+    href:`/quests/${encodeURIComponent(questId)}`,
+  });
+  let voucherPerk: { redemption_id: string; code: string; title: string } | undefined;
+  const perk = await client.query(
+    `SELECT perk.id,perk.sponsorship_id,perk.voucher_id,v.title
+       FROM quest_voucher_perks perk JOIN quest_sponsorships sponsor ON sponsor.id=perk.sponsorship_id
+       JOIN vouchers v ON v.id=perk.voucher_id AND v.merchant_id=sponsor.merchant_id
+      WHERE perk.plan_id=$1 AND perk.granted_qty<perk.total_qty AND sponsor.status='accepted' AND sponsor.is_test=$2 AND v.is_active=TRUE
+      ORDER BY perk.id FOR UPDATE OF perk`, [plan.id, plan.is_test]);
+  if (perk.rows[0]) {
+    const code = `JDQ-${randomBytes(8).toString('hex').toUpperCase()}`;
+    const redemptionId = randomUUID();
+    await client.query(
+      `INSERT INTO redemptions(id,voucher_id,user_id,code,cost_points,idempotency_key,source,hold_id)
+       VALUES($1,$2,$3,$4,0,$5,'quest_sponsor_perk',$6)`,
+      [redemptionId,perk.rows[0].voucher_id,userId,code,`quest-perk:${hold.id}`,hold.id]);
+    await client.query('UPDATE quest_voucher_perks SET granted_qty=granted_qty+1 WHERE id=$1 AND granted_qty<total_qty',[perk.rows[0].id]);
+    voucherPerk={redemption_id:redemptionId,code,title:perk.rows[0].title};
+  }
   if (plan.status === 'closing') await finalizePlan(tx, plan, actorId);
-  return { awardedPoints: Number(hold.reward_points), newPoints: rewardGroup.userBalanceUpdate!.demoPoints, fundedGroups: tx.groups, fundingHoldId: hold.id, fundedAttemptId: hold.attempt_id };
+  return { awardedPoints: Number(hold.reward_points), newPoints: rewardGroup.userBalanceUpdate!.demoPoints, fundedGroups: tx.groups, fundingHoldId: hold.id, fundedAttemptId: hold.attempt_id, ...(voucherPerk?{voucherPerk}:{}) };
 }
 
 export async function abandonFundedAttempt(pool: Pool, questId: string, attemptId: string, userId: string, key: string) {

@@ -238,7 +238,25 @@ const contributionSchema = z.object({
     address: z.string().min(3).max(300),
     gps_lat: z.number().min(4.5).max(21.5),
     gps_lng: z.number().min(116).max(127),
-    price_level: z.number().int().min(0).max(4).default(0),
+    price_level: z.number().int().min(0).max(4).nullable().optional(),
+    good_for: z
+      .array(z.enum(['families', 'solo', 'couples', 'groups', 'seniors_access']))
+      .max(5)
+      .default([]),
+    best_time: z
+      .array(
+        z.enum([
+          'early_morning',
+          'daytime',
+          'sunset',
+          'night',
+          'weekdays',
+          'dry_season',
+          'rainy_season',
+        ])
+      )
+      .max(4)
+      .default([]),
     hours: z.record(z.string()).default({}),
     amenities: z.array(z.string()).max(20).default([]),
     image_url: z.string().url().or(z.literal('')).default(''),

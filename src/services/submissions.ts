@@ -584,10 +584,7 @@ export class SubmissionsService {
           return { success: false, statusCode: 403,
             error: { code: 'SELF_REVIEW_FORBIDDEN', message: 'Reviewers cannot approve or reject their own proof.' } };
         }
-        // A replayed approval of an already-approved submission is idempotent: it must
-        // reach the shortcut below instead of tripping on the attempt its own first
-        // approval completed.
-        if (action === 'approve' && sub.status !== 'approved') {
+        if (action === 'approve') {
           // Use the same traveler lock as progressive-attempt approval so a
           // legacy proof and a reviewed attempt cannot both pay out in parallel.
           await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [sub.user_id]);
@@ -729,6 +726,7 @@ export class SubmissionsService {
         let govResult: any = null;
         let fundedGroups: CommittedLedgerGroup[] | undefined;
         let fundedAttemptId: string | undefined;
+        let voucherPerk: { redemption_id: string; code: string; title: string } | undefined;
         if (action === 'approve') {
           // Lock user row
           await client.query('SELECT demo_points FROM users WHERE id = $1 FOR UPDATE', [sub.user_id]);
@@ -744,6 +742,7 @@ export class SubmissionsService {
             govResult = rewardSettlement.governanceResult;
             fundedGroups = rewardSettlement.fundedGroups;
             fundedAttemptId = rewardSettlement.fundedAttemptId;
+            voucherPerk = rewardSettlement.voucherPerk;
             awardedPoints = rewardSettlement.awardedPoints;
           }
 
@@ -847,6 +846,7 @@ export class SubmissionsService {
             awarded_points: awardedPoints,
             ...(awardedExplorerCoins ? { awarded_explorer_coins: awardedExplorerCoins } : {}),
             ...(explorerCoinTransactionId ? { explorer_coin_transaction_id: explorerCoinTransactionId } : {}),
+            ...(voucherPerk ? { voucher_perk: voucherPerk } : {}),
           },
         };
       } catch (error) {

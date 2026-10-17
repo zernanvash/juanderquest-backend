@@ -60,3 +60,9 @@ for (const admin of [false, true]) fundingPlansRouter.get(`${admin ? '/admin' : 
     try { res.setHeader('Cache-Control', 'private, no-store'); return res.json({ success: true, data: await svc.get(req.user!.id, req.params.id, admin) }); }
     catch (error) { return fundingErrorResponse(res, error); }
   });
+
+fundingPlansRouter.get('/quests/:id/funding-plan',authenticateToken,async(req:AuthRequest,res:Response)=>{
+  const svc=service(res);if(!svc)return;
+  try{res.setHeader('Cache-Control','private, no-store');return res.json({success:true,data:await svc.latestForQuest(req.user!.id,req.params.id)});}
+  catch(error){return fundingErrorResponse(res,error);}
+});

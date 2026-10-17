@@ -24,6 +24,7 @@ export interface SettleRewardResult {
   governanceResult?: Awaited<ReturnType<typeof governanceStore.creditQuestReward>>;
   fundedGroups?: CommittedLedgerGroup[];
   fundedAttemptId?: string;
+  voucherPerk?: { redemption_id: string; code: string; title: string };
 }
 
 /**
