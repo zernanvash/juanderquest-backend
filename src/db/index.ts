@@ -1545,6 +1545,7 @@ export class MemoryDb {
     error?: 'CANNOT_FOLLOW_SELF' | 'PROFILE_VISIBILITY_REQUIRED' | 'NOT_FOUND';
     follower_count?: number;
     following_count?: number;
+    created?: boolean;
   }> {
     if (actorId === targetId) {
       return { success: false, error: 'CANNOT_FOLLOW_SELF' };
@@ -1575,7 +1576,8 @@ export class MemoryDb {
     }
 
     const nowIso = new Date().toISOString();
-    if (!this.follows.some((f) => f.follower_id === actorId && f.following_id === targetId)) {
+    const alreadyFollowing = this.follows.some((f) => f.follower_id === actorId && f.following_id === targetId);
+    if (!alreadyFollowing) {
       this.follows.push({
         follower_id: actorId,
         following_id: targetId,
@@ -1586,6 +1588,7 @@ export class MemoryDb {
     const counts = await this.getFollowCounts(targetId);
     return {
       success: true,
+      created: !alreadyFollowing,
       follower_count: counts.follower_count,
       following_count: counts.following_count,
     };

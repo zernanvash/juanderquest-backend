@@ -1,9 +1,12 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { db, InvalidCursorError } from '../db/index.js';
+import { getPool } from '../db/pool.js';
 import { authenticateToken, AuthRequest, optionalAuthenticateToken, isAuthorizedQA, checkQAAuthorization, authorizeQAPreview } from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
 import { rateLimit } from '../middleware/rateLimit.js';
+import { notify } from '../social/notify.js';
+import { manilaHour } from '../social/time.js';
 
 export const usersRouter = Router();
 
@@ -374,6 +377,30 @@ usersRouter.put(
           success: false,
           error: { code: 'NOT_FOUND', message: 'User not found or profile is private.' },
         });
+      }
+
+      if (result.created) {
+        const pool = getPool();
+        if (pool) {
+          const now = new Date();
+          const dStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+          const hourBucket = `${dStr}${String(manilaHour(now)).padStart(2, '0')}`;
+          const actorName = actor.is_public ? actor.display_name : 'Someone';
+          await notify(pool, {
+            userId: targetId,
+            kind: 'follow',
+            eventKey: `follow:${actorId}:${targetId}`,
+            title: 'New follower',
+            message: `${actorName} started following you.`,
+            href: `/users/${actor.handle ? `@${actor.handle}` : actor.id}`,
+            isTest: Boolean(actor.is_test),
+            push: {
+              category: 'social',
+              collapseKey: `social:${targetId}:${hourBucket}`,
+              actorName,
+            },
+          }).catch((err) => console.error('[users:follow] Failed to notify follow:', err));
+        }
       }
 
       return res.status(200).json({

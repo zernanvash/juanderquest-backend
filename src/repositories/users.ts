@@ -368,6 +368,7 @@ export class UsersRepository {
     error?: 'CANNOT_FOLLOW_SELF' | 'PROFILE_VISIBILITY_REQUIRED' | 'NOT_FOUND';
     follower_count?: number;
     following_count?: number;
+    created?: boolean;
   }> {
     if (actorId === targetId) {
       return { success: false, error: 'CANNOT_FOLLOW_SELF' };
@@ -396,10 +397,11 @@ export class UsersRepository {
         return { success: false, error: 'NOT_FOUND' };
       }
 
-      await client.query(
+      const insertRes = await client.query(
         `INSERT INTO user_follows (follower_id, following_id, created_at)
          VALUES ($1, $2, NOW())
-         ON CONFLICT (follower_id, following_id) DO NOTHING`,
+         ON CONFLICT (follower_id, following_id) DO NOTHING
+         RETURNING follower_id`,
         [actorId, targetId]
       );
       await client.query('COMMIT');
@@ -407,6 +409,7 @@ export class UsersRepository {
       const counts = await this.getFollowCounts(targetId);
       return {
         success: true,
+        created: insertRes.rows.length > 0,
         follower_count: counts.follower_count,
         following_count: counts.following_count,
       };
