@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import { randomUUID } from 'crypto';
 import { getSpotPhotoStorageProvider, SpotMediaSaveResult } from '../storage/spot-photos.js';
 import { MediaType } from '../utils/media-mime.js';
+import { recordActivity } from '../social/activity.js';
 
 export interface SpotAssetRecord {
   id: string;
@@ -101,6 +102,15 @@ export class SpotAssetStore {
       throw err;
     }
 
+    let priorPhotoCount = 0;
+    if (this.pg) {
+      const priorRes = await this.pg.query(
+        `SELECT COUNT(*)::int AS count FROM spot_assets WHERE spot_id = $1 AND status = 'attached'`,
+        [spotId],
+      );
+      priorPhotoCount = Number(priorRes.rows[0]?.count || 0);
+    }
+
     const attachedRecords: SpotAssetRecord[] = [];
 
     for (const assetId of assetIds) {
@@ -128,6 +138,32 @@ export class SpotAssetStore {
           `UPDATE spot_assets SET status = $1, spot_id = $2, updated_at = $3 WHERE id = $4`,
           [asset.status, asset.spot_id, asset.updated_at, asset.id]
         );
+      }
+    }
+
+    if (this.pg && priorPhotoCount === 0 && attachedRecords.length > 0) {
+      try {
+        const spotRes = await this.pg.query(
+          `SELECT id, name, slug, municipality, is_test FROM spots WHERE id = $1 LIMIT 1`,
+          [spotId],
+        );
+        if (spotRes.rows.length) {
+          const s = spotRes.rows[0];
+          await recordActivity(this.pg, {
+            eventKey: `first_photo:${spotId}`,
+            actorId: userId,
+            verb: 'first_photo',
+            subjectType: 'spot',
+            subjectId: spotId,
+            subjectTitle: s.name,
+            subjectHref: `/spots/${s.slug || spotId}`,
+            municipality: s.municipality || null,
+            payload: {},
+            isTest: Boolean(s.is_test),
+          });
+        }
+      } catch (err) {
+        console.error('[social:producer] Failed to record first_photo activity:', err);
       }
     }
 

@@ -3,6 +3,7 @@ import { Pool, PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
 import { db } from '../db/index.js';
 import { progressionRepo } from './repository.js';
+import { recordActivity } from '../social/activity.js';
 
 type Queryable = Pick<Pool | PoolClient, 'query'>;
 
@@ -278,6 +279,23 @@ export async function evaluateFinalizedCampaignRetention(
         [participant.user_id, campaign.series_key, campaign.is_test],
       )).rows;
       const streak = computeOfficialStreak(rounds);
+      if ([4, 8, 12, 26, 52].includes(streak.current)) {
+        try {
+          await recordActivity(client, {
+            eventKey: `streak_milestone:${participant.user_id}:${streak.current}`,
+            actorId: participant.user_id,
+            verb: 'streak_milestone',
+            subjectType: 'streak',
+            subjectId: `juanchoice-${streak.current}`,
+            subjectTitle: `${streak.current}-Round Streak`,
+            subjectHref: '/choice',
+            payload: { rounds: streak.current },
+            isTest: Boolean(campaign.is_test),
+          });
+        } catch (err) {
+          console.error('[social:producer] Failed to record streak_milestone activity:', err);
+        }
+      }
       for (const definition of streakAwards.filter((entry) => streak.current >= entry.threshold)) {
         const alreadyAwarded = await client.query(
           'SELECT 1 FROM achievement_awards WHERE user_id = $1 AND achievement_id = $2 AND season = $3',

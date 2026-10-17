@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
 import { CulturalQuizRepository } from './repository.js';
 import { ProgressionRepository } from '../progression/repository.js';
+import { recordActivity } from '../social/activity.js';
 import {
   CulturalQuiz,
   CulturalQuizVersion,
@@ -490,6 +491,28 @@ export class CulturalQuizService {
                ON CONFLICT (user_id, reward_scope_id) DO NOTHING`,
               [params.userId, attemptRow.reward_scope_id, progressionEventId]
             );
+
+            // P11: quiz_aced (score == max score, first completion only)
+            if (score === breakdown.length) {
+              try {
+                const qzRes = await client.query('SELECT title, is_test FROM cultural_quizzes WHERE id = $1', [attemptRow.quiz_id]);
+                const qzTitle = qzRes.rows[0]?.title || 'Cultural Quiz';
+                const qzIsTest = Boolean(qzRes.rows[0]?.is_test);
+                await recordActivity(client, {
+                  eventKey: `quiz_aced:${attemptRow.quiz_id}:${params.userId}`,
+                  actorId: params.userId,
+                  verb: 'quiz_aced',
+                  subjectType: 'quiz',
+                  subjectId: attemptRow.quiz_id,
+                  subjectTitle: qzTitle,
+                  subjectHref: `/quizzes/${attemptRow.quiz_id}`,
+                  payload: { score, max: breakdown.length },
+                  isTest: qzIsTest,
+                });
+              } catch (err) {
+                console.error('[social:producer] Failed to record quiz_aced activity:', err);
+              }
+            }
           } else {
             // Idempotent duplicate: already recorded
             xpToAward = 0;

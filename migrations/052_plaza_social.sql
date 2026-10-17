@@ -4,7 +4,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS share_activity BOOLEAN NOT NULL DEFAU
 
 CREATE TABLE IF NOT EXISTS social_activities (
   id TEXT PRIMARY KEY,                                   -- 'act_' || uuid
-  event_key TEXT NOT NULL UNIQUE CHECK (length(event_key) BETWEEN 1 AND 240),
+  event_key TEXT NOT NULL CHECK (length(event_key) BETWEEN 1 AND 240),
   actor_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   verb TEXT NOT NULL CHECK (verb IN (
     'quest_completed','trail_completed','town_completed',
@@ -22,8 +22,10 @@ CREATE TABLE IF NOT EXISTS social_activities (
   hidden_at TIMESTAMPTZ,                                 -- owner removal or moderation
   hidden_reason TEXT,
   is_test BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT uq_social_activities_event_key UNIQUE (event_key)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_social_activities_event_key ON social_activities (event_key);
 CREATE INDEX IF NOT EXISTS idx_social_activities_feed ON social_activities (is_test, created_at DESC, id DESC) WHERE hidden_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_social_activities_actor ON social_activities (actor_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_social_activities_town ON social_activities (municipality, created_at DESC) WHERE hidden_at IS NULL;
