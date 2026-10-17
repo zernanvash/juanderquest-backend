@@ -172,6 +172,171 @@ export async function applyMigrations(pg: Pool) {
         } else if (file === '048_quest_attempts_single_completion.sql' && pgMemMigrationAdapters.has(pg as object)) {
           await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_quest_attempts_single_completion
             ON quest_attempts(user_id, quest_id) WHERE status = 'completed'`);
+        } else if (file === '051_funding_notifications.sql' && pgMemMigrationAdapters.has(pg as object)) {
+          await client.query(`
+            CREATE TABLE IF NOT EXISTS user_notifications (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              event_key TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              title TEXT NOT NULL,
+              message TEXT NOT NULL,
+              href TEXT NOT NULL,
+              is_test BOOLEAN NOT NULL DEFAULT FALSE,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+              read_at TIMESTAMPTZ,
+              CONSTRAINT uq_user_notifications_event UNIQUE (user_id, event_key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_user_notifications_owner_created ON user_notifications (user_id, created_at DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_user_notifications_unread ON user_notifications (user_id, created_at DESC, id DESC);
+          `);
+        } else if (file === '052_plaza_social.sql' && pgMemMigrationAdapters.has(pg as object)) {
+          await client.query(`
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS share_activity BOOLEAN NOT NULL DEFAULT TRUE;
+            CREATE TABLE IF NOT EXISTS social_activities (
+              id TEXT PRIMARY KEY,
+              event_key TEXT NOT NULL,
+              actor_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              verb TEXT NOT NULL,
+              subject_type TEXT NOT NULL,
+              subject_id TEXT NOT NULL,
+              subject_title TEXT NOT NULL,
+              subject_href TEXT NOT NULL,
+              municipality TEXT,
+              payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+              cheer_count INTEGER NOT NULL DEFAULT 0,
+              comment_count INTEGER NOT NULL DEFAULT 0,
+              hidden_at TIMESTAMPTZ,
+              hidden_reason TEXT,
+              is_test BOOLEAN NOT NULL DEFAULT FALSE,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              CONSTRAINT uq_social_activities_event_key UNIQUE (event_key)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_social_activities_event_key ON social_activities (event_key);
+            CREATE INDEX IF NOT EXISTS idx_social_activities_feed ON social_activities (is_test, created_at DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_social_activities_actor ON social_activities (actor_id, created_at DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_social_activities_town ON social_activities (municipality, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS social_cheers (
+              activity_id TEXT NOT NULL REFERENCES social_activities(id) ON DELETE CASCADE,
+              user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              is_test BOOLEAN NOT NULL DEFAULT FALSE,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              PRIMARY KEY (activity_id, user_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_social_cheers_user ON social_cheers (user_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS social_comments (
+              id TEXT PRIMARY KEY,
+              activity_id TEXT NOT NULL REFERENCES social_activities(id) ON DELETE CASCADE,
+              author_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              body TEXT NOT NULL,
+              idempotency_key TEXT NOT NULL,
+              report_count INTEGER NOT NULL DEFAULT 0,
+              deleted_at TIMESTAMPTZ,
+              hidden_at TIMESTAMPTZ,
+              hidden_by TEXT,
+              is_test BOOLEAN NOT NULL DEFAULT FALSE,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              UNIQUE (author_id, idempotency_key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_social_comments_thread ON social_comments (activity_id, created_at ASC, id ASC);
+
+            CREATE TABLE IF NOT EXISTS social_comment_reports (
+              comment_id TEXT NOT NULL REFERENCES social_comments(id) ON DELETE CASCADE,
+              reporter_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              reason TEXT NOT NULL,
+              note TEXT,
+              resolved_at TIMESTAMPTZ,
+              resolved_by TEXT,
+              resolution TEXT,
+              is_test BOOLEAN NOT NULL DEFAULT FALSE,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              PRIMARY KEY (comment_id, reporter_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_social_comment_reports_comment ON social_comment_reports (comment_id);
+
+            CREATE TABLE IF NOT EXISTS social_user_settings (
+              user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+              share_activity BOOLEAN NOT NULL DEFAULT TRUE,
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS plaza_weekly_scores (
+              week_start DATE NOT NULL,
+              user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              score INTEGER NOT NULL DEFAULT 0,
+              quests INTEGER NOT NULL DEFAULT 0,
+              home_town TEXT,
+              rank INTEGER,
+              prev_rank INTEGER,
+              top10_announced BOOLEAN NOT NULL DEFAULT FALSE,
+              is_test BOOLEAN NOT NULL DEFAULT FALSE,
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              PRIMARY KEY (week_start, user_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_plaza_weekly_rank ON plaza_weekly_scores (week_start, is_test, rank);
+
+            CREATE TABLE IF NOT EXISTS plaza_job_runs (
+              job_key TEXT PRIMARY KEY,
+              finished_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
+            INSERT INTO achievement_definitions (id, track, title, description, badge_icon, category, threshold, criteria_version)
+            VALUES
+              ('weekly_champion', 'explorer', 'Weekly Champion', 'Finished #1 on the Plaza weekly board.', '🏆', 'weekly', 1, 'v1'),
+              ('weekly_podium',   'explorer', 'Weekly Podium',   'Finished #2 or #3 on the Plaza weekly board.', '🥈', 'weekly', 1, 'v1')
+            ON CONFLICT (id) DO NOTHING;
+          `);
+        } else if (file === '053_plaza_push.sql' && pgMemMigrationAdapters.has(pg as object)) {
+          await client.query(`
+            CREATE TABLE IF NOT EXISTS user_devices (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              token TEXT NOT NULL UNIQUE,
+              platform TEXT NOT NULL,
+              app_build INTEGER,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              disabled_at TIMESTAMPTZ,
+              disabled_reason TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_user_devices_user ON user_devices (user_id);
+
+            CREATE TABLE IF NOT EXISTS user_notification_preferences (
+              user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+              push_overtaken BOOLEAN NOT NULL DEFAULT TRUE,
+              push_friend_activity BOOLEAN NOT NULL DEFAULT TRUE,
+              push_social BOOLEAN NOT NULL DEFAULT TRUE,
+              push_weekly_recap BOOLEAN NOT NULL DEFAULT TRUE,
+              quiet_hours BOOLEAN NOT NULL DEFAULT TRUE,
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS push_deliveries (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              category TEXT NOT NULL,
+              collapse_key TEXT NOT NULL,
+              notification_id TEXT REFERENCES user_notifications(id) ON DELETE SET NULL,
+              title TEXT NOT NULL,
+              body TEXT NOT NULL,
+              href TEXT NOT NULL,
+              batch_count INTEGER NOT NULL DEFAULT 1,
+              batch_names JSONB NOT NULL DEFAULT '[]'::jsonb,
+              status TEXT NOT NULL DEFAULT 'queued',
+              skip_reason TEXT,
+              send_after TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              attempts INTEGER NOT NULL DEFAULT 0,
+              last_error TEXT,
+              is_test BOOLEAN NOT NULL DEFAULT FALSE,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              sent_at TIMESTAMPTZ
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_push_open_collapse ON push_deliveries (user_id, collapse_key) WHERE status = 'queued';
+            CREATE INDEX IF NOT EXISTS idx_push_due ON push_deliveries (send_after) WHERE status = 'queued';
+            CREATE INDEX IF NOT EXISTS idx_push_user_day ON push_deliveries (user_id, category, sent_at) WHERE status = 'sent';
+          `);
         } else {
           await client.query(sql);
         }

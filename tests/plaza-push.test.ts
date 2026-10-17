@@ -243,6 +243,7 @@ describe('Plan 41 Phase 4: Push Queue, Batching, Caps, Dispatcher & Weekly Recap
          ON CONFLICT (token) DO NOTHING`,
         ['dev_recip_unreg', userRecipient.id, tokenUnregistered],
       );
+      await testDb.pool.query('DELETE FROM push_deliveries');
 
       const duePushId = 'push_due_test_001';
       await testDb.pool.query(
