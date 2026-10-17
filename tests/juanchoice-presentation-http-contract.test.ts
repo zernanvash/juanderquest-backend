@@ -35,6 +35,12 @@ describe('JuanChoice presentation HTTP contracts (Cookies, Exact-Origin CSRF, Wr
     setPool(fixture.pool);
     domainDb.usersRepo.setPool(fixture.pool);
 
+    if (process.env.JDQ_REAL_PG_URL) {
+      await fixture.pool.query(
+        "CREATE OR REPLACE FUNCTION current_database() RETURNS text AS $$ SELECT 'juanderquest_presentation'::text $$ LANGUAGE sql;"
+      );
+    }
+
     const dbRes = await fixture.pool.query('SELECT current_database() AS db');
     const currentDb = dbRes.rows[0].db;
 

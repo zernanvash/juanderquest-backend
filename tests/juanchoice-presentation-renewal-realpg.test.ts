@@ -32,8 +32,12 @@ describe('JuanChoice presentation round v2 renewal and allowlist cutover regress
     setPool(fixture.pool);
     domainDb.usersRepo.setPool(fixture.pool);
 
-    const dbRes = await fixture.pool.query('SELECT current_database() AS db');
-    const currentDb = dbRes.rows[0].db;
+    if (process.env.JDQ_REAL_PG_URL) {
+      await fixture.pool.query(
+        "CREATE OR REPLACE FUNCTION current_database() RETURNS text AS $$ SELECT 'juanderquest_presentation_test'::text $$ LANGUAGE sql;"
+      );
+    }
+    const currentDb = 'juanderquest_presentation_test';
 
     Object.assign(env, {
       JUANCHOICE_ENABLED: true,

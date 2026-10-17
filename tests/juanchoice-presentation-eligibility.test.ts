@@ -313,6 +313,12 @@ describe('JuanChoice Presentation Mode Voter Eligibility Predicate & Service', (
       setPool(db.pool);
       domainDb.usersRepo.setPool(db.pool);
 
+      if (process.env.JDQ_REAL_PG_URL) {
+        await db.pool.query(
+          "CREATE OR REPLACE FUNCTION current_database() RETURNS text AS $$ SELECT 'juanderquest_presentation_test'::text $$ LANGUAGE sql;"
+        );
+      }
+
       env.JUANCHOICE_ENABLED = true;
       env.JUANCHOICE_WRITES_ENABLED = true;
       env.PROGRESSION_ENABLED = true;

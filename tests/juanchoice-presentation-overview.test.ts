@@ -23,6 +23,12 @@ describe('JuanChoice presentation overview contract', () => {
     setPool(fixture.pool);
     domainDb.usersRepo.setPool(fixture.pool);
 
+    if (process.env.JDQ_REAL_PG_URL) {
+      await fixture.pool.query(
+        "CREATE OR REPLACE FUNCTION current_database() RETURNS text AS $$ SELECT 'juanderquest_presentation_test'::text $$ LANGUAGE sql;"
+      );
+    }
+
     // Seed test spots
     await fixture.pool.query(
       `INSERT INTO spots(id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,source_type,source_name,is_test)
