@@ -1,5 +1,8 @@
 import { createTestDb } from '../src/db/testHarness';
-import { verifyMigrations } from '../src/db/migrations';
+import { createHash } from 'crypto';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { migrationChecksumMatches, verifyMigrations } from '../src/db/migrations';
 
 describe('read-only runtime migration gate', () => {
   it('accepts an exact ledger and rejects missing, altered, and unknown migrations', async () => {
@@ -23,6 +26,28 @@ describe('read-only runtime migration gate', () => {
       await fixture.pool.query("DELETE FROM schema_migrations WHERE filename = '999_unknown.sql'");
       await fixture.pool.query("DELETE FROM schema_migrations WHERE filename = '029_economic_ledger_integrity.sql'");
       await expect(verifyMigrations(fixture.pool)).rejects.toThrow(/missing or has no checksum/);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('treats CRLF and LF checkouts of the same migration as identical history', async () => {
+    const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+    const lf = 'CREATE TABLE a (id TEXT);\nCREATE TABLE b (id TEXT);\n';
+    const crlf = lf.replace(/\n/g, '\r\n');
+    expect(migrationChecksumMatches(sha(crlf), lf)).toBe(true);
+    expect(migrationChecksumMatches(sha(lf), crlf)).toBe(true);
+    expect(migrationChecksumMatches(sha(lf), lf)).toBe(true);
+    expect(migrationChecksumMatches(sha(lf), lf.replace('b (id', 'c (id'))).toBe(false);
+    expect(migrationChecksumMatches(sha(crlf), `${lf} `)).toBe(false);
+
+    const fixture = await createTestDb();
+    try {
+      // A ledger written from a CRLF checkout must still verify against the LF files.
+      const file = '001_init.sql';
+      const sql = readFileSync(join(__dirname, '..', 'migrations', file), 'utf8').replace(/\r\n/g, '\n');
+      await fixture.pool.query('UPDATE schema_migrations SET checksum = $1 WHERE filename = $2', [sha(sql.replace(/\n/g, '\r\n')), file]);
+      await expect(verifyMigrations(fixture.pool)).resolves.toBeUndefined();
     } finally {
       await fixture.close();
     }

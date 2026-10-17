@@ -81,6 +81,15 @@ function migrationChecksum(sql: string): string {
   return createHash('sha256').update(sql).digest('hex');
 }
 
+// Line endings are not migration history. Early ledgers (001-005) were recorded
+// from a CRLF Windows checkout while .gitattributes now checks files out as LF,
+// so a clean clone must still verify against them (2026-10-17 release rehearsal).
+// Any other byte difference remains a mismatch.
+export function migrationChecksumMatches(stored: string, sql: string): boolean {
+  const lf = sql.replace(/\r\n/g, '\n');
+  return [sql, lf, lf.replace(/\n/g, '\r\n')].some((variant) => migrationChecksum(variant) === stored);
+}
+
 // A restricted runtime must never attempt DDL or repair the ledger on boot.
 // Deployment tooling applies migrations with the owner connection first; the
 // application then verifies that the exact checked-in files are installed.
@@ -92,8 +101,8 @@ export async function verifyMigrations(pg: Pick<Pool, 'query'>): Promise<void> {
   for (const file of MIGRATIONS) {
     const stored = applied.get(file);
     if (!stored) throw new Error(`Migration ${file} is missing or has no checksum; run the owner-only migration command first.`);
-    const expected = migrationChecksum(readFileSync(join(rootDir, 'migrations', file), 'utf8'));
-    if (stored !== expected) throw new Error(`Migration ${file} checksum mismatch; runtime refuses altered migration history.`);
+    const sql = readFileSync(join(rootDir, 'migrations', file), 'utf8');
+    if (!migrationChecksumMatches(stored, sql)) throw new Error(`Migration ${file} checksum mismatch; runtime refuses altered migration history.`);
     applied.delete(file);
   }
   if (applied.size) throw new Error(`Database has unknown migrations: ${[...applied.keys()].sort().join(', ')}`);
@@ -134,7 +143,7 @@ export async function applyMigrations(pg: Pool) {
       const applied = await client.query('SELECT checksum FROM schema_migrations WHERE filename = $1', [file]);
       if (applied.rowCount) {
         const stored = applied.rows[0].checksum as string | null;
-        if (stored && stored !== checksum) {
+        if (stored && !migrationChecksumMatches(stored, sql)) {
           throw new Error(
             `Migration ${file} was modified after it was applied (checksum mismatch). ` +
             'Create a new forward migration instead of editing history.'
