@@ -102,3 +102,15 @@ export function manilaDayStartUtc(now: Date): Date {
   );
   return new Date(today00.getTime() - MANILA_OFFSET_MS);
 }
+
+/** ISO week of the previous week */
+export function prevWeekId(now: Date): string {
+  const prevWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  return weekId(prevWeek);
+}
+
+/** Manila day of week (0 = Sunday, 1 = Monday, ..., 6 = Saturday) */
+export function manilaDayOfWeek(now: Date): number {
+  return new Date(now.getTime() + MANILA_OFFSET_MS).getUTCDay();
+}
+
