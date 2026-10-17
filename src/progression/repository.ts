@@ -11,6 +11,8 @@ import {
   CuratedCollection,
   OutboxEvent,
 } from './types.js';
+import { getExplorerLevel } from './levels.js';
+import { recordActivity } from '../social/activity.js';
 
 type QueryExecutor = Pool | PoolClient;
 
@@ -248,6 +250,32 @@ export class ProgressionRepository {
       throw new Error('TOTALS_OUT_OF_BOUNDS: Resulting totals exceed safe integer range.');
     }
 
+    // P5: level_up
+    const oldLevel = getExplorerLevel(Number(curExp)).level;
+    const newLevel = getExplorerLevel(exp).level;
+    if (newLevel > oldLevel) {
+      try {
+        const uRes = await client.query('SELECT is_test FROM users WHERE id = $1', [userId]);
+        const isTest = Boolean(uRes.rows[0]?.is_test);
+        for (let lvl = oldLevel + 1; lvl <= newLevel; lvl++) {
+          const info = getExplorerLevel(50 * (lvl - 1) * lvl);
+          await recordActivity(client, {
+            eventKey: `level_up:${userId}:${lvl}`,
+            actorId: userId,
+            verb: 'level_up',
+            subjectType: 'level',
+            subjectId: `explorer-${lvl}`,
+            subjectTitle: `Level ${lvl} · ${info.title}`,
+            subjectHref: '/profile',
+            payload: { level: lvl, title: info.title },
+            isTest,
+          });
+        }
+      } catch (err) {
+        console.error('[social:producer] Failed to record level_up activity:', err);
+      }
+    }
+
     return {
       user_id: r.user_id,
       explorer_xp: exp,
@@ -439,6 +467,51 @@ export class ProgressionRepository {
     if (!rows.length) return null;
     const r = rows[0];
     const snap = typeof r.criteria_snapshot === 'string' ? JSON.parse(r.criteria_snapshot) : (r.criteria_snapshot || criteriaSnapshot);
+
+    // P3 / P4: social activity for badge_earned / trail_completed
+    try {
+      if (client && r) {
+        const colRes = await client.query(
+          `SELECT c.id, c.title, COUNT(s.spot_id)::int AS stops
+             FROM curated_collections c
+             LEFT JOIN curated_collection_spots s ON s.collection_id = c.id
+            WHERE c.badge_id = $1
+            GROUP BY c.id, c.title
+            LIMIT 1`,
+          [award.achievement_id],
+        );
+        if (colRes.rows.length) {
+          const col = colRes.rows[0];
+          await recordActivity(client, {
+            eventKey: `trail_completed:${award.user_id}:${col.id}`,
+            actorId: award.user_id,
+            verb: 'trail_completed',
+            subjectType: 'trail',
+            subjectId: col.id,
+            subjectTitle: col.title,
+            subjectHref: `/trail?collection=${col.id}`,
+            payload: { stops: Number(col.stops) || 5 },
+            isTest: Boolean(award.is_test),
+          });
+        } else if (!award.achievement_id.startsWith('weekly_')) {
+          const badgeTitle = def?.title || snap.title || award.achievement_id;
+          const badgeIcon = def?.badge_icon || snap.badge_icon || '🏅';
+          await recordActivity(client, {
+            eventKey: `badge_earned:${r.id}`,
+            actorId: award.user_id,
+            verb: 'badge_earned',
+            subjectType: 'badge',
+            subjectId: award.achievement_id,
+            subjectTitle: badgeTitle,
+            subjectHref: `/profile?badge=${award.achievement_id}`,
+            payload: { icon: badgeIcon },
+            isTest: Boolean(award.is_test),
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[social:producer] Failed to record badge/trail activity:', err);
+    }
     return {
       id: r.id,
       user_id: r.user_id,

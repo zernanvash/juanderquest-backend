@@ -1,7 +1,7 @@
-import { Router, Request, Response } from 'express';
+import { Router, Response } from 'express';
 import { z } from 'zod';
 import { computeLeaderboard } from '../services/leaderboard.js';
-import { verifySessionToken } from '../auth/tokens.js';
+import { optionalAuthenticateToken, AuthRequest } from '../middleware/auth.js';
 
 export const leaderboardRouter = Router();
 
@@ -11,7 +11,7 @@ const leaderboardQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).optional().default(20),
 });
 
-leaderboardRouter.get('/leaderboard', (req: Request, res: Response) => {
+leaderboardRouter.get('/leaderboard', optionalAuthenticateToken, (req: AuthRequest, res: Response) => {
   const parsed = leaderboardQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     return res.status(400).json({
@@ -24,18 +24,7 @@ leaderboardRouter.get('/leaderboard', (req: Request, res: Response) => {
     });
   }
 
-  // Extract optional authenticated user
-  let currentUserId: string | undefined;
-  const authHeader = req.headers.authorization;
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.substring(7);
-    try {
-      currentUserId = verifySessionToken(token)?.id;
-    } catch {
-      // Ignored for unauthenticated lookups
-    }
-  }
-
+  const currentUserId = req.user?.id;
   const { timeframe, metric, limit } = parsed.data;
   const leaderboard = computeLeaderboard({
     timeframe,

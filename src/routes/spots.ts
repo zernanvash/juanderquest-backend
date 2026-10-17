@@ -15,6 +15,7 @@ import { detectValidatedMediaMime } from '../utils/media-mime.js';
 import { fieldLogStore, FieldLogTag, SpotReportReason } from '../spots/field-logs.js';
 import { hiddenGemHighlights } from '../spots/highlights.js';
 import { sanitizeQuestForViewer } from '../quests/sanitize.js';
+import { recordActivity } from '../social/activity.js';
 
 const router = Router();
 const csv = (value: unknown) => typeof value === 'string' && value ? value.split(',').map(v => v.trim()).filter(Boolean) : [];
@@ -318,6 +319,25 @@ router.post('/spots', authenticateToken, validateRequest(contributionSchema), as
         success: false,
         error: { code: 'VALIDATION_ERROR', message: e.message || 'Failed to attach photo assets.' },
       });
+    }
+  }
+
+  if (result.spot.status === 'published' && !result.spot.is_test) {
+    try {
+      await recordActivity(null, {
+        eventKey: `spot_posted:${result.spot.id}`,
+        actorId: req.user!.id,
+        verb: 'spot_posted',
+        subjectType: 'spot',
+        subjectId: result.spot.id,
+        subjectTitle: result.spot.name,
+        subjectHref: `/spots/${result.spot.slug || result.spot.id}`,
+        municipality: result.spot.municipality || null,
+        payload: {},
+        isTest: false,
+      });
+    } catch (err) {
+      console.error('[social:producer] Failed to record spot_posted activity:', err);
     }
   }
 
