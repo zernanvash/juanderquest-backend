@@ -28,9 +28,11 @@ describe('JuanChoice presentation overview contract', () => {
     const dbRes = await fixture.pool.query('SELECT current_database() AS db');
     currentDb = dbRes.rows[0].db;
 
-    jest.spyOn(envModule, 'isPresentationDatabaseName').mockImplementation((db: string) => {
+    // Keep the real predicate for every other name (calling envModule.* here would hit the spy itself).
+    const realIsPresentationDatabaseName = envModule.isPresentationDatabaseName;
+    jest.spyOn(envModule, 'isPresentationDatabaseName').mockImplementation((db: string, ...rest) => {
       if (db === currentDb || db === 'juanderquest_presentation_test' || db === 'juanderquest_presentation') return true;
-      return envModule.isPresentationDatabaseName(db);
+      return realIsPresentationDatabaseName(db, ...rest);
     });
 
     // Seed test spots

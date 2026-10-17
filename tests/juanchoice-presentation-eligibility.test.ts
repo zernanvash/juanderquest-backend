@@ -318,9 +318,11 @@ describe('JuanChoice Presentation Mode Voter Eligibility Predicate & Service', (
       const dbRes = await db.pool.query('SELECT current_database() AS db');
       currentDb = dbRes.rows[0].db;
 
-      jest.spyOn(envModule, 'isPresentationDatabaseName').mockImplementation((dbName: string) => {
+      // Keep the real predicate for every other name (calling envModule.* here would hit the spy itself).
+      const realIsPresentationDatabaseName = envModule.isPresentationDatabaseName;
+      jest.spyOn(envModule, 'isPresentationDatabaseName').mockImplementation((dbName: string, ...rest) => {
         if (dbName === currentDb || dbName === 'juanderquest_presentation_test' || dbName === 'juanderquest_presentation') return true;
-        return envModule.isPresentationDatabaseName(dbName);
+        return realIsPresentationDatabaseName(dbName, ...rest);
       });
 
       env.JUANCHOICE_ENABLED = true;
