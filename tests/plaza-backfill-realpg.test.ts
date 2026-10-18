@@ -34,12 +34,41 @@ realPg('Plaza historical backfill (disposable real PostgreSQL only)', () => {
       }
       await client.query(`INSERT INTO quest_attempts (id, quest_id, user_id, status, completed_at)
         VALUES ($1,$2,$3,'completed',$4)`, [randomUUID(), secondQuest, real, laterTime]);
+      const spotId = `backfill-spot-${suffix}`;
+      await client.query(`INSERT INTO spots
+        (id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,
+         source_type,source_name,status,created_by,created_at)
+        VALUES ($1,$2,'Community Beach','Historical post','nature','beach','Dagupan','Test address',
+                16.0,120.0,'community','Community','published',$3,$4)`,
+        [spotId, spotId, real, oldTime]);
+      const badgeId = `backfill-badge-${suffix}`;
+      const trailBadgeId = `backfill-trail-badge-${suffix}`;
+      for (const id of [badgeId, trailBadgeId]) {
+        await client.query(`INSERT INTO achievement_definitions
+          (id,track,title,description,badge_icon) VALUES ($1,'explorer','Historical Badge','Fixture','🏅')`, [id]);
+      }
+      const collectionId = `backfill-collection-${suffix}`;
+      await client.query(`INSERT INTO curated_collections (id,title,description,category,badge_id)
+        VALUES ($1,'Heritage Trail','Fixture','heritage',$2)`, [collectionId, trailBadgeId]);
+      for (const [achievementId, at] of [[badgeId, oldTime], [trailBadgeId, laterTime]]) {
+        await client.query(`INSERT INTO achievement_awards (id,user_id,achievement_id,awarded_at)
+          VALUES ($1,$2,$3,$4)`, [randomUUID(), real, achievementId, at]);
+      }
+      await client.query(`INSERT INTO progression_totals (user_id,explorer_xp) VALUES ($1,100)
+        ON CONFLICT (user_id) DO UPDATE SET explorer_xp = 100`, [real]);
+      await client.query(`INSERT INTO progression_events
+        (id,user_id,track,delta,source_type,source_id,rule_version,earned_at)
+        VALUES ($1,$2,'explorer',100,'backfill_fixture',$3,'v1',$4)`, [randomUUID(), real, spotId, laterTime]);
       const before = await client.query(`SELECT
         (SELECT count(*)::int FROM user_notifications) AS notifications,
         (SELECT count(*)::int FROM push_deliveries) AS pushes`);
       const dry = await backfillPlazaActivities(client);
       expect(dry.quest_completed.inserted).toBe(3);
       expect(dry.town_completed.inserted).toBe(1);
+      expect(dry.spot_posted.inserted).toBe(1);
+      expect(dry.level_up.inserted).toBe(1);
+      expect(dry.badge_earned.inserted).toBe(1);
+      expect(dry.trail_completed.inserted).toBe(1);
       expect((await client.query('SELECT count(*)::int AS n FROM social_activities')).rows[0].n).toBe(0);
       const first = await backfillPlazaActivities(client, true);
       expect(first.quest_completed.inserted).toBe(3);
@@ -57,6 +86,8 @@ realPg('Plaza historical backfill (disposable real PostgreSQL only)', () => {
       expect(rows.find(row => row.event_key === `quest_completed:${real}:${secondQuest}`)?.created_at.toISOString()).toBe(laterTime);
       expect((await client.query('SELECT created_at FROM social_activities WHERE event_key = $1',
         [`town_completed:${real}:dagupan`])).rows[0].created_at.toISOString()).toBe(laterTime);
+      expect((await client.query('SELECT created_at FROM social_activities WHERE event_key = $1',
+        [`spot_posted:${spotId}`])).rows[0].created_at.toISOString()).toBe(oldTime);
       expect(rows.some(row => row.actor_id === privateUser)).toBe(false);
       expect(rows.find(row => row.actor_id === real)?.is_test).toBe(false);
       expect(rows.find(row => row.actor_id === testUser)?.is_test).toBe(true);

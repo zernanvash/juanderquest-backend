@@ -98,7 +98,8 @@ export async function collectPlazaCandidates(client: PoolClient): Promise<Candid
   const { rows: spots } = await client.query(`
     SELECT s.id, s.slug, s.name, s.municipality, s.created_by, s.created_at
       FROM spots s JOIN users u ON u.id = s.created_by
-     WHERE s.status = 'published' AND s.is_test = FALSE AND u.is_test = FALSE
+     WHERE s.status = 'published' AND s.source_type = 'community'
+       AND s.is_test = FALSE AND u.is_test = FALSE
        AND u.is_public = TRUE AND u.share_activity = TRUE`);
   for (const row of spots) add({ eventKey: `spot_posted:${row.id}`, actorId: row.created_by,
     verb: 'spot_posted', subjectType: 'spot', subjectId: row.id, subjectTitle: row.name,
@@ -148,13 +149,13 @@ export async function collectPlazaCandidates(client: PoolClient): Promise<Candid
      WHERE a.revoked_at IS NULL AND a.is_test = u.is_test
        AND u.is_public = TRUE AND u.share_activity = TRUE`);
   const { rows: collections } = await client.query(`
-    SELECT c.id, c.title, c.badge_id, COUNT(cs.spot_id)::int AS stops
+    SELECT c.id, c.title, c.badge_id, c.is_active, COUNT(cs.spot_id)::int AS stops
       FROM curated_collections c LEFT JOIN curated_collection_spots cs ON cs.collection_id = c.id
-     WHERE c.is_active = TRUE
-     GROUP BY c.id, c.title, c.badge_id`);
+     GROUP BY c.id, c.title, c.badge_id, c.is_active`);
   for (const row of awards) {
     const matching = collections.filter(col => col.badge_id === row.achievement_id);
     if (matching.length > 1) continue; // Ambiguous collection provenance; do not invent a trail.
+    if (matching.length === 1 && !matching[0].is_active) continue;
     const common = { actorId: row.user_id, municipality: null, isTest: row.is_test,
       createdAt: asDate(row.awarded_at) };
     if (matching.length === 1) {
