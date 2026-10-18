@@ -284,6 +284,8 @@ export function startPushDispatcher(): void {
   dispatcherTimer = setInterval(() => {
     void runPushDispatcherTick();
   }, intervalMs);
+  // Never keep the process alive on its own (graceful shutdown, test runners).
+  dispatcherTimer.unref?.();
 
   console.log(`[dispatcher] Push dispatcher started (interval: ${intervalMs} ms)`);
 }

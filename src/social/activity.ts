@@ -54,6 +54,44 @@ export interface Queryable {
 }
 
 /**
+ * Runs a Plaza producer without endangering the caller's transaction.
+ * A failed statement aborts the whole PostgreSQL transaction, so a JS try/catch
+ * alone would still roll back the vote, reward or XP grant that triggered the
+ * producer. Inside a transaction the producer runs under a savepoint and only
+ * that savepoint is rolled back on failure. Outside a transaction SAVEPOINT is
+ * rejected; statements autocommit there, so a failure cannot affect the caller.
+ */
+export async function runIsolatedProducer(
+  client: Queryable | null | undefined,
+  label: string,
+  producer: () => Promise<void>
+): Promise<void> {
+  let savepoint = false;
+  if (client) {
+    try {
+      await client.query('SAVEPOINT plaza_producer');
+      savepoint = true;
+    } catch {
+      savepoint = false;
+    }
+  }
+  try {
+    await producer();
+    if (savepoint) await client!.query('RELEASE SAVEPOINT plaza_producer');
+  } catch (err) {
+    if (savepoint) {
+      try {
+        await client!.query('ROLLBACK TO SAVEPOINT plaza_producer');
+        await client!.query('RELEASE SAVEPOINT plaza_producer');
+      } catch (rollbackErr) {
+        console.error('[social:producer] Savepoint rollback failed:', rollbackErr);
+      }
+    }
+    console.error(label, err);
+  }
+}
+
+/**
  * Inserts a new social activity with ON CONFLICT (event_key) DO NOTHING.
  * Returns the activity id, or null if the event was already recorded.
  * Social features require PostgreSQL; returns null if in-memory fallback.

@@ -3,7 +3,7 @@ import type { Pool, PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
 import { CulturalQuizRepository } from './repository.js';
 import { ProgressionRepository } from '../progression/repository.js';
-import { recordActivity } from '../social/activity.js';
+import { recordActivity, runIsolatedProducer } from '../social/activity.js';
 import {
   CulturalQuiz,
   CulturalQuizVersion,
@@ -494,8 +494,11 @@ export class CulturalQuizService {
 
             // P11: quiz_aced (score == max score, first completion only)
             if (score === breakdown.length) {
-              try {
-                const qzRes = await client.query('SELECT title, is_test FROM cultural_quizzes WHERE id = $1', [attemptRow.quiz_id]);
+              await runIsolatedProducer(client, '[social:producer] Failed to record quiz_aced activity:', async () => {
+                const qzRes = await client.query(`SELECT v.title, q.is_test
+                     FROM cultural_quizzes q
+                     LEFT JOIN cultural_quiz_versions v ON v.quiz_id = q.id AND v.version = q.current_version
+                    WHERE q.id = $1`, [attemptRow.quiz_id]);
                 const qzTitle = qzRes.rows[0]?.title || 'Cultural Quiz';
                 const qzIsTest = Boolean(qzRes.rows[0]?.is_test);
                 await recordActivity(client, {
@@ -509,9 +512,7 @@ export class CulturalQuizService {
                   payload: { score, max: breakdown.length },
                   isTest: qzIsTest,
                 });
-              } catch (err) {
-                console.error('[social:producer] Failed to record quiz_aced activity:', err);
-              }
+              });
             }
           } else {
             // Idempotent duplicate: already recorded

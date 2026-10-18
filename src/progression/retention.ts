@@ -3,7 +3,7 @@ import { Pool, PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
 import { db } from '../db/index.js';
 import { progressionRepo } from './repository.js';
-import { recordActivity } from '../social/activity.js';
+import { recordActivity, runIsolatedProducer } from '../social/activity.js';
 
 type Queryable = Pick<Pool | PoolClient, 'query'>;
 
@@ -280,7 +280,7 @@ export async function evaluateFinalizedCampaignRetention(
       )).rows;
       const streak = computeOfficialStreak(rounds);
       if ([4, 8, 12, 26, 52].includes(streak.current)) {
-        try {
+        await runIsolatedProducer(client, '[social:producer] Failed to record streak_milestone activity:', async () => {
           await recordActivity(client, {
             eventKey: `streak_milestone:${participant.user_id}:${streak.current}`,
             actorId: participant.user_id,
@@ -292,9 +292,7 @@ export async function evaluateFinalizedCampaignRetention(
             payload: { rounds: streak.current },
             isTest: Boolean(campaign.is_test),
           });
-        } catch (err) {
-          console.error('[social:producer] Failed to record streak_milestone activity:', err);
-        }
+        });
       }
       for (const definition of streakAwards.filter((entry) => streak.current >= entry.threshold)) {
         const alreadyAwarded = await client.query(

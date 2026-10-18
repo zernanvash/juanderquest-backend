@@ -5,7 +5,7 @@ import { progressionRepo } from '../progression/repository.js';
 import { evaluateFinalizedCampaignRetention } from '../progression/retention.js';
 import { evaluateCandidatePromotionEligibility } from './promotion-safety.js';
 import { env, extractDatabaseName, isPresentationDatabaseName, UUID_V4_REGEX } from '../config/env.js';
-import { recordActivity } from '../social/activity.js';
+import { recordActivity, runIsolatedProducer } from '../social/activity.js';
 
 export class JuanChoiceError extends Error {
   constructor(public readonly code: string, public readonly status: number, message = code) { super(message); }
@@ -175,8 +175,8 @@ async function awardFirstBallotParticipation(
   );
   if (totals.rowCount !== 1) throw new JuanChoiceError('TOTALS_OUT_OF_BOUNDS', 409);
 
-  try {
-    const campRes = await client.query('SELECT title FROM juanchoice_campaigns WHERE id = $1', [campaignId]);
+  await runIsolatedProducer(client, '[social:producer] Failed to record juanchoice_voted activity:', async () => {
+    const campRes = await client.query('SELECT theme AS title FROM juanchoice_campaigns WHERE id = $1', [campaignId]);
     const title = campRes.rows[0]?.title || 'JuanChoice Campaign';
     await recordActivity(client, {
       eventKey: `juanchoice_voted:${campaignId}:${userId}`,
@@ -189,9 +189,7 @@ async function awardFirstBallotParticipation(
       payload: {},
       isTest,
     });
-  } catch (err) {
-    console.error('[social:producer] Failed to record juanchoice_voted activity:', err);
-  }
+  });
 }
 
 async function writeBallotBatch(client: PoolClient, input: {

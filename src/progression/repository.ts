@@ -12,7 +12,7 @@ import {
   OutboxEvent,
 } from './types.js';
 import { getExplorerLevel } from './levels.js';
-import { recordActivity } from '../social/activity.js';
+import { recordActivity, runIsolatedProducer } from '../social/activity.js';
 
 type QueryExecutor = Pool | PoolClient;
 
@@ -254,7 +254,7 @@ export class ProgressionRepository {
     const oldLevel = getExplorerLevel(Number(curExp)).level;
     const newLevel = getExplorerLevel(exp).level;
     if (newLevel > oldLevel) {
-      try {
+      await runIsolatedProducer(client, '[social:producer] Failed to record level_up activity:', async () => {
         const uRes = await client.query('SELECT is_test FROM users WHERE id = $1', [userId]);
         const isTest = Boolean(uRes.rows[0]?.is_test);
         for (let lvl = oldLevel + 1; lvl <= newLevel; lvl++) {
@@ -271,9 +271,7 @@ export class ProgressionRepository {
             isTest,
           });
         }
-      } catch (err) {
-        console.error('[social:producer] Failed to record level_up activity:', err);
-      }
+      });
     }
 
     return {
@@ -469,7 +467,7 @@ export class ProgressionRepository {
     const snap = typeof r.criteria_snapshot === 'string' ? JSON.parse(r.criteria_snapshot) : (r.criteria_snapshot || criteriaSnapshot);
 
     // P3 / P4: social activity for badge_earned / trail_completed
-    try {
+    await runIsolatedProducer(client, '[social:producer] Failed to record badge/trail activity:', async () => {
       if (client && r) {
         const colRes = await client.query(
           `SELECT c.id, c.title, COUNT(s.spot_id)::int AS stops
@@ -509,9 +507,7 @@ export class ProgressionRepository {
           });
         }
       }
-    } catch (err) {
-      console.error('[social:producer] Failed to record badge/trail activity:', err);
-    }
+    });
     return {
       id: r.id,
       user_id: r.user_id,

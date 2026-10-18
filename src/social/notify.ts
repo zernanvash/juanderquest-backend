@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import type { Queryable } from './activity.js';
+import { runIsolatedProducer, type Queryable } from './activity.js';
 import { enqueuePush } from '../push/enqueue.js';
 
 export type NotificationKind =
@@ -57,7 +57,7 @@ export async function notify(client: Queryable, input: NotifyInput): Promise<str
   }
 
   if (input.push) {
-    try {
+    await runIsolatedProducer(client, '[notify:push] Failed to enqueue push:', async () => {
       await enqueuePush(client, {
         userId: input.userId,
         category: input.push.category,
@@ -69,9 +69,7 @@ export async function notify(client: Queryable, input: NotifyInput): Promise<str
         actorName: input.push.actorName,
         isTest: input.isTest,
       });
-    } catch (err) {
-      console.error('[notify:push] Failed to enqueue push:', err);
-    }
+    });
   }
 
   return notifId;

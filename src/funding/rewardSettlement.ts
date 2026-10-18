@@ -5,7 +5,7 @@ import { settleFundingHold } from './holds.js';
 import type { CommittedLedgerGroup } from './ledger.js';
 import { FundingError } from './transaction.js';
 
-import { recordActivity } from '../social/activity.js';
+import { recordActivity, runIsolatedProducer } from '../social/activity.js';
 
 export interface RewardSettlementClient {
   query(text: string, params?: any[]): Promise<any>;
@@ -35,7 +35,7 @@ async function recordQuestCompletionSocialActivities(
   questId: string,
   awardedPoints: number,
 ) {
-  try {
+  await runIsolatedProducer(client, '[social:producer] Failed to record quest/town completion activity:', async () => {
     const qRes = await client.query(
       `SELECT q.title, q.location_name, q.is_test,
               COALESCE(s.municipality, q.location_name) AS municipality
@@ -117,9 +117,7 @@ async function recordQuestCompletionSocialActivities(
         }
       }
     }
-  } catch (err) {
-    console.error('[social:producer] Failed to record quest/town completion activity:', err);
-  }
+  });
 }
 
 /**

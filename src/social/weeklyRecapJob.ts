@@ -237,6 +237,8 @@ export function startWeeklyRecapJob(): void {
   recapJobTimer = setInterval(() => {
     void runWeeklyRecapTick();
   }, 10 * 60 * 1000);
+  // Never keep the process alive on its own (graceful shutdown, test runners).
+  recapJobTimer.unref?.();
 
   console.log('[weeklyRecapJob] Started weekly recap job (checks every 10 min)');
 }
