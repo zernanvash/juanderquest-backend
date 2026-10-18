@@ -41,7 +41,7 @@ else
   if curl --fail --location --silent --show-error --connect-timeout 5 --max-time 15 \
     'https://github.com/zernanvash/juanderquest-mobile/releases/latest/download/version.json' \
     --output "$manifest_candidate" && \
-    node -e 'const m=JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); if (!Number.isSafeInteger(m.versionCode) || m.versionCode < 1 || m.downloadUrl !== "https://github.com/zernanvash/juanderquest-mobile/releases/latest/download/juanderquest-latest.apk") process.exit(1)' "$manifest_candidate"; then
+    node -e 'const m=JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const validUrl = typeof m.downloadUrl === "string" && (m.downloadUrl === "https://github.com/zernanvash/juanderquest-mobile/releases/latest/download/juanderquest-latest.apk" || /^https:\/\/github\.com\/zernanvash\/juanderquest-mobile\/releases\/download\/android-v[0-9.]+\+[0-9.]+\/juanderquest-latest\.apk$/.test(m.downloadUrl)); if (!Number.isSafeInteger(m.versionCode) || m.versionCode < 1 || !validUrl) process.exit(1)' "$manifest_candidate"; then
     mv "$manifest_candidate" "$manifest_file"
   else
     rm -f "$manifest_candidate"
