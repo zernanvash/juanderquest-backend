@@ -56,17 +56,18 @@ export async function notify(client: Queryable, input: NotifyInput): Promise<str
     return null;
   }
 
-  if (input.push) {
+  const push = input.push;
+  if (push) {
     await runIsolatedProducer(client, '[notify:push] Failed to enqueue push:', async () => {
       await enqueuePush(client, {
         userId: input.userId,
-        category: input.push.category,
-        collapseKey: input.push.collapseKey,
+        category: push.category,
+        collapseKey: push.collapseKey,
         notificationId: notifId,
         title,
         body: message.slice(0, 240),
         href: input.href,
-        actorName: input.push.actorName,
+        actorName: push.actorName,
         isTest: input.isTest,
       });
     });
