@@ -364,6 +364,19 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
   });
 
   describe('5. HTTP Endpoints', () => {
+    // The handlers derive the current week from new Date(); pin only Date to the
+    // seeded week so the suite does not start failing once that week has passed.
+    beforeAll(() => {
+      jest.useFakeTimers({
+        now: fixedNow,
+        doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'setTimeout', 'clearTimeout',
+          'setInterval', 'clearInterval', 'queueMicrotask', 'hrtime', 'performance'],
+      });
+    });
+    afterAll(() => {
+      jest.useRealTimers();
+    });
+
     it('GET /api/v1/plaza/standings?board=everyone returns podium, entries, me, and rivals', async () => {
       const res = await request(app)
         .get('/api/v1/plaza/standings?board=everyone&period=weekly')
