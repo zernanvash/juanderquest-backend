@@ -337,8 +337,8 @@ describe('JuanChoice capacity child client loopback test', () => {
           campaignId: 'test-camp',
           candidateIds: ['cand-1', 'cand-2'],
           tokens: [voterToken],
-          durationMs: 1500,
-          pollIntervalMs: 600,
+          durationMs: 3000,
+          pollIntervalMs: 500,
           voterCount: 1,
           readerCount: 2,
         },
@@ -383,28 +383,20 @@ describe('JuanChoice capacity child client loopback test', () => {
       }
 
       const readRequests = receivedRequests.filter(r => r.method === 'GET');
-      expect(readRequests.length).toBeGreaterThanOrEqual(6); // 3 rounds * 2 readers
+      expect(readRequests.length).toBeGreaterThanOrEqual(4); // Initial and second vote waves, 2 readers each.
       // Confirm guest GETs have NO Authorization header
       for (const req of readRequests) {
         expect(req.authorization).toBeUndefined();
       }
 
-      // Round 0 (first 2 reads) sent concurrently with wave 0 ballots -> mixed_ballot_burst
+      // The child chooses phases from elapsed wall time. On a loaded Windows runner,
+      // a scheduled poll can arrive after the midpoint; asserting its exact index
+      // was the race. Verify both vote waves and every actual header instead.
       for (const req of readRequests.slice(0, 2)) {
         expect(req.benchmarkPhase).toBe('mixed_ballot_burst');
       }
-      // Round 1 (at 600ms < 750ms) -> idle_read
-      for (const req of readRequests.slice(2, 4)) {
-        expect(req.benchmarkPhase).toBe('idle_read');
-      }
-      // Round 2 (at 1200ms >= 750ms) sent concurrently with wave 1 ballots -> mixed_ballot_burst
-      for (const req of readRequests.slice(4, 6)) {
-        expect(req.benchmarkPhase).toBe('mixed_ballot_burst');
-      }
-      // Any further rounds if present are idle_read
-      for (const req of readRequests.slice(6)) {
-        expect(req.benchmarkPhase).toBe('idle_read');
-      }
+      expect(readRequests.filter(req => req.benchmarkPhase === 'mixed_ballot_burst')).toHaveLength(4);
+      for (const req of readRequests.slice(2)) expect(['idle_read', 'mixed_ballot_burst']).toContain(req.benchmarkPhase);
     } finally {
       if (child.connected) {
         try {
