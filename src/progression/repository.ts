@@ -257,7 +257,10 @@ export class ProgressionRepository {
       await runIsolatedProducer(client, '[social:producer] Failed to record level_up activity:', async () => {
         const uRes = await client.query('SELECT is_test FROM users WHERE id = $1', [userId]);
         const isTest = Boolean(uRes.rows[0]?.is_test);
-        for (let lvl = oldLevel + 1; lvl <= newLevel; lvl++) {
+        // Announce at most the last 3 levels: a large grant or correction can jump
+        // thousands of levels, and one feed row per level would flood the feed.
+        const firstAnnounced = Math.max(oldLevel + 1, newLevel - 2);
+        for (let lvl = firstAnnounced; lvl <= newLevel; lvl++) {
           const info = getExplorerLevel(50 * (lvl - 1) * lvl);
           await recordActivity(client, {
             eventKey: `level_up:${userId}:${lvl}`,
