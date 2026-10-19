@@ -16,6 +16,8 @@ import { fieldLogStore, FieldLogTag, SpotReportReason } from '../spots/field-log
 import { hiddenGemHighlights } from '../spots/highlights.js';
 import { sanitizeQuestForViewer } from '../quests/sanitize.js';
 import { recordActivity } from '../social/activity.js';
+import { normalizeTasks } from '../quests/taskNormalize.js';
+import { questTaskInputSchema, validateTasksWithinDistance } from '../quests/taskValidation.js';
 
 const router = Router();
 const csv = (value: unknown) => typeof value === 'string' && value ? value.split(',').map(v => v.trim()).filter(Boolean) : [];
@@ -352,17 +354,9 @@ const createAuthorQuestSchema = z.object({
     radius_meters: z.number().int().min(50).max(500).default(200),
     reward_points: z.union([z.literal(50), z.literal(75), z.literal(100)]).default(75),
     status: z.enum(['draft', 'published']).default('published'),
-    steps: z.array(z.object({
-      step_order: z.number().int().min(1),
-      title: z.string().trim().min(3).max(100),
-      description: z.string().trim().min(5).max(500),
-      checkpoint_type: z.enum(['location', 'qr', 'photo', 'action']),
-      required: z.boolean().default(true),
-      gps_lat: z.number().optional(),
-      gps_lng: z.number().optional(),
-      radius_meters: z.number().int().optional(),
-      hint: z.string().optional(),
-    })).max(10).default([]),
+    step_order_mode: z.enum(['sequential', 'any']).default('sequential'),
+    tasks: z.array(questTaskInputSchema).max(10).optional(),
+    steps: z.array(z.any()).max(10).optional(),
   }),
 });
 
@@ -386,26 +380,55 @@ router.post('/spots/:id/quests', authenticateToken, validateRequest(createAuthor
     });
   }
 
+  const questStatus = env.QUEST_FUNDING_ENABLED ? 'draft' : (req.body.status ?? 'published');
+  const rawTasks = req.body.tasks || req.body.steps || [];
+
+  // When published, must have 1-10 tasks and at least one required task
+  if (questStatus === 'published') {
+    if (rawTasks.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Published quests must have between 1 and 10 tasks.' },
+      });
+    }
+  }
+
+  // Validate tasks distance from destination spot (Plan 43 §4.6)
+  const maxDistanceKm = Number(process.env.QUEST_TASK_MAX_DISTANCE_KM || 5);
+  const distanceValidation = validateTasksWithinDistance(rawTasks, spot.gps_lat, spot.gps_lng, maxDistanceKm);
+  if (!distanceValidation.valid) {
+    return res.status(422).json({
+      success: false,
+      error: { code: 'TASK_TOO_FAR', message: distanceValidation.error },
+    });
+  }
+
+  // Normalize tasks into canonical v2 QuestTask[] (server generates keys and marker_code)
+  const normalizedTasks = normalizeTasks(rawTasks, spot, { allowClientMarkerCode: false });
+
+  if (questStatus === 'published') {
+    const hasRequired = normalizedTasks.some((t) => t.required);
+    if (!hasRequired) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'NO_REQUIRED_TASKS', message: 'Published quests must have at least one required task.' },
+      });
+    }
+  }
+
   const sanitizedSlug = spot.slug.replace(/[^a-z0-9_-]/g, '').slice(0, 36);
   const questId = `quest-${sanitizedSlug}-${Date.now().toString(36)}`;
   const markerCode = `JDQ-${randomUUID().slice(0, 8).toUpperCase()}`;
   const nowIso = new Date().toISOString();
-
-  const questStatus = env.QUEST_FUNDING_ENABLED ? 'draft' : (req.body.status ?? 'published');
-  const requestedSteps = Array.isArray(req.body.steps) ? req.body.steps : [];
-  const priorQuest = spot.quest_id ? db.findQuestById(spot.quest_id, true) : undefined;
-  const questSteps = requestedSteps.map((step: any) => {
-    if (step.checkpoint_type !== 'qr') return step;
-    const oldStep = priorQuest?.steps?.find((candidate) => candidate.step_order === step.step_order);
-    return { ...step, marker_code: oldStep?.marker_code || `JDQ-STEP-${randomUUID().replace(/-/g, '').toUpperCase()}` };
-  });
+  const stepOrderMode = req.body.step_order_mode ?? 'sequential';
 
   const newQuest: QuestRow = {
     id: questId,
     author_id: req.user!.id,
     status: questStatus,
     version: 1,
-    steps: questSteps,
+    steps: normalizedTasks,
+    step_order_mode: stepOrderMode,
     title: req.body.title,
     description: req.body.description,
     category: req.body.category,
@@ -434,12 +457,13 @@ router.post('/spots/:id/quests', authenticateToken, validateRequest(createAuthor
         `INSERT INTO quests (
           id, title, description, category, location_name, gps_lat, gps_lng,
           radius_meters, reward_points, marker_code, marker_image_url, is_active, is_test,
-          author_id, status, version, steps,
+          author_id, status, version, steps, step_order_mode,
           created_at, updated_at, funding_required
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title,
           description = EXCLUDED.description,
+          step_order_mode = EXCLUDED.step_order_mode,
           updated_at = NOW()`,
         [
           newQuest.id,
@@ -455,13 +479,11 @@ router.post('/spots/:id/quests', authenticateToken, validateRequest(createAuthor
           newQuest.marker_image_url,
           newQuest.is_active,
           newQuest.is_test,
-          // base_reward_php / difficulty_factor / geo_multiplier are in-memory display
-          // values only: no migration creates those columns, and every reader defaults
-          // them. Writing them made every PostgreSQL author-quest insert fail.
           newQuest.author_id,
           newQuest.status,
           newQuest.version,
           JSON.stringify(newQuest.steps),
+          newQuest.step_order_mode,
           newQuest.created_at,
           newQuest.updated_at,
           env.QUEST_FUNDING_ENABLED,

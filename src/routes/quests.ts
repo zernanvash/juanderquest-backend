@@ -9,7 +9,7 @@ import { getPool } from '../db/pool.js';
 import { EconomyError, EconomyService } from '../economy/service.js';
 import { isLocalEconomyProfile } from '../economy/profile.js';
 import { env } from '../config/env.js';
-import { signQuestChallenge, verifyQuestChallengeToken } from '../auth/tokens.js';
+import { signQuestChallenge, verifyQuestChallengeToken, signQuestArChallenge, verifyQuestArChallengeToken, AR_CHALLENGE_TYP } from '../auth/tokens.js';
 import { spotStore } from '../spots/store.js';
 import { optionalAuthenticateToken, authenticateToken, checkQAAuthorization, isAuthorizedQA, AuthRequest } from '../middleware/auth.js';
 import { claimChallengeNonce, releaseChallengeNonce } from '../services/submissions.js';
@@ -17,6 +17,9 @@ import { detectValidatedMediaMime } from '../utils/media-mime.js';
 import { validateRequest } from '../middleware/validate.js';
 import { optionalAccuracy, optionalLat, optionalLng } from '../middleware/coerce.js';
 import { sanitizeAttemptSnapshot, sanitizeQuestForViewer, sanitizeQuestSteps } from '../quests/sanitize.js';
+import { normalizeTasks, publicTask, publicTasks } from '../quests/taskNormalize.js';
+import type { QuestTask } from '../quests/taskTypes.js';
+import { questTaskInputSchema, validateTasksWithinDistance } from '../quests/taskValidation.js';
 import { hasCompletedQuest } from '../services/quest-completion.js';
 import { hasFundingPlan, requireFundingHold, startFundedAttempt } from '../funding/holds.js';
 import { FundingError } from '../funding/transaction.js';
@@ -73,7 +76,8 @@ function mapAttempt(row: any): QuestAttemptRow {
     current_step: Number(row.current_step),
     total_steps: Number(row.total_steps),
     status: row.status,
-    steps_snapshot: sanitizeQuestSteps(Array.isArray(row.steps_snapshot) ? row.steps_snapshot : undefined),
+    step_order_mode: row.step_order_mode === 'any' ? 'any' : 'sequential',
+    steps_snapshot: Array.isArray(row.steps_snapshot) ? row.steps_snapshot : undefined,
     verified_steps: row.verified_steps !== undefined && row.verified_steps !== null ? Number(row.verified_steps) : 0,
     required_steps: row.required_steps !== undefined && row.required_steps !== null ? Number(row.required_steps) : 1,
     review_notes: row.review_notes ?? null,
@@ -92,6 +96,7 @@ function mapStepEvidence(row: any): QuestStepEvidenceRow {
     quest_id: String(row.quest_id),
     user_id: String(row.user_id),
     step_order: Number(row.step_order),
+    task_key: row.task_key ?? null,
     checkpoint_type: row.checkpoint_type,
     status: row.status,
     required: Boolean(row.required),
@@ -100,6 +105,10 @@ function mapStepEvidence(row: any): QuestStepEvidenceRow {
     idempotency_key: row.idempotency_key ?? null,
     evidence_payload: row.evidence_payload ?? null,
     rejection_reason: row.rejection_reason ?? null,
+    needs_changes_reason: row.needs_changes_reason ?? null,
+    failed_tries: row.failed_tries !== undefined && row.failed_tries !== null ? Number(row.failed_tries) : 0,
+    first_try_at: row.first_try_at ? new Date(row.first_try_at).toISOString() : null,
+    submitted_at: row.submitted_at ? new Date(row.submitted_at).toISOString() : null,
     verified_at: row.verified_at ? new Date(row.verified_at).toISOString() : null,
     reviewed_by: row.reviewed_by ?? null,
     reviewed_at: row.reviewed_at ? new Date(row.reviewed_at).toISOString() : null,
@@ -264,6 +273,369 @@ router.patch('/quests/:id/status', authenticateToken, async (req: AuthRequest, r
   });
 });
 
+// GET /quests/:id/edit - Author or admin: full definition incl. marker_code (Plan 43 §4.1)
+router.get('/quests/:id/edit', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const quest = db.findQuestById(id, true);
+
+  if (!quest) {
+    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: `Quest '${id}' not found.` } });
+  }
+
+  const spot = spotStore.spots.find((s) => s.quest_id === quest.id);
+  const isAuthor = Boolean(req.user?.id && (quest.author_id === req.user.id || spot?.created_by === req.user.id));
+  const isAdminOrQA = Boolean(req.user?.role === 'admin' || req.user?.role === 'qa');
+
+  if (!isAuthor && !isAdminOrQA) {
+    return res.status(403).json({
+      success: false,
+      error: { code: 'FORBIDDEN', message: 'Only the author or an admin can access the quest editor.' },
+    });
+  }
+
+  // Author gets full definition with secret marker_code for printing QR sheet
+  const normalizedTasks = normalizeTasks(quest.steps, spot, { allowClientMarkerCode: true });
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      ...quest,
+      steps: normalizedTasks,
+      tasks: normalizedTasks,
+      step_order_mode: quest.step_order_mode ?? 'sequential',
+    },
+  });
+});
+
+// PATCH /quests/:id - Author edit quest (Plan 43 §4.1)
+const patchQuestSchema = z.object({
+  body: z.object({
+    expected_version: z.number().int().positive().optional(),
+    title: z.string().trim().min(5).max(100).optional(),
+    description: z.string().trim().min(15).max(1000).optional(),
+    category: z.enum(['eco', 'cultural', 'food_trade']).optional(),
+    radius_meters: z.number().int().min(50).max(500).optional(),
+    reward_points: z.union([z.literal(50), z.literal(75), z.literal(100)]).optional(),
+    step_order_mode: z.enum(['sequential', 'any']).optional(),
+    status: z.enum(['draft', 'published', 'paused', 'archived']).optional(),
+    tasks: z.array(questTaskInputSchema).max(10).optional(),
+    steps: z.array(z.any()).max(10).optional(),
+  }),
+});
+
+router.patch('/quests/:id', authenticateToken, validateRequest(patchQuestSchema), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  const { id } = req.params;
+  const quest = db.findQuestById(id, true);
+
+  if (!quest) {
+    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: `Quest '${id}' not found.` } });
+  }
+
+  const spot = spotStore.spots.find((s) => s.quest_id === quest.id);
+  const isAuthor = Boolean(req.user?.id && (quest.author_id === req.user.id || spot?.created_by === req.user.id));
+  const isAdmin = Boolean(req.user?.role === 'admin');
+
+  if (!isAuthor && !isAdmin) {
+    return res.status(403).json({
+      success: false,
+      error: { code: 'FORBIDDEN', message: 'Only the author or an admin can edit this quest.' },
+    });
+  }
+
+  const { expected_version, title, description, category, radius_meters, reward_points, step_order_mode, status, tasks, steps } = req.body;
+
+  // Optimistic locking check (Plan 43 §4.1)
+  const currentVersion = quest.version ?? 1;
+  if (expected_version !== undefined && expected_version !== currentVersion) {
+    return res.status(409).json({
+      success: false,
+      error: {
+        code: 'VERSION_CONFLICT',
+        message: `Version conflict: this quest is at version ${currentVersion}, but expected version was ${expected_version}.`,
+      },
+    });
+  }
+
+  const nextStatus = status ?? quest.status ?? 'published';
+  const rawTasks = tasks || steps;
+
+  let normalizedTasks: QuestTask[] = quest.steps as QuestTask[];
+  if (rawTasks !== undefined) {
+    if (nextStatus === 'published' && rawTasks.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Published quests must have between 1 and 10 tasks.' },
+      });
+    }
+
+    // Fence distance check (Plan 43 §4.6)
+    const destinationLat = spot?.gps_lat ?? quest.gps_lat;
+    const destinationLng = spot?.gps_lng ?? quest.gps_lng;
+    const maxDistanceKm = Number(process.env.QUEST_TASK_MAX_DISTANCE_KM || 5);
+    const distanceCheck = validateTasksWithinDistance(rawTasks, destinationLat, destinationLng, maxDistanceKm);
+    if (!distanceCheck.valid) {
+      return res.status(422).json({
+        success: false,
+        error: { code: 'TASK_TOO_FAR', message: distanceCheck.error },
+      });
+    }
+
+    // Existing tasks to preserve keys & marker codes (Plan 43 §4.1)
+    const existingTasks = normalizeTasks(quest.steps, spot, { allowClientMarkerCode: true });
+    normalizedTasks = normalizeTasks(rawTasks, spot, {
+      preserveSecretsFrom: existingTasks,
+      allowClientMarkerCode: false,
+    });
+
+    if (nextStatus === 'published') {
+      const hasRequired = normalizedTasks.some((t) => t.required);
+      if (!hasRequired) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'NO_REQUIRED_TASKS', message: 'Published quests must have at least one required task.' },
+        });
+      }
+    }
+  }
+
+  // Version bump: draft updates in place; published increments version (Plan 43 §4.1)
+  const newVersion = quest.status === 'draft' ? currentVersion : currentVersion + 1;
+  const nowIso = new Date().toISOString();
+
+  if (title !== undefined) quest.title = title;
+  if (description !== undefined) quest.description = description;
+  if (category !== undefined) quest.category = category;
+  if (radius_meters !== undefined) quest.radius_meters = radius_meters;
+  if (reward_points !== undefined) quest.reward_points = reward_points;
+  if (step_order_mode !== undefined) quest.step_order_mode = step_order_mode;
+  if (status !== undefined) {
+    quest.status = status;
+    quest.is_active = (status === 'published');
+  }
+  if (rawTasks !== undefined) {
+    quest.steps = normalizedTasks;
+  }
+  quest.version = newVersion;
+  quest.updated_at = nowIso;
+
+  const pool = getPool();
+  if (pool) {
+    try {
+      await pool.query(
+        `UPDATE quests
+         SET title = $1, description = $2, category = $3, radius_meters = $4,
+             reward_points = $5, step_order_mode = $6, status = $7, is_active = $8,
+             steps = $9, version = $10, updated_at = NOW()
+         WHERE id = $11`,
+        [
+          quest.title,
+          quest.description,
+          quest.category,
+          quest.radius_meters,
+          quest.reward_points,
+          quest.step_order_mode ?? 'sequential',
+          quest.status,
+          quest.is_active,
+          JSON.stringify(quest.steps),
+          quest.version,
+          quest.id,
+        ]
+      );
+    } catch (err) {
+      return next(err);
+    }
+  }
+
+  db.upsertQuest(quest);
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      ...quest,
+      tasks: quest.steps,
+    },
+    message: 'Quest updated successfully.',
+  });
+});
+
+// GET /quests/:id/qr-sheet - Author/admin: list of QR tasks with print codes (Plan 43 §4.1)
+router.get('/quests/:id/qr-sheet', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const quest = db.findQuestById(id, true);
+
+  if (!quest) {
+    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: `Quest '${id}' not found.` } });
+  }
+
+  const spot = spotStore.spots.find((s) => s.quest_id === quest.id);
+  const isAuthor = Boolean(req.user?.id && (quest.author_id === req.user.id || spot?.created_by === req.user.id));
+  const isAdminOrQA = Boolean(req.user?.role === 'admin' || req.user?.role === 'qa');
+
+  if (!isAuthor && !isAdminOrQA) {
+    return res.status(403).json({
+      success: false,
+      error: { code: 'FORBIDDEN', message: 'Only the quest author or an administrator can access the QR print sheet.' },
+    });
+  }
+
+  const tasks = normalizeTasks(quest.steps, spot, { allowClientMarkerCode: true });
+  const qrTasks = tasks.filter((t) => t.checkpoint_type === 'qr');
+
+  const sheet = qrTasks.map((t) => {
+    const marker = (t.verification as any)?.marker_code || t.marker_code;
+    return {
+      task_key: t.key,
+      step_order: t.step_order,
+      title: t.title,
+      marker_code: marker,
+      qr_payload: marker,
+      fence: (t.verification as any)?.fence || { lat: t.gps_lat, lng: t.gps_lng, radius_meters: t.radius_meters },
+    };
+  });
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      quest_id: quest.id,
+      quest_title: quest.title,
+      location_name: quest.location_name,
+      qr_tasks: sheet,
+    },
+  });
+});
+
+// GET /quests/:id/analytics - Author/admin: aggregated funnel analytics per task (Plan 43 §4.1, §8)
+router.get('/quests/:id/analytics', authenticateToken, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  const { id } = req.params;
+  const quest = db.findQuestById(id, true);
+
+  if (!quest) {
+    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: `Quest '${id}' not found.` } });
+  }
+
+  const spot = spotStore.spots.find((s) => s.quest_id === quest.id);
+  const isAuthor = Boolean(req.user?.id && (quest.author_id === req.user.id || spot?.created_by === req.user.id));
+  const isAdminOrQA = Boolean(req.user?.role === 'admin' || req.user?.role === 'qa');
+
+  if (!isAuthor && !isAdminOrQA) {
+    return res.status(403).json({
+      success: false,
+      error: { code: 'FORBIDDEN', message: 'Only the author or an administrator can view quest analytics.' },
+    });
+  }
+
+  const tasks = normalizeTasks(quest.steps, spot, { allowClientMarkerCode: true });
+  const pool = getPool();
+
+  if (pool) {
+    try {
+      const attemptsCountRes = await pool.query(
+        "SELECT COUNT(*) AS started, COUNT(*) FILTER (WHERE status = 'completed') AS completed FROM quest_attempts WHERE quest_id = $1",
+        [id]
+      );
+      const overallStarted = parseInt(attemptsCountRes.rows[0]?.started || '0', 10);
+      const overallCompleted = parseInt(attemptsCountRes.rows[0]?.completed || '0', 10);
+
+      // Aggregations per step_order
+      const stepAggsRes = await pool.query(
+        `SELECT
+           e.step_order,
+           e.task_key,
+           COUNT(*) AS reached,
+           COUNT(*) FILTER (WHERE e.status = 'verified') AS verified,
+           COUNT(*) FILTER (WHERE e.status = 'pending_review') AS pending_review,
+           COUNT(*) FILTER (WHERE e.status = 'needs_changes') AS needs_changes,
+           COALESCE(AVG(e.failed_tries), 0)::float AS avg_failed_tries,
+           COALESCE(
+             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (e.verified_at - e.first_try_at)) / 60)
+             FILTER (WHERE e.verified_at IS NOT NULL AND e.first_try_at IS NOT NULL),
+             0
+           )::float AS median_minutes_to_verify
+         FROM quest_step_evidence e
+         JOIN quest_attempts a ON a.id = e.attempt_id
+         WHERE a.quest_id = $1
+         GROUP BY e.step_order, e.task_key
+         ORDER BY e.step_order ASC`,
+        [id]
+      );
+
+      const aggsMap = new Map<number, any>();
+      for (const row of stepAggsRes.rows) {
+        aggsMap.set(Number(row.step_order), row);
+      }
+
+      const taskFunnel = tasks.map((t) => {
+        const row = aggsMap.get(t.step_order);
+        return {
+          key: t.key,
+          step_order: t.step_order,
+          title: t.title,
+          method: t.checkpoint_type,
+          required: t.required,
+          reached: row ? parseInt(row.reached, 10) : 0,
+          verified: row ? parseInt(row.verified, 10) : 0,
+          pending_review: row ? parseInt(row.pending_review, 10) : 0,
+          needs_changes: row ? parseInt(row.needs_changes, 10) : 0,
+          avg_failed_tries: row ? Math.round(row.avg_failed_tries * 10) / 10 : 0,
+          median_minutes_to_verify: row ? Math.round(row.median_minutes_to_verify * 10) / 10 : 0,
+        };
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          quest_id: quest.id,
+          overall: {
+            started: overallStarted,
+            completed: overallCompleted,
+          },
+          task_funnel: taskFunnel,
+        },
+      });
+    } catch (err) {
+      return next(err);
+    }
+  }
+
+  // In-memory fallback
+  const attempts = db.quest_attempts.filter((a) => a.quest_id === id);
+  const started = attempts.length;
+  const completed = attempts.filter((a) => a.status === 'completed').length;
+  const allEvidence = db.quest_step_evidence.filter((e) => attempts.some((a) => a.id === e.attempt_id));
+
+  const taskFunnel = tasks.map((t) => {
+    const evs = allEvidence.filter((e) => e.step_order === t.step_order);
+    const verified = evs.filter((e) => e.status === 'verified').length;
+    const pendingReview = evs.filter((e) => e.status === 'pending_review').length;
+    const needsChanges = evs.filter((e) => e.status === 'needs_changes').length;
+    const totalFailed = evs.reduce((acc, cur) => acc + (cur.failed_tries || 0), 0);
+    const avgFailed = evs.length > 0 ? Math.round((totalFailed / evs.length) * 10) / 10 : 0;
+
+    return {
+      key: t.key,
+      step_order: t.step_order,
+      title: t.title,
+      method: t.checkpoint_type,
+      required: t.required,
+      reached: evs.length,
+      verified,
+      pending_review: pendingReview,
+      needs_changes: needsChanges,
+      avg_failed_tries: avgFailed,
+      median_minutes_to_verify: 0,
+    };
+  });
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      quest_id: quest.id,
+      overall: { started, completed },
+      task_funnel: taskFunnel,
+    },
+  });
+});
+
 // POST /quests/:id/attempts - Start or resume progressive quest attempt
 router.post('/quests/:id/attempts', authenticateToken, async (req: AuthRequest, res: Response, next: NextFunction) => {
   const { id } = req.params;
@@ -366,7 +738,7 @@ router.post('/quests/:id/attempts', authenticateToken, async (req: AuthRequest, 
       // Serialize starts for the same traveler, including across API workers.
       const user = await client.query('SELECT id, is_test FROM users WHERE id = $1 FOR UPDATE', [userId]);
       const liveQuest = await client.query(
-        'SELECT id, author_id, is_test, status, version, steps FROM quests WHERE id = $1 FOR SHARE', [id]);
+        'SELECT id, author_id, is_test, status, version, steps, step_order_mode FROM quests WHERE id = $1 FOR SHARE', [id]);
       const q = liveQuest.rows[0];
       if (!user.rows[0] || !q) {
         await client.query('ROLLBACK');
@@ -395,44 +767,53 @@ router.post('/quests/:id/attempts', authenticateToken, async (req: AuthRequest, 
         await client.query('COMMIT');
         return res.status(200).json({ success: true, data: mapAttempt(active.rows[0]), message: 'Resumed existing quest attempt.' });
       }
-      const steps = Array.isArray(q.steps) && q.steps.length > 0
+      const rawSteps = Array.isArray(q.steps) && q.steps.length > 0
         ? q.steps
         : [{ step_order: 1, title: 'Destination check-in', description: 'Submit location proof for verification.', checkpoint_type: 'location', required: true }];
-      const requiredCount = steps.filter((s: any) => s.required !== false).length;
+      const normalizedTasks = normalizeTasks(rawSteps, q, { allowClientMarkerCode: true });
+      const stepOrderMode: 'sequential' | 'any' = q.step_order_mode === 'any' ? 'any' : 'sequential';
+      const requiredCount = normalizedTasks.filter((s) => s.required !== false).length;
       const attemptId = `attempt_${randomUUID()}`;
 
       let inserted;
       try {
         inserted = await client.query(
-          `INSERT INTO quest_attempts (id, quest_id, user_id, version, current_step, total_steps, status, steps_snapshot, verified_steps, required_steps)
-           VALUES ($1, $2, $3, $4, 1, $5, 'in_progress', $6, 0, $7) RETURNING *`,
-          [attemptId, id, userId, q.version, Math.max(1, steps.length), JSON.stringify(steps), Math.max(1, requiredCount)]
+          `INSERT INTO quest_attempts (id, quest_id, user_id, version, current_step, total_steps, status, steps_snapshot, verified_steps, required_steps, step_order_mode)
+           VALUES ($1, $2, $3, $4, 1, $5, 'in_progress', $6, 0, $7, $8) RETURNING *`,
+          [attemptId, id, userId, q.version, Math.max(1, normalizedTasks.length), JSON.stringify(normalizedTasks), Math.max(1, requiredCount), stepOrderMode]
         );
       } catch {
         inserted = await client.query(
-          `INSERT INTO quest_attempts (id, quest_id, user_id, version, current_step, total_steps, status)
-           VALUES ($1, $2, $3, $4, 1, $5, 'in_progress') RETURNING *`,
-          [attemptId, id, userId, q.version, Math.max(1, steps.length)]
+          `INSERT INTO quest_attempts (id, quest_id, user_id, version, current_step, total_steps, status, steps_snapshot, verified_steps, required_steps)
+           VALUES ($1, $2, $3, $4, 1, $5, 'in_progress', $6, 0, $7) RETURNING *`,
+          [attemptId, id, userId, q.version, Math.max(1, normalizedTasks.length), JSON.stringify(normalizedTasks), Math.max(1, requiredCount)]
         );
       }
 
       try {
-        for (const step of steps) {
+        for (const task of normalizedTasks) {
+          const initialStatus = stepOrderMode === 'any' ? 'ready' : (task.step_order === 1 ? 'ready' : 'not_started');
           await client.query(
-            `INSERT INTO quest_step_evidence (id, attempt_id, quest_id, user_id, step_order, checkpoint_type, status, required, title, description)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-             ON CONFLICT (attempt_id, step_order) DO NOTHING`,
+            `INSERT INTO quest_step_evidence (id, attempt_id, quest_id, user_id, step_order, task_key, checkpoint_type, status, required, title, description)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+             ON CONFLICT (attempt_id, step_order) DO UPDATE SET
+               task_key = EXCLUDED.task_key,
+               checkpoint_type = EXCLUDED.checkpoint_type,
+               required = EXCLUDED.required,
+               title = EXCLUDED.title,
+               description = EXCLUDED.description`,
             [
               `step_ev_${randomUUID()}`,
               attemptId,
               id,
               userId,
-              step.step_order,
-              step.checkpoint_type,
-              step.step_order === 1 ? 'ready' : 'not_started',
-              step.required !== false,
-              step.title,
-              step.description || null,
+              task.step_order,
+              task.key,
+              task.checkpoint_type,
+              initialStatus,
+              task.required !== false,
+              task.title,
+              task.description || null,
             ]
           );
         }
@@ -626,6 +1007,36 @@ router.post(
       });
     }
 
+    // Helper to increment failed tries on error
+    const recordFailure = async (statusCode: number, code: string, message: string) => {
+      const now = new Date().toISOString();
+      const newFailed = (stepEvidence!.failed_tries ?? 0) + 1;
+      const firstTry = stepEvidence!.first_try_at ?? now;
+      stepEvidence!.failed_tries = newFailed;
+      stepEvidence!.first_try_at = firstTry;
+
+      if (pool) {
+        try {
+          await pool.query(
+            `UPDATE quest_step_evidence
+             SET failed_tries = $1, first_try_at = COALESCE(first_try_at, $2), updated_at = NOW()
+             WHERE id = $3`,
+            [newFailed, firstTry, stepEvidence!.id]
+          );
+        } catch {}
+      }
+      db.saveStepEvidence(stepEvidence!);
+
+      if (claimedChallengeNonce) {
+        releaseChallengeNonce(claimedChallengeNonce);
+      }
+
+      return res.status(statusCode).json({
+        success: false,
+        error: { code, message },
+      });
+    };
+
     // 2. Check current step status & idempotency
     const idempotencyKey = body.idempotency_key;
     if (stepEvidence.status === 'verified') {
@@ -664,7 +1075,13 @@ router.post(
     }
 
     // 3. Extract and validate evidence based on checkpoint type
-    const checkpointType = stepEvidence.checkpoint_type;
+    // Must verify against activeAttempt.steps_snapshot (Plan 43 §4.2, §4.3, §4.4)
+    const snapshotTasks: QuestTask[] = Array.isArray(activeAttempt.steps_snapshot) && activeAttempt.steps_snapshot.length > 0
+      ? normalizeTasks(activeAttempt.steps_snapshot, quest, { allowClientMarkerCode: true })
+      : normalizeTasks(quest.steps, quest, { allowClientMarkerCode: true });
+
+    const stepDef = snapshotTasks.find((s) => s.step_order === stepOrder);
+    const checkpointType = stepDef?.checkpoint_type || stepEvidence.checkpoint_type;
     const capturedLat = body.captured_lat;
     const capturedLng = body.captured_lng;
     const capturedAccuracy = body.captured_accuracy;
@@ -673,13 +1090,11 @@ router.post(
     let targetLng = quest.gps_lng;
     let allowedRadius = quest.radius_meters || 150;
 
-    const questStepDef = quest.steps?.find((s) => s.step_order === stepOrder);
-    if (questStepDef?.gps_lat !== undefined && questStepDef?.gps_lng !== undefined) {
-      targetLat = questStepDef.gps_lat;
-      targetLng = questStepDef.gps_lng;
-    }
-    if (questStepDef?.radius_meters) {
-      allowedRadius = questStepDef.radius_meters;
+    const fence = (stepDef?.verification as any)?.fence || (stepDef?.gps_lat != null && stepDef?.gps_lng != null ? { lat: stepDef.gps_lat, lng: stepDef.gps_lng, radius_meters: stepDef.radius_meters } : null);
+    if (fence && typeof fence.lat === 'number' && typeof fence.lng === 'number') {
+      targetLat = fence.lat;
+      targetLng = fence.lng;
+      allowedRadius = fence.radius_meters || allowedRadius;
     }
 
     let newStatus: any = 'verified';
@@ -688,23 +1103,18 @@ router.post(
 
     if (checkpointType === 'location') {
       if (capturedLat === undefined || capturedLng === undefined) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'MISSING_GPS_COORDINATES', message: 'Location step requires captured_lat and captured_lng.' },
-        });
+        return recordFailure(400, 'MISSING_GPS_COORDINATES', 'Location step requires captured_lat and captured_lng.');
       }
 
       const distance = withinRadius(capturedLat, capturedLng, targetLat, targetLng, allowedRadius, capturedAccuracy || 0);
       if (!distance.ok) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: 'GPS_RADIUS_EXCEEDED',
-            message: Number.isFinite(distance.distance)
-              ? `You are ${Math.round(distance.distance)}m away from this checkpoint. Must be within ${allowedRadius}m.`
-              : 'The captured GPS coordinates are invalid.',
-          },
-        });
+        return recordFailure(
+          400,
+          'GPS_RADIUS_EXCEEDED',
+          Number.isFinite(distance.distance)
+            ? `You are ${Math.round(distance.distance)}m away from this checkpoint. Must be within ${allowedRadius}m.`
+            : 'The captured GPS coordinates are invalid.'
+        );
       }
 
       evidencePayload = {
@@ -719,23 +1129,18 @@ router.post(
       newStatus = 'verified';
     } else if (checkpointType === 'qr') {
       if (capturedLat === undefined || capturedLng === undefined) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'MISSING_GPS_COORDINATES', message: 'QR verification requires a fresh GPS reading.' },
-        });
+        return recordFailure(400, 'MISSING_GPS_COORDINATES', 'QR verification requires a fresh GPS reading.');
       }
 
       const distance = withinRadius(capturedLat, capturedLng, targetLat, targetLng, allowedRadius, capturedAccuracy || 0);
       if (!distance.ok) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: 'GPS_RADIUS_EXCEEDED',
-            message: Number.isFinite(distance.distance)
-              ? `Fresh GPS reading (${Math.round(distance.distance)}m) exceeds allowed radius of ${allowedRadius}m.`
-              : 'The captured GPS coordinates are invalid.',
-          },
-        });
+        return recordFailure(
+          400,
+          'GPS_RADIUS_EXCEEDED',
+          Number.isFinite(distance.distance)
+            ? `Fresh GPS reading (${Math.round(distance.distance)}m) exceeds allowed radius of ${allowedRadius}m.`
+            : 'The captured GPS coordinates are invalid.'
+        );
       }
 
       const qrCode = body.qr_code || body.scanned_marker_code;
@@ -744,9 +1149,10 @@ router.post(
       let qrValid = false;
       let qrDetails: any = {};
 
+      const stepMarker = (stepDef?.verification as any)?.marker_code || stepDef?.marker_code;
       if (qrCode) {
         const matchesQuest = secureCodeEquals(quest.marker_code, qrCode);
-        const matchesStep = questStepDef && secureCodeEquals(questStepDef.marker_code, qrCode);
+        const matchesStep = stepMarker && secureCodeEquals(stepMarker, qrCode);
         if (matchesQuest || matchesStep) {
           qrValid = true;
           qrDetails = { scanned_qr: qrCode };
@@ -768,10 +1174,7 @@ router.post(
       }
 
       if (!qrValid) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_QR_CODE', message: 'The scanned QR code is invalid for this checkpoint.' },
-        });
+        return recordFailure(400, 'INVALID_QR_CODE', 'The scanned QR code is invalid for this checkpoint.');
       }
 
       evidencePayload = {
@@ -804,76 +1207,242 @@ router.post(
         } catch {}
       }
 
-      let sha256Hash = body.photo_sha256;
-      let storedFilename = '';
-
-      if (fileBuffer) {
-        sha256Hash = createHash('sha256').update(fileBuffer).digest('hex');
-        const dir = ensurePrivateEvidenceDir();
-        storedFilename = `evidence_${stepEvidence.id}_${randomUUID().slice(0, 8)}.${fileExt}`;
-        fs.writeFileSync(path.resolve(dir, storedFilename), fileBuffer);
+      // Reject URL-only or hash-only photo evidence (Plan 43 §4.3)
+      if (!fileBuffer) {
+        return recordFailure(400, 'VALIDATION_ERROR', 'A photo image file is required for photo task evidence.');
       }
 
-      if (!fileBuffer && !body.photo_url && !body.photo_sha256) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'VALIDATION_ERROR', message: 'No photo evidence provided.' },
-        });
+      const photoCfg = stepDef?.verification as any;
+      if (photoCfg?.require_gps || photoCfg?.fence) {
+        if (capturedLat === undefined || capturedLng === undefined) {
+          return recordFailure(400, 'MISSING_GPS_COORDINATES', 'This photo task requires on-site GPS coordinates.');
+        }
+        const photoFence = photoCfg.fence || fence;
+        if (photoFence) {
+          const dist = withinRadius(capturedLat, capturedLng, photoFence.lat, photoFence.lng, photoFence.radius_meters || allowedRadius, capturedAccuracy || 0);
+          if (!dist.ok) {
+            return recordFailure(
+              400,
+              'GPS_RADIUS_EXCEEDED',
+              Number.isFinite(dist.distance)
+                ? `Photo must be taken on-site (within ${photoFence.radius_meters}m). Current distance: ${Math.round(dist.distance)}m.`
+                : 'The captured GPS coordinates are invalid.'
+            );
+          }
+        }
       }
+
+      const sha256Hash = createHash('sha256').update(fileBuffer).digest('hex');
+      const dir = ensurePrivateEvidenceDir();
+      const storedFilename = `evidence_${stepEvidence.id}_${randomUUID().slice(0, 8)}.${fileExt}`;
+      fs.writeFileSync(path.resolve(dir, storedFilename), fileBuffer);
 
       const galleryOptIn = body.gallery_opt_in === true || body.gallery_opt_in === 'true';
 
       evidencePayload = {
-        sha256: sha256Hash || 'sha256_mock',
-        file_path: storedFilename || null,
-        photo_url: body.photo_url || (storedFilename ? `/api/v1/quests/evidence/${stepEvidence.id}/file` : null),
+        sha256: sha256Hash,
+        file_path: storedFilename,
+        photo_url: `/api/v1/quests/evidence/${stepEvidence.id}/file`,
         gallery_opt_in: galleryOptIn,
         gps: capturedLat !== undefined ? { lat: capturedLat, lng: capturedLng, accuracy: capturedAccuracy } : null,
         submitted_at: new Date().toISOString(),
       };
       newStatus = 'pending_review';
+    } else if (checkpointType === 'ar') {
+      if (capturedLat === undefined || capturedLng === undefined) {
+        return recordFailure(400, 'MISSING_GPS_COORDINATES', 'AR verification requires a fresh GPS reading.');
+      }
+
+      const distance = withinRadius(capturedLat, capturedLng, targetLat, targetLng, allowedRadius, capturedAccuracy || 0);
+      if (!distance.ok) {
+        return recordFailure(
+          400,
+          'GPS_RADIUS_EXCEEDED',
+          Number.isFinite(distance.distance)
+            ? `You are ${Math.round(distance.distance)}m away from this AR checkpoint. Must be within ${allowedRadius}m.`
+            : 'The captured GPS coordinates are invalid.'
+        );
+      }
+
+      const challengeToken = body.challenge_token;
+      if (!challengeToken) {
+        return recordFailure(400, 'MISSING_CHALLENGE_TOKEN', 'AR verification requires a valid challenge token.');
+      }
+
+      let validAr = false;
+      let arClaims: any = null;
+      try {
+        arClaims = verifyQuestArChallengeToken(challengeToken);
+      } catch (err: any) {
+        if (err?.name === 'TokenExpiredError') {
+          return recordFailure(401, 'CHALLENGE_TOKEN_EXPIRED', 'AR challenge token has expired. Please restart the AR view.');
+        }
+      }
+
+      if (!arClaims) {
+        // Also check legacy token fallback
+        try {
+          const legacyClaims = verifyQuestChallengeToken(challengeToken);
+          if (legacyClaims && legacyClaims.quest_id === quest.id && legacyClaims.user_id === userId) {
+            arClaims = legacyClaims;
+          }
+        } catch {}
+      }
+
+      if (!arClaims || arClaims.quest_id !== quest.id || arClaims.user_id !== userId) {
+        return recordFailure(400, 'INVALID_CHALLENGE_TOKEN', 'The challenge token is invalid for this AR checkpoint.');
+      }
+
+      if (arClaims.attempt_id && arClaims.attempt_id !== activeAttempt.id) {
+        return recordFailure(400, 'INVALID_CHALLENGE_TOKEN', 'Challenge token was issued for a different attempt.');
+      }
+
+      const taskKey = stepEvidence.task_key || stepDef?.key;
+      if (arClaims.task_key && taskKey && arClaims.task_key !== taskKey) {
+        return recordFailure(400, 'INVALID_CHALLENGE_TOKEN', 'Challenge token was issued for a different task.');
+      }
+
+      const claimed = claimChallengeNonce(arClaims.nonce);
+      if (!claimed) {
+        return recordFailure(400, 'CHALLENGE_NONCE_REUSED', 'Challenge token has already been used.');
+      }
+      claimedChallengeNonce = arClaims.nonce;
+
+      evidencePayload = {
+        challenge_nonce: arClaims.nonce,
+        gps: {
+          lat: capturedLat,
+          lng: capturedLng,
+          accuracy: capturedAccuracy ?? 5,
+          distance_meters: Math.round(distance.distance),
+        },
+        verified_at: new Date().toISOString(),
+      };
+      newStatus = 'verified';
     } else if (checkpointType === 'action') {
-      const allowedActions = ['like_destination', 'quiz_completed', 'view_story'];
-      const actionName = body.action_name;
-      if (!actionName || !allowedActions.includes(actionName)) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_ACTION', message: `Action must be one of: ${allowedActions.join(', ')}` },
-        });
+      const actionCfg = (stepDef?.verification as any)?.task;
+      const actionKind = actionCfg?.kind || body.action_name;
+      const attemptStartedAt = activeAttempt.created_at;
+
+      let verified = false;
+      let failureMessage = 'Please complete the required action first.';
+
+      if (actionKind === 'complete_quiz') {
+        const quizId = actionCfg?.quiz_id || body.quiz_id;
+        if (!quizId) {
+          return recordFailure(400, 'INVALID_ACTION_CONFIG', 'Quiz task is missing quiz_id.');
+        }
+        if (pool) {
+          const quizRes = await pool.query(
+            `SELECT 1 FROM cultural_quiz_completions
+             WHERE user_id = $1 AND reward_scope_id = $2 AND completed_at >= $3
+             LIMIT 1`,
+            [userId, quizId, attemptStartedAt]
+          );
+          verified = Boolean(quizRes.rows[0]);
+        } else {
+          // In-memory fallback
+          const completions = (db as any).cultural_quiz_completions || [];
+          verified = completions.some((c: any) => c.user_id === userId && c.reward_scope_id === quizId && new Date(c.completed_at) >= new Date(attemptStartedAt));
+        }
+        failureMessage = 'Finish the cultural quiz to complete this task.';
+      } else if (actionKind === 'save_spot') {
+        const spotId = actionCfg?.spot_id || body.spot_id;
+        if (pool) {
+          const saveRes = await pool.query(
+            `SELECT 1 FROM spot_interactions WHERE user_id = $1 AND spot_id = $2 AND interaction_type = 'save' LIMIT 1`,
+            [userId, spotId]
+          );
+          verified = Boolean(saveRes.rows[0]);
+        } else {
+          verified = spotStore.interactions.get(userId)?.has(`${spotId}:save`) ?? false;
+        }
+        failureMessage = 'Save this destination to your bookmarks first.';
+      } else if (actionKind === 'like_spot') {
+        const spotId = actionCfg?.spot_id || body.spot_id;
+        if (pool) {
+          const likeRes = await pool.query(
+            `SELECT 1 FROM spot_interactions WHERE user_id = $1 AND spot_id = $2 AND interaction_type = 'like' LIMIT 1`,
+            [userId, spotId]
+          );
+          verified = Boolean(likeRes.rows[0]);
+        } else {
+          verified = spotStore.interactions.get(userId)?.has(`${spotId}:like`) ?? false;
+        }
+        failureMessage = 'Like this destination first.';
+      } else if (actionKind === 'vote_juanchoice') {
+        const campaignId = actionCfg?.campaign_id || body.campaign_id;
+        if (pool) {
+          const voteRes = campaignId
+            ? await pool.query('SELECT 1 FROM juanchoice_participations WHERE user_id = $1 AND campaign_id = $2 LIMIT 1', [userId, campaignId])
+            : await pool.query('SELECT 1 FROM juanchoice_participations WHERE user_id = $1 LIMIT 1', [userId]);
+          verified = Boolean(voteRes.rows[0]);
+        } else {
+          const participations = (db as any).juanchoice_participations || [];
+          verified = campaignId
+            ? participations.some((p: any) => p.user_id === userId && p.campaign_id === campaignId)
+            : participations.some((p: any) => p.user_id === userId);
+        }
+        failureMessage = 'Cast your JuanChoice vote first.';
+      } else {
+        // Fallback for legacy actions like view_story
+        verified = true;
+      }
+
+      if (!verified) {
+        return recordFailure(422, 'TASK_NOT_DONE_YET', failureMessage);
       }
 
       evidencePayload = {
-        action_name: actionName,
+        action_kind: actionKind,
         verified_at: new Date().toISOString(),
       };
       newStatus = 'verified';
     }
 
     // 4. Update step evidence and attempt state
+    const nowIso = new Date().toISOString();
     stepEvidence.status = newStatus;
     stepEvidence.evidence_payload = evidencePayload;
     stepEvidence.idempotency_key = idempotencyKey || null;
-    stepEvidence.verified_at = newStatus === 'verified' ? new Date().toISOString() : null;
-    stepEvidence.updated_at = new Date().toISOString();
+    stepEvidence.verified_at = newStatus === 'verified' ? nowIso : null;
+    stepEvidence.first_try_at = stepEvidence.first_try_at || nowIso;
+    if (newStatus === 'pending_review') {
+      stepEvidence.submitted_at = nowIso;
+    }
+    stepEvidence.updated_at = nowIso;
 
     const nextStepOrder = stepOrder + 1;
+    const isSequential = (activeAttempt.step_order_mode ?? 'sequential') === 'sequential';
 
     if (pool) {
       try {
         await pool.query(
           `UPDATE quest_step_evidence
-           SET status = $1, evidence_payload = $2, idempotency_key = $3, verified_at = $4, updated_at = NOW()
-           WHERE id = $5`,
-          [stepEvidence.status, JSON.stringify(evidencePayload), stepEvidence.idempotency_key, stepEvidence.verified_at, stepEvidence.id]
+           SET status = $1, evidence_payload = $2, idempotency_key = $3,
+               verified_at = $4, submitted_at = $5, first_try_at = COALESCE(first_try_at, $6),
+               updated_at = NOW()
+           WHERE id = $7`,
+          [
+            stepEvidence.status,
+            JSON.stringify(evidencePayload),
+            stepEvidence.idempotency_key,
+            stepEvidence.verified_at,
+            stepEvidence.submitted_at ?? null,
+            stepEvidence.first_try_at,
+            stepEvidence.id,
+          ]
         );
 
-        // Unlock next step if not_started
-        await pool.query(
-          `UPDATE quest_step_evidence
-           SET status = 'ready', updated_at = NOW()
-           WHERE attempt_id = $1 AND step_order = $2 AND status = 'not_started'`,
-          [activeAttempt.id, nextStepOrder]
-        );
+        // In sequential mode: unlock next step if not_started
+        if (isSequential) {
+          await pool.query(
+            `UPDATE quest_step_evidence
+             SET status = 'ready', updated_at = NOW()
+             WHERE attempt_id = $1 AND step_order = $2 AND status = 'not_started'`,
+            [activeAttempt.id, nextStepOrder]
+          );
+        }
 
         // Recompute verified steps on attempt
         const countRes = await pool.query(
@@ -885,10 +1454,12 @@ router.post(
           `UPDATE quest_attempts
            SET verified_steps = $1, current_step = GREATEST(current_step, $2), updated_at = NOW()
            WHERE id = $3`,
-          [verifiedCount, nextStepOrder, activeAttempt.id]
+          [verifiedCount, isSequential ? nextStepOrder : activeAttempt.current_step, activeAttempt.id]
         );
         activeAttempt.verified_steps = verifiedCount;
-        activeAttempt.current_step = Math.max(activeAttempt.current_step, nextStepOrder);
+        if (isSequential) {
+          activeAttempt.current_step = Math.max(activeAttempt.current_step, nextStepOrder);
+        }
       } catch (err) {
         if (claimedChallengeNonce) releaseChallengeNonce(claimedChallengeNonce);
         return next(err);
@@ -897,15 +1468,17 @@ router.post(
 
     // Mirror in memory
     db.saveStepEvidence(stepEvidence);
-    const nextStepMem = db.findStepEvidence(activeAttempt.id, nextStepOrder);
-    if (nextStepMem && nextStepMem.status === 'not_started') {
-      nextStepMem.status = 'ready';
-      nextStepMem.updated_at = new Date().toISOString();
-      db.saveStepEvidence(nextStepMem);
+    if (isSequential) {
+      const nextStepMem = db.findStepEvidence(activeAttempt.id, nextStepOrder);
+      if (nextStepMem && nextStepMem.status === 'not_started') {
+        nextStepMem.status = 'ready';
+        nextStepMem.updated_at = new Date().toISOString();
+        db.saveStepEvidence(nextStepMem);
+      }
+      activeAttempt.current_step = Math.max(activeAttempt.current_step, nextStepOrder);
     }
     const memSteps = db.getStepEvidence(activeAttempt.id);
     activeAttempt.verified_steps = memSteps.filter((s) => s.status === 'verified').length;
-    activeAttempt.current_step = Math.max(activeAttempt.current_step, nextStepOrder);
     claimedChallengeNonce = undefined;
 
     return res.status(200).json({
@@ -1114,5 +1687,141 @@ router.post('/quests/:id/challenge', authenticateToken, async (req: AuthRequest,
     },
   });
 });
+
+// POST /quests/:id/steps/:stepOrder/ar-challenge - Issue single-use AR challenge token bound to attempt & task
+const arChallengeSchema = z.object({
+  params: z.object({ id: z.string().min(1), stepOrder: z.string().regex(/^[1-9]\d{0,2}$/) }),
+  body: z.object({
+    captured_lat: optionalLat,
+    captured_lng: optionalLng,
+    captured_accuracy: optionalAccuracy,
+  }),
+});
+
+router.post(
+  '/quests/:id/steps/:stepOrder/ar-challenge',
+  authenticateToken,
+  validateRequest(arChallengeSchema),
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    const { id, stepOrder: stepOrderStr } = req.params;
+    const stepOrder = Number(stepOrderStr);
+    const userId = req.user!.id;
+    const { captured_lat, captured_lng, captured_accuracy } = req.body;
+
+    const quest = db.findQuestById(id, true);
+    if (!quest) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Quest not found.' } });
+    }
+
+    if (captured_lat === undefined || captured_lng === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'MISSING_GPS_COORDINATES', message: 'AR challenge requires captured_lat and captured_lng.' },
+      });
+    }
+
+    const pool = getPool();
+    let activeAttempt: QuestAttemptRow | null = null;
+    let stepEvidence: QuestStepEvidenceRow | null = null;
+
+    if (pool) {
+      try {
+        const attemptRes = await pool.query(
+          "SELECT * FROM quest_attempts WHERE user_id = $1 AND quest_id = $2 AND status = 'in_progress' ORDER BY created_at DESC LIMIT 1",
+          [userId, id]
+        );
+        if (attemptRes.rows[0]) {
+          activeAttempt = mapAttempt(attemptRes.rows[0]);
+          const stepRes = await pool.query(
+            "SELECT * FROM quest_step_evidence WHERE attempt_id = $1 AND step_order = $2",
+            [activeAttempt.id, stepOrder]
+          );
+          if (stepRes.rows[0]) {
+            stepEvidence = mapStepEvidence(stepRes.rows[0]);
+          }
+        }
+      } catch (err) {
+        return next(err);
+      }
+    }
+
+    if (!activeAttempt) {
+      const memAttempt = db.getActiveAttempt(userId, id);
+      if (memAttempt) {
+        activeAttempt = memAttempt;
+        stepEvidence = db.findStepEvidence(memAttempt.id, stepOrder) ?? null;
+      }
+    }
+
+    if (!activeAttempt) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'NO_ACTIVE_ATTEMPT', message: 'You have not started an active attempt for this quest.' },
+      });
+    }
+
+    if (!stepEvidence) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'STEP_NOT_FOUND', message: `Step ${stepOrder} not found for this attempt.` },
+      });
+    }
+
+    const snapshotTasks: QuestTask[] = Array.isArray(activeAttempt.steps_snapshot) && activeAttempt.steps_snapshot.length > 0
+      ? normalizeTasks(activeAttempt.steps_snapshot, quest)
+      : normalizeTasks(quest.steps, quest);
+
+    const stepDef = snapshotTasks.find((s) => s.step_order === stepOrder);
+    if (!stepDef || stepDef.checkpoint_type !== 'ar') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'NOT_AR_TASK', message: `Step ${stepOrder} is not an AR task.` },
+      });
+    }
+
+    const fence = (stepDef.verification as any)?.fence || (stepDef.gps_lat != null && stepDef.gps_lng != null ? { lat: stepDef.gps_lat, lng: stepDef.gps_lng, radius_meters: stepDef.radius_meters } : null);
+    const targetLat = fence?.lat ?? quest.gps_lat;
+    const targetLng = fence?.lng ?? quest.gps_lng;
+    const allowedRadius = fence?.radius_meters ?? 50;
+
+    const distance = withinRadius(captured_lat, captured_lng, targetLat, targetLng, allowedRadius, captured_accuracy || 0);
+    if (!distance.ok) {
+      return res.status(422).json({
+        success: false,
+        error: {
+          code: 'GPS_RADIUS_EXCEEDED',
+          message: Number.isFinite(distance.distance)
+            ? `Get closer — you're ${Math.round(distance.distance)} m away from this AR checkpoint.`
+            : 'The captured GPS coordinates are invalid.',
+        },
+      });
+    }
+
+    const nonce = randomUUID();
+    const expiresInSec = 600; // 10 minutes
+    const taskKey = stepEvidence.task_key || stepDef.key;
+    const token = signQuestArChallenge(
+      {
+        user_id: userId,
+        quest_id: quest.id,
+        attempt_id: activeAttempt.id,
+        task_key: taskKey,
+        nonce,
+      },
+      expiresInSec
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        challenge_token: token,
+        quest_id: quest.id,
+        attempt_id: activeAttempt.id,
+        task_key: taskKey,
+        expires_at: new Date(Date.now() + expiresInSec * 1000).toISOString(),
+      },
+    });
+  }
+);
 
 export default router;

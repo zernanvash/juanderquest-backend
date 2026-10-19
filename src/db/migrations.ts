@@ -67,6 +67,7 @@ export const MIGRATIONS = [
   '051_funding_notifications.sql',
   '052_plaza_social.sql',
   '053_plaza_push.sql',
+  '054_quest_builder.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
@@ -336,6 +337,17 @@ export async function applyMigrations(pg: Pool) {
             CREATE UNIQUE INDEX IF NOT EXISTS uq_push_open_collapse ON push_deliveries (user_id, collapse_key) WHERE status = 'queued';
             CREATE INDEX IF NOT EXISTS idx_push_due ON push_deliveries (send_after) WHERE status = 'queued';
             CREATE INDEX IF NOT EXISTS idx_push_user_day ON push_deliveries (user_id, category, sent_at) WHERE status = 'sent';
+          `);
+        } else if (file === '054_quest_builder.sql' && pgMemMigrationAdapters.has(pg as object)) {
+          await client.query(`
+            ALTER TABLE quests ADD COLUMN IF NOT EXISTS step_order_mode TEXT NOT NULL DEFAULT 'sequential';
+            ALTER TABLE quest_attempts ADD COLUMN IF NOT EXISTS step_order_mode TEXT NOT NULL DEFAULT 'sequential';
+            ALTER TABLE quest_step_evidence ADD COLUMN IF NOT EXISTS task_key TEXT;
+            ALTER TABLE quest_step_evidence ADD COLUMN IF NOT EXISTS failed_tries INT NOT NULL DEFAULT 0;
+            ALTER TABLE quest_step_evidence ADD COLUMN IF NOT EXISTS first_try_at TIMESTAMPTZ;
+            ALTER TABLE quest_step_evidence ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ;
+            ALTER TABLE quest_step_evidence ADD COLUMN IF NOT EXISTS needs_changes_reason TEXT;
+            CREATE INDEX IF NOT EXISTS idx_step_evidence_quest_task ON quest_step_evidence (quest_id, task_key, status);
           `);
         } else {
           await client.query(sql);

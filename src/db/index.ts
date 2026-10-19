@@ -107,8 +107,10 @@ export interface QuestStep {
   step_order: number;
   title: string;
   description: string;
-  checkpoint_type: 'location' | 'qr' | 'photo' | 'action';
+  checkpoint_type: 'location' | 'qr' | 'photo' | 'ar' | 'action';
   required: boolean;
+  key?: string;
+  verification?: any;
   gps_lat?: number;
   gps_lng?: number;
   radius_meters?: number;
@@ -125,7 +127,8 @@ export interface QuestStepEvidenceRow {
   quest_id: string;
   user_id: string;
   step_order: number;
-  checkpoint_type: 'location' | 'qr' | 'photo' | 'action';
+  task_key?: string | null;
+  checkpoint_type: 'location' | 'qr' | 'photo' | 'ar' | 'action';
   status: QuestStepStatus;
   required: boolean;
   title: string;
@@ -133,6 +136,10 @@ export interface QuestStepEvidenceRow {
   idempotency_key?: string | null;
   evidence_payload?: Record<string, any> | null;
   rejection_reason?: string | null;
+  needs_changes_reason?: string | null;
+  failed_tries?: number;
+  first_try_at?: string | null;
+  submitted_at?: string | null;
   verified_at?: string | null;
   reviewed_by?: string | null;
   reviewed_at?: string | null;
@@ -150,6 +157,7 @@ export interface QuestAttemptRow {
   current_step: number;
   total_steps: number;
   status: QuestAttemptStatus;
+  step_order_mode?: 'sequential' | 'any';
   steps_snapshot?: QuestStep[];
   verified_steps?: number;
   required_steps?: number;
@@ -248,6 +256,7 @@ export interface QuestRow {
   author_id?: string | null;
   status?: QuestStatus;
   version?: number;
+  step_order_mode?: 'sequential' | 'any';
   steps?: QuestStep[];
   title: string;
   description: string;

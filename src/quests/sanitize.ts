@@ -4,7 +4,11 @@ import type { QuestRow, QuestStep, QuestAttemptRow } from '../db/index.js';
 export function sanitizeQuestSteps<T extends QuestStep>(steps: T[] | undefined): T[] {
   if (!Array.isArray(steps)) return [];
   return steps.map((step) => {
-    const { marker_code: _markerCode, ...publicStep } = step as T & { marker_code?: string };
+    const { marker_code: _markerCode, ...publicStep } = step as any;
+    if (publicStep.verification && publicStep.verification.type === 'qr') {
+      const { marker_code: _qrCode, ...publicVerification } = publicStep.verification;
+      publicStep.verification = publicVerification;
+    }
     return publicStep as T;
   });
 }

@@ -13,16 +13,21 @@ export interface SpotContext {
   municipality?: string | null;
 }
 
-/**
- * Normalizes legacy v1 or modern v2 quest steps into canonical QuestTask[] (v2).
- * Fills in stable keys, verification configs, legacy mirrors, and converts
- * unverified action 'view_story' to optional (required: false).
- */
-export function normalizeTasks(rawSteps: any, spot?: SpotContext | null): QuestTask[] {
+export function normalizeTasks(
+  rawSteps: any,
+  spot?: SpotContext | null,
+  options?: { preserveSecretsFrom?: QuestTask[]; allowClientMarkerCode?: boolean }
+): QuestTask[] {
   if (!Array.isArray(rawSteps)) return [];
 
   const defaultLat = typeof spot?.gps_lat === 'number' && Number.isFinite(spot.gps_lat) ? spot.gps_lat : 16.0;
   const defaultLng = typeof spot?.gps_lng === 'number' && Number.isFinite(spot.gps_lng) ? spot.gps_lng : 120.0;
+  const existingMap = new Map<string, QuestTask>();
+  if (options?.preserveSecretsFrom) {
+    for (const t of options.preserveSecretsFrom) {
+      if (t.key) existingMap.set(t.key, t);
+    }
+  }
 
   return rawSteps.map((raw: any, index: number) => {
     const stepOrder = index + 1;
@@ -67,10 +72,24 @@ export function normalizeTasks(rawSteps: any, spot?: SpotContext | null): QuestT
       radius_meters: Math.max(30, Math.min(500, fenceRadius)),
     };
 
-    // Marker code for QR
-    const markerCode: string = typeof raw?.marker_code === 'string' && raw.marker_code.length > 0
-      ? raw.marker_code
-      : (typeof raw?.verification?.marker_code === 'string' ? raw.verification.marker_code : randomUUID());
+    // Marker code for QR:
+    // If updating an existing task, preserve its server-generated marker_code.
+    // When reading from DB or legacy steps, raw.marker_code is used unless allowClientMarkerCode is explicitly false.
+    const existingTask = existingMap.get(key);
+    let markerCode: string = randomUUID();
+    if (existingTask) {
+      if (existingTask.checkpoint_type === 'qr' && (existingTask.verification as any)?.marker_code) {
+        markerCode = String((existingTask.verification as any).marker_code);
+      } else if (existingTask.marker_code) {
+        markerCode = String(existingTask.marker_code);
+      }
+    } else if (options?.allowClientMarkerCode !== false) {
+      if (typeof raw?.marker_code === 'string' && raw.marker_code.length > 0) {
+        markerCode = raw.marker_code;
+      } else if (typeof raw?.verification?.marker_code === 'string' && raw.verification.marker_code.length > 0) {
+        markerCode = raw.verification.marker_code;
+      }
+    }
 
     // Build verification object
     let verification: TaskVerificationConfig;
