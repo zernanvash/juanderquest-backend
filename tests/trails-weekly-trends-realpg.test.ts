@@ -20,8 +20,8 @@ describeRealPg('Weekly trail trend job (isolated real PostgreSQL schema; mocked/
     for (let i = 0; i < spotIds.length; i++) {
       await fixture.pool.query(`INSERT INTO spots
         (id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,source_type,source_name,status,is_test,good_for,best_time)
-        VALUES ($1,$1,$2,'A verified Pangasinan place with useful visitor details.',$3,$4,'Lingayen','Lingayen, Pangasinan',16.0,$5,'editorial','Fixture','published',FALSE,'["families"]'::jsonb,'[]'::jsonb)`,
-      [spotIds[i], `Weekly Place ${i + 1}`, spotDetails[i][0], spotDetails[i][1], 120 + i * 0.001]);
+        VALUES ($1,$2,$3,'A verified Pangasinan place with useful visitor details.',$4,$5,'Lingayen','Lingayen, Pangasinan',16.0,$6,'editorial','Fixture','published',FALSE,'["families"]'::jsonb,'[]'::jsonb)`,
+      [spotIds[i], spotIds[i], `Weekly Place ${i + 1}`, spotDetails[i][0], spotDetails[i][1], 120 + i * 0.001]);
       await fixture.pool.query(`INSERT INTO spot_interactions(user_id,spot_id,interaction_type,created_at) VALUES ($1,$2,'save',$3)`, [actorId, spotIds[i], eventAt]);
     }
     await fixture.pool.query(`INSERT INTO trails
