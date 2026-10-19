@@ -67,6 +67,7 @@ export const MIGRATIONS = [
   '051_funding_notifications.sql',
   '052_plaza_social.sql',
   '053_plaza_push.sql',
+  '055_trail_engine.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
