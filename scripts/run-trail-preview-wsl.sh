@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Runs only the requested preview generation against jdq_preview_codex_dev.
+# Applies only the missing trail migration at the expected preview baseline,
+# then generates a sample against jdq_preview_codex_dev.
 set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 container='jdq-reliability-pg-20260910'
@@ -18,4 +19,5 @@ export DATABASE_URL="$(JDQ_DB_USER="$database_user" JDQ_DB_PASSWORD="$database_p
 ')"
 unset database_password
 cd "$repo_dir"
+npx tsx scripts/migrate-trail-preview.ts
 npx tsx scripts/generate-trail-preview.ts
