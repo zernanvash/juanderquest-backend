@@ -5,40 +5,62 @@ export function solveLocal(problem: TrailProblem, matrix?: TrailLegLookup, budge
   const started = performance.now();
   const deadline = started + Math.min(150, Math.max(1, budgetMs));
   const legFor = createLegLookup(problem, matrix);
-  const allowed = problem.nodes.filter(n => !problem.exclude.includes(n.spotId));
+  const allowed = [...new Map(problem.nodes.filter(n => !problem.exclude.includes(n.spotId)).map(node => [node.spotId, node])).values()]
+    .sort((a, b) => (b.value / Math.max(1, b.dwellMin)) - (a.value / Math.max(1, a.dwellMin)) || a.spotId.localeCompare(b.spotId));
   if (problem.mustInclude.some(id => !allowed.some(n => n.spotId === id))) return empty(started);
+  const targetStops = Math.max(problem.minStops, new Set(problem.mustInclude).size);
+  if (targetStops > problem.maxStops || allowed.length < targetStops) return empty(started);
+
   const rng = seededRandom(problem.seed);
   const evaluate = (ids: string[]) => evaluateOrder(problem, ids, legFor, 'local');
-  let current: string[] = [...problem.mustInclude];
-  let currentEval = evaluate(current);
-  // The mandatory set may itself violate constraints; grow only from valid partial routes.
-  if (!currentEval.feasible && current.length >= problem.minStops) return empty(started);
-  while (current.length < problem.maxStops) {
-  const options = allowed.filter(n => !current.includes(n.spotId)).map(n => {
-      let best: { route: string[]; score: number } | undefined;
-      for (let at = 0; at <= current.length; at++) {
-        if (performance.now() >= deadline) break;
-        const route = [...current.slice(0, at), n.spotId, ...current.slice(at)];
-        if (partialFeasible(problem, route, legFor)) {
-          const evaluated = evaluate(route);
-          if (!best || evaluated.solution.objective > best.score) best = { route, score: evaluated.solution.objective };
+  // Establish feasibility before optimizing. The old constructor scored every
+  // partial route with the full minStops requirement, making all early scores
+  // -Infinity; stable sorting could then commit to a prefix that could not be
+  // extended even though a different minStops subset was feasible.
+  const topK = Math.min(allowed.length, Math.max(12, targetStops + problem.mustInclude.length));
+  const preferred = allowed.slice(0, topK);
+  for (const id of problem.mustInclude) {
+    const mandatory = allowed.find(node => node.spotId === id);
+    if (mandatory && !preferred.some(node => node.spotId === id)) preferred.push(mandatory);
+  }
+  const fastDeadline = Math.min(deadline, started + Math.max(1, Math.min(35, (deadline - started) * 0.3)));
+  let seed = findFeasibleSeed(problem, preferred, legFor, targetStops, fastDeadline);
+  if (!seed && performance.now() < deadline) {
+    // Broaden to the complete candidate set before conceding infeasibility.
+    seed = findFeasibleSeed(problem, allowed, legFor, targetStops, deadline);
+  }
+  if (!seed) return empty(started);
+
+  let bestRoute = seed;
+  let best = evaluate(bestRoute).solution;
+  // Grow only from a fully feasible route, accepting a stop only when the
+  // resulting itinerary remains feasible. This also acts as a feasibility
+  // repair path if the construction prefix was a poor objective choice.
+  let grew = true;
+  while (grew && bestRoute.length < problem.maxStops && performance.now() < deadline) {
+    grew = false;
+    const inRoute = new Set(bestRoute);
+    let choice: { route: string[]; solution: TrailSolution } | undefined;
+    for (const node of allowed) {
+      if (inRoute.has(node.spotId)) continue;
+      for (let at = 0; at <= bestRoute.length && performance.now() < deadline; at++) {
+        const route = [...bestRoute.slice(0, at), node.spotId, ...bestRoute.slice(at)];
+        const candidate = evaluate(route);
+        if (candidate.feasible && (!choice || candidate.solution.objective > choice.solution.objective)) {
+          choice = { route, solution: candidate.solution };
         }
       }
-      return best ? { node: n, ...best } : undefined;
-    }).filter((v): v is NonNullable<typeof v> => Boolean(v));
-    if (!options.length) break;
-    options.sort((a, b) => (b.score - currentEval.solution.objective) / Math.max(b.node.dwellMin, 1) - (a.score - currentEval.solution.objective) / Math.max(a.node.dwellMin, 1));
-    const choice = options[0];
-    current = choice.route;
-    currentEval = evaluate(current);
+    }
+    if (choice) {
+      bestRoute = choice.route;
+      best = choice.solution;
+      grew = true;
+    }
   }
 
-  let bestRoute = currentEval.feasible ? current : [];
-  let best = currentEval.feasible ? currentEval.solution : empty(started);
   const maxIterations = 2000;
   for (let iteration = 0; iteration < maxIterations && performance.now() < deadline; iteration++) {
-    const route = bestRoute.length ? [...bestRoute] : [...problem.mustInclude];
-    if (!route.length && allowed.length) route.push(allowed[Math.floor(rng() * allowed.length)].spotId);
+    const route = [...bestRoute];
     const operation = Math.floor(rng() * 4);
     if (operation === 0 && route.length > 1) {
       let a = Math.floor(rng() * route.length), b = Math.floor(rng() * route.length);
@@ -71,14 +93,47 @@ export function solveLocal(problem: TrailProblem, matrix?: TrailLegLookup, budge
 function partialFeasible(problem: TrailProblem, ids: string[], legFor: TrailLegLookup): boolean {
   if (!ids.length || ids.length > problem.maxStops || ids.some(id => problem.exclude.includes(id))) return false;
   const chosen = new Set(ids);
-  if (problem.mustInclude.some(id => !chosen.has(id))) return false;
   const category = new Map<string, number>();
   for (const id of ids) {
     const node = problem.nodes.find(n => n.spotId === id)!;
     category.set(node.category, (category.get(node.category) ?? 0) + 1);
     if ((category.get(node.category) ?? 0) > problem.maxPerCategory) return false;
   }
-  return evaluateOrder(problem, ids, legFor, 'local', 1).feasible;
+  // A partial route may not have placed every mandatory stop yet. Enforce
+  // mandatory membership only for IDs already present; the full evaluator
+  // checks the complete required set once a candidate itinerary is formed.
+  const partialProblem = problem.mustInclude.every(id => chosen.has(id))
+    ? problem
+    : { ...problem, mustInclude: problem.mustInclude.filter(id => chosen.has(id)) };
+  return evaluateOrder(partialProblem, ids, legFor, 'local', 1).feasible;
+}
+
+function findFeasibleSeed(problem: TrailProblem, candidates: TrailProblem['nodes'], legFor: TrailLegLookup, targetStops: number, deadline: number): string[] | undefined {
+  const route: string[] = [];
+  const selected = new Set<string>();
+  const required = new Set(problem.mustInclude);
+
+  function search(): string[] | undefined {
+    if (performance.now() >= deadline) return undefined;
+    if (route.length === targetStops) return evaluateOrder(problem, route, legFor, 'local').feasible ? [...route] : undefined;
+    const missingRequired = [...required].filter(id => !selected.has(id));
+    if (route.length + missingRequired.length > targetStops) return undefined;
+    for (const node of candidates) {
+      if (selected.has(node.spotId)) continue;
+      selected.add(node.spotId);
+      route.push(node.spotId);
+      if (partialFeasible(problem, route, legFor)) {
+        const result = search();
+        if (result) return result;
+      }
+      route.pop();
+      selected.delete(node.spotId);
+      if (performance.now() >= deadline) break;
+    }
+    return undefined;
+  }
+
+  return search();
 }
 
 function empty(started: number): TrailSolution {

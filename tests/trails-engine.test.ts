@@ -1,12 +1,30 @@
 import { computeSpotSignals } from '../src/trails/signals.js';
 import { solveLocal } from '../src/trails/solver/local.js';
 import { solveExact } from '../src/trails/solver/exact.js';
+import { seededRandom } from '../src/trails/solver/index.js';
 import { refreshTravelTimeMatrix } from '../src/trails/matrix.js';
 import { generateTrail, TrailGenerationError, windowsFromBestTime } from '../src/trails/generate.js';
 import type { TrailLeg, TrailProblem } from '../src/trails/types.js';
 import request from 'supertest';
 import { app } from '../src/app.js';
 import { signSessionToken } from '../src/auth/tokens.js';
+
+function makeFeasibilityTrap(seed: number, count: number): { problem: TrailProblem; lookup: (from: string, to: string) => TrailLeg | undefined } {
+  const rng = seededRandom(seed);
+  const nodes = Array.from({ length: count }, (_, i) => {
+    const target = i >= 7 && i <= 9;
+    return { spotId: target ? `target-${i}` : `decoy-${i}`, value: target ? 0.05 + rng() * 0.02 : 0.85 + rng() * 0.1,
+      dwellMin: 30, windows: [], crowdByHour: Array(24).fill(0), category: `category-${i}` };
+  });
+  const targetIds = new Set(nodes.filter(node => node.spotId.startsWith('target-')).map(node => node.spotId));
+  const lookup = (from: string, to: string): TrailLeg => {
+    const minutes = targetIds.has(from) && targetIds.has(to) ? 5 : 20;
+    return { minutes, km: minutes / 2, approximate: false };
+  };
+  const problem: TrailProblem = { nodes, dayStartMin: 480, budgetMin: 240, minStops: 3, maxStops: 6, maxLegMin: 10,
+    maxPerCategory: 1, mustInclude: [], exclude: [], weights: { crowdPenalty: 0, travelPenalty: 0 }, seed };
+  return { problem, lookup };
+}
 
 describe('Plan 44 trail engine phase 0–2', () => {
   beforeEach(() => { jest.useFakeTimers({ now: new Date('2026-10-19T08:00:00.000Z') }); });
@@ -38,6 +56,36 @@ describe('Plan 44 trail engine phase 0–2', () => {
       expect(local.feasible).toBe(true);
       expect(local.objective).toBeGreaterThanOrEqual(exact.objective*.95);
       expect(solveLocal(problem,lookup,150).stops).toEqual(local.stops);
+    }
+  }, 30_000);
+
+  test.each([[15, 20261032], [30, 20261024], [60, 20261028]])(
+    'feasibility regression seed %i / %i survives a high-value dead-end prefix', (count, seed) => {
+      const { problem, lookup } = makeFeasibilityTrap(seed, count);
+      const exactSubset = solveExact({ ...problem, nodes: problem.nodes.slice(0, 10) }, lookup);
+      expect(exactSubset.feasible).toBe(true);
+      const local = solveLocal(problem, lookup, 150);
+      expect(local.feasible).toBe(true);
+      expect(local.stops).toHaveLength(3);
+      expect(local.stops.every(stop => stop.spotId.startsWith('target-'))).toBe(true);
+      expect(solveLocal(problem, lookup, 150).stops).toEqual(local.stops);
+      expect(local.ms).toBeLessThanOrEqual(150.5);
+    }, 10_000,
+  );
+
+  test.each([15, 30, 60])('large seeded instances preserve feasibility proven by an exact candidate subset (N=%i)', count => {
+    for (const seed of [20261024, 20261028, 20261032]) {
+      const { problem, lookup } = makeFeasibilityTrap(seed, count);
+      const rng = seededRandom(seed ^ count);
+      const distractors = problem.nodes.filter(node => node.spotId.startsWith('decoy-'));
+      for (let i = distractors.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [distractors[i], distractors[j]] = [distractors[j], distractors[i]];
+      }
+      const subset = [...problem.nodes.filter(node => node.spotId.startsWith('target-')), ...distractors.slice(0, 7)];
+      expect(subset).toHaveLength(10);
+      const exact = solveExact({ ...problem, nodes: subset }, lookup);
+      if (exact.feasible) expect(solveLocal(problem, lookup, 150).feasible).toBe(true);
     }
   }, 30_000);
 
