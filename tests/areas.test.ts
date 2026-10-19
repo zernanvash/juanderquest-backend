@@ -2,6 +2,8 @@ import request from 'supertest';
 import { app } from '../src/app.js';
 import { pointInPolygon, pointInRing, createCirclePolygon, distanceMeters } from '../src/maps/geometry.js';
 import { matchSpotToAreas, AreaRecord } from '../src/maps/areas-service.js';
+import { createTestDb } from '../src/db/testHarness.js';
+import { setPool } from '../src/db/pool.js';
 
 describe('Admin Areas & Geometry Utilities (Plan 45 Phase 2)', () => {
   describe('Point-in-polygon & Geometry', () => {
@@ -180,4 +182,52 @@ describe('Admin Areas & Geometry Utilities (Plan 45 Phase 2)', () => {
       expect(res.body.meta).toBeDefined();
     });
   });
+
+  describe('Real PostgreSQL Migration 056 Integration', () => {
+    it('creates admin_areas table and spots area columns via migrations ledger', async () => {
+      const testDb = await createTestDb();
+      try {
+        // Assert admin_areas table exists
+        const tableCheck = await testDb.pool.query(`
+          SELECT table_name FROM information_schema.tables
+          WHERE table_name = 'admin_areas'
+        `);
+        expect(tableCheck.rows.length).toBe(1);
+
+        // Assert spots table has town_area_id and barangay_area_id columns
+        const colCheck = await testDb.pool.query(`
+          SELECT column_name FROM information_schema.columns
+          WHERE table_name = 'spots' AND column_name IN ('town_area_id', 'barangay_area_id')
+        `);
+        const foundCols = colCheck.rows.map((r: any) => r.column_name);
+        expect(foundCols).toContain('town_area_id');
+        expect(foundCols).toContain('barangay_area_id');
+
+        // Assert schema_migrations recorded 056_admin_areas.sql
+        const migCheck = await testDb.pool.query(`
+          SELECT filename FROM schema_migrations WHERE filename = '056_admin_areas.sql'
+        `);
+        expect(migCheck.rows.length).toBe(1);
+      } finally {
+        await testDb.close();
+      }
+    });
+
+    it('returns 500 when admin_areas table is missing or fails query', async () => {
+      // Simulate broken or unmigrated pool where table does not exist
+      const mockPool: any = {
+        query: jest.fn().mockRejectedValue(new Error('relation "admin_areas" does not exist')),
+      };
+      setPool(mockPool);
+
+      try {
+        const res = await request(app).get('/api/v1/areas');
+        expect(res.status).toBe(500);
+        expect(res.body.error.code).toBe('DATABASE_ERROR');
+      } finally {
+        setPool(null as any);
+      }
+    });
+  });
 });
+

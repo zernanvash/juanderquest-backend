@@ -92,8 +92,12 @@ areasRouter.get('/areas', async (req: Request, res: Response) => {
       }));
 
       return res.json({ success: true, data: items, meta: { count: items.length } });
-    } catch {
-      // Fallback if database table not yet migrated or in-memory
+    } catch (error) {
+      console.error('[areas] Error querying admin_areas from database:', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'DATABASE_ERROR', message: 'Failed to query admin areas from database.' },
+      });
     }
   }
 
@@ -161,8 +165,12 @@ areasRouter.get('/areas/:id', async (req: Request, res: Response) => {
           parents,
         },
       });
-    } catch {
-      // In-memory fallback
+    } catch (error) {
+      console.error(`[areas] Error querying admin_area ${areaId} from database:`, error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'DATABASE_ERROR', message: `Failed to query area ${areaId} from database.` },
+      });
     }
   }
 
@@ -189,7 +197,13 @@ areasRouter.get('/areas/:id/shape', async (req: Request, res: Response) => {
       if (result.rows.length > 0) {
         areaRow = result.rows[0];
       }
-    } catch {}
+    } catch (error) {
+      console.error(`[areas] Error querying admin_area shape for ${areaId}:`, error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'DATABASE_ERROR', message: `Failed to query shape for area ${areaId}.` },
+      });
+    }
   }
 
   if (!areaRow) {
@@ -274,7 +288,13 @@ areasRouter.get('/areas/:id/spots', async (req: Request, res: Response) => {
           totalPages: Math.ceil(total / limit),
         },
       });
-    } catch {}
+    } catch (error) {
+      console.error(`[areas] Error querying spots for area ${areaId}:`, error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'DATABASE_ERROR', message: `Failed to query spots for area ${areaId}.` },
+      });
+    }
   }
 
   // Store in-memory fallback

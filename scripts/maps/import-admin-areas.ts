@@ -8,13 +8,24 @@ import { AreaRecord, matchSpotToAreas } from '../../src/maps/areas-service.js';
 interface CliArgs {
   dryRun: boolean;
   apply: boolean;
+  inputDir?: string;
 }
 
 function parseArgs(): CliArgs {
   const args = process.argv.slice(2);
   const apply = args.includes('--apply');
   const dryRun = !apply || args.includes('--dry-run');
-  return { dryRun, apply: !dryRun };
+
+  let inputDir: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--input' && args[i + 1]) {
+      inputDir = args[i + 1];
+    } else if (args[i].startsWith('--input=')) {
+      inputDir = args[i].slice('--input='.length);
+    }
+  }
+
+  return { dryRun, apply: !dryRun, inputDir };
 }
 
 // Map from KNOWN_AREAS
@@ -47,20 +58,16 @@ function slugify(text: string): string {
 }
 
 async function run() {
-  const { dryRun } = parseArgs();
+  const { dryRun, inputDir: argInputDir } = parseArgs();
   console.log(`=== Admin Areas Import (${dryRun ? 'DRY RUN' : 'APPLY'}) ===`);
 
   const homeDir = os.homedir();
-  const defaultDir = process.env.JDQ_MAPS_DIR || (
-    os.platform() === 'win32'
-      ? '\\\\wsl.localhost\\Ubuntu\\home\\kaizo\\jdq-maps\\areas'
-      : path.join(homeDir, 'jdq-maps/areas')
-  );
-  const townsPath = path.join(defaultDir, 'towns.geojson');
-  const barangaysPath = path.join(defaultDir, 'barangays.geojson');
+  const inputDir = argInputDir || process.env.JDQ_MAPS_DIR || path.join(homeDir, 'jdq-maps/areas');
+  const townsPath = path.join(inputDir, 'towns.geojson');
+  const barangaysPath = path.join(inputDir, 'barangays.geojson');
 
   if (!fs.existsSync(townsPath) || !fs.existsSync(barangaysPath)) {
-    throw new Error(`GeoJSON files missing at ${defaultDir}. Check JDQ_MAPS_DIR.`);
+    throw new Error(`GeoJSON files missing at ${inputDir}. Pass --input <dir> or set JDQ_MAPS_DIR.`);
   }
 
   const townsGeoJson = JSON.parse(fs.readFileSync(townsPath, 'utf8'));

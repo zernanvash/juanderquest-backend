@@ -67,6 +67,7 @@ export const MIGRATIONS = [
   '051_funding_notifications.sql',
   '052_plaza_social.sql',
   '053_plaza_push.sql',
+  '056_admin_areas.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
@@ -342,7 +343,7 @@ export async function applyMigrations(pg: Pool) {
             CREATE TABLE IF NOT EXISTS admin_areas (
               id TEXT PRIMARY KEY,
               psgc_code BIGINT UNIQUE,
-              level TEXT NOT NULL,
+              level TEXT NOT NULL CHECK (level IN ('province','town','barangay')),
               name TEXT NOT NULL,
               display_name TEXT NOT NULL,
               parent_id TEXT REFERENCES admin_areas(id),
@@ -350,7 +351,7 @@ export async function applyMigrations(pg: Pool) {
               has_boundary BOOLEAN NOT NULL DEFAULT TRUE,
               label_lat DOUBLE PRECISION NOT NULL,
               label_lng DOUBLE PRECISION NOT NULL,
-              bbox DOUBLE PRECISION[] NOT NULL,
+              bbox DOUBLE PRECISION[4] NOT NULL,
               min_zoom SMALLINT NOT NULL DEFAULT 9,
               shape_file TEXT,
               data_version TEXT NOT NULL DEFAULT '2023-psa-namria',
@@ -363,8 +364,8 @@ export async function applyMigrations(pg: Pool) {
             ALTER TABLE spots ADD COLUMN IF NOT EXISTS town_area_id TEXT REFERENCES admin_areas(id);
             ALTER TABLE spots ADD COLUMN IF NOT EXISTS barangay_area_id TEXT REFERENCES admin_areas(id);
 
-            CREATE INDEX IF NOT EXISTS idx_spots_town_area ON spots (town_area_id);
-            CREATE INDEX IF NOT EXISTS idx_spots_barangay_area ON spots (barangay_area_id);
+            CREATE INDEX IF NOT EXISTS idx_spots_town_area ON spots (town_area_id) WHERE status = 'published';
+            CREATE INDEX IF NOT EXISTS idx_spots_barangay_area ON spots (barangay_area_id) WHERE status = 'published';
           `);
         } else {
           await client.query(sql);
