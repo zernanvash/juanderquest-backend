@@ -71,6 +71,9 @@ const rawEnv = cleanEnv(process.env, {
   VALHALLA_URL: str({ default: 'http://127.0.0.1:8002' }),
   VALHALLA_COVERAGE_BBOX: str({ default: '119.70,15.65,121.05,16.55' }),
   VALHALLA_COVERAGE_LABEL: str({ default: 'Pangasinan' }),
+  // Trail NIM is optional; credentials are read only from the private key file.
+  NIM_BASE_URL: str({ default: 'https://integrate.api.nvidia.com/v1' }),
+  NIM_MODEL: str({ default: 'nvidia/nemotron-3.5-lightning-30b-a3b' }),
   PROGRESSION_ENABLED: bool({ default: true }),
   PROGRESSION_EMIT_OUTBOX_ENABLED: bool({ default: true }),
   PROGRESSION_OUTBOX_WORKER_ENABLED: bool({ default: false }),

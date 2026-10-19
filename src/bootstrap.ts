@@ -13,6 +13,7 @@ import { startStandingsJob } from './social/standingsJob.js';
 import { initFcm } from './push/fcm.js';
 import { startPushDispatcher } from './push/dispatcher.js';
 import { startWeeklyRecapJob } from './social/weeklyRecapJob.js';
+import { startWeeklyTrailTrendJob } from './trails/jobs/weeklyTrends.js';
 
 // Boot orchestration: connect PostgreSQL (when available), hydrate memory + governance, fall back to in-memory.
 export async function bootstrap() {
@@ -27,6 +28,7 @@ export async function bootstrap() {
     initFcm();
     startPushDispatcher();
     startWeeklyRecapJob();
+    startWeeklyTrailTrendJob();
   } else {
     governanceStore.refreshBalances();
   }

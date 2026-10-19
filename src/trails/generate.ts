@@ -3,14 +3,15 @@ import type { Pool } from 'pg';
 import { computeSpotSignals, loadTrailSignalInputs } from './signals.js';
 import { loadTravelTimeLookup } from './matrix.js';
 import { solveLocal } from './solver/local.js';
-import { templateTrailStory } from './story.js';
+import { writeTrailStory } from './ai/service.js';
 import type { TrailCosting, TrailProblem, TrailSignalRequest } from './types.js';
 
 export interface GenerateTrailInput {
-  kind?: 'admin' | 'benchmark'; theme?: string; constraints?: TrailSignalRequest; tier?: 'starter'|'explorer'|'signature'|'legendary';
+  kind?: 'admin' | 'weekly_batch' | 'benchmark'; theme?: string; constraints?: TrailSignalRequest; tier?: 'starter'|'explorer'|'signature'|'legendary';
   startNode?: string; budgetMin?: number; seed?: number; solver?: 'local'; minStops?: number; maxStops?: number;
   maxLegMin?: number; maxPerCategory?: number; mustInclude?: string[]; exclude?: string[]; costing?: TrailCosting;
-  isTest?: boolean; requestedBy?: string;
+  isTest?: boolean; requestedBy?: string; status?: 'draft'|'pending_review'|'published';
+  availableFrom?: Date | null; availableUntil?: Date | null; weekId?: string; candidateKey?: string;
 }
 
 export class TrailGenerationError extends Error {
@@ -57,15 +58,27 @@ export async function generateTrail(pool: Pool, input: GenerateTrailInput) {
     }
     if (!solution.feasible || solution.stops.length < problem.minStops) throw new TrailGenerationError();
     const municipalities = [...new Set(solution.stops.map(s => nodes.find(n => n.spotId === s.spotId)?.municipality).filter((v): v is string => Boolean(v)))];
-    const story = templateTrailStory(input.theme ?? signalRequest.themes?.[0] ?? 'Pangasinan discoveries', nodes, solution, municipalities);
+    const selectedStops = solution.stops.map(stop => {
+      const node = nodes.find(item => item.spotId === stop.spotId)!;
+      return { spot_id: node.spotId, name: node.title, municipality: node.municipality, category: node.category, description: node.description };
+    });
+    const storyResult = await writeTrailStory(client, {
+      theme: input.theme ?? signalRequest.themes?.[0] ?? 'Pangasinan discoveries',
+      municipalities,
+      total_minutes: solution.totalMin,
+      stops: selectedStops,
+      known_catalog_places: nodes.map(node => node.title),
+    }, { nodes, solution });
+    const story = storyResult.value;
     const trailId = `trl_${randomUUID()}`;
     const slugBase = (input.theme ?? 'pangasinan-trail').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'pangasinan-trail';
     const slug = `${slugBase}-${randomUUID().slice(0, 8)}`;
     const duration = Math.max(1, solution.totalMin);
     const trailResult = await client.query(`INSERT INTO trails
-      (id,slug,title,tagline,tier,theme,municipalities,unlock_rule,costing,total_minutes,total_km,story,status,source,owner_user_id,generation_id,is_test)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,'{"type":"free"}'::jsonb,$8,$9,$10,$11,'draft','engine',NULL,$12,$13)
-      RETURNING *`, [trailId, slug, storyTitle(story.intro), '', input.tier ?? 'starter', input.theme ?? 'mixed', municipalities, costing, duration, solution.totalKm, JSON.stringify(story), null, Boolean(input.isTest)]);
+      (id,slug,title,tagline,tier,theme,municipalities,unlock_rule,costing,total_minutes,total_km,story,status,source,owner_user_id,generation_id,is_test,available_from,available_until)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,'{"type":"free"}'::jsonb,$8,$9,$10,$11::jsonb,$12,'engine',NULL,NULL,$13,$14,$15)
+      RETURNING *`, [trailId, slug, story.title, story.tagline, input.tier ?? 'starter', input.theme ?? 'mixed', municipalities, costing, duration, solution.totalKm,
+      JSON.stringify(story), input.status ?? 'draft', Boolean(input.isTest), input.availableFrom ?? null, input.availableUntil ?? null]);
     for (let i = 0; i < solution.stops.length; i++) {
       const stop = solution.stops[i];
       const leg = i === 0 ? { minutes: 0, km: 0 } : matrix(solution.stops[i - 1].spotId, stop.spotId) ?? { minutes: 0, km: 0 };
@@ -73,13 +86,13 @@ export async function generateTrail(pool: Pool, input: GenerateTrailInput) {
         VALUES ($1,$2,$3,$4,45,$5,$6,$7)`, [trailId, i + 1, stop.spotId, Math.max(0, stop.arriveMin - base.dayStartMin), Math.round(leg.minutes), leg.km, story.stops[i]?.narration ?? '']);
     }
     const generationId = randomUUID();
-    await client.query(`INSERT INTO trail_generations (id,kind,requested_by,input,constraints,solver,solver_ms,objective,result,ai_used,ai_fallback_reason)
-      VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,'local',$6,$7,$8::jsonb,FALSE,'template_story_fallback')`, [generationId, input.kind ?? 'admin', input.requestedBy ?? null,
-      JSON.stringify({ theme: input.theme ?? null, costing, seed: problem.seed }), JSON.stringify(problemConstraints(problem)), Math.max(0, Math.round(solution.ms)), solution.objective,
-      JSON.stringify({ trail_id: trailId, stops: solution.stops, total_minutes: duration, total_km: solution.totalKm })]);
+    await client.query(`INSERT INTO trail_generations (id,kind,requested_by,input,constraints,solver,solver_ms,objective,result,ai_model,ai_used,ai_fallback_reason)
+      VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,'local',$6,$7,$8::jsonb,$9,$10,$11)`, [generationId, input.kind ?? 'admin', input.requestedBy ?? null,
+      JSON.stringify({ theme: input.theme ?? null, costing, seed: problem.seed, ...(input.weekId ? { week_id: input.weekId } : {}), ...(input.candidateKey ? { candidate_key: input.candidateKey } : {}) }), JSON.stringify(problemConstraints(problem)), Math.max(0, Math.round(solution.ms)), solution.objective,
+      JSON.stringify({ trail_id: trailId, stops: solution.stops, total_minutes: duration, total_km: solution.totalKm }), storyResult.model, storyResult.aiUsed, storyResult.fallbackReason]);
     await client.query('UPDATE trails SET generation_id=$1 WHERE id=$2', [generationId, trailId]);
     await client.query('COMMIT');
-    return { trail: { ...trailResult.rows[0], generation_id: generationId }, generation: { id: generationId, solver_ms: Math.max(0, Math.round(solution.ms)), objective: solution.objective, solver: 'local', ai_used: false }, solution };
+    return { trail: { ...trailResult.rows[0], generation_id: generationId }, generation: { id: generationId, solver_ms: Math.max(0, Math.round(solution.ms)), objective: solution.objective, solver: 'local', ai_used: storyResult.aiUsed, ai_model: storyResult.model, ai_fallback_reason: storyResult.fallbackReason }, solution };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -98,5 +111,4 @@ export function windowsFromBestTime(tags: string[]): Array<[number, number]> {
   return tags.flatMap(tag => map[tag] ? [map[tag]] : []);
 }
 
-function storyTitle(intro: string) { return intro.split(':')[0].slice(0, 80).padEnd(3, ' '); }
 function problemConstraints(p: TrailProblem) { return { dayStartMin:p.dayStartMin,budgetMin:p.budgetMin,minStops:p.minStops,maxStops:p.maxStops,maxLegMin:p.maxLegMin,maxPerCategory:p.maxPerCategory,mustInclude:p.mustInclude,exclude:p.exclude,seed:p.seed }; }
