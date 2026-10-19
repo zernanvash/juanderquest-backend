@@ -737,8 +737,14 @@ router.post('/quests/:id/attempts', authenticateToken, async (req: AuthRequest, 
       await client.query('BEGIN');
       // Serialize starts for the same traveler, including across API workers.
       const user = await client.query('SELECT id, is_test FROM users WHERE id = $1 FOR UPDATE', [userId]);
-      const liveQuest = await client.query(
-        'SELECT id, author_id, is_test, status, version, steps, step_order_mode FROM quests WHERE id = $1 FOR SHARE', [id]);
+      let liveQuest;
+      try {
+        liveQuest = await client.query(
+          'SELECT id, author_id, is_test, status, version, steps, step_order_mode FROM quests WHERE id = $1 FOR SHARE', [id]);
+      } catch {
+        liveQuest = await client.query(
+          'SELECT id, author_id, is_test, status, version, steps FROM quests WHERE id = $1 FOR SHARE', [id]);
+      }
       const q = liveQuest.rows[0];
       if (!user.rows[0] || !q) {
         await client.query('ROLLBACK');
@@ -783,11 +789,19 @@ router.post('/quests/:id/attempts', authenticateToken, async (req: AuthRequest, 
           [attemptId, id, userId, q.version, Math.max(1, normalizedTasks.length), JSON.stringify(normalizedTasks), Math.max(1, requiredCount), stepOrderMode]
         );
       } catch {
-        inserted = await client.query(
-          `INSERT INTO quest_attempts (id, quest_id, user_id, version, current_step, total_steps, status, steps_snapshot, verified_steps, required_steps)
-           VALUES ($1, $2, $3, $4, 1, $5, 'in_progress', $6, 0, $7) RETURNING *`,
-          [attemptId, id, userId, q.version, Math.max(1, normalizedTasks.length), JSON.stringify(normalizedTasks), Math.max(1, requiredCount)]
-        );
+        try {
+          inserted = await client.query(
+            `INSERT INTO quest_attempts (id, quest_id, user_id, version, current_step, total_steps, status, steps_snapshot, verified_steps, required_steps)
+             VALUES ($1, $2, $3, $4, 1, $5, 'in_progress', $6, 0, $7) RETURNING *`,
+            [attemptId, id, userId, q.version, Math.max(1, normalizedTasks.length), JSON.stringify(normalizedTasks), Math.max(1, requiredCount)]
+          );
+        } catch {
+          inserted = await client.query(
+            `INSERT INTO quest_attempts (id, quest_id, user_id, version, current_step, total_steps, status)
+             VALUES ($1, $2, $3, $4, 1, $5, 'in_progress') RETURNING *`,
+            [attemptId, id, userId, q.version, Math.max(1, normalizedTasks.length)]
+          );
+        }
       }
 
       try {

@@ -59,6 +59,22 @@ SET steps = (
             END,
             'require_gps', (step ? 'gps_lat' AND step ? 'gps_lng')
           )
+          WHEN step->>'checkpoint_type' = 'ar' THEN jsonb_build_object(
+            'type', 'ar',
+            'fence', jsonb_build_object(
+              'lat', COALESCE((step->>'gps_lat')::numeric, quests.gps_lat, 16.0),
+              'lng', COALESCE((step->>'gps_lng')::numeric, quests.gps_lng, 120.0),
+              'radius_meters', LEAST(150, GREATEST(30, COALESCE((step->>'radius_meters')::numeric, 50)))
+            ),
+            'object', CASE
+              WHEN step->>'object' IN ('token', 'gem', 'beacon', 'box') THEN step->>'object'
+              ELSE 'token'
+            END,
+            'color', CASE
+              WHEN step->>'color' IN ('#FFB703', '#2D6A4F', '#3B82F6', '#E11D48') THEN step->>'color'
+              ELSE '#FFB703'
+            END
+          )
           WHEN step->>'checkpoint_type' = 'action' THEN jsonb_build_object(
             'type', 'action',
             'task', jsonb_build_object(

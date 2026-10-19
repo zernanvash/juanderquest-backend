@@ -381,16 +381,20 @@ router.post('/spots/:id/quests', authenticateToken, validateRequest(createAuthor
   }
 
   const questStatus = env.QUEST_FUNDING_ENABLED ? 'draft' : (req.body.status ?? 'published');
-  const rawTasks = req.body.tasks || req.body.steps || [];
+  let rawTasks = req.body.tasks || req.body.steps || [];
 
-  // When published, must have 1-10 tasks and at least one required task
-  if (questStatus === 'published') {
-    if (rawTasks.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'VALIDATION_ERROR', message: 'Published quests must have between 1 and 10 tasks.' },
-      });
-    }
+  // Backward compatibility: If no tasks/steps are provided by legacy clients, default to destination check-in task
+  if (rawTasks.length === 0) {
+    rawTasks = [{
+      step_order: 1,
+      title: 'Destination check-in',
+      description: 'Visit the destination and verify your location.',
+      checkpoint_type: 'location',
+      required: true,
+      gps_lat: spot.gps_lat,
+      gps_lng: spot.gps_lng,
+      radius_meters: req.body.radius_meters || 200,
+    }];
   }
 
   // Validate tasks distance from destination spot (Plan 43 §4.6)
@@ -407,6 +411,12 @@ router.post('/spots/:id/quests', authenticateToken, validateRequest(createAuthor
   const normalizedTasks = normalizeTasks(rawTasks, spot, { allowClientMarkerCode: false });
 
   if (questStatus === 'published') {
+    if (normalizedTasks.length === 0 || normalizedTasks.length > 10) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Published quests must have between 1 and 10 tasks.' },
+      });
+    }
     const hasRequired = normalizedTasks.some((t) => t.required);
     if (!hasRequired) {
       return res.status(400).json({
