@@ -85,7 +85,7 @@ Command: `bash scripts/run-trail-benchmark-preview.sh` from the Plan 44 backend 
 
 This benchmark compares the deterministic CPU solver with a bounded exact oracle and records reproducible audit rows in `trail_generations(kind=benchmark)`. Exact is intentionally capped to the first ten candidates to avoid combinatorial growth; interpret it as a sampled quality reference, not an exact optimum for the full candidate set. Its objective and feasibility are therefore not directly comparable with the full-size local route. Local is the operational solver and its 150 ms budget can cap search effort. Windowed cases use destination `best_time` values where available; stops with no recognized time window remain unconstrained.
 
-The local solver found feasible routes for 27/30 full candidate instances. Seeds `20261024`, `20261028`, and `20261032` (all 240-minute budget cases) returned no feasible route, while their separate first-10-node exact subproblems were feasible. This is a useful quality finding: the exact result proves feasibility only for its smaller subset, but the local misses warrant a follow-up solver-quality investigation before this benchmark is used to claim robust coverage.
+Local feasibility follow-up: 3/30 full-candidate instances returned no feasible route (seeds 20261024, 20261028, 20261032). Exact results apply only to the smaller first-10-candidate subproblems and do not establish full-catalog feasibility.
 
 cuOpt columns are pending owner key. No hosted NVIDIA cuOpt request was made during this run.
 

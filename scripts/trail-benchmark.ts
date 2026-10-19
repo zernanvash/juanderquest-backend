@@ -133,6 +133,7 @@ function renderReport(outputs: BenchmarkEntry[], context: { realSpotCount: numbe
     '# Trail Engine Solver Benchmark', '',
     `Run date: ${new Date().toISOString()}`,
     'Database: disposable loopback `jdq_preview_codex_dev`; no production or presentation database was used.',
+    'cuOpt schema references: [NVIDIA managed submit OpenAPI](https://docs.api.nvidia.com/nim/reference/nvidia-cuopt-infer), [status-poll OpenAPI](https://docs.api.nvidia.com/nim/reference/nvidia-cuopt-statuspolling), and [cuOpt routing data requirements](https://docs.nvidia.com/cuopt/service/latest/data-requirements.html).',
     `Instances: ${RUNS}; seeds 20261020–20261049; candidate sizes 15/30/60, budgets 240/480 minutes, windows off/on.`,
     `Published real spots available: ${context.realSpotCount}. Candidate sets larger than the available catalog use deterministic repeated catalog entries with explicit benchmark aliases; same-source alias legs use approximate Haversine estimates.`, '',
     'Exact is an oracle over the first 10 candidates only; its objective/feasibility are not directly comparable to the full-size local run. Each reported wall time is solver-reported milliseconds; SQL persistence and NIM/cooling overhead are excluded.', '',
@@ -147,6 +148,9 @@ function renderReport(outputs: BenchmarkEntry[], context: { realSpotCount: numbe
     ...outputs.map(row => `| ${row.seed} | ${row.candidateCount} | ${row.budgetMin} | ${row.withWindows ? 'yes' : 'no'} | ${row.solver} | ${row.result.feasible ? 'yes' : 'no'} | ${Number.isFinite(row.result.objective) ? row.result.objective.toFixed(4) : '—'} | ${row.result.stops.length} | ${row.result.ms.toFixed(2)} |`), '',
     '## Discussion', '',
     'This benchmark compares the deterministic CPU solver with a bounded exact oracle and records reproducible audit rows in `trail_generations(kind=benchmark)`. Exact is intentionally capped at ten candidates to avoid combinatorial growth; interpret it as a sampled quality reference, not an exact optimum for the full candidate set. Local is the operational solver and its 150 ms budget can cap search effort. Windowed cases use destination `best_time` values where available; stops with no recognized time window remain unconstrained.', '',
+    localRows.some(row => !row.result.feasible)
+      ? `Local feasibility follow-up: ${localRows.filter(row => !row.result.feasible).length}/${localRows.length} full-candidate instances returned no feasible route (seeds ${localRows.filter(row => !row.result.feasible).map(row => row.seed).join(', ')}). Exact results apply only to the smaller first-10-candidate subproblems and do not establish full-catalog feasibility.`
+      : `Local feasibility: all ${localRows.length} full-candidate instances returned feasible routes.`, '',
     context.useCuopt ? 'cuOpt was explicitly enabled and the private owner key was available; cuOpt metrics above are from the managed service and were re-scored locally.' : 'cuOpt columns are pending owner key. No hosted NVIDIA cuOpt request was made during this run.', '',
     'All generation rows contain only solver inputs/results and no traveler identity, exact user location, or AI story. These are thesis evaluation records, not published trails.', '',
   ];
