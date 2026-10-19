@@ -3,8 +3,13 @@ import { z } from 'zod';
 import { authenticateToken, requireAdmin, type AuthRequest } from '../middleware/auth.js';
 import { getPool } from '../db/pool.js';
 import { refreshTravelTimeMatrix, readTravelTimeMatrixStatus } from '../trails/matrix.js';
-import { generateTrail, TrailGenerationError } from '../trails/generate.js';
-import type { TrailCosting } from '../trails/types.js';
+import { generateTrail, TrailGenerationError, windowsFromBestTime } from '../trails/generate.js';
+import { computeSpotSignals, loadTrailSignalInputs } from '../trails/signals.js';
+import { loadTravelTimeLookup } from '../trails/matrix.js';
+import { solveLocal } from '../trails/solver/local.js';
+import { createCuoptSolver, cuoptEnabledWithKey, CuoptError } from '../trails/solver/cuopt.js';
+import { randomUUID } from 'node:crypto';
+import type { TrailCosting, TrailProblem } from '../trails/types.js';
 
 export const trailsRouter = Router();
 // Every endpoint in this router is operational/admin-only, including reads.
@@ -69,6 +74,73 @@ trailsRouter.post('/admin/trails/generate', async (req: AuthRequest, res: Respon
   } catch (error) {
     if (error instanceof TrailGenerationError) return res.status(422).json({ success: false, error: { code: error.code, message: error.message } });
     return res.status(503).json({ success: false, error: { code: 'GENERATION_FAILED', message: 'Trail generation failed; no partial trail was saved.' } });
+  }
+});
+
+const compareSolversSchema = z.object({
+  spot_ids: z.array(z.string().min(1).max(120)).min(3).max(60),
+  budget_min: z.number().int().min(60).max(600),
+  min_stops: z.number().int().min(2).max(12).default(3),
+  max_stops: z.number().int().min(2).max(12).default(6),
+  max_leg_min: z.number().int().min(15).max(180).default(60),
+  max_per_category: z.number().int().min(1).max(12).default(2),
+  must_include: z.array(z.string().max(120)).max(12).default([]),
+  exclude: z.array(z.string().max(120)).max(60).default([]),
+  start_node: z.string().max(120).optional(),
+  seed: z.number().int().default(44),
+  costing: z.enum(['auto','pedestrian','bicycle','motorcycle']).default('auto'),
+  with_windows: z.boolean().default(true),
+}).strict().refine(body => body.min_stops <= body.max_stops, { message: 'min_stops must not exceed max_stops.' })
+  .refine(body => new Set(body.spot_ids).size === body.spot_ids.length, { message: 'spot_ids must be unique.' });
+
+// cuOpt is deliberately isolated to this administrator-only benchmark path.
+// Traveler generation always remains on the deterministic local solver.
+trailsRouter.post('/admin/trails/compare-solvers', async (req: AuthRequest, res: Response) => {
+  const parsed = compareSolversSchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid solver comparison request.' } });
+  if (!await cuoptEnabledWithKey()) return res.status(503).json({ success: false, error: { code: 'CUOPT_DISABLED', message: 'cuOpt comparison requires explicit local enablement and the private owner key file.' } });
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ success: false, error: { code: 'DATABASE_UNAVAILABLE', message: 'Trail storage is unavailable.' } });
+  try {
+    const allSpots = await loadTrailSignalInputs(pool);
+    const byId = new Map(allSpots.map(spot => [spot.spotId, spot]));
+    const selected = parsed.data.spot_ids.map(id => byId.get(id));
+    if (selected.some(spot => !spot)) return res.status(400).json({ success: false, error: { code: 'SPOT_SET_INVALID', message: 'Every spot must be published, public, and non-test.' } });
+    if (parsed.data.start_node && !byId.has(parsed.data.start_node)) return res.status(400).json({ success: false, error: { code: 'START_SPOT_INVALID', message: 'Start spot must be a published catalog spot.' } });
+    const spots = selected.filter((spot): spot is NonNullable<typeof spot> => spot !== undefined);
+    const values = new Map(computeSpotSignals(spots).map(signal => [signal.spotId, signal.value]));
+    const problem: TrailProblem = {
+      nodes: spots.map(spot => ({ spotId: spot.spotId, title: spot.title, municipality: spot.municipality, description: spot.description,
+        lat: spot.lat, lng: spot.lng, value: values.get(spot.spotId) ?? 0, dwellMin: 45,
+        windows: parsed.data.with_windows ? windowsFromBestTime(spot.bestTime ?? []) : [], crowdByHour: Array(24).fill(0), category: spot.category })),
+      startNode: parsed.data.start_node, dayStartMin: 8 * 60, budgetMin: parsed.data.budget_min,
+      minStops: parsed.data.min_stops, maxStops: parsed.data.max_stops, maxLegMin: parsed.data.max_leg_min,
+      maxPerCategory: parsed.data.max_per_category, mustInclude: parsed.data.must_include, exclude: parsed.data.exclude,
+      weights: { crowdPenalty: 0.15, travelPenalty: 0.003 }, seed: parsed.data.seed, costing: parsed.data.costing,
+    };
+    const matrix = await loadTravelTimeLookup(pool, problem.costing ?? 'auto');
+    const local = solveLocal(problem, matrix);
+    const cuopt = await createCuoptSolver().solve(problem, matrix);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const [solver, result] of [['local', local], ['cuopt', cuopt]] as const) {
+        const generationId = randomUUID();
+        await client.query(`INSERT INTO trail_generations
+          (id,kind,requested_by,input,constraints,solver,solver_ms,objective,result,ai_used)
+          VALUES ($1,'benchmark',$2,$3::jsonb,$4::jsonb,$5,$6,$7,$8::jsonb,FALSE)`, [generationId, req.user!.id,
+          JSON.stringify({ compare_solvers: true, candidate_count: problem.nodes.length, seed: problem.seed, costing: problem.costing }),
+          JSON.stringify({ budget_min: problem.budgetMin, min_stops: problem.minStops, max_stops: problem.maxStops, max_leg_min: problem.maxLegMin, with_windows: parsed.data.with_windows }),
+          solver, Math.max(0, Math.round(result.ms)), Number.isFinite(result.objective) ? result.objective : -1,
+          JSON.stringify({ feasible: result.feasible, objective: Number.isFinite(result.objective) ? result.objective : null, stops: result.stops.map(stop => stop.spotId), stop_count: result.stops.length, total_min: result.totalMin, total_km: result.totalKm })]);
+      }
+      await client.query('COMMIT');
+    } catch (error) { await client.query('ROLLBACK'); throw error; }
+    finally { client.release(); }
+    return res.json({ success: true, data: { local, cuopt } });
+  } catch (error) {
+    if (error instanceof CuoptError) return res.status(error.code === 'CUOPT_INFEASIBLE' ? 422 : 503).json({ success: false, error: { code: error.code, message: error.code === 'CUOPT_INFEASIBLE' ? 'cuOpt found no route satisfying the submitted constraints.' : 'cuOpt comparison is unavailable.' } });
+    return res.status(503).json({ success: false, error: { code: 'SOLVER_COMPARISON_FAILED', message: 'Solver comparison failed; no benchmark rows were saved.' } });
   }
 });
 

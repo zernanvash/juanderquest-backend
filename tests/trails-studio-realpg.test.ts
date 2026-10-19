@@ -43,6 +43,16 @@ describeRealPg('Trail Studio API (isolated real PostgreSQL schema)', () => {
   test('Trail Studio review and edit routes reject unauthenticated requests', async () => {
     expect((await request(app).get('/api/v1/admin/trails/review')).status).toBe(401);
     expect((await request(app).patch(`/api/v1/admin/trails/${trailId}`).send({ title: 'Hijack' })).status).toBe(401);
+    expect((await request(app).post('/api/v1/admin/trails/compare-solvers').send({})).status).toBe(401);
+  });
+
+  test('compare-solvers is closed unless the evaluation flag and private key are available', async () => {
+    const response = await request(app).post('/api/v1/admin/trails/compare-solvers')
+      .set('Authorization', `Bearer ${adminToken}`).send({ spot_ids: [spotId, `${spotId}-2`, `${spotId}-3`], budget_min: 240 });
+    expect(response.status).toBe(503);
+    expect(response.body.error.code).toBe('CUOPT_DISABLED');
+    const rows = await fixture.pool.query("SELECT count(*)::int AS count FROM trail_generations WHERE kind='benchmark'");
+    expect(rows.rows[0].count).toBe(0);
   });
 
   test('admin review queue and PATCH atomically edit story, stop narration, tier, price and availability', async () => {

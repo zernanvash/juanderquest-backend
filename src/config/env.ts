@@ -74,6 +74,8 @@ const rawEnv = cleanEnv(process.env, {
   // Trail NIM is optional; credentials are read only from the private key file.
   NIM_BASE_URL: str({ default: 'https://integrate.api.nvidia.com/v1' }),
   NIM_MODEL: str({ default: 'nvidia/nemotron-3.5-lightning-30b-a3b' }),
+  // Hosted cuOpt is evaluation-only; an owner must opt in explicitly.
+  TRAILS_CUOPT_ENABLED: bool({ default: false }),
   PROGRESSION_ENABLED: bool({ default: true }),
   PROGRESSION_EMIT_OUTBOX_ENABLED: bool({ default: true }),
   PROGRESSION_OUTBOX_WORKER_ENABLED: bool({ default: false }),

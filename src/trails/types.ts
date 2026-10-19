@@ -39,7 +39,7 @@ export interface TrailSolution {
   totalMin: number;
   totalKm: number;
   feasible: boolean;
-  solver: 'local' | 'exact';
+  solver: 'local' | 'exact' | 'cuopt';
   ms: number;
 }
 
