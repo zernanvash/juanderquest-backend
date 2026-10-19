@@ -60,14 +60,14 @@ export async function generateTrail(pool: Pool, input: GenerateTrailInput) {
     const municipalities = [...new Set(solution.stops.map(s => nodes.find(n => n.spotId === s.spotId)?.municipality).filter((v): v is string => Boolean(v)))];
     const selectedStops = solution.stops.map(stop => {
       const node = nodes.find(item => item.spotId === stop.spotId)!;
-      return { spot_id: node.spotId, name: node.title, municipality: node.municipality, category: node.category, description: node.description };
+      return { spot_id: node.spotId, name: node.title ?? node.spotId, municipality: node.municipality ?? 'Pangasinan', category: node.category, description: node.description };
     });
     const storyResult = await writeTrailStory(client, {
       theme: input.theme ?? signalRequest.themes?.[0] ?? 'Pangasinan discoveries',
       municipalities,
       total_minutes: solution.totalMin,
       stops: selectedStops,
-      known_catalog_places: nodes.map(node => node.title),
+      known_catalog_places: nodes.map(node => node.title ?? node.spotId),
     }, { nodes, solution });
     const story = storyResult.value;
     const trailId = `trl_${randomUUID()}`;

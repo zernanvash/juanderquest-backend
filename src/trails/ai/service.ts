@@ -76,7 +76,7 @@ export async function writeTrailStory(
 }
 
 export function fallbackTrendDigest(facts: Pick<WeeklyTrendFacts, 'top_categories' | 'top_good_for'>): TrendDigest {
-  const themes = facts.top_categories.slice(0, 3).map((item, index) => ({
+  const themes: TrendDigest['themes'] = facts.top_categories.slice(0, 3).map((item, index) => ({
     label: item.category.slice(0, 40), categories: [item.category], good_for: [],
     weight: Math.max(0.25, 1 - index * 0.2),
   }));
