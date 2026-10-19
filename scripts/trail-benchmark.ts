@@ -113,7 +113,7 @@ async function main() {
     finally { client.release(); }
 
     const report = renderReport(outputs, { realSpotCount, useCuopt });
-    const reportPath = process.env.TRAIL_BENCHMARK_REPORT_PATH ?? resolve(process.cwd(), '..', '..', 'docs', '07-testing', 'trail-engine-benchmark.md');
+    const reportPath = process.env.TRAIL_BENCHMARK_REPORT_PATH ?? resolve(process.cwd(), 'docs', '07-testing', 'trail-engine-benchmark.md');
     await mkdir(resolve(reportPath, '..'), { recursive: true });
     await writeFile(reportPath, report, 'utf8');
     console.log(JSON.stringify({ database: 'jdq_preview_codex_dev', runs: RUNS, rows_written: outputs.length, cuopt_enabled: useCuopt,
@@ -131,9 +131,9 @@ function renderReport(outputs: BenchmarkEntry[], context: { realSpotCount: numbe
   const feasible = (rows: BenchmarkEntry[]) => rows.length ? `${rows.filter(row => row.result.feasible).length}/${rows.length}` : 'pending owner key';
   const lines = [
     '# Trail Engine Solver Benchmark', '',
-    `Run date: ${new Date().toISOString()}  `,
-    'Database: disposable loopback `jdq_preview_codex_dev`; no production or presentation database was used.  ',
-    `Instances: ${RUNS}; seeds 20261020–20261049; candidate sizes 15/30/60, budgets 240/480 minutes, windows off/on.  `,
+    `Run date: ${new Date().toISOString()}`,
+    'Database: disposable loopback `jdq_preview_codex_dev`; no production or presentation database was used.',
+    `Instances: ${RUNS}; seeds 20261020–20261049; candidate sizes 15/30/60, budgets 240/480 minutes, windows off/on.`,
     `Published real spots available: ${context.realSpotCount}. Candidate sets larger than the available catalog use deterministic repeated catalog entries with explicit benchmark aliases; same-source alias legs use approximate Haversine estimates.`, '',
     'Exact is an oracle over the first 10 candidates only; its objective/feasibility are not directly comparable to the full-size local run. Each reported wall time is solver-reported milliseconds; SQL persistence and NIM/cooling overhead are excluded.', '',
     '| Solver | Instances | Feasible | Mean objective | Mean stops | Mean solver ms |',
