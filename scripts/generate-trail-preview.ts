@@ -12,7 +12,8 @@ async function main() {
     if (identity.rows[0]?.name !== 'jdq_preview_codex_dev') throw new Error('Preview database identity mismatch.');
     const migrations = await pool.query(`SELECT 1 FROM schema_migrations WHERE filename='055_trail_engine.sql'`);
     const spots = await pool.query(`SELECT count(*)::int AS count FROM spots WHERE status='published' AND COALESCE(is_test,FALSE)=FALSE`);
-    if (!migrations.rowCount || Number(spots.rows[0]?.count) < 3) throw new Error('Preview DB must have migration 055 and at least 3 published non-test spots.');
+    if (!migrations.rowCount) throw new Error('Preview DB is missing migration 055_trail_engine.sql.');
+    if (Number(spots.rows[0]?.count) < 3) throw new Error(`Preview DB needs at least 3 published non-test spots; found ${spots.rows[0]?.count ?? 0}.`);
     const result = await generateTrail(pool, { kind:'benchmark', theme:'Pangasinan discoveries', tier:'starter', budgetMin:600, minStops:3, maxStops:6, maxLegMin:180, maxPerCategory:6, seed:20261019 });
     console.log(JSON.stringify({ trail: {
       id:result.trail.id,slug:result.trail.slug,title:result.trail.title,tier:result.trail.tier,status:result.trail.status,
