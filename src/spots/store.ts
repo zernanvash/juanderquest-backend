@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { env } from '../config/env.js';
 import { isDevelopmentSeedEnabled } from '../db/policy.js';
 import { db } from '../db/index.js';
+import { matchSpotToAreas } from '../maps/areas-service.js';
 
 export type SpotCategory = 'eat_drink' | 'nature_outdoors' | 'culture_heritage' | 'activities_wellness' | 'shopping_local' | 'stay';
 export type SpotTrust = 'lgu_verified' | 'editorial' | 'open_data' | 'community';
@@ -22,6 +23,7 @@ export interface Spot {
   trust_level: SpotTrust; status: 'published' | 'needs_review' | 'unpublished';
   quest_id?: string; created_by?: string; created_at: string; updated_at: string;
   crowd_capacity_band?: CrowdCapacityBand; reviewed_by?: string; reviewed_at?: string; recommendation_suppressed?: boolean;
+  town_area_id?: string | null; barangay_area_id?: string | null;
   is_test?: boolean;
 }
 
@@ -87,7 +89,12 @@ export class SpotStore {
 
   private async persistSpot(s: Spot) {
     if (!this.pg) return;
-    await this.pg.query(`INSERT INTO spots (id,slug,name,description,category,subcategory,tags,municipality,address,gps_lat,gps_lng,price_level,hours,amenities,good_for,best_time,image_url,source_type,source_name,source_url,trust_level,status,quest_id,created_by,is_test,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,is_test=EXCLUDED.is_test,updated_at=EXCLUDED.updated_at`,[s.id,s.slug,s.name,s.description,s.category,s.subcategory,JSON.stringify(s.tags),s.municipality,s.address,s.gps_lat,s.gps_lng,s.price_level,JSON.stringify(s.hours),JSON.stringify(s.amenities),JSON.stringify(s.good_for || []),JSON.stringify(s.best_time || []),s.image_url,s.source_type,s.source_name,s.source_url||null,s.trust_level,s.status,s.quest_id||null,s.created_by||null,Boolean(s.is_test),s.created_at,s.updated_at]);
+    try {
+      await this.pg.query(`INSERT INTO spots (id,slug,name,description,category,subcategory,tags,municipality,address,gps_lat,gps_lng,price_level,hours,amenities,good_for,best_time,image_url,source_type,source_name,source_url,trust_level,status,quest_id,created_by,is_test,created_at,updated_at,town_area_id,barangay_area_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,is_test=EXCLUDED.is_test,updated_at=EXCLUDED.updated_at,town_area_id=COALESCE(EXCLUDED.town_area_id, spots.town_area_id),barangay_area_id=COALESCE(EXCLUDED.barangay_area_id, spots.barangay_area_id)`,[s.id,s.slug,s.name,s.description,s.category,s.subcategory,JSON.stringify(s.tags),s.municipality,s.address,s.gps_lat,s.gps_lng,s.price_level,JSON.stringify(s.hours),JSON.stringify(s.amenities),JSON.stringify(s.good_for || []),JSON.stringify(s.best_time || []),s.image_url,s.source_type,s.source_name,s.source_url||null,s.trust_level,s.status,s.quest_id||null,s.created_by||null,Boolean(s.is_test),s.created_at,s.updated_at,s.town_area_id||null,s.barangay_area_id||null]);
+    } catch {
+      // Fallback for partial schemas without area columns
+      await this.pg.query(`INSERT INTO spots (id,slug,name,description,category,subcategory,tags,municipality,address,gps_lat,gps_lng,price_level,hours,amenities,good_for,best_time,image_url,source_type,source_name,source_url,trust_level,status,quest_id,created_by,is_test,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,is_test=EXCLUDED.is_test,updated_at=EXCLUDED.updated_at`,[s.id,s.slug,s.name,s.description,s.category,s.subcategory,JSON.stringify(s.tags),s.municipality,s.address,s.gps_lat,s.gps_lng,s.price_level,JSON.stringify(s.hours),JSON.stringify(s.amenities),JSON.stringify(s.good_for || []),JSON.stringify(s.best_time || []),s.image_url,s.source_type,s.source_name,s.source_url||null,s.trust_level,s.status,s.quest_id||null,s.created_by||null,Boolean(s.is_test),s.created_at,s.updated_at]);
+    }
   }
 
   getPreferences(userId:string): DiscoveryPreferences { return this.preferences.get(userId) || {categories:[],tags:[],occasions:[],price_levels:[],radius_km:25,onboarding_state:'pending'}; }
@@ -117,8 +124,6 @@ export class SpotStore {
     const candidates=this.spots.filter(s=>s.id!==source.id&&s.status==='published'&&!s.recommendation_suppressed&&this.crowd(s).crowd_status!=='estimated_busy').map(s=>{
       const shared=s.tags.filter(t=>source.tags.includes(t));const tagScore=shared.length/Math.max(new Set([...source.tags,...s.tags]).size,1);const categoryScore=s.subcategory===source.subcategory?1:s.category===source.category?.65:0;if(!shared.length&&!categoryScore)return null;
       const distance=distanceKm(source.gps_lat,source.gps_lng,s.gps_lat,s.gps_lng);const trust={lgu_verified:1,editorial:.9,open_data:.75,community:.6}[s.trust_level];const pressure=this.crowd(s);const pressureScore=pressure.crowd_status==='quiet'?1:pressure.crowd_status==='moderate'?.55:.7;const pref=prefs&&[...prefs.categories,...prefs.tags,...prefs.occasions].some(v=>v===s.category||s.tags.includes(v))?1:0;
-      // Quality and preference similarity intentionally outweigh proximity. This keeps
-      // the contract usable when the catalog expands from Pangasinan nationwide.
       const distanceScore=Math.max(0,1-distance/500);const score=tagScore*.35+categoryScore*.25+pref*.15+trust*.1+pressureScore*.1+distanceScore*.05;const reasons=[shared.length?`Similar ${shared.slice(0,2).join(' and ').replaceAll('_',' ')}`:`Similar ${s.subcategory.replaceAll('_',' ')}`,pref?'Matches your travel preferences':'Matches this destination',`${s.municipality} alternative`];
       return {...s,...pressure,distance_km:Number(distance.toFixed(2)),alternative_score:Number(score.toFixed(4)),recommendation_kind:'similar_place',sponsored:false,recommendation_reasons:reasons};
     }).filter(Boolean) as any[];
@@ -153,7 +158,8 @@ export class SpotStore {
     while (this.spots.some(s => s.slug === slug)) {
       slug = `${baseSlug}-${randomUUID().slice(0,8)}`;
     }
-    const spot:Spot={...input,id:randomUUID(),slug,source_type:'community',source_name:'JuanDerQuest Community',trust_level:'community',status:'published',crowd_capacity_band:'medium',recommendation_suppressed:false,created_by:userId,created_at:timestamp,updated_at:timestamp};
+    const areaMatch = matchSpotToAreas(input.gps_lat, input.gps_lng, input.municipality);
+    const spot:Spot={...input,id:randomUUID(),slug,source_type:'community',source_name:'JuanDerQuest Community',trust_level:'community',status:'published',crowd_capacity_band:'medium',recommendation_suppressed:false,created_by:userId,created_at:timestamp,updated_at:timestamp,town_area_id:areaMatch.townAreaId,barangay_area_id:areaMatch.barangayAreaId};
     await this.persistSpot(spot);
     this.spots.push(spot);
     return {spot};
