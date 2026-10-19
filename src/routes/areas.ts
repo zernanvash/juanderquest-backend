@@ -63,7 +63,10 @@ areasRouter.get('/areas', async (req: Request, res: Response) => {
 
   if (pool) {
     try {
-      // Filter by min_zoom and spatial bbox intersection
+      // Filter by min_zoom and spatial bbox intersection (overlap condition):
+      // a.bbox is [minLng, minLat, maxLng, maxLat]
+      // Viewport is [minLng, minLat, maxLng, maxLat]
+      // Overlap: a.bbox[1] <= :maxLng AND a.bbox[3] >= :minLng AND a.bbox[2] <= :maxLat AND a.bbox[4] >= :minLat
       const query = `
         SELECT a.id, a.level, a.name, a.display_name, a.label_lat, a.label_lng,
                a.has_boundary, a.bbox, a.min_zoom, a.parent_id,
@@ -71,13 +74,13 @@ areasRouter.get('/areas', async (req: Request, res: Response) => {
         FROM admin_areas a
         LEFT JOIN spots s ON (s.town_area_id = a.id OR s.barangay_area_id = a.id)
         WHERE a.min_zoom <= $1
-          AND a.bbox[1] <= $4 AND a.bbox[3] >= $2
-          AND a.bbox[2] <= $5 AND a.bbox[4] >= $3
+          AND a.bbox[1] <= $2 AND a.bbox[3] >= $3
+          AND a.bbox[2] <= $4 AND a.bbox[4] >= $5
         GROUP BY a.id
         ORDER BY published_spot_count DESC, a.name ASC
         LIMIT 500
       `;
-      const result = await pool.query(query, [zoom, maxLng, maxLat, minLng, minLat]);
+      const result = await pool.query(query, [zoom, maxLng, minLng, maxLat, minLat]);
       const items = result.rows.map((r) => ({
         id: r.id,
         level: r.level,
@@ -101,11 +104,10 @@ areasRouter.get('/areas', async (req: Request, res: Response) => {
     }
   }
 
-  // Fallback response from in-memory spots if db unavailable
-  return res.json({
-    success: true,
-    data: [],
-    meta: { count: 0 },
+  // When database pool is unavailable, return 503 Service Unavailable
+  return res.status(503).json({
+    success: false,
+    error: { code: 'SERVICE_UNAVAILABLE', message: 'Database pool is unavailable.' },
   });
 });
 

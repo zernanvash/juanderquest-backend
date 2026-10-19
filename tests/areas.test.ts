@@ -161,6 +161,20 @@ describe('Admin Areas & Geometry Utilities (Plan 45 Phase 2)', () => {
   });
 
   describe('HTTP Endpoints /api/v1/areas', () => {
+    let testDb: any;
+
+    beforeAll(async () => {
+      testDb = await createTestDb();
+      setPool(testDb.pool);
+    });
+
+    afterAll(async () => {
+      setPool(null as any);
+      if (testDb) {
+        await testDb.close();
+      }
+    });
+
     it('returns public list of areas with Cache-Control headers', async () => {
       const res = await request(app).get('/api/v1/areas?zoom=10');
       expect(res.status).toBe(200);
@@ -226,6 +240,47 @@ describe('Admin Areas & Geometry Utilities (Plan 45 Phase 2)', () => {
         expect(res.body.error.code).toBe('DATABASE_ERROR');
       } finally {
         setPool(null as any);
+      }
+    });
+
+    it('returns 503 when database pool is not available', async () => {
+      setPool(null as any);
+      try {
+        const res = await request(app).get('/api/v1/areas');
+        expect(res.status).toBe(503);
+        expect(res.body.error.code).toBe('SERVICE_UNAVAILABLE');
+      } finally {
+        setPool(null as any);
+      }
+    });
+
+    it('filters areas by spatial bbox overlap correctly on real PG', async () => {
+      const testDb = await createTestDb();
+      setPool(testDb.pool);
+      try {
+        // Seed 3 test areas:
+        // Area 1: Fully inside viewport [120.2, 16.0, 120.4, 16.2] -> bbox [120.25, 16.05, 120.35, 16.15]
+        // Area 2: Partially overlapping viewport -> bbox [120.35, 16.15, 120.50, 16.30]
+        // Area 3: Completely outside viewport -> bbox [120.60, 16.40, 120.70, 16.50]
+        await testDb.pool.query(`
+          INSERT INTO admin_areas (id, psgc_code, level, name, display_name, label_lat, label_lng, bbox, min_zoom)
+          VALUES
+            ('test-inside', 999001, 'town', 'Inside Area', 'Inside Area, Pangasinan', 16.1, 120.3, ARRAY[120.25, 16.05, 120.35, 16.15], 9),
+            ('test-partial', 999002, 'town', 'Partial Area', 'Partial Area, Pangasinan', 16.2, 120.4, ARRAY[120.35, 16.15, 120.50, 16.30], 9),
+            ('test-outside', 999003, 'town', 'Outside Area', 'Outside Area, Pangasinan', 16.45, 120.65, ARRAY[120.60, 16.40, 120.70, 16.50], 9)
+        `);
+
+        // Query with bbox=120.2,16.0,120.4,16.2 (minLng, minLat, maxLng, maxLat)
+        const res = await request(app).get('/api/v1/areas?bbox=120.2,16.0,120.4,16.2&zoom=10');
+        expect(res.status).toBe(200);
+        const areaIds = res.body.data.map((a: any) => a.id);
+
+        expect(areaIds).toContain('test-inside');
+        expect(areaIds).toContain('test-partial');
+        expect(areaIds).not.toContain('test-outside');
+      } finally {
+        setPool(null as any);
+        await testDb.close();
       }
     });
   });
