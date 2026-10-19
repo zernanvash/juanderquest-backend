@@ -18,9 +18,14 @@ export JDQ_REAL_PG_URL="$(JDQ_DB_USER="$database_user" JDQ_DB_PASSWORD="$databas
 ')"
 export DATABASE_URL="$JDQ_REAL_PG_URL"
 # WSL cannot parse the Windows absolute gitdir stored in a Windows worktree's
-# .git file. Set the equivalent Linux paths for legacy tests that call git.
-export GIT_DIR='/mnt/c/Users/HP/Desktop/Code/JuanderQuest/backend/.git/worktrees/codex-trail-engine-backend'
-export GIT_WORK_TREE="$repo_dir"
+# .git file. Set equivalent Linux paths only for that worktree; native WSL
+# clones should use their own local .git directory.
+if [[ -f "$repo_dir/.git" ]]; then
+  export GIT_DIR='/mnt/c/Users/HP/Desktop/Code/JuanderQuest/backend/.git/worktrees/codex-trail-engine-backend'
+  export GIT_WORK_TREE="$repo_dir"
+else
+  unset GIT_DIR GIT_WORK_TREE
+fi
 unset database_password
 export NODE_ENV=test
 cd "$repo_dir"
