@@ -1,7 +1,7 @@
 import request from 'supertest';
 import { app } from '../src/app.js';
 import { pointInPolygon, pointInRing, createCirclePolygon, distanceMeters } from '../src/maps/geometry.js';
-import { matchSpotToAreas, AreaRecord } from '../src/maps/areas-service.js';
+import { matchSpotToAreas, ensureAreaCache, AreaRecord } from '../src/maps/areas-service.js';
 import { createTestDb } from '../src/db/testHarness.js';
 import { setPool } from '../src/db/pool.js';
 
@@ -337,7 +337,6 @@ describe('Admin Areas & Geometry Utilities (Plan 45 Phase 2)', () => {
     });
 
     it('assigns town and barangay to a newly created spot from the DB-loaded area cache', async () => {
-      const { ensureAreaCache } = await import('../src/maps/areas-service.js');
       const testDb = await createTestDb();
       setPool(testDb.pool);
       try {
