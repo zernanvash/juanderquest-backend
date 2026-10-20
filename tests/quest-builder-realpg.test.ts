@@ -1,10 +1,14 @@
 import { randomUUID } from 'crypto';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { app } from '../src/app.js';
 import { db } from '../src/db/index.js';
 import { env } from '../src/config/env.js';
 import { setPool } from '../src/db/pool.js';
+import { MIGRATIONS } from '../src/db/migrations.js';
 import { spotStore } from '../src/spots/store.js';
 import { createTestDb, type TestDbInstance } from '../src/db/testHarness.js';
 import { signQuestChallenge } from '../src/auth/tokens.js';
@@ -490,6 +494,236 @@ realPg('Plan 43 Quest Builder & Multi-Task Verification Suite (Real PostgreSQL)'
       expect(res.body.data.task_funnel).toHaveLength(4);
       expect(res.body.data.task_funnel[0].verified).toBe(1);
       expect(res.body.data.task_funnel[0].avg_failed_tries).toBe(1); // 1 failed try recorded earlier
+    });
+  });
+
+  describe('Migration 054 Pre-054 Schema Upgrade Verification', () => {
+    it('upgrades v1 steps on a pre-054 schema without inventing QR codes, coordinates, or using quest.id as spot_id', async () => {
+      const url = new URL(process.env.JDQ_REAL_PG_URL!);
+      const schema = `jdq_test_mig054_${randomUUID().replace(/-/g, '')}`;
+      const admin = new Pool({ connectionString: url.toString(), connectionTimeoutMillis: 3000 });
+      await admin.query(`CREATE SCHEMA ${schema}`);
+      const migPool = new Pool({
+        connectionString: url.toString(),
+        options: `-c search_path=${schema}`,
+        max: 2,
+        connectionTimeoutMillis: 3000,
+      });
+
+      try {
+        // 1. Apply all migrations BEFORE 054_quest_builder.sql
+        const pre054Files = MIGRATIONS.filter((f) => f !== '054_quest_builder.sql');
+        for (const file of pre054Files) {
+          const sql = readFileSync(join(process.cwd(), 'migrations', file), 'utf8');
+          await migPool.query(sql);
+        }
+
+        // Allow nullable gps_lat/gps_lng and empty marker_code on quests to test missing-coordinate and missing-code edge cases
+        await migPool.query('ALTER TABLE quests ALTER COLUMN gps_lat DROP NOT NULL');
+        await migPool.query('ALTER TABLE quests ALTER COLUMN gps_lng DROP NOT NULL');
+        await migPool.query('ALTER TABLE quests ALTER COLUMN marker_code DROP NOT NULL');
+
+        // 2. Seed users & spots
+        await migPool.query(
+          `INSERT INTO users(id, seed_id, display_name, email, role, demo_points)
+           VALUES ('u-mig-author', 'u-mig-author', 'Mig Author', 'mig@example.test', 'user', 0)`
+        );
+        await migPool.query(
+          `INSERT INTO spots(id, slug, name, description, category, subcategory, municipality, address, gps_lat, gps_lng,
+             status, is_test, recommendation_suppressed, source_type, source_name, created_by)
+           VALUES
+             ('spot-bound-1', 'spot-bound-1', 'Bound Spot 1', 'Desc', 'nature_outdoors', 'beach', 'Bolinao', 'Addr', 16.35, 119.85, 'published', false, false, 'community', 'Author', 'u-mig-author'),
+             ('spot-direct-2', 'spot-direct-2', 'Direct Spot 2', 'Desc', 'nature_outdoors', 'beach', 'Bolinao', 'Addr', 16.36, 119.86, 'published', false, false, 'community', 'Author', 'u-mig-author')`
+        );
+
+        // Quest A: Has quest coordinates (16.35, 119.85), quest marker_code ('QUEST-QR-STICKER-01'), and an active binding to 'spot-bound-1'
+        const v1StepsQuestA = [
+          // Case 1a: QR step WITH its own marker_code and step coordinates
+          {
+            title: 'QR with step code & coords',
+            description: 'Scan plaque 1',
+            checkpoint_type: 'qr',
+            marker_code: 'STEP-QR-EXPLICIT-99',
+            gps_lat: 16.351,
+            gps_lng: 119.851,
+            radius_meters: 80,
+          },
+          // Case 1b: QR step WITHOUT step marker_code -> falls back to quests.marker_code ('QUEST-QR-STICKER-01'), and without step coords -> falls back to quests.gps_lat/lng
+          {
+            title: 'QR fallback to quest code & quest coords',
+            description: 'Scan main sticker',
+            checkpoint_type: 'qr',
+          },
+          // Case 3a: Action step WITH explicit action_target_id
+          {
+            title: 'Action with explicit target',
+            checkpoint_type: 'action',
+            action_kind: 'like_spot',
+            action_target_id: 'spot-explicit-target',
+          },
+          // Case 3b: Action step WITHOUT action_target_id -> falls back to active binding ('spot-bound-1'), never quests.id
+          {
+            title: 'Action fallback to bound spot',
+            checkpoint_type: 'action',
+            action_kind: 'save_spot',
+          },
+          // Case 4: AR step with custom object/color and fallback to quest coords
+          {
+            title: 'AR step',
+            checkpoint_type: 'ar',
+            object: 'gem',
+            color: '#2D6A4F',
+            radius_meters: 20, // should clamp to >= 30
+          },
+          // Case 5: view_story demoted to required: false
+          {
+            title: 'Story step',
+            checkpoint_type: 'action',
+            action_kind: 'view_story',
+          },
+        ];
+
+        await migPool.query(
+          `INSERT INTO quests(id, title, description, category, location_name, gps_lat, gps_lng, radius_meters, reward_points, marker_code, marker_image_url, author_id, steps)
+           VALUES ('quest-mig-a', 'Quest A', 'Desc', 'eco', 'Bolinao', 16.35, 119.85, 100, 50, 'QUEST-QR-STICKER-01', '', 'u-mig-author', $1::jsonb)`,
+          [JSON.stringify(v1StepsQuestA)]
+        );
+
+        await migPool.query(
+          `INSERT INTO reviewed_quest_spot_bindings(id, quest_id, spot_id, status, is_test)
+           VALUES ($1, 'quest-mig-a', 'spot-bound-1', 'active', false)`,
+          [randomUUID()]
+        );
+
+        // Quest B: Missing quest coordinates (NULL, NULL), blank/null quest marker_code, no binding, and no spot linked -> tests missing-data flags without inventing values
+        const v1StepsQuestB = [
+          // QR step with no step code and no quest code, and no coords
+          {
+            title: 'QR missing code and coords',
+            checkpoint_type: 'qr',
+          },
+          // Location step with no step coords and no quest coords
+          {
+            title: 'Location missing coords',
+            checkpoint_type: 'location',
+          },
+          // AR step with no step coords and no quest coords
+          {
+            title: 'AR missing coords',
+            checkpoint_type: 'ar',
+          },
+          // Action step with no target and no bound/linked spot
+          {
+            title: 'Action missing spot',
+            checkpoint_type: 'action',
+            action_kind: 'save_spot',
+          },
+        ];
+
+        await migPool.query(
+          `INSERT INTO quests(id, title, description, category, location_name, gps_lat, gps_lng, radius_meters, reward_points, marker_code, marker_image_url, author_id, steps)
+           VALUES ('quest-mig-b', 'Quest B', 'Desc', 'eco', 'Nowhere', NULL, NULL, 100, 50, NULL, '', 'u-mig-author', $1::jsonb)`,
+          [JSON.stringify(v1StepsQuestB)]
+        );
+
+        // Quest C: Linked via spots.quest_id ('spot-direct-2') without reviewed_quest_spot_bindings row
+        const v1StepsQuestC = [
+          {
+            title: 'Action fallback to spots.quest_id',
+            checkpoint_type: 'action',
+            action_kind: 'complete_quiz',
+          },
+        ];
+        await migPool.query(
+          `INSERT INTO quests(id, title, description, category, location_name, gps_lat, gps_lng, radius_meters, reward_points, marker_code, marker_image_url, author_id, steps)
+           VALUES ('quest-mig-c', 'Quest C', 'Desc', 'cultural', 'Bolinao', 16.36, 119.86, 100, 50, 'QUEST-QR-C', '', 'u-mig-author', $1::jsonb)`,
+          [JSON.stringify(v1StepsQuestC)]
+        );
+        await migPool.query(`UPDATE spots SET quest_id = 'quest-mig-c' WHERE id = 'spot-direct-2'`);
+
+        // 3. Apply 054_quest_builder.sql
+        const sql054 = readFileSync(join(process.cwd(), 'migrations', '054_quest_builder.sql'), 'utf8');
+        await migPool.query(sql054);
+
+        // 4. Assert Quest A upgraded tasks
+        const resA = await migPool.query(`SELECT steps FROM quests WHERE id = 'quest-mig-a'`);
+        const stepsA = resA.rows[0].steps as any[];
+        expect(stepsA).toHaveLength(6);
+
+        // Step 1: QR with explicit step code & coords
+        expect(stepsA[0].verification.type).toBe('qr');
+        expect(stepsA[0].verification.marker_code).toBe('STEP-QR-EXPLICIT-99');
+        expect(stepsA[0].verification.needs_new_qr_sheet).toBe(false);
+        expect(stepsA[0].verification.fence).toEqual({ lat: 16.351, lng: 119.851, radius_meters: 80 });
+
+        // Step 2: QR without step code -> uses quest's existing marker_code ('QUEST-QR-STICKER-01') and quest's gps_lat/lng (16.35, 119.85)
+        expect(stepsA[1].verification.type).toBe('qr');
+        expect(stepsA[1].verification.marker_code).toBe('QUEST-QR-STICKER-01');
+        expect(stepsA[1].marker_code).toBe('QUEST-QR-STICKER-01');
+        expect(stepsA[1].verification.needs_new_qr_sheet).toBe(false);
+        expect(stepsA[1].verification.fence).toEqual({ lat: 16.35, lng: 119.85, radius_meters: 100 });
+
+        // Step 3: Action with explicit action_target_id
+        expect(stepsA[2].verification.type).toBe('action');
+        expect(stepsA[2].verification.task).toEqual({ kind: 'like_spot', spot_id: 'spot-explicit-target' });
+
+        // Step 4: Action without action_target_id -> uses bound spot ('spot-bound-1'), NOT 'quest-mig-a'
+        expect(stepsA[3].verification.type).toBe('action');
+        expect(stepsA[3].verification.task).toEqual({ kind: 'save_spot', spot_id: 'spot-bound-1' });
+        expect(stepsA[3].verification.task.spot_id).not.toBe('quest-mig-a');
+
+        // Step 5: AR step with quest coords and clamped radius
+        expect(stepsA[4].verification.type).toBe('ar');
+        expect(stepsA[4].verification.fence).toEqual({ lat: 16.35, lng: 119.85, radius_meters: 30 });
+        expect(stepsA[4].verification.object).toBe('gem');
+        expect(stepsA[4].verification.color).toBe('#2D6A4F');
+
+        // Step 6: view_story demoted to required: false
+        expect(stepsA[5].required).toBe(false);
+
+        // 5. Assert Quest B missing-data edge cases (never invents 16.0/120.0, random QR code, or quest.id as spot_id)
+        const resB = await migPool.query(`SELECT steps FROM quests WHERE id = 'quest-mig-b'`);
+        const stepsB = resB.rows[0].steps as any[];
+        expect(stepsB).toHaveLength(4);
+
+        // QR with no code & no coords
+        expect(stepsB[0].verification.type).toBe('qr');
+        expect(stepsB[0].verification.marker_code ?? null).toBeNull();
+        expect(stepsB[0].verification.needs_new_qr_sheet).toBe(true);
+        expect(stepsB[0].needs_new_qr_sheet).toBe(true);
+        expect(stepsB[0].verification.fence ?? null).toBeNull();
+        expect(stepsB[0].verification.needs_author_review).toBe(true);
+        expect(stepsB[0].needs_author_review).toBe(true);
+        expect(stepsB[0].gps_lat ?? null).toBeNull();
+        expect(stepsB[0].gps_lng ?? null).toBeNull();
+
+        // Location with no coords
+        expect(stepsB[1].verification.type).toBe('location');
+        expect(stepsB[1].verification.fence ?? null).toBeNull();
+        expect(stepsB[1].verification.needs_author_review).toBe(true);
+        expect(stepsB[1].needs_author_review).toBe(true);
+
+        // AR with no coords
+        expect(stepsB[2].verification.type).toBe('ar');
+        expect(stepsB[2].verification.fence ?? null).toBeNull();
+        expect(stepsB[2].verification.needs_author_review).toBe(true);
+        expect(stepsB[2].needs_author_review).toBe(true);
+
+        // Action with no target and no bound/linked spot -> spot_id is null/omitted, needs_author_review: true, never 'quest-mig-b'
+        expect(stepsB[3].verification.type).toBe('action');
+        expect(stepsB[3].verification.task.spot_id ?? null).toBeNull();
+        expect(stepsB[3].verification.needs_author_review).toBe(true);
+        expect(stepsB[3].needs_author_review).toBe(true);
+
+        // 6. Assert Quest C action step resolves spot via spots.quest_id ('spot-direct-2')
+        const resC = await migPool.query(`SELECT steps FROM quests WHERE id = 'quest-mig-c'`);
+        const stepsC = resC.rows[0].steps as any[];
+        expect(stepsC[0].verification.task).toEqual({ kind: 'complete_quiz', spot_id: 'spot-direct-2' });
+      } finally {
+        await migPool.end();
+        await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+        await admin.end();
+      }
     });
   });
 });
