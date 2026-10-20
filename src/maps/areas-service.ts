@@ -32,6 +32,44 @@ export function getCachedAreas(): AreaRecord[] | null {
   return cachedAreas;
 }
 
+let cacheLoadedAt = 0;
+let cacheLoading: Promise<void> | null = null;
+const AREA_CACHE_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * Loads towns/barangays (with stored boundaries, migration 057) into the matcher cache.
+ * New spots are assigned at write time, so the cache must come from the database —
+ * never from files on disk. Refreshes at most every 10 minutes; failures keep the old cache.
+ */
+export async function ensureAreaCache(pool: Pick<Pool, 'query'> | null, force = false): Promise<void> {
+  if (!pool) return;
+  if (!force && cachedAreas && Date.now() - cacheLoadedAt < AREA_CACHE_TTL_MS) return;
+  if (cacheLoading) return cacheLoading;
+  cacheLoading = (async () => {
+    try {
+      const { rows } = await pool.query(
+        `SELECT id, psgc_code, level, name, display_name, parent_id, osm_relation_id, has_boundary,
+                label_lat, label_lng, bbox, min_zoom, shape_file, data_version, boundary
+           FROM admin_areas WHERE level IN ('town', 'barangay')`
+      );
+      cachedAreas = rows.map((r: any) => ({
+        ...r,
+        psgc_code: Number(r.psgc_code),
+        label_lat: Number(r.label_lat),
+        label_lng: Number(r.label_lng),
+        bbox: (r.bbox || []).map(Number) as [number, number, number, number],
+        geometry: typeof r.boundary === 'string' ? JSON.parse(r.boundary) : r.boundary ?? undefined,
+      }));
+      cacheLoadedAt = Date.now();
+    } catch (error) {
+      console.error('[areas] could not load admin_areas for spot matching:', error instanceof Error ? error.message : error);
+    } finally {
+      cacheLoading = null;
+    }
+  })();
+  return cacheLoading;
+}
+
 /**
  * Finds town and barangay area IDs for a given coordinate.
  */

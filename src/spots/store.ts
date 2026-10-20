@@ -3,7 +3,8 @@ import { randomUUID } from 'crypto';
 import { env } from '../config/env.js';
 import { isDevelopmentSeedEnabled } from '../db/policy.js';
 import { db } from '../db/index.js';
-import { matchSpotToAreas } from '../maps/areas-service.js';
+import { ensureAreaCache, matchSpotToAreas } from '../maps/areas-service.js';
+import { getPool } from '../db/pool.js';
 
 export type SpotCategory = 'eat_drink' | 'nature_outdoors' | 'culture_heritage' | 'activities_wellness' | 'shopping_local' | 'stay';
 export type SpotTrust = 'lgu_verified' | 'editorial' | 'open_data' | 'community';
@@ -158,6 +159,7 @@ export class SpotStore {
     while (this.spots.some(s => s.slug === slug)) {
       slug = `${baseSlug}-${randomUUID().slice(0,8)}`;
     }
+    await ensureAreaCache(getPool());
     const areaMatch = matchSpotToAreas(input.gps_lat, input.gps_lng, input.municipality);
     const spot:Spot={...input,id:randomUUID(),slug,source_type:'community',source_name:'JuanDerQuest Community',trust_level:'community',status:'published',crowd_capacity_band:'medium',recommendation_suppressed:false,created_by:userId,created_at:timestamp,updated_at:timestamp,town_area_id:areaMatch.townAreaId,barangay_area_id:areaMatch.barangayAreaId};
     await this.persistSpot(spot);

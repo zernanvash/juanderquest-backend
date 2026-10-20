@@ -1,7 +1,4 @@
 import { Router, Request, Response } from 'express';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
 import type { Pool } from 'pg';
 import { getPool } from '../db/pool.js';
 import { spotStore } from '../spots/store.js';
@@ -28,65 +25,6 @@ async function queryWithRetry(pool: Pool, text: string, values?: any[], retries 
     }
   }
   throw lastError;
-}
-
-function resolveGeoJsonPath(filename: string): string {
-  const candidates = [
-    process.env.JDQ_MAPS_DIR ? path.join(process.env.JDQ_MAPS_DIR, filename) : null,
-    path.resolve(process.cwd(), 'data/maps', filename),
-    path.resolve(__dirname, '../../data/maps', filename),
-    path.join(os.homedir(), 'jdq-maps/areas', filename),
-  ].filter(Boolean) as string[];
-
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return c;
-  }
-  return candidates[0];
-}
-
-const townsPath = resolveGeoJsonPath('towns.geojson');
-const barangaysPath = resolveGeoJsonPath('barangays.geojson');
-const provincePath = resolveGeoJsonPath('province.geojson');
-
-let cachedTownFeatures: Map<string, any> | null = null;
-let cachedBgyFeatures: Map<string, any> | null = null;
-let cachedProvinceFeature: any | null = null;
-
-function loadGeoJsonFeatures() {
-  if (!cachedProvinceFeature && fs.existsSync(provincePath)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(provincePath, 'utf8'));
-      cachedProvinceFeature = data.features ? data.features[0] : data;
-    } catch (e) {
-      console.error('[areas] failed to load province.geojson', e);
-    }
-  }
-
-  if (!cachedTownFeatures && fs.existsSync(townsPath)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(townsPath, 'utf8'));
-      cachedTownFeatures = new Map();
-      for (const feat of data.features || []) {
-        const psgc = String(feat.properties?.adm3_psgc);
-        cachedTownFeatures.set(psgc, feat);
-      }
-    } catch (e) {
-      console.error('[areas] failed to load towns.geojson', e);
-    }
-  }
-
-  if (!cachedBgyFeatures && fs.existsSync(barangaysPath)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(barangaysPath, 'utf8'));
-      cachedBgyFeatures = new Map();
-      for (const feat of data.features || []) {
-        const psgc = String(feat.properties?.adm4_psgc);
-        cachedBgyFeatures.set(psgc, feat);
-      }
-    } catch (e) {
-      console.error('[areas] failed to load barangays.geojson', e);
-    }
-  }
 }
 
 /**
@@ -239,8 +177,6 @@ areasRouter.get('/areas/:id/shape', async (req: Request, res: Response) => {
   const pool = getPool();
   res.setHeader('Cache-Control', 'public, max-age=86400');
 
-  loadGeoJsonFeatures();
-
   let areaRow: any = null;
   if (pool) {
     try {
@@ -264,42 +200,29 @@ areasRouter.get('/areas/:id/shape', async (req: Request, res: Response) => {
     });
   }
 
-  const psgcStr = String(areaRow.psgc_code);
+  const properties = {
+    id: areaRow.id,
+    name: areaRow.name,
+    display_name: areaRow.display_name,
+    level: areaRow.level,
+    has_boundary: Boolean(areaRow.has_boundary),
+  };
 
   if (areaRow.has_boundary) {
-    if (areaRow.level === 'province' || areaRow.id === 'pangasinan') {
-      if (cachedProvinceFeature) {
-        return res.json({
-          type: 'Feature',
-          properties: {
-            id: areaRow.id,
-            name: areaRow.name,
-            display_name: areaRow.display_name,
-            level: areaRow.level,
-            has_boundary: true,
-          },
-          geometry: cachedProvinceFeature.geometry,
-        });
-      }
+    const boundary = typeof areaRow.boundary === 'string' ? JSON.parse(areaRow.boundary) : areaRow.boundary;
+    if (boundary && (boundary.type === 'Polygon' || boundary.type === 'MultiPolygon')) {
+      return res.json({ type: 'Feature', properties, geometry: boundary });
     }
-
-    let feature = cachedTownFeatures?.get(psgcStr) || cachedBgyFeatures?.get(psgcStr);
-    if (feature) {
-      return res.json({
-        type: 'Feature',
-        properties: {
-          id: areaRow.id,
-          name: areaRow.name,
-          display_name: areaRow.display_name,
-          level: areaRow.level,
-          has_boundary: true,
-        },
-        geometry: feature.geometry,
-      });
-    }
+    // A boundary is expected but missing: fail visibly instead of drawing a misleading circle.
+    console.error(`[areas] admin_areas.boundary missing for ${areaRow.id}; re-run the admin-areas import`);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(503).json({
+      success: false,
+      error: { code: 'AREA_SHAPE_MISSING', message: `Boundary for ${areaRow.id} is not loaded yet.` },
+    });
   }
 
-  // §4 fallback: return a 600m circular polygon for places without exact polygons
+  // §4 fallback: only places that genuinely have no polygon get a 600 m display circle
   const circleCoords = createCirclePolygon(Number(areaRow.label_lng), Number(areaRow.label_lat), 600);
   return res.json({
     type: 'Feature',

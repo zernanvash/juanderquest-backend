@@ -70,6 +70,15 @@ async function run() {
     throw new Error(`GeoJSON files missing at ${inputDir}. Pass --input <dir> or set JDQ_MAPS_DIR.`);
   }
 
+  const provincePath = path.join(inputDir, 'province.geojson');
+  if (!fs.existsSync(provincePath)) {
+    throw new Error(`province.geojson missing at ${inputDir}. The province boundary is required (no circle fallback).`);
+  }
+  const provinceGeoJson = JSON.parse(fs.readFileSync(provincePath, 'utf8'));
+  const provinceGeometry = (provinceGeoJson.features ? provinceGeoJson.features[0] : provinceGeoJson).geometry;
+  if (!provinceGeometry || !['Polygon', 'MultiPolygon'].includes(provinceGeometry.type)) {
+    throw new Error('province.geojson has no Polygon/MultiPolygon geometry.');
+  }
   const townsGeoJson = JSON.parse(fs.readFileSync(townsPath, 'utf8'));
   const barangaysGeoJson = JSON.parse(fs.readFileSync(barangaysPath, 'utf8'));
 
@@ -89,10 +98,11 @@ async function run() {
     has_boundary: true,
     label_lat: 15.9281,
     label_lng: 120.3329,
-    bbox: [119.7, 15.6, 120.9, 16.4],
+    bbox: computeBbox(provinceGeometry),
     min_zoom: 7,
     shape_file: null,
     data_version: '2023-psa-namria',
+    geometry: provinceGeometry,
   };
   areas.push(pangasinanProvince);
 
@@ -221,6 +231,11 @@ async function run() {
       return;
     }
 
+    const missing = areas.filter((a) => a.has_boundary && !a.geometry);
+    if (missing.length) {
+      throw new Error(`${missing.length} areas marked has_boundary lack geometry (e.g. ${missing.slice(0, 3).map((a) => a.id).join(', ')}).`);
+    }
+
     // APPLY IN A SINGLE TRANSACTION
     console.log('\nApplying import in a single transaction...');
     await client.query('BEGIN');
@@ -229,8 +244,8 @@ async function run() {
     const upsertSql = `
       INSERT INTO admin_areas (
         id, psgc_code, level, name, display_name, parent_id, osm_relation_id,
-        has_boundary, label_lat, label_lng, bbox, min_zoom, shape_file, data_version, updated_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
+        has_boundary, label_lat, label_lng, bbox, min_zoom, shape_file, data_version, boundary, updated_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,NOW())
       ON CONFLICT (id) DO UPDATE SET
         psgc_code = EXCLUDED.psgc_code,
         level = EXCLUDED.level,
@@ -244,6 +259,7 @@ async function run() {
         min_zoom = EXCLUDED.min_zoom,
         shape_file = EXCLUDED.shape_file,
         data_version = EXCLUDED.data_version,
+        boundary = EXCLUDED.boundary,
         updated_at = NOW()
     `;
 
@@ -263,6 +279,7 @@ async function run() {
         a.min_zoom,
         a.shape_file,
         a.data_version,
+        a.has_boundary && a.geometry ? JSON.stringify(a.geometry) : null,
       ]);
     }
     console.log(`Upserted ${areas.length} admin_areas.`);

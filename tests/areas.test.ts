@@ -287,8 +287,9 @@ describe('Admin Areas & Geometry Utilities (Plan 45 Phase 2)', () => {
       setPool(testDb.pool);
       try {
         await testDb.pool.query(`
-          INSERT INTO admin_areas (id, psgc_code, level, name, display_name, label_lat, label_lng, bbox, min_zoom, has_boundary)
-          VALUES ('pangasinan', 105500000, 'province', 'Pangasinan', 'Pangasinan', 15.9281, 120.3329, ARRAY[119.7, 15.6, 120.9, 16.4], 7, true)
+          INSERT INTO admin_areas (id, psgc_code, level, name, display_name, label_lat, label_lng, bbox, min_zoom, has_boundary, boundary)
+          VALUES ('pangasinan', 105500000, 'province', 'Pangasinan', 'Pangasinan', 15.9281, 120.3329, ARRAY[119.7, 15.6, 120.9, 16.4], 7, true,
+                  '{"type":"MultiPolygon","coordinates":[[[[119.7,15.6],[120.9,15.6],[120.9,16.4],[119.7,16.4],[119.7,15.6]]]]}'::jsonb)
           ON CONFLICT (id) DO NOTHING
         `);
 
@@ -304,6 +305,57 @@ describe('Admin Areas & Geometry Utilities (Plan 45 Phase 2)', () => {
         const provSpotsRes = await request(app).get('/api/v1/areas/pangasinan/spots');
         expect(provSpotsRes.status).toBe(200);
         expect(provSpotsRes.body.success).toBe(true);
+      } finally {
+        setPool(null as any);
+        await testDb.close();
+      }
+    });
+
+    it('serves boundaries only from the database: stored shape → 200, missing shape → 503 (never a circle)', async () => {
+      const testDb = await createTestDb();
+      setPool(testDb.pool);
+      try {
+        await testDb.pool.query(`
+          INSERT INTO admin_areas (id, psgc_code, level, name, display_name, label_lat, label_lng, bbox, min_zoom, has_boundary, boundary)
+          VALUES
+            ('shape-stored', 999101, 'town', 'Stored', 'Stored, Pangasinan', 16.05, 120.05, ARRAY[120.0, 16.0, 120.1, 16.1], 9, true,
+             '{"type":"Polygon","coordinates":[[[120.0,16.0],[120.1,16.0],[120.1,16.1],[120.0,16.1],[120.0,16.0]]]}'::jsonb),
+            ('shape-missing', 999102, 'town', 'Missing', 'Missing, Pangasinan', 16.25, 120.25, ARRAY[120.2, 16.2, 120.3, 16.3], 9, true, NULL)
+        `);
+        const stored = await request(app).get('/api/v1/areas/shape-stored/shape');
+        expect(stored.status).toBe(200);
+        expect(stored.body.geometry.type).toBe('Polygon');
+        expect(stored.body.properties.is_fallback_circle).toBeUndefined();
+
+        const missing = await request(app).get('/api/v1/areas/shape-missing/shape');
+        expect(missing.status).toBe(503);
+        expect(missing.body.error.code).toBe('AREA_SHAPE_MISSING');
+      } finally {
+        setPool(null as any);
+        await testDb.close();
+      }
+    });
+
+    it('assigns town and barangay to a newly created spot from the DB-loaded area cache', async () => {
+      const { ensureAreaCache } = await import('../src/maps/areas-service.js');
+      const testDb = await createTestDb();
+      setPool(testDb.pool);
+      try {
+        await testDb.pool.query(`
+          INSERT INTO admin_areas (id, psgc_code, level, name, display_name, parent_id, label_lat, label_lng, bbox, min_zoom, has_boundary, boundary)
+          VALUES
+            ('cachetown', 999201, 'town', 'Cachetown', 'Cachetown, Pangasinan', NULL, 16.05, 120.05, ARRAY[120.0, 16.0, 120.1, 16.1], 9, true,
+             '{"type":"Polygon","coordinates":[[[120.0,16.0],[120.1,16.0],[120.1,16.1],[120.0,16.1],[120.0,16.0]]]}'::jsonb)
+        `);
+        await testDb.pool.query(`
+          INSERT INTO admin_areas (id, psgc_code, level, name, display_name, parent_id, label_lat, label_lng, bbox, min_zoom, has_boundary, boundary)
+          VALUES
+            ('cachetown--centro', 999202, 'barangay', 'Centro', 'Centro, Cachetown', 'cachetown', 16.05, 120.05, ARRAY[120.04, 16.04, 120.06, 16.06], 13, true,
+             '{"type":"Polygon","coordinates":[[[120.04,16.04],[120.06,16.04],[120.06,16.06],[120.04,16.06],[120.04,16.04]]]}'::jsonb)
+        `);
+        await ensureAreaCache(testDb.pool, true);
+        expect(matchSpotToAreas(16.05, 120.05, 'Cachetown')).toEqual({ townAreaId: 'cachetown', barangayAreaId: 'cachetown--centro' });
+        expect(matchSpotToAreas(16.09, 120.09, 'Cachetown')).toEqual({ townAreaId: 'cachetown', barangayAreaId: null });
       } finally {
         setPool(null as any);
         await testDb.close();
