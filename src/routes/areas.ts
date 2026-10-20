@@ -46,11 +46,22 @@ function resolveGeoJsonPath(filename: string): string {
 
 const townsPath = resolveGeoJsonPath('towns.geojson');
 const barangaysPath = resolveGeoJsonPath('barangays.geojson');
+const provincePath = resolveGeoJsonPath('province.geojson');
 
 let cachedTownFeatures: Map<string, any> | null = null;
 let cachedBgyFeatures: Map<string, any> | null = null;
+let cachedProvinceFeature: any | null = null;
 
 function loadGeoJsonFeatures() {
+  if (!cachedProvinceFeature && fs.existsSync(provincePath)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(provincePath, 'utf8'));
+      cachedProvinceFeature = data.features ? data.features[0] : data;
+    } catch (e) {
+      console.error('[areas] failed to load province.geojson', e);
+    }
+  }
+
   if (!cachedTownFeatures && fs.existsSync(townsPath)) {
     try {
       const data = JSON.parse(fs.readFileSync(townsPath, 'utf8'));
@@ -256,6 +267,22 @@ areasRouter.get('/areas/:id/shape', async (req: Request, res: Response) => {
   const psgcStr = String(areaRow.psgc_code);
 
   if (areaRow.has_boundary) {
+    if (areaRow.level === 'province' || areaRow.id === 'pangasinan') {
+      if (cachedProvinceFeature) {
+        return res.json({
+          type: 'Feature',
+          properties: {
+            id: areaRow.id,
+            name: areaRow.name,
+            display_name: areaRow.display_name,
+            level: areaRow.level,
+            has_boundary: true,
+          },
+          geometry: cachedProvinceFeature.geometry,
+        });
+      }
+    }
+
     let feature = cachedTownFeatures?.get(psgcStr) || cachedBgyFeatures?.get(psgcStr);
     if (feature) {
       return res.json({
@@ -305,19 +332,26 @@ areasRouter.get('/areas/:id/spots', async (req: Request, res: Response) => {
 
   if (pool) {
     try {
+      const isProvince = areaId === 'pangasinan';
       const countRes = await queryWithRetry(
         pool,
-        `SELECT COUNT(*) FROM spots WHERE (town_area_id = $1 OR barangay_area_id = $1) AND status = 'published' AND NOT is_test`,
-        [areaId]
+        isProvince
+          ? `SELECT COUNT(*) FROM spots WHERE status = 'published' AND NOT is_test`
+          : `SELECT COUNT(*) FROM spots WHERE (town_area_id = $1 OR barangay_area_id = $1) AND status = 'published' AND NOT is_test`,
+        isProvince ? [] : [areaId]
       );
       const total = Number(countRes.rows[0]?.count || 0);
 
       const spotsRes = await queryWithRetry(
         pool,
-        `SELECT * FROM spots WHERE (town_area_id = $1 OR barangay_area_id = $1) AND status = 'published' AND NOT is_test
-         ORDER BY created_at DESC
-         LIMIT $2 OFFSET $3`,
-        [areaId, limit, offset]
+        isProvince
+          ? `SELECT * FROM spots WHERE status = 'published' AND NOT is_test
+             ORDER BY created_at DESC
+             LIMIT $1 OFFSET $2`
+          : `SELECT * FROM spots WHERE (town_area_id = $1 OR barangay_area_id = $1) AND status = 'published' AND NOT is_test
+             ORDER BY created_at DESC
+             LIMIT $2 OFFSET $3`,
+        isProvince ? [limit, offset] : [areaId, limit, offset]
       );
 
       return res.json({

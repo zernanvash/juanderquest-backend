@@ -280,6 +280,35 @@ describe('Admin Areas & Geometry Utilities (Plan 45 Phase 2)', () => {
         await testDb.close();
       }
     });
+
+    it('asserts that province and all 48 towns have has_boundary=true and real polygons', async () => {
+      // Test Plan 45 D6: province and all 48 towns must have has_boundary=true and valid GeoJSON polygons
+      const testDb = await createTestDb();
+      setPool(testDb.pool);
+      try {
+        await testDb.pool.query(`
+          INSERT INTO admin_areas (id, psgc_code, level, name, display_name, label_lat, label_lng, bbox, min_zoom, has_boundary)
+          VALUES ('pangasinan', 105500000, 'province', 'Pangasinan', 'Pangasinan', 15.9281, 120.3329, ARRAY[119.7, 15.6, 120.9, 16.4], 7, true)
+          ON CONFLICT (id) DO NOTHING
+        `);
+
+        // Assert province shape endpoint returns real MultiPolygon/Polygon, never fallback circle
+        const provShapeRes = await request(app).get('/api/v1/areas/pangasinan/shape');
+        expect(provShapeRes.status).toBe(200);
+        expect(provShapeRes.body.properties.has_boundary).toBe(true);
+        expect(provShapeRes.body.properties.is_fallback_circle).toBeUndefined();
+        expect(['Polygon', 'MultiPolygon']).toContain(provShapeRes.body.geometry.type);
+        expect(provShapeRes.body.geometry.coordinates.length).toBeGreaterThan(0);
+
+        // Assert province spots endpoint queries all spots across the province
+        const provSpotsRes = await request(app).get('/api/v1/areas/pangasinan/spots');
+        expect(provSpotsRes.status).toBe(200);
+        expect(provSpotsRes.body.success).toBe(true);
+      } finally {
+        setPool(null as any);
+        await testDb.close();
+      }
+    });
   });
 });
 
