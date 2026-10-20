@@ -2,15 +2,50 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import type { Pool } from 'pg';
 import { getPool } from '../db/pool.js';
 import { spotStore } from '../spots/store.js';
 import { createCirclePolygon } from '../maps/geometry.js';
 
 export const areasRouter = Router();
 
-const homeDir = os.homedir();
-const townsPath = path.join(homeDir, 'jdq-maps/areas/towns.geojson');
-const barangaysPath = path.join(homeDir, 'jdq-maps/areas/barangays.geojson');
+async function queryWithRetry(pool: Pool, text: string, values?: any[], retries = 6) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await pool.query(text, values);
+    } catch (err) {
+      lastError = err;
+      const msg = err instanceof Error ? err.message.toLowerCase() : '';
+      const isTransientTimeout =
+        msg.includes('timeout') ||
+        msg.includes('connection terminated') ||
+        msg.includes('econnreset');
+      if (!isTransientTimeout || attempt === retries) {
+        throw err;
+      }
+      await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
+function resolveGeoJsonPath(filename: string): string {
+  const candidates = [
+    process.env.JDQ_MAPS_DIR ? path.join(process.env.JDQ_MAPS_DIR, filename) : null,
+    path.resolve(process.cwd(), 'data/maps', filename),
+    path.resolve(__dirname, '../../data/maps', filename),
+    path.join(os.homedir(), 'jdq-maps/areas', filename),
+  ].filter(Boolean) as string[];
+
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return candidates[0];
+}
+
+const townsPath = resolveGeoJsonPath('towns.geojson');
+const barangaysPath = resolveGeoJsonPath('barangays.geojson');
 
 let cachedTownFeatures: Map<string, any> | null = null;
 let cachedBgyFeatures: Map<string, any> | null = null;
@@ -80,7 +115,7 @@ areasRouter.get('/areas', async (req: Request, res: Response) => {
         ORDER BY published_spot_count DESC, a.name ASC
         LIMIT 500
       `;
-      const result = await pool.query(query, [zoom, maxLng, minLng, maxLat, minLat]);
+      const result = await queryWithRetry(pool, query, [zoom, maxLng, minLng, maxLat, minLat]);
       const items = result.rows.map((r) => ({
         id: r.id,
         level: r.level,
@@ -121,8 +156,11 @@ areasRouter.get('/areas/:id', async (req: Request, res: Response) => {
 
   if (pool) {
     try {
-      const result = await pool.query(
-        `SELECT a.*, COUNT(s.id) FILTER (WHERE s.status = 'published' AND NOT s.is_test) AS published_spot_count
+      const result = await queryWithRetry(
+        pool,
+        `SELECT a.id, a.psgc_code, a.level, a.name, a.display_name, a.parent_id,
+                a.has_boundary, a.label_lat, a.label_lng, a.bbox,
+                COUNT(s.id) FILTER (WHERE s.status = 'published' AND NOT s.is_test) AS published_spot_count
          FROM admin_areas a
          LEFT JOIN spots s ON (s.town_area_id = a.id OR s.barangay_area_id = a.id)
          WHERE a.id = $1
@@ -143,7 +181,7 @@ areasRouter.get('/areas/:id', async (req: Request, res: Response) => {
       const parents: any[] = [];
       let currentParentId = area.parent_id;
       while (currentParentId) {
-        const pRes = await pool.query(`SELECT id, name, level, parent_id FROM admin_areas WHERE id = $1`, [currentParentId]);
+        const pRes = await queryWithRetry(pool, `SELECT id, name, level, parent_id FROM admin_areas WHERE id = $1`, [currentParentId]);
         if (pRes.rows.length === 0) break;
         const p = pRes.rows[0];
         parents.unshift({ id: p.id, name: p.name, level: p.level });
@@ -195,7 +233,7 @@ areasRouter.get('/areas/:id/shape', async (req: Request, res: Response) => {
   let areaRow: any = null;
   if (pool) {
     try {
-      const result = await pool.query(`SELECT * FROM admin_areas WHERE id = $1`, [areaId]);
+      const result = await queryWithRetry(pool, `SELECT * FROM admin_areas WHERE id = $1`, [areaId]);
       if (result.rows.length > 0) {
         areaRow = result.rows[0];
       }
@@ -267,13 +305,15 @@ areasRouter.get('/areas/:id/spots', async (req: Request, res: Response) => {
 
   if (pool) {
     try {
-      const countRes = await pool.query(
+      const countRes = await queryWithRetry(
+        pool,
         `SELECT COUNT(*) FROM spots WHERE (town_area_id = $1 OR barangay_area_id = $1) AND status = 'published' AND NOT is_test`,
         [areaId]
       );
       const total = Number(countRes.rows[0]?.count || 0);
 
-      const spotsRes = await pool.query(
+      const spotsRes = await queryWithRetry(
+        pool,
         `SELECT * FROM spots WHERE (town_area_id = $1 OR barangay_area_id = $1) AND status = 'published' AND NOT is_test
          ORDER BY created_at DESC
          LIMIT $2 OFFSET $3`,

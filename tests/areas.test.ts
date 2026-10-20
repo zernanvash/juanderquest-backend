@@ -201,16 +201,13 @@ describe('Admin Areas & Geometry Utilities (Plan 45 Phase 2)', () => {
     it('creates admin_areas table and spots area columns via migrations ledger', async () => {
       const testDb = await createTestDb();
       try {
-        // Assert admin_areas table exists
-        const tableCheck = await testDb.pool.query(`
-          SELECT table_name FROM information_schema.tables
-          WHERE table_name = 'admin_areas'
-        `);
-        expect(tableCheck.rows.length).toBe(1);
+        // Assert admin_areas table exists by querying it directly and checking migrations
+        const countCheck = await testDb.pool.query(`SELECT COUNT(*) FROM admin_areas`);
+        expect(countCheck.rows.length).toBe(1);
 
         // Assert spots table has town_area_id and barangay_area_id columns
         const colCheck = await testDb.pool.query(`
-          SELECT column_name FROM information_schema.columns
+          SELECT DISTINCT column_name FROM information_schema.columns
           WHERE table_name = 'spots' AND column_name IN ('town_area_id', 'barangay_area_id')
         `);
         const foundCols = colCheck.rows.map((r: any) => r.column_name);

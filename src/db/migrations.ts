@@ -351,7 +351,7 @@ export async function applyMigrations(pg: Pool) {
               has_boundary BOOLEAN NOT NULL DEFAULT TRUE,
               label_lat DOUBLE PRECISION NOT NULL,
               label_lng DOUBLE PRECISION NOT NULL,
-              bbox DOUBLE PRECISION[4] NOT NULL,
+              bbox DOUBLE PRECISION[] NOT NULL,
               min_zoom SMALLINT NOT NULL DEFAULT 9,
               shape_file TEXT,
               data_version TEXT NOT NULL DEFAULT '2023-psa-namria',
