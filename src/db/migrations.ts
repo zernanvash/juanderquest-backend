@@ -68,6 +68,8 @@ export const MIGRATIONS = [
   '052_plaza_social.sql',
   '053_plaza_push.sql',
   '054_quest_builder.sql',
+  '056_admin_areas.sql',
+  '057_admin_area_boundaries.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
@@ -338,6 +340,7 @@ export async function applyMigrations(pg: Pool) {
             CREATE INDEX IF NOT EXISTS idx_push_due ON push_deliveries (send_after) WHERE status = 'queued';
             CREATE INDEX IF NOT EXISTS idx_push_user_day ON push_deliveries (user_id, category, sent_at) WHERE status = 'sent';
           `);
+<<<<<<< HEAD
         } else if (file === '054_quest_builder.sql' && pgMemMigrationAdapters.has(pg as object)) {
           await client.query(`
             ALTER TABLE quests ADD COLUMN IF NOT EXISTS step_order_mode TEXT NOT NULL DEFAULT 'sequential';
@@ -348,6 +351,36 @@ export async function applyMigrations(pg: Pool) {
             ALTER TABLE quest_step_evidence ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ;
             ALTER TABLE quest_step_evidence ADD COLUMN IF NOT EXISTS needs_changes_reason TEXT;
             CREATE INDEX IF NOT EXISTS idx_step_evidence_quest_task ON quest_step_evidence (quest_id, task_key, status);
+=======
+        } else if (file === '056_admin_areas.sql' && pgMemMigrationAdapters.has(pg as object)) {
+          await client.query(`
+            CREATE TABLE IF NOT EXISTS admin_areas (
+              id TEXT PRIMARY KEY,
+              psgc_code BIGINT UNIQUE,
+              level TEXT NOT NULL CHECK (level IN ('province','town','barangay')),
+              name TEXT NOT NULL,
+              display_name TEXT NOT NULL,
+              parent_id TEXT REFERENCES admin_areas(id),
+              osm_relation_id BIGINT,
+              has_boundary BOOLEAN NOT NULL DEFAULT TRUE,
+              label_lat DOUBLE PRECISION NOT NULL,
+              label_lng DOUBLE PRECISION NOT NULL,
+              bbox DOUBLE PRECISION[] NOT NULL,
+              min_zoom SMALLINT NOT NULL DEFAULT 9,
+              shape_file TEXT,
+              data_version TEXT NOT NULL DEFAULT '2023-psa-namria',
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_admin_areas_parent ON admin_areas (parent_id);
+            CREATE INDEX IF NOT EXISTS idx_admin_areas_level ON admin_areas (level);
+            CREATE INDEX IF NOT EXISTS idx_admin_areas_psgc ON admin_areas (psgc_code);
+
+            ALTER TABLE spots ADD COLUMN IF NOT EXISTS town_area_id TEXT REFERENCES admin_areas(id);
+            ALTER TABLE spots ADD COLUMN IF NOT EXISTS barangay_area_id TEXT REFERENCES admin_areas(id);
+
+            CREATE INDEX IF NOT EXISTS idx_spots_town_area ON spots (town_area_id) WHERE status = 'published';
+            CREATE INDEX IF NOT EXISTS idx_spots_barangay_area ON spots (barangay_area_id) WHERE status = 'published';
+>>>>>>> origin/master
           `);
         } else {
           await client.query(sql);
