@@ -69,6 +69,7 @@ export const MIGRATIONS = [
   '053_plaza_push.sql',
   '056_admin_areas.sql',
   '057_admin_area_boundaries.sql',
+  '058_destination_provenance.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
@@ -344,7 +345,7 @@ export async function applyMigrations(pg: Pool) {
             CREATE TABLE IF NOT EXISTS admin_areas (
               id TEXT PRIMARY KEY,
               psgc_code BIGINT UNIQUE,
-              level TEXT NOT NULL CHECK (level IN ('province','town','barangay')),
+              level TEXT NOT NULL CHECK (level IN ('region','province','town','barangay')),
               name TEXT NOT NULL,
               display_name TEXT NOT NULL,
               parent_id TEXT REFERENCES admin_areas(id),
@@ -367,6 +368,29 @@ export async function applyMigrations(pg: Pool) {
 
             CREATE INDEX IF NOT EXISTS idx_spots_town_area ON spots (town_area_id) WHERE status = 'published';
             CREATE INDEX IF NOT EXISTS idx_spots_barangay_area ON spots (barangay_area_id) WHERE status = 'published';
+          `);
+        } else if (file === '058_destination_provenance.sql' && pgMemMigrationAdapters.has(pg as object)) {
+          // pg-mem lacks pg_trgm and JSONB expression-index support. Real PostgreSQL
+          // applies the checked-in SQL; this adapter covers the additive row shape.
+          await client.query(`
+            ALTER TABLE spots ADD COLUMN IF NOT EXISTS external_refs JSONB NOT NULL DEFAULT '{}'::jsonb;
+            ALTER TABLE spots ADD COLUMN IF NOT EXISTS field_sources JSONB NOT NULL DEFAULT '{}'::jsonb;
+            ALTER TABLE spots ADD COLUMN IF NOT EXISTS import_confidence REAL;
+            ALTER TABLE spots ADD COLUMN IF NOT EXISTS import_wave TEXT;
+            ALTER TABLE spots ADD COLUMN IF NOT EXISTS official_website TEXT;
+            ALTER TABLE spots ADD COLUMN IF NOT EXISTS contact_phone TEXT;
+            ALTER TABLE spots ADD COLUMN IF NOT EXISTS entrance_fee_text TEXT;
+            ALTER TABLE spots ADD COLUMN IF NOT EXISTS closure_notice TEXT;
+            ALTER TABLE spot_assets ADD COLUMN IF NOT EXISTS license TEXT;
+            ALTER TABLE spot_assets ADD COLUMN IF NOT EXISTS author TEXT;
+            ALTER TABLE spot_assets ADD COLUMN IF NOT EXISTS attribution_url TEXT;
+            CREATE TABLE IF NOT EXISTS seed_runs (
+              id TEXT PRIMARY KEY, wave TEXT NOT NULL, region_psgc TEXT,
+              mode TEXT NOT NULL CHECK (mode IN ('dry-run', 'apply')),
+              stats JSONB NOT NULL, started_at TIMESTAMPTZ NOT NULL, finished_at TIMESTAMPTZ
+            );
+            CREATE INDEX IF NOT EXISTS idx_admin_areas_level_min_zoom ON admin_areas (level, min_zoom);
+            CREATE INDEX IF NOT EXISTS idx_spots_status_created ON spots (status, created_at DESC, id);
           `);
         } else {
           await client.query(sql);

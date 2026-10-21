@@ -16,6 +16,7 @@ import { fieldLogStore, FieldLogTag, SpotReportReason } from '../spots/field-log
 import { hiddenGemHighlights } from '../spots/highlights.js';
 import { sanitizeQuestForViewer } from '../quests/sanitize.js';
 import { recordActivity } from '../social/activity.js';
+import { listSpotsPage } from '../spots/query.js';
 
 const router = Router();
 const csv = (value: unknown) => typeof value === 'string' && value ? value.split(',').map(v => v.trim()).filter(Boolean) : [];
@@ -23,8 +24,8 @@ const numeric = (value: unknown) => typeof value === 'string' && value !== '' ? 
 const validSpotIdentifier = (value: string) => /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,179}$/.test(value);
 const publicSpot = (identifier: string, allowTest: boolean) =>
   validSpotIdentifier(identifier)
-    ? spotStore.spots.find(s => (s.id === identifier || s.slug === identifier) && s.status === 'published' && (allowTest || !s.is_test))
-    : undefined;
+    ? spotStore.findByIdentifier(identifier, { publishedOnly: true, allowTest })
+    : Promise.resolve(undefined);
 
 const mediaUpload = multer({
   storage: multer.memoryStorage(),
@@ -45,16 +46,55 @@ router.get('/spot-taxonomy', (_req, res) => res.json({ success: true, data: {
   amenities: ['parking', 'restroom', 'wifi', 'wheelchair_accessible', 'pet_friendly', 'child_friendly'],
 } }));
 
-router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
+router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res) => {
   const allowTest = isAuthorizedQA(req);
   if (allowTest) res.set('X-Robots-Tag', 'noindex, nofollow');
   const lat = numeric(req.query.lat), lng = numeric(req.query.lng), radius = numeric(req.query.radius_km);
   if ((lat !== undefined) !== (lng !== undefined) || [lat, lng, radius].some(v => v !== undefined && !Number.isFinite(v))) {
     return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Valid lat/lng and radius values are required.' } });
   }
+  const requestedLimit = req.query.limit === undefined ? 50 : Number(req.query.limit);
+  const sort = typeof req.query.sort === 'string' ? req.query.sort : 'recommended';
+  let bbox: [number, number, number, number] | undefined;
+  if (req.query.bbox !== undefined) {
+    const coords = typeof req.query.bbox === 'string' ? req.query.bbox.split(',').map(Number) : [];
+    if (coords.length !== 4 || coords.some(value => !Number.isFinite(value)) || coords[0] < -180 || coords[2] > 180 || coords[1] < -90 || coords[3] > 90 || coords[0] >= coords[2] || coords[1] >= coords[3]) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'bbox must be west,south,east,north within valid coordinates.' } });
+    }
+    bbox = coords as [number, number, number, number];
+  }
+  if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 200 || !['recommended', 'newest', 'nearest', 'trending'].includes(sort)) {
+    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'limit must be 1-200 and sort must be recommended, newest, nearest, or trending.' } });
+  }
+  if (sort === 'nearest' && (lat === undefined || lng === undefined)) {
+    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'nearest sort requires lat and lng.' } });
+  }
   const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
-  const data = spotStore.list({ search: req.query.q as string | undefined, categories: csv(req.query.categories), tags: csv(req.query.tags), municipality: req.query.municipality as string | undefined, lat, lng, radius, intent: req.query.intent as string | undefined, sort: req.query.sort as string | undefined, hasQuest: req.query.has_quest === 'true', userId: actorId, allowTest });
-  return res.json({ success: true, data, meta: { count: data.length, sort: req.query.sort || 'recommended' } });
+  const filters = {
+    search: typeof req.query.q === 'string' ? req.query.q : undefined,
+    categories: csv(req.query.categories), tags: csv(req.query.tags),
+    municipality: typeof req.query.municipality === 'string' ? req.query.municipality : undefined,
+    lat, lng, radius, intent: typeof req.query.intent === 'string' ? req.query.intent : undefined,
+    sort: sort as 'recommended' | 'newest' | 'nearest' | 'trending',
+    hasQuest: req.query.has_quest === 'true', userId: String(actorId || ''), allowTest,
+    areaId: typeof req.query.area_id === 'string' ? req.query.area_id : undefined,
+    bbox, limit: requestedLimit, cursor: typeof req.query.cursor === 'string' ? req.query.cursor : undefined,
+  };
+  const pool = getPool();
+  if (pool) {
+    try {
+      const page = await listSpotsPage(pool, filters);
+      return res.json({ success: true, data: page.items, meta: { count: page.items.length, limit: page.limit, has_more: page.hasMore, next_cursor: page.nextCursor, sort } });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'INVALID_CURSOR') {
+        return res.status(400).json({ success: false, error: { code: 'INVALID_CURSOR', message: 'The spot list cursor is invalid or does not match these filters.' } });
+      }
+      console.error('[spots:list] database query failed:', error instanceof Error ? error.message : error);
+      return res.status(500).json({ success: false, error: { code: 'DATABASE_ERROR', message: 'Unable to load destinations.' } });
+    }
+  }
+  const all = spotStore.list(filters).slice(0, requestedLimit);
+  return res.json({ success: true, data: all, meta: { count: all.length, limit: requestedLimit, has_more: false, next_cursor: null, sort } });
 });
 
 router.get('/spots/highlights', optionalAuthenticateToken, (req: AuthRequest, res) => {
@@ -70,19 +110,19 @@ router.get('/spots/trending', optionalAuthenticateToken, checkQAAuthorization, (
   res.json({ success: true, data: spotStore.list({ municipality: req.query.municipality as string | undefined, sort: 'trending', userId: actorId, allowTest }).slice(0, 10) });
 });
 
-router.get('/spots/:slug/alternatives', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
+router.get('/spots/:slug/alternatives', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res) => {
   const allowTest = isAuthorizedQA(req);
   if (allowTest) res.set('X-Robots-Tag', 'noindex, nofollow');
-  const source=publicSpot(req.params.slug,allowTest);
+  const source=await publicSpot(req.params.slug,allowTest);
   if(!source)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
   const requested=numeric(req.query.limit);const limit=requested===undefined?3:Math.max(1,Math.min(5,Math.floor(requested)));
   const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
   return res.json({success:true,data:spotStore.alternatives(source,actorId,limit),meta:{source_spot_id:source.id,catalog_scope:'pangasinan_alpha',ranking_scope:'catalog_wide',expansion_ready:'philippines',personalized:Boolean(req.user),estimated_not_live:true}});
 });
 
-router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
+router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res) => {
   const allowTest = isAuthorizedQA(req);
-  const spot = publicSpot(req.params.slug, allowTest);
+  const spot = await publicSpot(req.params.slug, allowTest);
   if (!spot) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
   if (spot.is_test) {
     res.set('X-Robots-Tag', 'noindex, nofollow');
@@ -96,34 +136,172 @@ router.get('/me/discovery-preferences', authenticateToken, (req: AuthRequest, re
 const preferencesSchema = z.object({ body: z.object({ categories: z.array(z.string()).max(10).default([]), tags: z.array(z.string()).max(20).default([]), occasions: z.array(z.string()).max(10).default([]), price_levels: z.array(z.number().int().min(0).max(4)).max(5).default([]), radius_km: z.number().int().min(1).max(200).default(25), onboarding_state: z.enum(['pending', 'completed', 'skipped']).default('completed') }) });
 router.put('/me/discovery-preferences', authenticateToken, validateRequest(preferencesSchema), (req: AuthRequest, res) => res.json({ success: true, data: spotStore.setPreferences(req.user!.id, req.body) }));
 
-router.put('/spots/:id/save', authenticateToken, (req: AuthRequest, res) => { const spot=spotStore.spots.find(item=>item.id===req.params.id); const actor=db.findUserById(req.user!.id); if(!actor)return res.status(403).json({success:false,error:{code:'FORBIDDEN',message:'Account is unavailable.'}}); if(spot&&Boolean(spot.is_test)!==Boolean(actor.is_test))return res.status(403).json({success:false,error:{code:'SCOPE_MISMATCH',message:'Fictional alpha posts are read-only for real accounts.'}}); const saved=spotStore.interact(req.user!.id,req.params.id,'save',true);spotStore.recordActivity(req.user!.id,req.params.id,'save');return res.json({success:true,data:{saved}}); });
-router.delete('/spots/:id/save', authenticateToken, (req: AuthRequest, res) => res.json({ success: true, data: { saved: spotStore.interact(req.user!.id, req.params.id, 'save', false) } }));
+router.put('/spots/:id/save', authenticateToken, async (req: AuthRequest, res) => { const spot=await spotStore.findByIdentifier(req.params.id,{publishedOnly:true,allowTest:true}); const actor=db.findUserById(req.user!.id); if(!actor)return res.status(403).json({success:false,error:{code:'FORBIDDEN',message:'Account is unavailable.'}}); if(!spot)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}}); if(Boolean(spot.is_test)!==Boolean(actor.is_test))return res.status(403).json({success:false,error:{code:'SCOPE_MISMATCH',message:'Fictional alpha posts are read-only for real accounts.'}}); const saved=spotStore.interact(req.user!.id,spot.id,'save',true);spotStore.recordActivity(req.user!.id,spot.id,'save');return res.json({success:true,data:{saved}}); });
+router.delete('/spots/:id/save', authenticateToken, async (req: AuthRequest, res) => { const spot=await spotStore.findByIdentifier(req.params.id,{publishedOnly:true,allowTest:true}); if(!spot)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}}); return res.json({ success: true, data: { saved: spotStore.interact(req.user!.id, spot.id, 'save', false) } }); });
 
-router.put('/spots/:id/like', optionalAuthenticateToken, (req: AuthRequest, res) => {
-  const spot = spotStore.spots.find(item => item.id === req.params.id || item.slug === req.params.id);
+router.put('/spots/:id/like', optionalAuthenticateToken, async (req: AuthRequest, res) => {
+  const spot = await spotStore.findByIdentifier(req.params.id, { publishedOnly: true, allowTest: isAuthorizedQA(req) });
   if (!spot) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
   const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip || 'anon';
   spotStore.interact(String(actorId), spot.id, 'like', true);
   return res.json({ success: true, data: { liked: true, spot_id: spot.id } });
 });
 
-router.delete('/spots/:id/like', optionalAuthenticateToken, (req: AuthRequest, res) => {
-  const spot = spotStore.spots.find(item => item.id === req.params.id || item.slug === req.params.id);
+router.delete('/spots/:id/like', optionalAuthenticateToken, async (req: AuthRequest, res) => {
+  const spot = await spotStore.findByIdentifier(req.params.id, { publishedOnly: true, allowTest: isAuthorizedQA(req) });
   if (!spot) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
   const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip || 'anon';
   spotStore.interact(String(actorId), spot.id, 'like', false);
   return res.json({ success: true, data: { liked: false, spot_id: spot.id } });
 });
-router.post('/spots/:id/interactions', authenticateToken, validateRequest(z.object({ body: z.object({ type: z.enum(['view', 'directions', 'helpful', 'visit']), captured_lat:z.number().min(-90).max(90).optional(), captured_lng:z.number().min(-180).max(180).optional() }) })), (req: AuthRequest, res) => {
-  const spot=spotStore.spots.find(item=>item.id===req.params.id);if(!spot)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
+router.post('/spots/:id/interactions', authenticateToken, validateRequest(z.object({ body: z.object({ type: z.enum(['view', 'directions', 'helpful', 'visit']), captured_lat:z.number().min(-90).max(90).optional(), captured_lng:z.number().min(-180).max(180).optional() }) })), async (req: AuthRequest, res) => {
+  const spot=await spotStore.findByIdentifier(req.params.id,{publishedOnly:true,allowTest:true});if(!spot)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
   const actor=db.findUserById(req.user!.id);if(!actor)return res.status(403).json({success:false,error:{code:'FORBIDDEN',message:'Account is unavailable.'}});if(Boolean(spot.is_test)!==Boolean(actor.is_test))return res.status(403).json({success:false,error:{code:'SCOPE_MISMATCH',message:'Fictional alpha posts are read-only for real accounts.'}});
   if(req.body.type==='visit'&&(req.body.captured_lat===undefined||req.body.captured_lng===undefined||distanceKm(req.body.captured_lat,req.body.captured_lng,spot.gps_lat,spot.gps_lng)>.25))return res.status(422).json({success:false,error:{code:'VISIT_NOT_VERIFIED',message:'A visit must include coordinates within 250 meters of the destination.'}});
   const recorded=spotStore.interact(req.user!.id,req.params.id,req.body.type,true);if(req.body.type!=='helpful')spotStore.recordActivity(req.user!.id,req.params.id,req.body.type);return res.status(201).json({success:true,data:{recorded}});
 });
 
 const spotReviewSchema=z.object({body:z.object({status:z.enum(['published','needs_review','unpublished']),crowd_capacity_band:z.enum(['low','medium','high']),recommendation_suppressed:z.boolean().default(false)})});
-router.get('/admin/spots',authenticateToken,requireAdmin,(_req,res)=>res.json({success:true,data:spotStore.spots.map(s=>({...s,...spotStore.crowd(s)}))}));
+router.get('/admin/spots',authenticateToken,requireAdmin,async (_req,res)=>{
+  const pool=getPool();
+  if(pool){const {rows}=await pool.query("SELECT * FROM spots ORDER BY updated_at DESC, id DESC LIMIT 200");return res.json({success:true,data:rows,meta:{limit:200,has_more:rows.length===200}});}
+  return res.json({success:true,data:spotStore.spots.slice(0,200).map(s=>({...s,...spotStore.crowd(s)})),meta:{limit:200,has_more:false}});
+});
 router.patch('/admin/spots/:id',authenticateToken,requireAdmin,validateRequest(spotReviewSchema),(req:AuthRequest,res)=>{const spot=spotStore.review(req.params.id,req.user!.id,req.body.status,req.body.crowd_capacity_band,req.body.recommendation_suppressed);if(!spot)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});return res.json({success:true,data:{...spot,...spotStore.crowd(spot)}});});
+
+const importedSpotActionSchema = z.object({ body: z.object({
+  action: z.enum(['approve', 'reject', 'edit']),
+  name: z.string().trim().min(3).max(200).optional(),
+  description: z.string().max(2000).optional(),
+  category: z.enum(['eat_drink', 'nature_outdoors', 'culture_heritage', 'activities_wellness', 'shopping_local', 'stay']).optional(),
+  subcategory: z.string().trim().min(2).max(50).optional(),
+  municipality: z.string().trim().max(100).optional(),
+  address: z.string().trim().max(300).optional(),
+  approve_scraped_fields: z.array(z.enum(['hours', 'official_website', 'contact_number', 'entrance_fee', 'closure_notice'])).max(5).default([]),
+}) });
+
+router.get('/admin/imported-spots', authenticateToken, requireAdmin, async (req: AuthRequest, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ success: false, error: { code: 'DATABASE_REQUIRED', message: 'Imported-place review requires PostgreSQL.' } });
+  const status = typeof req.query.status === 'string' ? req.query.status : 'needs_review';
+  const wave = typeof req.query.wave === 'string' ? req.query.wave : undefined;
+  const regionPsgc = typeof req.query.region_psgc === 'string' ? req.query.region_psgc : undefined;
+  const minConfidence = numeric(req.query.min_confidence), maxConfidence = numeric(req.query.max_confidence);
+  const limit = req.query.limit === undefined ? 30 : Number(req.query.limit);
+  if (!['needs_review', 'published', 'unpublished', 'all'].includes(status) || !Number.isInteger(limit) || limit < 1 || limit > 100 ||
+      [minConfidence, maxConfidence].some(value => value !== undefined && (!Number.isFinite(value) || value < 0 || value > 1)) ||
+      (regionPsgc !== undefined && !/^\d{6,10}$/.test(regionPsgc))) {
+    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid imported-place filters.' } });
+  }
+  const values: unknown[] = [];
+  const bind = (value: unknown) => { values.push(value); return `$${values.length}`; };
+  const where = [`source_type = 'open_data'`, `external_refs <> '{}'::jsonb`];
+  if (status !== 'all') where.push(`status = ${bind(status)}`);
+  if (wave) where.push(`import_wave = ${bind(wave)}`);
+  if (minConfidence !== undefined) where.push(`import_confidence >= ${bind(minConfidence)}`);
+  if (maxConfidence !== undefined) where.push(`import_confidence <= ${bind(maxConfidence)}`);
+  if (regionPsgc) {
+    const psgc = bind(regionPsgc);
+    where.push(`town_area_id IN (WITH RECURSIVE descendants(id) AS (
+      SELECT id FROM admin_areas WHERE psgc_code = ${psgc}::bigint
+      UNION ALL SELECT a.id FROM admin_areas a JOIN descendants d ON a.parent_id = d.id
+    ) SELECT id FROM descendants)`);
+  }
+  const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
+  if (cursor) {
+    try {
+      const decoded = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+      if (typeof decoded.created_at !== 'string' || typeof decoded.id !== 'string') throw new Error('bad cursor');
+      where.push(`(created_at, id) < (${bind(decoded.created_at)}::timestamptz, ${bind(decoded.id)})`);
+    } catch { return res.status(400).json({ success: false, error: { code: 'INVALID_CURSOR', message: 'Review cursor is invalid.' } }); }
+  }
+  const limitParam = bind(limit + 1);
+  try {
+    const { rows } = await pool.query(`SELECT s.*, s.created_at::text AS cursor_created_at,
+      (SELECT jsonb_agg(jsonb_build_object('url',a.url,'author',a.author,'license',a.license,'attribution_url',a.attribution_url,'status',a.status))
+      FROM spot_assets a WHERE a.spot_id=s.id AND a.status='attached') AS commons_assets
+      FROM spots s WHERE ${where.map(clause => clause.replaceAll('source_type =', 's.source_type =').replaceAll('external_refs <>', 's.external_refs <>').replaceAll('status =', 's.status =').replaceAll('import_wave =', 's.import_wave =').replaceAll('import_confidence ', 's.import_confidence ').replaceAll('town_area_id IN', 's.town_area_id IN').replaceAll('(created_at, id)', '(s.created_at, s.id)')).join(' AND ')}
+      ORDER BY s.created_at DESC,s.id DESC LIMIT ${limitParam}`, values);
+    const hasMore = rows.length > limit;
+    const data = rows.slice(0, limit);
+    const last = data.at(-1);
+    const nextCursor = hasMore && last ? Buffer.from(JSON.stringify({ created_at: last.cursor_created_at, id: last.id })).toString('base64url') : null;
+    return res.json({ success: true, data, meta: { count: data.length, limit, has_more: hasMore, next_cursor: nextCursor } });
+  } catch (error) {
+    console.error('[admin:imported-spots] query failed:', error instanceof Error ? error.message : error);
+    return res.status(500).json({ success: false, error: { code: 'DATABASE_ERROR', message: 'Unable to load imported destinations.' } });
+  }
+});
+
+router.patch('/admin/imported-spots/:id', authenticateToken, requireAdmin, validateRequest(importedSpotActionSchema), async (req: AuthRequest, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ success: false, error: { code: 'DATABASE_REQUIRED', message: 'Imported-place review requires PostgreSQL.' } });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query("SELECT * FROM spots WHERE id=$1 AND source_type='open_data' AND external_refs <> '{}'::jsonb FOR UPDATE", [req.params.id]);
+    if (!result.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Imported destination not found.' } }); }
+    const spot = result.rows[0];
+    const updates: Record<string, unknown> = {};
+    if (req.body.action === 'approve') { updates.status = 'published'; updates.trust_level = 'open_data'; updates.recommendation_suppressed = false; }
+    if (req.body.action === 'reject') { updates.status = 'unpublished'; updates.recommendation_suppressed = true; }
+    if (req.body.action === 'edit') {
+      for (const field of ['name', 'description', 'category', 'subcategory', 'municipality', 'address']) if (req.body[field] !== undefined) updates[field] = req.body[field];
+    }
+    const pending = { ...(spot.field_sources?.scraped_pending || {}) } as Record<string, any>;
+    for (const key of req.body.approve_scraped_fields || []) {
+      const proposed = pending[key];
+      if (!proposed || proposed.source !== 'scrapling' || proposed.reviewed !== false || typeof proposed.proposed_value !== 'string') continue;
+      const value = proposed.proposed_value.trim().slice(0, 500);
+      if (key === 'hours') updates.hours = JSON.stringify({ source_text: value });
+      if (key === 'official_website') {
+        try { const parsed = new URL(value); if (['http:', 'https:'].includes(parsed.protocol)) updates.official_website = parsed.toString(); }
+        catch { /* Invalid URL remains pending and hidden. */ }
+      }
+      if (key === 'contact_number') updates.contact_phone = value;
+      if (key === 'entrance_fee') updates.entrance_fee_text = value;
+      if (key === 'closure_notice') updates.closure_notice = value;
+      pending[key] = { ...proposed, reviewed: true, reviewed_by: req.user!.id, reviewed_at: new Date().toISOString() };
+    }
+    const sources = { ...(spot.field_sources || {}), scraped_pending: pending };
+    updates.field_sources = JSON.stringify(sources);
+    updates.reviewed_by = req.user!.id;
+    updates.reviewed_at = new Date().toISOString();
+    updates.updated_at = updates.reviewed_at;
+    const columns = Object.keys(updates);
+    const values: unknown[] = [];
+    const assignments = columns.map((column) => {
+      values.push(updates[column]);
+      return `${column}=$${values.length}${column === 'hours' || column === 'field_sources' ? '::jsonb' : ''}`;
+    });
+    values.push(req.params.id);
+    const updated = await client.query(`UPDATE spots SET ${assignments.join(',')} WHERE id=$${values.length} RETURNING id,slug,name,status,import_confidence,import_wave,official_website,contact_phone,entrance_fee_text,closure_notice,hours,reviewed_by,reviewed_at`, values);
+    await client.query('COMMIT');
+    return res.json({ success: true, data: updated.rows[0] });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    console.error('[admin:imported-spots] update failed:', error instanceof Error ? error.message : error);
+    return res.status(500).json({ success: false, error: { code: 'DATABASE_ERROR', message: 'Unable to update imported destination.' } });
+  } finally { client.release(); }
+});
+
+const bulkImportedSpotSchema = z.object({ body: z.object({ wave: z.string().min(1).max(100), region_psgc: z.string().regex(/^\d{6,10}$/).optional(), minimum_confidence: z.number().min(0.6).max(1), max_items: z.number().int().min(1).max(500).default(100) }) });
+router.post('/admin/imported-spots/bulk-approve', authenticateToken, requireAdmin, validateRequest(bulkImportedSpotSchema), async (req: AuthRequest, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ success: false, error: { code: 'DATABASE_REQUIRED', message: 'Imported-place review requires PostgreSQL.' } });
+  const { wave, region_psgc: psgc, minimum_confidence: min, max_items: max } = req.body;
+  const { rows } = await pool.query(`WITH RECURSIVE eligible_area(id) AS (
+      SELECT id FROM admin_areas WHERE psgc_code=$3::bigint
+      UNION ALL SELECT a.id FROM admin_areas a JOIN eligible_area p ON a.parent_id=p.id
+    ), candidates AS (
+      SELECT id FROM spots WHERE source_type='open_data' AND status='needs_review' AND import_wave=$1 AND import_confidence >= $2
+        AND town_area_id IS NOT NULL AND ($3::text IS NULL OR town_area_id IN (SELECT id FROM eligible_area))
+        AND NOT EXISTS (SELECT 1 FROM jsonb_each(COALESCE(field_sources->'scraped_pending','{}'::jsonb)) f WHERE COALESCE((f.value->>'reviewed')::boolean,FALSE)=FALSE)
+      ORDER BY import_confidence DESC, id LIMIT $4 FOR UPDATE SKIP LOCKED
+    ) UPDATE spots s SET status='published',trust_level='open_data',recommendation_suppressed=FALSE,reviewed_by=$5,reviewed_at=NOW(),updated_at=NOW()
+      FROM candidates c WHERE s.id=c.id RETURNING s.id,s.name,s.import_confidence`, [wave, min, psgc || null, max, req.user!.id]);
+  return res.json({ success: true, data: rows, meta: { approved_count: rows.length, limit: max } });
+});
 
 // Shared handler for photo & rich video media uploads
 const handleMediaUpload = (req: AuthRequest, res: any) => {
@@ -367,7 +545,7 @@ const createAuthorQuestSchema = z.object({
 });
 
 router.post('/spots/:id/quests', authenticateToken, validateRequest(createAuthorQuestSchema), async (req: AuthRequest, res) => {
-  const spot = spotStore.spots.find(s => s.id === req.params.id || s.slug === req.params.id);
+  const spot = await spotStore.findByIdentifier(req.params.id, { publishedOnly: true, allowTest: true });
   if (!spot) {
     return res.status(404).json({
       success: false,
@@ -514,7 +692,7 @@ router.post('/spots/:id/quests', authenticateToken, validateRequest(createAuthor
 router.get('/spots/:id/quests', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res) => {
   const allowTest = isAuthorizedQA(req);
   if (allowTest) res.set('X-Robots-Tag', 'noindex, nofollow');
-  const spot = publicSpot(req.params.id, allowTest) || spotStore.spots.find(s => s.id === req.params.id || s.slug === req.params.id);
+  const spot = await publicSpot(req.params.id, allowTest);
   if (!spot) {
     return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
   }
@@ -595,8 +773,8 @@ router.get('/spots/:id/quests', optionalAuthenticateToken, checkQAAuthorization,
 });
 
 // GET /spots/:id/comments (or /spots/:id/field-logs)
-router.get(['/spots/:id/comments', '/spots/:id/field-logs'], optionalAuthenticateToken, (req: AuthRequest, res) => {
-  const spot = spotStore.spots.find(s => s.id === req.params.id || s.slug === req.params.id);
+router.get(['/spots/:id/comments', '/spots/:id/field-logs'], optionalAuthenticateToken, async (req: AuthRequest, res) => {
+  const spot = await spotStore.findByIdentifier(req.params.id, { publishedOnly: true, allowTest: isAuthorizedQA(req) });
   if (!spot) {
     return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
   }
@@ -628,8 +806,8 @@ const createFieldLogSchema = z.object({
   }),
 });
 
-router.post(['/spots/:id/comments', '/spots/:id/field-logs'], optionalAuthenticateToken, validateRequest(createFieldLogSchema), (req: AuthRequest, res) => {
-  const spot = spotStore.spots.find(s => s.id === req.params.id || s.slug === req.params.id);
+router.post(['/spots/:id/comments', '/spots/:id/field-logs'], optionalAuthenticateToken, validateRequest(createFieldLogSchema), async (req: AuthRequest, res) => {
+  const spot = await spotStore.findByIdentifier(req.params.id, { publishedOnly: true, allowTest: isAuthorizedQA(req) });
   if (!spot) {
     return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
   }
@@ -675,8 +853,8 @@ router.post(['/spots/:id/comments', '/spots/:id/field-logs'], optionalAuthentica
 });
 
 // POST /spots/:id/comments/:logId/helpful
-router.post(['/spots/:id/comments/:logId/helpful', '/spots/:id/field-logs/:logId/helpful'], optionalAuthenticateToken, (req: AuthRequest, res) => {
-  const spot = spotStore.spots.find(s => s.id === req.params.id || s.slug === req.params.id);
+router.post(['/spots/:id/comments/:logId/helpful', '/spots/:id/field-logs/:logId/helpful'], optionalAuthenticateToken, async (req: AuthRequest, res) => {
+  const spot = await spotStore.findByIdentifier(req.params.id, { publishedOnly: true, allowTest: isAuthorizedQA(req) });
   if (!spot) {
     return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
   }
@@ -702,8 +880,8 @@ const createReportSchema = z.object({
   }),
 });
 
-router.post('/spots/:id/reports', optionalAuthenticateToken, validateRequest(createReportSchema), (req: AuthRequest, res) => {
-  const spot = spotStore.spots.find(s => s.id === req.params.id || s.slug === req.params.id);
+router.post('/spots/:id/reports', optionalAuthenticateToken, validateRequest(createReportSchema), async (req: AuthRequest, res) => {
+  const spot = await spotStore.findByIdentifier(req.params.id, { publishedOnly: true, allowTest: isAuthorizedQA(req) });
   if (!spot) {
     return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
   }

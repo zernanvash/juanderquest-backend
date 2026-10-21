@@ -77,8 +77,10 @@ export class SpotStore {
 
   async hydrateFromPg(pool: Pool) {
     this.pg = pool;
-    const { rows } = await pool.query('SELECT * FROM spots ORDER BY created_at');
-    if (rows.length) this.spots = rows.map((r:any)=>({...r,tags:r.tags||[],amenities:r.amenities||[],good_for:r.good_for||[],best_time:r.best_time||[],hours:r.hours||{},created_at:new Date(r.created_at).toISOString(),updated_at:new Date(r.updated_at).toISOString()}));
+    // Keep only a bounded hot-read cache. Public listings use the indexed
+    // database query path in spots/query.ts and never scan this array.
+    const { rows } = await pool.query('SELECT * FROM spots ORDER BY updated_at DESC, id DESC LIMIT 500');
+    if (rows.length) this.spots = rows.map((r:any)=>{ const { field_sources: _fieldSources, ...spot } = r; return {...spot,tags:r.tags||[],amenities:r.amenities||[],good_for:r.good_for||[],best_time:r.best_time||[],hours:r.hours||{},created_at:new Date(r.created_at).toISOString(),updated_at:new Date(r.updated_at).toISOString()}; });
     else for (const spot of this.spots) await this.persistSpot(spot);
     const { rows: preferences } = await pool.query('SELECT * FROM discovery_preferences');
     for (const p of preferences) this.preferences.set(p.user_id, { categories:p.categories||[],tags:p.tags||[],occasions:p.occasions||[],price_levels:p.price_levels||[],radius_km:p.radius_km,onboarding_state:p.onboarding_state });
@@ -86,6 +88,28 @@ export class SpotStore {
     for (const item of interactions) { const values=this.interactions.get(item.user_id)||new Set<string>();values.add(`${item.spot_id}:${item.interaction_type}`);this.interactions.set(item.user_id,values); }
     const { rows: activity } = await pool.query("SELECT id,user_id,spot_id,activity_type,created_at,COALESCE(is_test, FALSE) AS is_test FROM spot_activity_events WHERE created_at >= NOW() - INTERVAL '24 hours'");
     this.activityEvents = activity.map((item:any)=>({...item,is_test:Boolean(item.is_test),created_at:new Date(item.created_at).toISOString()}));
+  }
+
+  async findByIdentifier(identifier: string, options: { publishedOnly?: boolean; allowTest?: boolean } = {}): Promise<Spot | undefined> {
+    const cached = this.spots.find((spot) => (spot.id === identifier || spot.slug === identifier) &&
+      (!options.publishedOnly || spot.status === 'published') && (options.allowTest || !spot.is_test));
+    if (cached) return cached;
+    if (!this.pg) return undefined;
+    const clauses = ['(id = $1 OR slug = $1)'];
+    if (options.publishedOnly) clauses.push("status = 'published'");
+    if (!options.allowTest) clauses.push('NOT COALESCE(is_test, FALSE)');
+    const { rows } = await this.pg.query(`SELECT * FROM spots WHERE ${clauses.join(' AND ')} LIMIT 1`, [identifier]);
+    if (!rows.length) return undefined;
+    const row = rows[0] as any;
+    const { field_sources: _fieldSources, ...publicRow } = row;
+    const spot: Spot = {
+      ...publicRow,
+      tags: row.tags || [], amenities: row.amenities || [], good_for: row.good_for || [], best_time: row.best_time || [],
+      hours: row.hours || {}, created_at: new Date(row.created_at).toISOString(), updated_at: new Date(row.updated_at).toISOString(),
+    };
+    this.spots.unshift(spot);
+    if (this.spots.length > 500) this.spots.length = 500;
+    return spot;
   }
 
   private async persistSpot(s: Spot) {

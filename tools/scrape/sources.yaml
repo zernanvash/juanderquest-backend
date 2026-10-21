@@ -1,0 +1,12 @@
+sources:
+  - host: www.pangasinan.gov.ph
+    enabled: true
+    robots_checked_on: 2026-10-21
+    terms_note: >-
+      Official provincial government site. The visible footer states that site content is public domain unless otherwise stated;
+      no separate automated-access terms page was found during this check. Use only the listed pages, facts only, and stop
+      if the site changes policy or returns a block/rate-limit response. This is not a blanket license for bulk crawling.
+    purpose: Reviewable hours, entrance fees, contact number, official website, and temporary closure facts.
+    allowed_path_prefixes:
+      - /department/provincial-tourism-and-cultural-affairs-office/
+      - /what-makes-pangasinan-ang-galing/
