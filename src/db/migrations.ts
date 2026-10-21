@@ -339,6 +339,8 @@ export async function applyMigrations(pg: Pool) {
             CREATE INDEX IF NOT EXISTS idx_push_due ON push_deliveries (send_after) WHERE status = 'queued';
             CREATE INDEX IF NOT EXISTS idx_push_user_day ON push_deliveries (user_id, category, sent_at) WHERE status = 'sent';
           `);
+        } else if (file === '059_push_account_category.sql' && pgMemMigrationAdapters.has(pg as object)) {
+          // The pg-mem copy of push_deliveries (053 adapter) has no category CHECK.
         } else if (file === '056_admin_areas.sql' && pgMemMigrationAdapters.has(pg as object)) {
           await client.query(`
             CREATE TABLE IF NOT EXISTS admin_areas (

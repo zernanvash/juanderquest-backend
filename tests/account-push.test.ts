@@ -114,15 +114,10 @@ describe('Account push notifications', () => {
     expect(new Date(row.rows[0].send_after).toISOString()).toBe('2026-10-22T00:00:00.000Z'); // 08:00 Manila
   });
 
-  it('an unknown category is never sent', async () => {
-    await enqueuePush(testDb.pool as any, {
+  it('an unknown category is rejected by the database (never sent)', async () => {
+    await expect(enqueuePush(testDb.pool as any, {
       userId: user.id, category: 'mystery' as any, collapseKey: 'm',
       title: 't', body: 'b', href: '/', isTest: false,
-    }, noon);
-    const row = await testDb.pool.query(
-      `SELECT status, skip_reason FROM push_deliveries WHERE user_id = $1 AND collapse_key = 'm'`,
-      [user.id],
-    );
-    expect(row.rows[0]).toEqual({ status: 'skipped', skip_reason: 'PREF_OFF' });
+    }, noon)).rejects.toThrow(/push_deliveries_category_check/);
   });
 });
