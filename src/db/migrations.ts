@@ -69,6 +69,7 @@ export const MIGRATIONS = [
   '053_plaza_push.sql',
   '056_admin_areas.sql',
   '057_admin_area_boundaries.sql',
+  '059_push_account_category.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
