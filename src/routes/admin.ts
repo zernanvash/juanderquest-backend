@@ -82,13 +82,150 @@ router.patch('/admin/submissions/:id', validateRequest(reviewSchema), async (req
   }
 });
 
-router.get('/admin/quest-attempts', (req: AuthRequest, res: Response) => {
+router.get('/admin/quest-attempts', async (req: AuthRequest, res: Response) => {
   const statusFilter = req.query.status as string | undefined;
+  const pool = getPool();
+  if (pool) {
+    try {
+      const whereClause = statusFilter ? 'WHERE a.status = $1' : '';
+      const params = statusFilter ? [statusFilter] : [];
+      const query = `
+        SELECT 
+          a.*,
+          q.title AS quest_title,
+          q.location_name AS quest_location,
+          u.display_name AS traveler_name,
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'id', e.id,
+                'step_order', e.step_order,
+                'task_key', e.task_key,
+                'title', e.title,
+                'description', e.description,
+                'checkpoint_type', e.checkpoint_type,
+                'required', e.required,
+                'status', e.status,
+                'evidence_payload', e.evidence_payload,
+                'failed_tries', e.failed_tries,
+                'first_try_at', e.first_try_at,
+                'submitted_at', e.submitted_at,
+                'needs_changes_reason', e.needs_changes_reason,
+                'rejection_reason', e.rejection_reason,
+                'reviewed_by', e.reviewed_by,
+                'reviewed_at', e.reviewed_at,
+                'verified_at', e.verified_at
+              ) ORDER BY e.step_order ASC
+            ) FILTER (WHERE e.id IS NOT NULL),
+            '[]'::json
+          ) AS steps
+        FROM quest_attempts a
+        JOIN quests q ON q.id = a.quest_id
+        LEFT JOIN users u ON u.id = a.user_id
+        LEFT JOIN quest_step_evidence e ON e.attempt_id = a.id
+        ${whereClause}
+        GROUP BY a.id, q.title, q.location_name, u.display_name
+        ORDER BY a.created_at DESC
+      `;
+      const result = await pool.query(query, params);
+      return res.status(200).json({ success: true, data: result.rows });
+    } catch (err) {
+      console.error('[admin] Failed to list quest attempts from pool:', err);
+      return res.status(500).json({ success: false, error: { code: 'DATABASE_ERROR', message: 'Failed to query quest attempts.' } });
+    }
+  }
+
   let attempts = db.quest_attempts;
   if (statusFilter) {
     attempts = attempts.filter((a) => a.status === statusFilter);
   }
-  return res.status(200).json({ success: true, data: attempts });
+  const enriched = attempts.map((a) => {
+    const q = db.findQuestById(a.quest_id);
+    const u = db.users.find((user) => user.id === a.user_id);
+    const steps = db.getStepEvidence(a.id);
+    return {
+      ...a,
+      quest_title: q?.title,
+      quest_location: q?.location_name,
+      traveler_name: u?.display_name || 'Traveler',
+      steps,
+    };
+  });
+  return res.status(200).json({ success: true, data: enriched });
+});
+
+router.get('/admin/quest-attempts/:id', async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const pool = getPool();
+  if (pool) {
+    try {
+      const query = `
+        SELECT 
+          a.*,
+          q.title AS quest_title,
+          q.location_name AS quest_location,
+          q.author_id AS quest_author_id,
+          u.display_name AS traveler_name,
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'id', e.id,
+                'step_order', e.step_order,
+                'task_key', e.task_key,
+                'title', e.title,
+                'description', e.description,
+                'checkpoint_type', e.checkpoint_type,
+                'required', e.required,
+                'status', e.status,
+                'evidence_payload', e.evidence_payload,
+                'failed_tries', e.failed_tries,
+                'first_try_at', e.first_try_at,
+                'submitted_at', e.submitted_at,
+                'needs_changes_reason', e.needs_changes_reason,
+                'rejection_reason', e.rejection_reason,
+                'reviewed_by', e.reviewed_by,
+                'reviewed_at', e.reviewed_at,
+                'verified_at', e.verified_at
+              ) ORDER BY e.step_order ASC
+            ) FILTER (WHERE e.id IS NOT NULL),
+            '[]'::json
+          ) AS steps
+        FROM quest_attempts a
+        JOIN quests q ON q.id = a.quest_id
+        LEFT JOIN users u ON u.id = a.user_id
+        LEFT JOIN quest_step_evidence e ON e.attempt_id = a.id
+        WHERE a.id = $1
+        GROUP BY a.id, q.title, q.location_name, q.author_id, u.display_name
+      `;
+      const result = await pool.query(query, [id]);
+      if (!result.rows[0]) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Quest attempt not found.' } });
+      }
+      return res.status(200).json({ success: true, data: result.rows[0] });
+    } catch (err) {
+      console.error('[admin] Failed to fetch quest attempt detail:', err);
+      return res.status(500).json({ success: false, error: { code: 'DATABASE_ERROR', message: 'Failed to query quest attempt.' } });
+    }
+  }
+
+  const memAttempt = db.quest_attempts.find((a) => a.id === id);
+  if (!memAttempt) {
+    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Quest attempt not found.' } });
+  }
+  const q = db.findQuestById(memAttempt.quest_id);
+  const u = db.users.find((user) => user.id === memAttempt.user_id);
+  const steps = db.getStepEvidence(id);
+  return res.status(200).json({
+    success: true,
+    data: {
+      ...memAttempt,
+      quest_title: q?.title,
+      quest_location: q?.location_name,
+      quest_author_id: q?.author_id,
+      traveler_name: u?.display_name || 'Traveler',
+      steps,
+    },
+  });
 });
 
 const questAttemptReviewSchema = z.object({
