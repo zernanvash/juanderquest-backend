@@ -94,6 +94,16 @@ const rawEnv = cleanEnv(process.env, {
   FCM_SERVICE_ACCOUNT_FILE: str({ default: '' }),
   PLAZA_STANDINGS_INTERVAL_MS: num({ default: 300000 }),
   PUSH_DISPATCH_INTERVAL_MS: num({ default: 30000 }),
+  CHAIN_ID: num({ default: 80002 }),
+  CHAIN_RPC_URLS: str({ default: 'https://polygon-amoy-bor-rpc.publicnode.com,https://polygon-amoy.drpc.org' }),
+  CHAIN_TOKEN_ADDRESS: str({ default: '0x575c4B5b2E046AcCb003ba852dF185126d6197b9' }),
+  CHAIN_DISTRIBUTOR_ADDRESS: str({ default: '0x3542402bcB93e142437779EEEa9e16D7163854ce' }),
+  CHAIN_BADGE_ADDRESS: str({ default: '0xC9b1Cc4f980edf71daCa182944ECb67E494B3E9b' }),
+  CHAIN_CONFIRMATIONS: num({ default: 64 }),
+  CHAIN_START_BLOCK: num({ default: 50776900 }),
+  CHAIN_OVERVIEW_CACHE_SECONDS: num({ default: 60 }),
+  CHAIN_LOW_BALANCE_CHECK_MINUTES: num({ default: 10 }),
+  CHAIN_ALERTS_ENABLED: bool({ default: false }),
 });
 
 const flagOverrides: Record<string, any> = {};
@@ -296,6 +306,21 @@ export function validatePresentationModeConfig(targetEnv: typeof env = env): voi
       throw new Error('JUANCHOICE_PRESENTATION_MODE requires dedicated loopback PostgreSQL on port 55434.');
     }
   }
+}
+
+if (env.CHAIN_ID !== 80002 && env.CHAIN_ID !== 84532) {
+  throw new Error(`CHAIN_ID must be 80002 or 84532, got ${env.CHAIN_ID}`);
+}
+
+const ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/;
+if (!ADDRESS_REGEX.test(env.CHAIN_TOKEN_ADDRESS)) {
+  throw new Error(`CHAIN_TOKEN_ADDRESS must be a valid 40-hex address, got "${env.CHAIN_TOKEN_ADDRESS}"`);
+}
+if (!ADDRESS_REGEX.test(env.CHAIN_DISTRIBUTOR_ADDRESS)) {
+  throw new Error(`CHAIN_DISTRIBUTOR_ADDRESS must be a valid 40-hex address, got "${env.CHAIN_DISTRIBUTOR_ADDRESS}"`);
+}
+if (!ADDRESS_REGEX.test(env.CHAIN_BADGE_ADDRESS)) {
+  throw new Error(`CHAIN_BADGE_ADDRESS must be a valid 40-hex address, got "${env.CHAIN_BADGE_ADDRESS}"`);
 }
 
 validatePresentationModeConfig(env);

@@ -1,19 +1,25 @@
 import { randomUUID } from 'crypto';
 import type { Pool, PoolClient } from 'pg';
+import { getChainConfig } from './config.js';
 
 export const BASE_SEPOLIA_CHAIN_ID = 84532;
 const HASH = /^0x[0-9a-f]{64}$/;
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 
+export type ChainEventName = 'Claimed' | 'BadgeIssued' | 'RoleGranted' | 'RoleRevoked' | 'Paused' | 'Unpaused';
+
 export interface ObservedLog {
   txHash: string;
   logIndex: number;
   address: string;
-  eventName: 'Claimed' | 'BadgeIssued';
-  entitlement: string;
-  recipient: string;
+  eventName: ChainEventName;
+  entitlement?: string;
+  recipient?: string;
   amountWei?: string;
   tokenId?: string;
+  roleHash?: string;
+  account?: string;
+  sender?: string;
 }
 
 export interface ObservedBlock {
@@ -41,17 +47,33 @@ function checkedBlock(block: ObservedBlock, expected: number, options: ChainInde
       || !HASH.test(block.parentHash) || !Array.isArray(block.logs)) throw new Error('INVALID_CHAIN_BLOCK');
   const seen = new Set<string>();
   for (const log of block.logs) {
-    if (!HASH.test(log.txHash) || !Number.isSafeInteger(log.logIndex) || log.logIndex < 0
-        || !ADDRESS.test(log.address) || !HASH.test(log.entitlement) || !ADDRESS.test(log.recipient)
-        || !((log.eventName === 'Claimed' && log.address === options.tokenDistributor)
-          || (log.eventName === 'BadgeIssued' && log.address === options.badge))) {
+    if (!HASH.test(log.txHash) || !Number.isSafeInteger(log.logIndex) || log.logIndex < 0 || !ADDRESS.test(log.address)) {
       throw new Error('INVALID_CHAIN_LOG');
     }
-    if (log.eventName === 'Claimed' && (!log.amountWei || !/^[1-9][0-9]*$/.test(log.amountWei))) {
-      throw new Error('INVALID_CHAIN_LOG_AMOUNT');
-    }
-    if (log.eventName === 'BadgeIssued' && (log.tokenId === undefined || !/^(0|[1-9][0-9]*)$/.test(log.tokenId))) {
-      throw new Error('INVALID_CHAIN_LOG_TOKEN_ID');
+    if (log.eventName === 'Claimed') {
+      if (log.address !== options.tokenDistributor || !log.entitlement || !HASH.test(log.entitlement) || !log.recipient || !ADDRESS.test(log.recipient)) {
+        throw new Error('INVALID_CHAIN_LOG');
+      }
+      if (!log.amountWei || !/^[1-9][0-9]*$/.test(log.amountWei)) {
+        throw new Error('INVALID_CHAIN_LOG_AMOUNT');
+      }
+    } else if (log.eventName === 'BadgeIssued') {
+      if (log.address !== options.badge || !log.entitlement || !HASH.test(log.entitlement) || !log.recipient || !ADDRESS.test(log.recipient)) {
+        throw new Error('INVALID_CHAIN_LOG');
+      }
+      if (log.tokenId === undefined || !/^(0|[1-9][0-9]*)$/.test(log.tokenId)) {
+        throw new Error('INVALID_CHAIN_LOG_TOKEN_ID');
+      }
+    } else if (log.eventName === 'RoleGranted' || log.eventName === 'RoleRevoked') {
+      if (!log.roleHash || !HASH.test(log.roleHash) || !log.account || !ADDRESS.test(log.account) || !log.sender || !ADDRESS.test(log.sender)) {
+        throw new Error('INVALID_CHAIN_LOG_ROLE');
+      }
+    } else if (log.eventName === 'Paused' || log.eventName === 'Unpaused') {
+      if (!log.account || !ADDRESS.test(log.account)) {
+        throw new Error('INVALID_CHAIN_LOG_PAUSE');
+      }
+    } else {
+      throw new Error('INVALID_CHAIN_LOG');
     }
     const key = `${log.txHash}:${log.logIndex}`;
     if (seen.has(key)) throw new Error('DUPLICATE_CHAIN_LOG_IN_BLOCK');
