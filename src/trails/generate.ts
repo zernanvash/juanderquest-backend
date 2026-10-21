@@ -4,6 +4,7 @@ import { computeSpotSignals, loadTrailSignalInputs } from './signals.js';
 import { loadTravelTimeLookup } from './matrix.js';
 import { solveLocal } from './solver/local.js';
 import { writeTrailStory } from './ai/service.js';
+import { loadTrailEconomy } from './economy.js';
 import type { TrailCosting, TrailProblem, TrailSignalRequest } from './types.js';
 
 export interface GenerateTrailInput {
@@ -74,10 +75,16 @@ export async function generateTrail(pool: Pool, input: GenerateTrailInput) {
     const slugBase = (input.theme ?? 'pangasinan-trail').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'pangasinan-trail';
     const slug = `${slugBase}-${randomUUID().slice(0, 8)}`;
     const duration = Math.max(1, solution.totalMin);
+    const economy = await loadTrailEconomy(client);
+    const tier = input.tier ?? 'starter';
+    const unlockRule = tier === 'starter' ? { type: 'free' }
+      : tier === 'explorer' ? { type: 'level', min_level: economy.explorerMinLevel }
+        : tier === 'signature' ? { type: 'points', price_points: economy.signatureUnlockPoints }
+          : { type: 'points', price_points: economy.legendaryUnlockPoints };
     const trailResult = await client.query(`INSERT INTO trails
       (id,slug,title,tagline,tier,theme,municipalities,unlock_rule,costing,total_minutes,total_km,story,status,source,owner_user_id,generation_id,is_test,available_from,available_until)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,'{"type":"free"}'::jsonb,$8,$9,$10,$11::jsonb,$12,'engine',NULL,NULL,$13,$14,$15)
-      RETURNING *`, [trailId, slug, story.title, story.tagline, input.tier ?? 'starter', input.theme ?? 'mixed', municipalities, costing, duration, solution.totalKm,
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12::jsonb,$13,'engine',NULL,NULL,$14,$15,$16)
+      RETURNING *`, [trailId, slug, story.title, story.tagline, tier, input.theme ?? 'mixed', municipalities, JSON.stringify(unlockRule), costing, duration, solution.totalKm,
       JSON.stringify(story), input.status ?? 'draft', Boolean(input.isTest), input.availableFrom ?? null, input.availableUntil ?? null]);
     for (let i = 0; i < solution.stops.length; i++) {
       const stop = solution.stops[i];

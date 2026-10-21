@@ -1,6 +1,7 @@
 import { Router, type Response } from 'express';
 import { z } from 'zod';
-import { authenticateToken, requireAdmin, type AuthRequest } from '../middleware/auth.js';
+import { authenticateToken, optionalAuthenticateToken, requireAdmin, type AuthRequest } from '../middleware/auth.js';
+import { rateLimit } from '../middleware/rateLimit.js';
 import { getPool } from '../db/pool.js';
 import { refreshTravelTimeMatrix, readTravelTimeMatrixStatus } from '../trails/matrix.js';
 import { generateTrail, TrailGenerationError, windowsFromBestTime } from '../trails/generate.js';
@@ -10,10 +11,91 @@ import { solveLocal } from '../trails/solver/local.js';
 import { createCuoptSolver, cuoptEnabledWithKey, CuoptError } from '../trails/solver/cuopt.js';
 import { randomUUID } from 'node:crypto';
 import type { TrailCosting, TrailProblem } from '../trails/types.js';
+import { checkinTrailStop, TrailProgressError, unlockTrail } from '../trails/progress.js';
 
 export const trailsRouter = Router();
 // Every endpoint in this router is operational/admin-only, including reads.
 trailsRouter.use('/admin/trails', authenticateToken, requireAdmin);
+
+const unlockRateLimiter = rateLimit({ policyId: 'trails:unlock', windowMs: 60_000, max: 10, keyStrategy: 'actor' });
+const checkinRateLimiter = rateLimit({ policyId: 'trails:checkin', windowMs: 60_000, max: 6, keyStrategy: 'actor' });
+
+function sendTrailProgressError(res: Response, error: unknown) {
+  if (error instanceof TrailProgressError) return res.status(error.status).json({ success:false,error:{code:error.code,message:error.message} });
+  return res.status(503).json({ success:false,error:{code:'TRAIL_PROGRESS_UNAVAILABLE',message:'Trail progress could not be saved. Please try again.'} });
+}
+
+function lockedTrailShape(row: any, unlocked: boolean) {
+  return { id:row.id,slug:row.slug,title:row.title,tagline:row.tagline,tier:row.tier,theme:row.theme,
+    municipalities:row.municipalities,stop_count:Number(row.stop_count ?? 0),total_minutes:Number(row.total_minutes),
+    total_km:Number(row.total_km),unlock_rule:typeof row.unlock_rule==='string'?JSON.parse(row.unlock_rule):row.unlock_rule,
+    available_until:row.available_until,rarity_art_key:row.tier,is_unlocked:unlocked };
+}
+
+trailsRouter.get('/trails', optionalAuthenticateToken, async (req: AuthRequest, res: Response) => {
+  const pool=getPool();
+  if(!pool)return res.status(503).json({success:false,error:{code:'DATABASE_UNAVAILABLE',message:'Trail catalog is unavailable.'}});
+  try {
+    const user=req.user ? (await pool.query('SELECT id,is_test FROM users WHERE id=$1',[req.user.id])).rows[0] : null;
+    const isTest=Boolean(user?.is_test);
+    const {rows}=await pool.query(`SELECT t.id,t.slug,t.title,t.tagline,t.tier,t.theme,t.municipalities,t.unlock_rule,t.total_minutes,t.total_km,
+        t.available_until,t.owner_user_id,t.is_test,
+        (SELECT COUNT(*)::int FROM trail_stops s WHERE s.trail_id=t.id) AS stop_count,
+        (t.owner_user_id=$2 OR EXISTS(SELECT 1 FROM trail_unlocks u WHERE u.trail_id=t.id AND u.user_id=$2)) AS is_unlocked
+      FROM trails t WHERE t.status='published' AND t.is_test=$1 AND (t.owner_user_id IS NULL OR t.owner_user_id=$2)
+      ORDER BY CASE t.tier WHEN 'starter' THEN 1 WHEN 'explorer' THEN 2 WHEN 'signature' THEN 3 WHEN 'legendary' THEN 4 ELSE 5 END,t.title`,[isTest,user?.id??null]);
+    res.set('Cache-Control',req.user?'private, no-store':'public, max-age=60');
+    return res.json({success:true,data:{items:rows.map(row=>lockedTrailShape(row,Boolean(row.is_unlocked))),total:rows.length}});
+  } catch { return res.status(503).json({success:false,error:{code:'TRAILS_UNAVAILABLE',message:'Trail catalog is unavailable.'}}); }
+});
+
+trailsRouter.get('/trails/:id', optionalAuthenticateToken, async (req: AuthRequest, res: Response) => {
+  const pool=getPool();
+  if(!pool)return res.status(503).json({success:false,error:{code:'DATABASE_UNAVAILABLE',message:'Trail details are unavailable.'}});
+  try {
+    const user=req.user ? (await pool.query('SELECT id,is_test FROM users WHERE id=$1',[req.user.id])).rows[0] : null;
+    const isTest=Boolean(user?.is_test);
+    const selected=await pool.query(`SELECT t.*,(SELECT COUNT(*)::int FROM trail_stops s WHERE s.trail_id=t.id) AS stop_count,
+        (t.owner_user_id=$2 OR EXISTS(SELECT 1 FROM trail_unlocks u WHERE u.trail_id=t.id AND u.user_id=$2)) AS is_unlocked
+      FROM trails t WHERE t.id=$1 AND t.status='published' AND t.is_test=$3 AND (t.owner_user_id IS NULL OR t.owner_user_id=$2)`,
+      [req.params.id,user?.id??null,isTest]);
+    const trail=selected.rows[0];
+    if(!trail)return res.status(404).json({success:false,error:{code:'TRAIL_NOT_FOUND',message:'Trail was not found.'}});
+    res.set('Cache-Control',req.user?'private, no-store':'public, max-age=60');
+    if(!trail.is_unlocked)return res.json({success:true,data:lockedTrailShape(trail,false)});
+    const stops=await pool.query(`SELECT s.position,s.spot_id,s.arrive_offset_min,s.dwell_min,s.leg_minutes,s.leg_km,s.narration,s.checkin_radius_m,
+        p.name,p.municipality,p.category,p.gps_lat,p.gps_lng
+      FROM trail_stops s JOIN spots p ON p.id=s.spot_id WHERE s.trail_id=$1 ORDER BY s.position`,[trail.id]);
+    const checkins=user ? await pool.query('SELECT position,verified_at,distance_m,accuracy_m FROM trail_checkins WHERE trail_id=$1 AND user_id=$2',[trail.id,user.id]) : {rows:[]};
+    const checkinByPosition=new Map(checkins.rows.map((row:any)=>[Number(row.position),row]));
+    return res.json({success:true,data:{...trail,stops:stops.rows.map((stop:any)=>({
+      position:Number(stop.position),spot_id:stop.spot_id,arrive_offset_min:Number(stop.arrive_offset_min),dwell_min:Number(stop.dwell_min),
+      leg_minutes:Number(stop.leg_minutes),leg_km:Number(stop.leg_km),narration:stop.narration,checkin_radius_m:Number(stop.checkin_radius_m),
+      name:stop.name,municipality:stop.municipality,category:stop.category,lat:Number(stop.gps_lat),lng:Number(stop.gps_lng),
+      checked_in:checkinByPosition.has(Number(stop.position)),...(checkinByPosition.get(Number(stop.position))??{})
+    }))}});
+  } catch { return res.status(503).json({success:false,error:{code:'TRAILS_UNAVAILABLE',message:'Trail details are unavailable.'}}); }
+});
+
+trailsRouter.post('/trails/:id/unlock', authenticateToken, unlockRateLimiter, async (req: AuthRequest, res: Response) => {
+  const pool=getPool();
+  if(!pool)return res.status(503).json({success:false,error:{code:'DATABASE_UNAVAILABLE',message:'Trail unlock is unavailable.'}});
+  const key=req.header('Idempotency-Key');
+  if(!key || key.length<8 || key.length>200)return res.status(400).json({success:false,error:{code:'IDEMPOTENCY_KEY_REQUIRED',message:'A valid Idempotency-Key header is required.'}});
+  try { return res.json({success:true,data:await unlockTrail(pool,req.user!.id,req.params.id,key)}); }
+  catch(error){return sendTrailProgressError(res,error);}
+});
+
+const checkinSchema=z.object({lat:z.number().min(-90).max(90),lng:z.number().min(-180).max(180),accuracy_m:z.number().finite().nonnegative()}).strict();
+trailsRouter.post('/trails/:id/stops/:position/checkin', authenticateToken, checkinRateLimiter, async (req: AuthRequest, res: Response) => {
+  const parsed=checkinSchema.safeParse(req.body??{});
+  const position=Number(req.params.position);
+  if(!parsed.success || !Number.isInteger(position) || position<1)return res.status(400).json({success:false,error:{code:'VALIDATION_ERROR',message:'Provide a positive stop position and valid location with accuracy_m at most 100.'}});
+  const pool=getPool();
+  if(!pool)return res.status(503).json({success:false,error:{code:'DATABASE_UNAVAILABLE',message:'Trail check-in is unavailable.'}});
+  try { return res.json({success:true,data:await checkinTrailStop(pool,req.user!.id,req.params.id,position,parsed.data)}); }
+  catch(error){return sendTrailProgressError(res,error);}
+});
 
 trailsRouter.get('/admin/trails/matrix/status', async (_req: AuthRequest, res: Response) => {
   const pool = getPool();

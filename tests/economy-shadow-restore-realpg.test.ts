@@ -8,7 +8,7 @@ const realDockerPg = process.env.JDQ_REAL_PG_URL && process.platform === 'linux'
   ? describe : describe.skip;
 
 realDockerPg('economy shadow backup/restore on isolated real PostgreSQL', () => {
-  const container = 'jdq-reliability-pg-20260910';
+  const container = process.env.JDQ_REAL_PG_CONTAINER ?? 'jdq-reliability-pg-20260910';
   const databaseUser = 'jdq_test';
   let source: TestDbInstance;
 

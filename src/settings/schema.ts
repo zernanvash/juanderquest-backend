@@ -3,7 +3,7 @@ export type SettingValue = string | number | boolean;
 export interface SettingDefinition {
   key: string;
   label: string;
-  category: 'branding_support' | 'quiz_defaults' | 'quest_funding';
+  category: 'branding_support' | 'quiz_defaults' | 'quest_funding' | 'trail_economy';
   type: 'email' | 'url' | 'text' | 'integer' | 'boolean' | 'string';
   defaultValue: SettingValue;
   min?: number;
@@ -147,6 +147,16 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     type: 'boolean', defaultValue: false, restartRequired: false,
     description: 'Optional future prototype accounting path; no real money is involved.',
   },
+  { key: 'trail_starter_reward_points', label: 'Starter trail completion reward', category: 'trail_economy', type: 'integer', defaultValue: 50, min: 0, max: 10000, restartRequired: false, description: 'Off-chain mJDQ points awarded once after all trail stops are verified.' },
+  { key: 'trail_explorer_min_level', label: 'Explorer trail minimum level', category: 'trail_economy', type: 'integer', defaultValue: 5, min: 1, max: 100, restartRequired: false, description: 'Minimum Explorer level required to unlock Explorer trails.' },
+  { key: 'trail_explorer_reward_points', label: 'Explorer trail completion reward', category: 'trail_economy', type: 'integer', defaultValue: 100, min: 0, max: 10000, restartRequired: false, description: 'Off-chain mJDQ points awarded once after all trail stops are verified.' },
+  { key: 'trail_signature_unlock_points', label: 'Signature trail unlock price', category: 'trail_economy', type: 'integer', defaultValue: 300, min: 1, max: 100000, restartRequired: false, description: 'mJDQ points sunk when a traveler unlocks a Signature trail.' },
+  { key: 'trail_signature_reward_points', label: 'Signature trail completion reward', category: 'trail_economy', type: 'integer', defaultValue: 200, min: 0, max: 10000, restartRequired: false, description: 'Off-chain mJDQ points awarded once after all trail stops are verified.' },
+  { key: 'trail_legendary_unlock_points', label: 'Legendary trail unlock price', category: 'trail_economy', type: 'integer', defaultValue: 500, min: 1, max: 100000, restartRequired: false, description: 'mJDQ points sunk when a traveler unlocks a Legendary trail.' },
+  { key: 'trail_legendary_reward_points', label: 'Legendary trail completion reward', category: 'trail_economy', type: 'integer', defaultValue: 350, min: 0, max: 10000, restartRequired: false, description: 'Off-chain mJDQ points awarded once after all trail stops are verified.' },
+  { key: 'trail_personal_free_per_week', label: 'Free personal trail generations per week', category: 'trail_economy', type: 'integer', defaultValue: 1, min: 0, max: 10, restartRequired: false, description: 'Weekly free personal trail generation allowance.' },
+  { key: 'trail_personal_generation_points', label: 'Additional personal trail generation price', category: 'trail_economy', type: 'integer', defaultValue: 100, min: 1, max: 10000, restartRequired: false, description: 'mJDQ points charged after the free weekly allowance.' },
+  { key: 'trail_personal_reward_points', label: 'Personal trail completion reward', category: 'trail_economy', type: 'integer', defaultValue: 50, min: 0, max: 10000, restartRequired: false, description: 'Off-chain mJDQ points awarded once after all trail stops are verified.' },
 ];
 
 export const SETTINGS_BY_KEY: ReadonlyMap<string, SettingDefinition> = new Map(
