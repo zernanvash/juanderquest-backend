@@ -236,7 +236,7 @@ describe('Phase 5: Synthetic QA Data Isolation', () => {
     });
 
     it('excludes synthetic spots from default spots listing', async () => {
-      const res = await request(app).get('/api/v1/spots');
+      const res = await request(app).get('/api/v1/spots?limit=500');
       expect(res.status).toBe(200);
       const spotIds = res.body.data.map((s: any) => s.id);
       expect(spotIds).toContain(genuineSpot.id);
@@ -271,7 +271,7 @@ describe('Phase 5: Synthetic QA Data Isolation', () => {
       expect(userIds).toContain(testUserId);
 
       const resSpots = await request(app)
-        .get('/api/v1/spots?include_test=true')
+        .get('/api/v1/spots?include_test=true&limit=500')
         .set('Authorization', `Bearer ${tokenAdmin}`);
 
       expect(resSpots.status).toBe(200);

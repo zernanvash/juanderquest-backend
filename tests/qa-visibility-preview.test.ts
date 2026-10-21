@@ -197,7 +197,7 @@ describe('Phase 0 & 1: QA Visibility & Evaluator Preview Mode', () => {
 
     it('accepts x-include-test: true header with admin token on GET /spots', async () => {
       const res = await request(app)
-        .get('/api/v1/spots')
+        .get('/api/v1/spots?limit=500')
         .set('Authorization', `Bearer ${tokenAdmin}`)
         .set('x-include-test', 'true');
 
@@ -208,7 +208,7 @@ describe('Phase 0 & 1: QA Visibility & Evaluator Preview Mode', () => {
 
     it('accepts x-include-test: true header with QA role token on GET /spots', async () => {
       const res = await request(app)
-        .get('/api/v1/spots')
+        .get('/api/v1/spots?limit=500')
         .set('Authorization', `Bearer ${tokenQA}`)
         .set('x-include-test', 'true');
 
