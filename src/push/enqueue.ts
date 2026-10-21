@@ -14,7 +14,12 @@ export interface EnqueueFriendActivityInput {
 
 export interface EnqueuePushInput {
   userId: string;
-  category: 'overtaken' | 'friend_activity' | 'social' | 'weekly_recap';
+  /**
+   * `account`: transactional updates about the traveler's own quests, rewards,
+   * funding and sponsorships. Always on (no preference toggle) and exempt from
+   * the social daily caps; quiet hours still apply.
+   */
+  category: 'overtaken' | 'friend_activity' | 'social' | 'weekly_recap' | 'account';
   collapseKey: string;
   notificationId?: string | null;
   title: string;
@@ -85,12 +90,14 @@ export async function checkDailyCaps(
     friend_activity: 0,
     social: 0,
     weekly_recap: 0,
+    account: 0,
   };
 
   for (const r of res.rows) {
     const c = Number(r.cnt || 0);
     countsByCategory[r.category] = c;
-    totalSent += c;
+    // Account updates never use up the social daily budget.
+    if (r.category !== 'account') totalSent += c;
   }
 
   return { totalSent, countsByCategory };
@@ -110,13 +117,17 @@ export async function enqueuePush(
   // 1. Preference check
   const prefs = await getUserPreferences(client, input.userId);
   const categoryAllowed =
-    input.category === 'overtaken'
+    input.category === 'account'
+      ? true
+      : input.category === 'overtaken'
       ? prefs.push_overtaken
       : input.category === 'friend_activity'
       ? prefs.push_friend_activity
       : input.category === 'social'
       ? prefs.push_social
-      : prefs.push_weekly_recap;
+      : input.category === 'weekly_recap'
+      ? prefs.push_weekly_recap
+      : false;
 
   if (!categoryAllowed) {
     await client.query(
@@ -147,10 +158,11 @@ export async function enqueuePush(
   const catSent = countsByCategory[input.category] || 0;
 
   const isOverCap =
-    totalSent >= 6 ||
-    (input.category === 'overtaken' && catSent >= 1) ||
-    (input.category === 'friend_activity' && catSent >= 2) ||
-    (input.category === 'social' && catSent >= 4);
+    input.category !== 'account' &&
+    (totalSent >= 6 ||
+      (input.category === 'overtaken' && catSent >= 1) ||
+      (input.category === 'friend_activity' && catSent >= 2) ||
+      (input.category === 'social' && catSent >= 4));
 
   if (isOverCap) {
     await client.query(
