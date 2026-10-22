@@ -227,6 +227,40 @@ realPg('badge minter on disposable PostgreSQL (Plan 50)', () => {
     expect(cmd.last_error).toMatch(/dropped/);
   });
 
+  it('lists every earned badge with its traveler in the admin ledger', async () => {
+    const minted = await addUser({ wallet: WALLET });
+    const waiting = await addUser({ wallet: null });
+    const tester = await addUser({ isTest: true });
+    const adminId = await addUser({ role: 'admin', wallet: null });
+    await fixture.pool.query(`UPDATE users SET display_name = 'Maria Waiting', handle = 'maria' WHERE id = $1`, [waiting]);
+    const mintedAward = await award(minted);
+    const waitingAward = await award(waiting, 'pangasinan_pioneer');
+    await award(tester);
+    await runBadgeMintTick(fixture.pool, chain, OPTIONS);
+    await runBadgeMintTick(fixture.pool, chain, OPTIONS);
+    chain.head += 5;
+    await runBadgeMintTick(fixture.pool, chain, OPTIONS);
+
+    const adminAuth = { Authorization: `Bearer ${signSessionToken({ id: adminId, seed_id: `seed-${adminId}`, role: 'admin' })}` };
+    const all = await request(app).get('/api/v1/admin/chain/badges/ledger').set(adminAuth);
+    expect(all.status).toBe(200);
+    expect(all.body.data.total).toBe(2); // the test user's award is excluded
+    expect(all.body.data.totals).toMatchObject({ on_chain: 1, pending_wallet: 1 });
+    const byAward = Object.fromEntries(all.body.data.entries.map((e: any) => [e.awardId, e]));
+    expect(byAward[mintedAward]).toMatchObject({ state: 'on_chain', wallet: WALLET, tokenId: badgeTokenId(mintedAward) });
+    expect(byAward[waitingAward]).toMatchObject({ state: 'pending_wallet', wallet: null, title: 'Pangasinan Pioneer',
+      traveler: { id: waiting, name: 'Maria Waiting', handle: 'maria' } });
+
+    const pendingOnly = await request(app).get('/api/v1/admin/chain/badges/ledger?state=pending_wallet').set(adminAuth);
+    expect(pendingOnly.body.data.entries.map((e: any) => e.awardId)).toEqual([waitingAward]);
+    expect(pendingOnly.body.data.total).toBe(2);
+    const search = await request(app).get('/api/v1/admin/chain/badges/ledger?q=MARIA').set(adminAuth);
+    expect(search.body.data.entries.map((e: any) => e.awardId)).toEqual([waitingAward]);
+
+    expect((await request(app).get('/api/v1/admin/chain/badges/ledger')
+      .set('Authorization', `Bearer ${signSessionToken({ id: minted, seed_id: `seed-${minted}`, role: 'user' })}`)).status).toBe(403);
+  });
+
   it('serves badge status, public metadata, an image and the admin queue', async () => {
     const userId = await addUser({ wallet: WALLET });
     const adminId = await addUser({ role: 'admin', wallet: null });

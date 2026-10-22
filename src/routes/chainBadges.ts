@@ -210,6 +210,57 @@ chainBadgesRouter.get('/admin/chain/badges', ...adminGuard, async (_req: AuthReq
   }
 });
 
+const LEDGER_STATES = ['pending_wallet', 'queued', 'minting', 'on_chain', 'failed', 'revoked'] as const;
+
+/** Every earned (non-test) badge with its traveler and on-chain state — the admin ledger. */
+chainBadgesRouter.get('/admin/chain/badges/ledger', ...adminGuard, async (req: AuthRequest, res: Response) => {
+  const pool = getPool();
+  if (!pool) return unavailable(res);
+  const stateFilter = typeof req.query.state === 'string' && (LEDGER_STATES as readonly string[]).includes(req.query.state)
+    ? req.query.state : null;
+  const search = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 80).toLowerCase() : '';
+  try {
+    const config = getChainConfig();
+    const rows = await pool.query(
+      `SELECT a.id AS award_id, a.awarded_at, a.revoked_at, FALSE AS is_test,
+              d.title, d.track, u.id AS user_id, u.display_name, u.handle, u.wallet_address AS wallet,
+              c.id AS command_id, c.status, c.recipient_address, c.expected_token_id::text AS token_id,
+              c.attempt_count, c.last_error, c.updated_at,
+              (SELECT t.tx_hash FROM chain_transaction_attempts t WHERE t.command_id = c.id
+                ORDER BY t.created_at DESC LIMIT 1) AS tx_hash
+         FROM achievement_awards a
+         JOIN users u ON u.id = a.user_id
+         JOIN achievement_definitions d ON d.id = a.achievement_id
+         LEFT JOIN chain_commands c ON c.chain_id = $1 AND c.source_award_id = a.id
+        WHERE a.is_test = FALSE AND COALESCE(u.is_test, FALSE) = FALSE
+          AND ($2 = '' OR lower(u.display_name) LIKE '%' || $2 || '%' OR lower(COALESCE(u.handle, '')) LIKE '%' || $2 || '%'
+               OR lower(d.title) LIKE '%' || $2 || '%' OR lower(COALESCE(u.wallet_address, '')) LIKE '%' || $2 || '%')
+        ORDER BY (c.status = 'failed') DESC NULLS LAST, a.awarded_at DESC
+        LIMIT 500`, [config.chainId, search]);
+    const entries = rows.rows.map((r) => {
+      const state = badgeState(r);
+      return {
+        awardId: r.award_id, title: r.title, track: r.track, awardedAt: r.awarded_at,
+        traveler: { id: r.user_id, name: r.display_name, handle: r.handle ?? null },
+        wallet: r.recipient_address ?? (r.wallet && /^0x[0-9a-f]{40}$/i.test(r.wallet) ? String(r.wallet).toLowerCase() : null),
+        state, commandId: r.command_id ?? null, attempts: r.attempt_count ?? 0, lastError: r.last_error ?? null,
+        updatedAt: r.updated_at ?? r.awarded_at, tokenId: r.token_id ?? null,
+        txUrl: r.tx_hash ? explorerTx(r.tx_hash, config.explorer) : null,
+        tokenUrl: r.token_id && (state === 'on_chain' || state === 'revoked') ? nftUrl(config.explorer, config.contracts.badge, r.token_id) : null,
+      };
+    });
+    const totals: Record<string, number> = Object.fromEntries(LEDGER_STATES.map((s) => [s, 0]));
+    entries.forEach((e) => { totals[e.state] = (totals[e.state] ?? 0) + 1; });
+    return res.json({
+      success: true,
+      data: { totals, total: entries.length, entries: stateFilter ? entries.filter((e) => e.state === stateFilter) : entries },
+    });
+  } catch (err) {
+    console.error('[chain-badges] ledger failed:', err instanceof Error ? err.message : err);
+    return failed(res);
+  }
+});
+
 chainBadgesRouter.post('/admin/chain/badges/:commandId/retry', ...adminGuard, async (req: AuthRequest, res: Response) => {
   const pool = getPool();
   if (!pool) return unavailable(res);
