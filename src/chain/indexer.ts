@@ -115,7 +115,10 @@ async function projectCommands(client: PoolClient, options: ChainIndexerOptions,
               AND e.contract_address = $3
               AND c.expected_token_id IS NOT NULL
               AND e.payload ->> 'tokenId' = c.expected_token_id::text))
-    ) THEN 'finalized' WHEN c.status = 'finalized' THEN 'unknown' ELSE c.status END,
+    ) THEN 'finalized'
+      -- Plan 50: the badge minter finalizes its own commands from receipts and
+      -- confirmations; an indexer that has not reached that block yet must not demote them.
+      WHEN c.status = 'finalized' AND c.source_award_id IS NULL THEN 'unknown' ELSE c.status END,
     updated_at = now()
     WHERE c.chain_id = $1 AND c.status IN ('queued', 'submitted', 'included', 'finalized', 'unknown')
   `, [chainId, options.tokenDistributor, options.badge]);

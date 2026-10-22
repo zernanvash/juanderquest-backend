@@ -104,6 +104,13 @@ const rawEnv = cleanEnv(process.env, {
   CHAIN_OVERVIEW_CACHE_SECONDS: num({ default: 60 }),
   CHAIN_LOW_BALANCE_CHECK_MINUTES: num({ default: 10 }),
   CHAIN_ALERTS_ENABLED: bool({ default: false }),
+  // Plan 50: mint earned achievements as soulbound badges. The issuer key is
+  // read from this file path at runtime; never put the key itself in env.
+  CHAIN_BADGE_MINTING_ENABLED: bool({ default: false }),
+  CHAIN_ISSUER_KEY_FILE: str({ default: '' }),
+  CHAIN_BADGE_MINT_INTERVAL_SECONDS: num({ default: 30 }),
+  CHAIN_BADGE_MAX_ATTEMPTS: num({ default: 5 }),
+  PUBLIC_API_BASE: str({ default: 'https://api.juanderquest.app' }),
 });
 
 const flagOverrides: Record<string, any> = {};

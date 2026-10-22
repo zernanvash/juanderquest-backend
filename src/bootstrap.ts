@@ -14,6 +14,7 @@ import { initFcm } from './push/fcm.js';
 import { startPushDispatcher } from './push/dispatcher.js';
 import { startWeeklyRecapJob } from './social/weeklyRecapJob.js';
 import { startChainBalanceWatch } from './chain/balanceWatch.js';
+import { startBadgeMinter } from './chain/badgeMinter.js';
 
 // Boot orchestration: connect PostgreSQL (when available), hydrate memory + governance, fall back to in-memory.
 export async function bootstrap() {
@@ -29,6 +30,7 @@ export async function bootstrap() {
     startPushDispatcher();
     startWeeklyRecapJob();
     startChainBalanceWatch();
+    startBadgeMinter();
   } else {
     governanceStore.refreshBalances();
   }
