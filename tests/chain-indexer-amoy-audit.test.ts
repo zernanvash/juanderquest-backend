@@ -136,4 +136,19 @@ realPg('ChainIndexer — Polygon Amoy Role & Pause Projections (WP3)', () => {
     // Events from old block 50776901 must be purged
     expect(auditRows.rows.length).toBe(0);
   });
+
+  it('rejects role events from a contract that is not ours, and pause events not from the distributor', async () => {
+    const options = { chainId: 80002, tokenDistributor: distributor, badge, token, confirmations: 1, startBlock: 50776900 };
+
+    const foreignRole = new AmoyFixtureSource();
+    foreignRole.blocks.get(50776900)!.logs[0].address = a('9');
+    await expect(new ChainIndexer(fixture.pool, foreignRole, options).sync(10)).rejects.toThrow('INVALID_CHAIN_LOG_ROLE');
+
+    const badgePause = new AmoyFixtureSource();
+    badgePause.blocks.get(50776900)!.logs[1].address = badge;
+    await expect(new ChainIndexer(fixture.pool, badgePause, options).sync(10)).rejects.toThrow('INVALID_CHAIN_LOG_PAUSE');
+
+    const audit = await fixture.pool.query('SELECT count(*)::int AS n FROM chain_wallet_audit');
+    expect(audit.rows[0].n).toBe(0);
+  });
 });

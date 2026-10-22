@@ -68,10 +68,16 @@ function checkedBlock(block: ObservedBlock, expected: number, options: ChainInde
         throw new Error('INVALID_CHAIN_LOG_TOKEN_ID');
       }
     } else if (log.eventName === 'RoleGranted' || log.eventName === 'RoleRevoked') {
+      // Only our three contracts may produce role events (defence in depth: the
+      // RPC source already filters by address).
+      const roleContracts = [options.tokenDistributor, options.badge, options.token].filter(Boolean);
+      if (!roleContracts.includes(log.address)) throw new Error('INVALID_CHAIN_LOG_ROLE');
       if (!log.roleHash || !HASH.test(log.roleHash) || !log.account || !ADDRESS.test(log.account) || !log.sender || !ADDRESS.test(log.sender)) {
         throw new Error('INVALID_CHAIN_LOG_ROLE');
       }
     } else if (log.eventName === 'Paused' || log.eventName === 'Unpaused') {
+      // Only the distributor is pausable.
+      if (log.address !== options.tokenDistributor) throw new Error('INVALID_CHAIN_LOG_PAUSE');
       if (!log.account || !ADDRESS.test(log.account)) {
         throw new Error('INVALID_CHAIN_LOG_PAUSE');
       }
