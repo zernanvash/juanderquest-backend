@@ -13,6 +13,7 @@ const realPg = process.env.JDQ_REAL_PG_URL ? describe : describe.skip;
 const CHAIN = 80002;
 const WALLET = '0x1111111111111111111111111111111111111111';
 const OPTIONS = { chainId: CHAIN, confirmations: 3, maxAttempts: 2 };
+const randomWallet = () => `0x${randomUUID().replace(/-/g, '')}${randomUUID().replace(/-/g, '').slice(0, 8)}`;
 
 /** In-memory badge contract + mempool. */
 class FakeChain implements BadgeChain {
@@ -82,7 +83,7 @@ realPg('badge minter on disposable PostgreSQL (Plan 50)', () => {
     const id = `u-badge-${randomUUID().slice(0, 8)}`;
     await fixture.pool.query(
       `INSERT INTO users (id, seed_id, display_name, email, role, wallet_address, is_test) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [id, `seed-${id}`, 'Badge Traveler', `${id}@test.local`, opts.role ?? 'user', opts.wallet === undefined ? WALLET : opts.wallet, opts.isTest ?? false]);
+      [id, `seed-${id}`, 'Badge Traveler', `${id}@test.local`, opts.role ?? 'user', opts.wallet === undefined ? randomWallet() : opts.wallet, opts.isTest ?? false]);
     db.users.push({ id, seed_id: `seed-${id}`, display_name: id, email: `${id}@test.local`, role: opts.role ?? 'user' } as any);
     return id;
   };
@@ -105,7 +106,7 @@ realPg('badge minter on disposable PostgreSQL (Plan 50)', () => {
   afterEach(async () => { await fixture?.close(); }, 120_000);
 
   it('queues only eligible awards: live, non-test, with a hex wallet', async () => {
-    const ok = await award(await addUser());
+    const ok = await award(await addUser({ wallet: WALLET }));
     const noWallet = await award(await addUser({ wallet: null }));
     const testUser = await award(await addUser({ isTest: true }));
     const testAward = await award(await addUser(), 'first_footstep', true);
@@ -121,7 +122,7 @@ realPg('badge minter on disposable PostgreSQL (Plan 50)', () => {
   });
 
   it('mints once, then confirms after enough blocks, and never re-sends', async () => {
-    const id = await award(await addUser());
+    const id = await award(await addUser({ wallet: WALLET }));
     const first = await runBadgeMintTick(fixture.pool, chain, OPTIONS);
     expect(first.sent).toBeTruthy();
     expect(chain.sent).toHaveLength(1);
@@ -227,7 +228,7 @@ realPg('badge minter on disposable PostgreSQL (Plan 50)', () => {
   });
 
   it('serves badge status, public metadata, an image and the admin queue', async () => {
-    const userId = await addUser();
+    const userId = await addUser({ wallet: WALLET });
     const adminId = await addUser({ role: 'admin', wallet: null });
     const id = await award(userId);
     const noWalletUser = await addUser({ wallet: null });

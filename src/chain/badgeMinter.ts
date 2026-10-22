@@ -66,7 +66,8 @@ const shortError = (err: unknown): string => {
 const backoffMs = (attempt: number) => Math.min(60, 2 ** Math.max(0, attempt - 1)) * 60_000;
 
 /** Awards of non-test travelers with a hex wallet and no command yet become queued commands. */
-export async function enqueueEligibleBadges(pool: Pool, chainId: number, limit = ENQUEUE_BATCH): Promise<number> {
+export async function enqueueEligibleBadges(pool: Pool, chainId: number, now: Date = new Date(),
+  limit = ENQUEUE_BATCH): Promise<number> {
   const candidates = await pool.query(
     `SELECT a.id, lower(u.wallet_address) AS wallet
        FROM achievement_awards a
@@ -81,10 +82,10 @@ export async function enqueueEligibleBadges(pool: Pool, chainId: number, limit =
     const tokenId = badgeTokenId(row.id);
     const inserted = await pool.query(
       `INSERT INTO chain_commands (id, chain_id, entitlement_id, operation, recipient_address, status,
-          expected_token_id, source_award_id, token_uri)
-       VALUES ($1, $2, $3, 'badge_claim', $4, 'queued', $5, $6, $7)
+          expected_token_id, source_award_id, token_uri, next_attempt_at)
+       VALUES ($1, $2, $3, 'badge_claim', $4, 'queued', $5, $6, $7, $8)
        ON CONFLICT DO NOTHING`,
-      [randomUUID(), chainId, badgeEntitlement(row.id), row.wallet, tokenId, row.id, badgeTokenUri(tokenId)]);
+      [randomUUID(), chainId, badgeEntitlement(row.id), row.wallet, tokenId, row.id, badgeTokenUri(tokenId), now]);
     enqueued += inserted.rowCount ?? 0;
   }
   return enqueued;
@@ -227,7 +228,7 @@ export async function sendNextBadge(pool: Pool, chain: BadgeChain, options: Badg
 
 export async function runBadgeMintTick(pool: Pool, chain: BadgeChain, options: BadgeMinterOptions): Promise<BadgeTickResult> {
   const result: BadgeTickResult = { enqueued: 0, included: 0, finalized: 0, retried: 0, failed: 0, sent: null };
-  result.enqueued = await enqueueEligibleBadges(pool, options.chainId);
+  result.enqueued = await enqueueEligibleBadges(pool, options.chainId, options.now ?? new Date());
   await reconcileBadgeCommands(pool, chain, options, result);
   await sendNextBadge(pool, chain, options, result);
   return result;
