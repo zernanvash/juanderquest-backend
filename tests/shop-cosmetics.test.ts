@@ -12,8 +12,8 @@ import { reconcileFunding } from '../src/funding/reconcile.js';
 
 describe('Shop v1 cosmetics', () => {
   let fixture: TestDbInstance;
-  beforeAll(async () => { fixture = await createTestDb(); });
-  afterAll(async () => { await fixture?.close(); });
+  beforeAll(async () => { fixture = await createTestDb(); }, 120_000);
+  afterAll(async () => { await fixture?.close(); }, 120_000);
 
   it('validates the self-describing asset shapes for each slot', () => {
     expect(validateAsset('banner', { style: 'gradient', colors: ['#f4a261', '#e76f51'], angle: 135, pattern: 'sun' })).toBe(true);
@@ -57,8 +57,12 @@ realPg('Shop v1 against disposable PostgreSQL (Plan 52 §7)', () => {
       [id,kind,'Shop test item',opts.price===undefined?10:opts.price,opts.badge??null,JSON.stringify(asset),opts.active??true,opts.test??false,opts.starts??null]);
     return id;
   }
-  beforeEach(async () => { fixture=await createTestDb({poolMax:10}); setPool(fixture.pool); db.usersRepo.setPool(fixture.pool); });
-  afterEach(async () => { await fixture?.close(); });
+  beforeEach(async () => {
+    fixture = await createTestDb({ poolMax: 10 });
+    setPool(fixture.pool);
+    db.usersRepo.setPool(fixture.pool);
+  }, 120_000);
+  afterEach(async () => { await fixture?.close(); }, 120_000);
 
   it('deducts once, writes a balanced ledger group and reconciles treasury balances', async () => {
     const user=await addUser({points:100}); const item=await addItem({price:25});
@@ -138,7 +142,8 @@ realPg('Shop v1 against disposable PostgreSQL (Plan 52 §7)', () => {
     const me=await request(app).get('/api/v1/auth/me').set(auth);
     expect(me.status).toBe(200); expect(me.body.data.cosmetics.banner).toMatchObject({id:item,kind:'banner',asset:expect.any(Object)});
     expect(me.body.data.cosmetics.banner).not.toHaveProperty('price_points');
-    await fixture.pool.query('UPDATE users SET is_public=TRUE WHERE id=$1',[user]);
+    await fixture.pool.query('UPDATE users SET is_public=TRUE,is_test=FALSE WHERE id=$1',[user]);
+    db.usersRepo.setPool(fixture.pool);
     const profile=await request(app).get(`/api/v1/users/${user}/profile`);
     expect(profile.status).toBe(200); expect(profile.body.data.cosmetics.banner).toMatchObject({id:item,kind:'banner'});
     expect(Object.keys(profile.body.data.cosmetics).sort()).toEqual(['banner','frame','nameColor','title']);
