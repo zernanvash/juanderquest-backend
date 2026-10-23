@@ -9,6 +9,7 @@ import { randomUUID } from 'crypto';
 import { getAddress, verifyMessage } from 'ethers';
 import { clearSessionCookie, setSessionCookie } from '../auth/sessionCookie.js';
 import { signSessionToken } from '../auth/tokens.js';
+import { cosmeticsFor } from '../shop/render.js';
 
 const router = Router();
 
@@ -1004,9 +1005,10 @@ router.get('/auth/me', authenticateToken, async (req: AuthRequest, res: Response
   }
 
   res.setHeader('Cache-Control', 'private, no-store');
+  const cosmetics=(await cosmeticsFor([user.id])).get(user.id);
   return res.status(200).json({
     success: true,
-    data: user,
+    data: { ...user, cosmetics: cosmetics ?? {banner:null,frame:null,title:null,nameColor:null} },
   });
 });
 

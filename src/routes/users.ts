@@ -7,6 +7,7 @@ import { validateRequest } from '../middleware/validate.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { notify } from '../social/notify.js';
 import { manilaHour } from '../social/time.js';
+import { cosmeticsFor } from '../shop/render.js';
 
 export const usersRouter = Router();
 
@@ -33,11 +34,12 @@ usersRouter.get('/users', optionalAuthenticateToken, checkQAAuthorization, async
   const parsedLimit = rawLimit ? parseInt(rawLimit as string, 10) : 3;
   const limit = Math.min(6, Math.max(1, isNaN(parsedLimit) ? 3 : parsedLimit));
   const items = await db.listPublicUsers(limit, allowTest);
+  const cosmetics=await cosmeticsFor(items.map((item:any)=>item.id));
   return res.status(200).json({
     success: true,
     data: {
-      items,
-      users: items,
+      items: items.map((item:any)=>({...item,cosmetics:cosmetics.get(item.id)??{banner:null,frame:null,title:null,nameColor:null}})),
+      users: items.map((item:any)=>({...item,cosmetics:cosmetics.get(item.id)??{banner:null,frame:null,title:null,nameColor:null}})),
     },
   });
 });
@@ -59,6 +61,7 @@ usersRouter.get(
     }
 
     const counts = await db.getFollowCounts(user.id, true);
+    const cosmetics=(await cosmeticsFor([user.id])).get(user.id);
     return res.status(200).json({
       success: true,
       data: {
@@ -75,6 +78,7 @@ usersRouter.get(
         following_count: counts.following_count,
         created_at: user.created_at,
         updated_at: user.updated_at,
+        cosmetics: cosmetics ?? {banner:null,frame:null,title:null,nameColor:null},
       },
     });
   }
@@ -249,6 +253,7 @@ usersRouter.get(
     }
 
     const counts = await db.getFollowCounts(user.id, false, allowTest);
+    const cosmetics=(await cosmeticsFor([user.id])).get(user.id);
 
     // Strict Privacy-Safe Projection: Never leak email, wallet address, balances, or private logs
     return res.status(200).json({
@@ -266,6 +271,7 @@ usersRouter.get(
         follower_count: counts.follower_count,
         following_count: counts.following_count,
         created_at: user.created_at,
+        cosmetics: cosmetics ?? {banner:null,frame:null,title:null,nameColor:null},
       },
     });
   }

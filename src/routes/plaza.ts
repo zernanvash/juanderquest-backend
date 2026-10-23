@@ -27,6 +27,7 @@ import {
   adminModerateComment,
   adminModerateActivity,
 } from '../social/interactions.js';
+import { cosmeticsFor } from '../shop/render.js';
 
 export const plazaRouter = Router();
 
@@ -284,6 +285,8 @@ plazaRouter.get(
         cursor,
         limit,
       });
+      const cosmetics=await cosmeticsFor(result.items.map(item=>item.actor.user_id),pool);
+      result.items=result.items.map(item=>({...item,actor:{...item.actor,cosmetics:cosmetics.get(item.actor.user_id)??{banner:null,frame:null,title:null,nameColor:null}}}));
 
       return res.status(200).json({
         success: true,
@@ -411,6 +414,11 @@ plazaRouter.get(
         limit,
         afterRank,
       });
+      const actors=[...result.entries,...result.podium,...result.rivals.above,...result.rivals.below];
+      const cosmetics=await cosmeticsFor(actors.map(item=>item.user_id||'').filter(Boolean),pool);
+      const addCosmetics=(item:any)=>({...item,cosmetics:item.user_id?cosmetics.get(item.user_id)??{banner:null,frame:null,title:null,nameColor:null}:undefined});
+      result.entries=result.entries.map(addCosmetics); result.podium=result.podium.map(addCosmetics);
+      result.rivals.above=result.rivals.above.map(addCosmetics); result.rivals.below=result.rivals.below.map(addCosmetics);
 
       return res.status(200).json({
         success: true,
@@ -624,6 +632,8 @@ plazaRouter.get(
         limit,
         isTest,
       });
+      const cosmetics=await cosmeticsFor(result.items.map(item=>item.author.user_id),pool);
+      result.items=result.items.map(item=>({...item,author:{...item.author,cosmetics:cosmetics.get(item.author.user_id)??{banner:null,frame:null,title:null,nameColor:null}}}));
 
       return res.status(200).json({
         success: true,
