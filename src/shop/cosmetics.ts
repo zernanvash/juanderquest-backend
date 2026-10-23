@@ -50,9 +50,10 @@ export async function purchaseCosmetic(userId:string,itemId:string,key:string) {
     const replay=(await c.query('SELECT uc.item_id,uc.points_spent,i.name,i.kind,i.asset,u.demo_points FROM user_cosmetics uc JOIN cosmetic_items i ON i.id=uc.item_id JOIN users u ON u.id=uc.user_id WHERE uc.user_id=$1 AND uc.idempotency_key=$2',[userId,key])).rows[0];
     if(replay) { if(replay.item_id!==itemId) throw new Error('IDEMPOTENCY_CONFLICT'); await commitGovernanceTransaction(c); return { item:{id:replay.item_id,name:replay.name,kind:replay.kind,asset:replay.asset},pointsBalance:Number(replay.demo_points),replayed:true,statusCode:200 }; }
     const item=(await c.query(`SELECT * FROM cosmetic_items WHERE id=$1 AND is_active=TRUE AND (available_from IS NULL OR available_from<=now()) AND (available_until IS NULL OR available_until>now()) FOR SHARE`,[itemId])).rows[0];
-    if(!item) throw new Error('NOT_AVAILABLE'); if(item.price_points==null) throw new Error('NOT_FOR_SALE');
-    if(item.is_test && !u.is_test) throw new Error('NOT_AVAILABLE');
+    if(!item) throw new Error('NOT_AVAILABLE');
     if(item.unlock_achievement_id) throw new Error('BADGE_REQUIRED');
+    if(item.price_points==null) throw new Error('NOT_FOR_SALE');
+    if(item.is_test && !u.is_test) throw new Error('NOT_AVAILABLE');
     if((await c.query('SELECT 1 FROM user_cosmetics WHERE user_id=$1 AND item_id=$2',[userId,itemId])).rowCount) throw new Error('ALREADY_OWNED');
     if(Number(u.demo_points)<Number(item.price_points)) throw new Error('INSUFFICIENT_POINTS');
     const group=await movePoints(c,{from:{id:userId,userId,kind:'traveler'},to:{id:u.is_test?'treasury:test':'treasury',kind:'treasury'},points:Number(item.price_points),type:'shop_cosmetic_purchase',referenceType:'cosmetic_purchase',referenceId:itemId,actorId:userId,idempotencyKey:key,metadata:{item_id:itemId}});

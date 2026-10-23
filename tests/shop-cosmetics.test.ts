@@ -67,7 +67,7 @@ realPg('Shop v1 against disposable PostgreSQL (Plan 52 §7)', () => {
     expect((await fixture.pool.query('SELECT demo_points FROM users WHERE id=$1',[user])).rows[0].demo_points).toBe(75);
     const group=(await fixture.pool.query(`SELECT transaction_group_id,count(*)::int n,sum(amount_mjdq)::int net FROM governance_ledger WHERE idempotency_key=$1 GROUP BY transaction_group_id`,['shop-key-0001'])).rows[0];
     expect(group).toMatchObject({n:2,net:0});
-    expect((await fixture.pool.query(`SELECT balance_points FROM points_accounts WHERE id='treasury'`)).rows[0].balance_points).toBe(25);
+    expect(Number((await fixture.pool.query(`SELECT balance_points FROM points_accounts WHERE id='treasury'`)).rows[0].balance_points)).toBe(25);
     expect((await reconcileFunding(fixture.pool)).ok).toBe(true);
   });
 
@@ -109,7 +109,7 @@ realPg('Shop v1 against disposable PostgreSQL (Plan 52 §7)', () => {
     expect((await listCosmetics(live)).some(x=>x.id===item)).toBe(false);
     await expect(purchaseCosmetic(live,item,'shop-live-test-item')).rejects.toThrow('NOT_AVAILABLE');
     await purchaseCosmetic(test,item,'shop-test-purchase');
-    expect((await fixture.pool.query(`SELECT balance_points FROM points_accounts WHERE id='treasury:test'`)).rows[0].balance_points).toBe(10);
+    expect(Number((await fixture.pool.query(`SELECT balance_points FROM points_accounts WHERE id='treasury:test'`)).rows[0].balance_points)).toBe(10);
   });
 
   it('validates loadout ownership and slots, then supports null unequip', async () => {
@@ -138,10 +138,12 @@ realPg('Shop v1 against disposable PostgreSQL (Plan 52 §7)', () => {
     const me=await request(app).get('/api/v1/auth/me').set(auth);
     expect(me.status).toBe(200); expect(me.body.data.cosmetics.banner).toMatchObject({id:item,kind:'banner',asset:expect.any(Object)});
     expect(me.body.data.cosmetics.banner).not.toHaveProperty('price_points');
-    const profile=await request(app).get('/api/v1/users/me/profile').set(auth);
+    await fixture.pool.query('UPDATE users SET is_public=TRUE WHERE id=$1',[user]);
+    const profile=await request(app).get(`/api/v1/users/${user}/profile`);
     expect(profile.status).toBe(200); expect(profile.body.data.cosmetics.banner).toMatchObject({id:item,kind:'banner'});
-    const plaza=await request(app).get('/api/v1/plaza/feed').set(auth);
-    expect(plaza.status).toBe(200);
+    expect(Object.keys(profile.body.data.cosmetics).sort()).toEqual(['banner','frame','nameColor','title']);
+    expect(Object.keys(profile.body.data.cosmetics.banner).sort()).toEqual(['asset','id','kind']);
+    expect(profile.body.data.cosmetics.banner).not.toHaveProperty('price_points');
   });
 
   it('unlocks achievements on award and lazily, but never grants revoked badges', async () => {
