@@ -1,0 +1,27 @@
+import type { Pool, PoolClient } from 'pg';
+import { getPool } from '../db/pool.js';
+
+export type CosmeticSlot = { id: string; kind: string; asset: Record<string, unknown> } | null;
+export type CosmeticRenderData = { banner: CosmeticSlot; frame: CosmeticSlot; title: CosmeticSlot; nameColor: CosmeticSlot };
+
+/** Resolve equipped cosmetics in one query for a set of public actors. */
+export async function cosmeticsFor(userIds: string[], client?: Pool | PoolClient): Promise<Map<string, CosmeticRenderData>> {
+  const unique = [...new Set(userIds.filter(Boolean))];
+  const out = new Map<string, CosmeticRenderData>();
+  if (!unique.length) return out;
+  const pg = client ?? getPool();
+  if (!pg) return out;
+  const rows = await pg.query(
+    `SELECT l.user_id, i.id, i.kind, i.asset
+       FROM user_cosmetic_loadout l
+       LEFT JOIN cosmetic_items i ON i.id IN (l.banner_id,l.frame_id,l.title_id,l.name_color_id) AND i.is_active=TRUE
+      WHERE l.user_id = ANY($1::text[])`, [unique]);
+  for (const id of unique) out.set(id, { banner:null, frame:null, title:null, nameColor:null });
+  for (const row of rows.rows) {
+    const data = out.get(row.user_id);
+    if (!data || !row.id) continue;
+    const slot = row.kind === 'name_color' ? 'nameColor' : row.kind as keyof CosmeticRenderData;
+    if (slot in data) data[slot] = { id: row.id, kind: row.kind, asset: row.asset };
+  }
+  return out;
+}

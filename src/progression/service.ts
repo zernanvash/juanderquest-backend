@@ -4,6 +4,7 @@ import { getPool } from '../db/pool.js';
 import { db, UserRow } from '../db/index.js';
 import { progressionRepo } from './repository.js';
 import { getExplorerLevel, getCivicLevel, getScoutLevel } from './levels.js';
+import { grantAchievementCosmetics } from '../shop/cosmetics.js';
 import {
   TravelerPassport,
   AchievementAward,
@@ -11,6 +12,18 @@ import {
 } from './types.js';
 
 export class ProgressionService {
+  private async awardWithCosmetics(award: Parameters<typeof progressionRepo.awardAchievement>[0], client: PoolClient): Promise<void> {
+    await progressionRepo.awardAchievement(award, client);
+    await client.query('SAVEPOINT shop_achievement_cosmetics');
+    try {
+      await grantAchievementCosmetics(client, award.user_id);
+      await client.query('RELEASE SAVEPOINT shop_achievement_cosmetics');
+    } catch (error) {
+      await client.query('ROLLBACK TO SAVEPOINT shop_achievement_cosmetics');
+      await client.query('RELEASE SAVEPOINT shop_achievement_cosmetics');
+      console.warn('[shop] Achievement cosmetic grant skipped:', error instanceof Error ? error.message : 'unknown error');
+    }
+  }
   /**
    * Called within the submission approval transaction to emit an approval outbox event.
    * Ensures that unmapped, ambiguous, or scope-mismatched submissions do NOT silently convert to visits.
@@ -412,7 +425,7 @@ export class ProgressionService {
       [userId, isTest]
     );
     if (firstVisitRows.length >= 1) {
-      await progressionRepo.awardAchievement(
+      await this.awardWithCosmetics(
         {
           id: randomUUID(),
           user_id: userId,
@@ -436,7 +449,7 @@ export class ProgressionService {
     const uniqueSpotsCount = Number(uniqueSpotsRows[0]?.unique_spots || 0);
 
     if (uniqueSpotsCount >= 5) {
-      await progressionRepo.awardAchievement(
+      await this.awardWithCosmetics(
         {
           id: randomUUID(),
           user_id: userId,
@@ -454,7 +467,7 @@ export class ProgressionService {
     const collections = await progressionRepo.getCuratedCollections(userId, isTest, client);
     for (const coll of collections) {
       if (coll.completed && coll.badge_id) {
-        await progressionRepo.awardAchievement(
+        await this.awardWithCosmetics(
           {
             id: randomUUID(),
             user_id: userId,

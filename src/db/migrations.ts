@@ -72,6 +72,7 @@ export const MIGRATIONS = [
   '059_push_account_category.sql',
   '060_polygon_amoy_chain_registry.sql',
   '061_onchain_badge_minting.sql',
+  '062_shop_v1.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
@@ -413,6 +414,10 @@ export async function applyMigrations(pg: Pool) {
               ('amoy-wallet-recovery-team2', 80002, '0x426ad29d7e73d8a8d694bb5ec7e018d14f2032e9', 'Team wallet 2 (recovery admin)', 'recovery_admin', 'personal', 'Team Member', NULL, FALSE, TRUE, 'Recovery admin (personal wallet; signs in MetaMask, not a multisig)')
             ON CONFLICT (chain_id, address, role) DO NOTHING;
           `);
+        } else if (file === '062_shop_v1.sql' && pgMemMigrationAdapters.has(pg as object)) {
+          // pg-mem does not implement PostgreSQL's regular-expression match
+          // operator. The API validates cosmetic IDs with the same pattern.
+          await client.query(sql.replace(/CHECK\s*\(id\s*~\s*'\^\[a-z0-9-\]\{3,60\}\$'\)/, ''));
         } else if (file === '056_admin_areas.sql' && pgMemMigrationAdapters.has(pg as object)) {
           await client.query(`
             CREATE TABLE IF NOT EXISTS admin_areas (
