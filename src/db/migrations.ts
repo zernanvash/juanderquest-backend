@@ -67,6 +67,7 @@ export const MIGRATIONS = [
   '051_funding_notifications.sql',
   '052_plaza_social.sql',
   '053_plaza_push.sql',
+  '054_quest_builder.sql',
   '056_admin_areas.sql',
   '057_admin_area_boundaries.sql',
   '059_push_account_category.sql',
@@ -418,6 +419,17 @@ export async function applyMigrations(pg: Pool) {
           // pg-mem does not implement PostgreSQL's regular-expression match
           // operator. The API validates cosmetic IDs with the same pattern.
           await client.query(sql.replace(/CHECK\s*\(id\s*~\s*'\^\[a-z0-9-\]\{3,60\}\$'\)/, ''));
+        } else if (file === '054_quest_builder.sql' && pgMemMigrationAdapters.has(pg as object)) {
+          await client.query(`
+            ALTER TABLE quests ADD COLUMN IF NOT EXISTS step_order_mode TEXT NOT NULL DEFAULT 'sequential';
+            ALTER TABLE quest_attempts ADD COLUMN IF NOT EXISTS step_order_mode TEXT NOT NULL DEFAULT 'sequential';
+            ALTER TABLE quest_step_evidence ADD COLUMN IF NOT EXISTS task_key TEXT;
+            ALTER TABLE quest_step_evidence ADD COLUMN IF NOT EXISTS failed_tries INT NOT NULL DEFAULT 0;
+            ALTER TABLE quest_step_evidence ADD COLUMN IF NOT EXISTS first_try_at TIMESTAMPTZ;
+            ALTER TABLE quest_step_evidence ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ;
+            ALTER TABLE quest_step_evidence ADD COLUMN IF NOT EXISTS needs_changes_reason TEXT;
+            CREATE INDEX IF NOT EXISTS idx_step_evidence_quest_task ON quest_step_evidence (quest_id, task_key, status);
+          `);
         } else if (file === '056_admin_areas.sql' && pgMemMigrationAdapters.has(pg as object)) {
           await client.query(`
             CREATE TABLE IF NOT EXISTS admin_areas (

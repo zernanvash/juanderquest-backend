@@ -3,6 +3,7 @@ import { env } from '../config/env.js';
 
 export const SESSION_TYP = 'session';
 export const CHALLENGE_TYP = 'quest_challenge';
+export const AR_CHALLENGE_TYP = 'quest_ar_challenge';
 
 export interface SessionClaims {
   id: string;
@@ -15,6 +16,16 @@ export interface QuestChallengeClaims {
   typ: typeof CHALLENGE_TYP;
   user_id: string;
   quest_id: string;
+  nonce: string;
+}
+
+export interface QuestArChallengeClaims {
+  sub: typeof AR_CHALLENGE_TYP;
+  typ: typeof AR_CHALLENGE_TYP;
+  user_id: string;
+  quest_id: string;
+  attempt_id: string;
+  task_key: string;
   nonce: string;
 }
 
@@ -41,13 +52,21 @@ export function signQuestChallenge(input: Omit<QuestChallengeClaims, 'sub' | 'ty
   );
 }
 
+export function signQuestArChallenge(input: Omit<QuestArChallengeClaims, 'sub' | 'typ'>, expiresInSec = 600): string {
+  return jwt.sign(
+    { sub: AR_CHALLENGE_TYP, typ: AR_CHALLENGE_TYP, ...input },
+    env.JWT_SECRET,
+    { algorithm: 'HS256', expiresIn: expiresInSec },
+  );
+}
+
 export function verifySessionToken(token: string): SessionClaims | null {
   try {
     const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ['HS256'] });
     if (!decoded || typeof decoded === 'string') return null;
     const claims = decoded as JwtPayload & Record<string, unknown>;
     // TODO(2026-10-23): require typ === 'session' after the longest legacy session expires.
-    if ((claims.typ !== undefined && claims.typ !== SESSION_TYP) || claims.sub === CHALLENGE_TYP) return null;
+    if ((claims.typ !== undefined && claims.typ !== SESSION_TYP) || claims.sub === CHALLENGE_TYP || claims.sub === AR_CHALLENGE_TYP || claims.typ === AR_CHALLENGE_TYP) return null;
     if (typeof claims.id !== 'string' || claims.id.length === 0) return null;
     if (typeof claims.seed_id !== 'string' || !validRole(claims.role)) return null;
     return { id: claims.id, seed_id: claims.seed_id, role: claims.role };
@@ -65,6 +84,22 @@ export function verifyQuestChallengeToken(token: string): QuestChallengeClaims |
     if (typeof claims.user_id !== 'string' || typeof claims.quest_id !== 'string' ||
         typeof claims.nonce !== 'string' || claims.nonce.length === 0) return null;
     return claims as unknown as QuestChallengeClaims;
+  } catch (error) {
+    if (error instanceof jwt.TokenExpiredError) throw error;
+    return null;
+  }
+}
+
+export function verifyQuestArChallengeToken(token: string): QuestArChallengeClaims | null {
+  try {
+    const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ['HS256'] });
+    if (!decoded || typeof decoded === 'string') return null;
+    const claims = decoded as JwtPayload & Record<string, unknown>;
+    if (claims.sub !== AR_CHALLENGE_TYP || (claims.typ !== undefined && claims.typ !== AR_CHALLENGE_TYP)) return null;
+    if (typeof claims.user_id !== 'string' || typeof claims.quest_id !== 'string' ||
+        typeof claims.attempt_id !== 'string' || typeof claims.task_key !== 'string' ||
+        typeof claims.nonce !== 'string' || claims.nonce.length === 0) return null;
+    return claims as unknown as QuestArChallengeClaims;
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) throw error;
     return null;
