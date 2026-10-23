@@ -14,6 +14,15 @@ import {
 export class ProgressionService {
   private async awardWithCosmetics(award: Parameters<typeof progressionRepo.awardAchievement>[0], client: PoolClient): Promise<void> {
     await progressionRepo.awardAchievement(award, client);
+    const inTransaction = (client as PoolClient & { getTransactionStatus?: () => string }).getTransactionStatus?.() === 'T';
+    if (!inTransaction) {
+      try {
+        await grantAchievementCosmetics(client, award.user_id);
+      } catch (error) {
+        console.warn('[shop] Achievement cosmetic grant skipped:', error instanceof Error ? error.message : 'unknown error');
+      }
+      return;
+    }
     await client.query('SAVEPOINT shop_achievement_cosmetics');
     try {
       await grantAchievementCosmetics(client, award.user_id);

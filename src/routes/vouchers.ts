@@ -19,6 +19,19 @@ const redeemSchema = z.object({
   }),
 });
 
+async function marketplaceRedemptionGate(req: Request, res: Response, next: NextFunction) {
+  if (env.MARKETPLACE_ENABLED) return next();
+  const voucherId = req.params.id || (req.body?.voucher_id as string | undefined) || (req.body?.id as string | undefined);
+  if (voucherId) {
+    const pool = getPool();
+    const isPreview = pool
+      ? (await pool.query('SELECT 1 FROM vouchers WHERE id=$1 AND availability=$2 AND is_active=TRUE', [voucherId, 'preview'])).rowCount! > 0
+      : ['v1', 'v2', 'v3'].includes(voucherId);
+    if (isPreview) return res.status(409).json({ success:false, error:{ code:'NOT_REDEEMABLE', message:'This partner offer is coming soon.' } });
+  }
+  return res.status(503).json({ success:false, error:{ code:'FEATURE_UNAVAILABLE', message:'Merchant vouchers are under development.' } });
+}
+
 async function handleRedemption(voucherId: string, req: AuthRequest, res: Response) {
   const pool = getPool();
   if (pool) {
@@ -77,11 +90,11 @@ router.get('/vouchers', async (_req, res: Response) => {
   res.json({ success: true, data: values });
 });
 
-router.post('/vouchers/:id/redeem', authenticateToken, validateRequest(redeemSchema), async (req: AuthRequest, res: Response) => {
+router.post('/vouchers/:id/redeem', marketplaceRedemptionGate, authenticateToken, validateRequest(redeemSchema), async (req: AuthRequest, res: Response) => {
   return await handleRedemption(req.params.id, req, res);
 });
 
-router.post('/vouchers/redeem', authenticateToken, validateRequest(redeemSchema), async (req: AuthRequest, res: Response) => {
+router.post('/vouchers/redeem', marketplaceRedemptionGate, authenticateToken, validateRequest(redeemSchema), async (req: AuthRequest, res: Response) => {
   const voucherId = req.body.voucher_id || req.body.id;
   if (!voucherId) {
     return res.status(400).json({

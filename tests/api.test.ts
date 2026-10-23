@@ -25,7 +25,40 @@ describe('JuanderQuest Backend REST API & QA Rules', () => {
   let userToken: string;
   let adminToken: string;
   let apiSubmissionId: string;
+  const originalMarketplaceAvailability = env.MARKETPLACE_ENABLED;
+  const liveVoucherId = 'api-test-live-voucher';
+  const expensiveVoucherId = 'api-test-expensive-voucher';
   const testIdempotencyKey = 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d';
+
+  beforeAll(async () => {
+    Reflect.set(env, 'MARKETPLACE_ENABLED', true);
+    const merchantId = 'api-test-live-merchant';
+    const pool = getPool();
+    if (pool) {
+      await pool.query(`INSERT INTO merchants(id,name,location,description) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO NOTHING`, [merchantId, 'API Test Merchant', 'Pangasinan', 'Test merchant']);
+      await pool.query(`INSERT INTO vouchers(id,merchant_id,title,description,cost_points,is_active,availability) VALUES($1,$3,$4,$5,100,TRUE,'live'),($2,$3,$6,$5,999999,TRUE,'live') ON CONFLICT(id) DO UPDATE SET availability='live',is_active=TRUE,cost_points=EXCLUDED.cost_points`, [liveVoucherId, expensiveVoucherId, merchantId, 'API Test Voucher', 'Test voucher', 'Expensive Test Voucher']);
+    }
+    if (!db.merchants.some((merchant) => merchant.id === merchantId)) {
+      db.merchants.push({ id: merchantId, name: 'API Test Merchant', location: 'Pangasinan', description: 'Test merchant', created_at: new Date().toISOString() });
+    }
+    for (const [id, title, cost_points] of [[liveVoucherId, 'API Test Voucher', 100], [expensiveVoucherId, 'Expensive Test Voucher', 999999]] as const) {
+      const voucher = db.vouchers.find((item) => item.id === id);
+      if (voucher) Object.assign(voucher, { merchant_id: merchantId, title, cost_points, is_active: true, availability: 'live' });
+      else db.vouchers.push({ id, merchant_id: merchantId, title, description: 'Test voucher', cost_points, fiat_floor_php: 50, is_active: true } as any);
+    }
+  }, 120_000);
+
+  afterAll(async () => {
+    Reflect.set(env, 'MARKETPLACE_ENABLED', originalMarketplaceAvailability);
+    const pool = getPool();
+    if (pool) {
+      await pool.query('DELETE FROM redemptions WHERE voucher_id = ANY($1::text[])', [[liveVoucherId, expensiveVoucherId]]);
+      await pool.query('DELETE FROM vouchers WHERE id = ANY($1::text[])', [[liveVoucherId, expensiveVoucherId]]);
+      await pool.query("DELETE FROM merchants WHERE id='api-test-live-merchant'");
+    }
+    db.vouchers = db.vouchers.filter((item) => item.id !== liveVoucherId && item.id !== expensiveVoucherId);
+    db.merchants = db.merchants.filter((item) => item.id !== 'api-test-live-merchant');
+  }, 120_000);
 
   it('supports comma-separated CORS origins for local web development', () => {
     expect(parseCorsOrigin('https://jdq.zernanvash.dev, http://localhost:3000')).toEqual([
@@ -342,6 +375,7 @@ it('filters spots by category and optional quest availability', async () => {
     expect(res.status).toBe(200);
     expect(res.body.data.length).toBeGreaterThanOrEqual(3);
     expect(res.body.data[0]).toHaveProperty('merchant_name');
+    expect(res.body.data.filter((voucher: any) => ['v1', 'v2', 'v3'].includes(voucher.id)).every((voucher: any) => voucher.availability === 'preview' && voucher.redeemable === false)).toBe(true);
   });
 
   it('voucher redemption deducts points, replays idempotently, and blocks repeat with a new key', async () => {
@@ -349,7 +383,7 @@ it('filters spots by category and optional quest availability', async () => {
     const pointsBefore = before.body.data.demo_points;
 
     const first = await request(app)
-      .post('/api/v1/vouchers/v1/redeem')
+      .post(`/api/v1/vouchers/${liveVoucherId}/redeem`)
       .set('Authorization', `Bearer ${userToken}`)
       .send({ idempotency_key: 'voucher-redeem-key-1' });
 
@@ -361,7 +395,7 @@ it('filters spots by category and optional quest availability', async () => {
     expect(afterFirst.body.data.demo_points).toBe(pointsBefore - 100);
 
     const replay = await request(app)
-      .post('/api/v1/vouchers/v1/redeem')
+      .post(`/api/v1/vouchers/${liveVoucherId}/redeem`)
       .set('Authorization', `Bearer ${userToken}`)
       .send({ idempotency_key: 'voucher-redeem-key-1' });
 
@@ -372,7 +406,7 @@ it('filters spots by category and optional quest availability', async () => {
     expect(afterReplay.body.data.demo_points).toBe(pointsBefore - 100);
 
     const repeat = await request(app)
-      .post('/api/v1/vouchers/v1/redeem')
+      .post(`/api/v1/vouchers/${liveVoucherId}/redeem`)
       .set('Authorization', `Bearer ${userToken}`)
       .send({ idempotency_key: 'voucher-redeem-key-2' });
 
@@ -382,7 +416,7 @@ it('filters spots by category and optional quest availability', async () => {
 
   it('voucher redemption rejects with 409 INSUFFICIENT_POINTS when points run out', async () => {
     const res = await request(app)
-      .post('/api/v1/vouchers/v2/redeem')
+      .post(`/api/v1/vouchers/${expensiveVoucherId}/redeem`)
       .set('Authorization', `Bearer ${userToken}`)
       .send({ idempotency_key: 'voucher-redeem-user-1-poor' });
 
@@ -394,6 +428,11 @@ it('filters spots by category and optional quest availability', async () => {
     const res = await request(app).get('/api/v1/does-not-exist');
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('NOT_FOUND');
+  });
+
+  it('keeps the public chain badge route reachable without admin shop authentication', async () => {
+    const res = await request(app).get('/api/v1/chain/badges/not-a-token');
+    expect(res.status).not.toBe(401);
   });
 
   it('malformed JSON body returns 400 INVALID_JSON', async () => {

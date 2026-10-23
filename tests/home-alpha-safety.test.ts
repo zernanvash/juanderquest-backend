@@ -12,28 +12,33 @@ describe('Public alpha marketplace safety', () => {
     Reflect.set(env, 'MARKETPLACE_ENABLED', originalAvailability);
   });
 
-  it('does not advertise prototype merchant offers when the marketplace is disabled', async () => {
+  it('lists preview offers as non-redeemable when the marketplace is disabled', async () => {
     Reflect.set(env, 'MARKETPLACE_ENABLED', false);
 
     const response = await request(app).get('/api/v1/vouchers');
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({
-      success: true,
-      data: [],
-      meta: { availability: 'under_development' },
-    });
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.length).toBeGreaterThanOrEqual(3);
+    expect(response.body.data.filter((voucher: any) => ['v1', 'v2', 'v3'].includes(voucher.id))).toHaveLength(3);
+    expect(response.body.data.every((voucher: any) => voucher.availability === 'preview' && voucher.redeemable === false)).toBe(true);
   });
 
-  it('blocks voucher redemption before authentication or any mutation', async () => {
+  it('blocks preview and live voucher redemption before authentication or mutation', async () => {
     Reflect.set(env, 'MARKETPLACE_ENABLED', false);
 
     const response = await request(app)
       .post('/api/v1/vouchers/v1/redeem')
       .send({ idempotency_key: 'alpha-marketplace-closed' });
 
-    expect(response.status).toBe(503);
-    expect(response.body.error.code).toBe('FEATURE_UNAVAILABLE');
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe('NOT_REDEEMABLE');
+
+    const liveResponse = await request(app)
+      .post('/api/v1/vouchers/nonexistent-live-offer/redeem')
+      .send({ idempotency_key: 'alpha-marketplace-closed-live' });
+    expect(liveResponse.status).toBe(503);
+    expect(liveResponse.body.error.code).toBe('FEATURE_UNAVAILABLE');
   });
 });
 
