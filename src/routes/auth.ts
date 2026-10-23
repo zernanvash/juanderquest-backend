@@ -9,7 +9,8 @@ import { randomUUID } from 'crypto';
 import { getAddress, verifyMessage } from 'ethers';
 import { clearSessionCookie, setSessionCookie } from '../auth/sessionCookie.js';
 import { signSessionToken } from '../auth/tokens.js';
-import { cosmeticsFor } from '../shop/render.js';
+import { safeCosmeticsFor } from '../shop/render.js';
+import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
 
 const router = Router();
 
@@ -52,7 +53,7 @@ const findOrCreateWalletUser = async (address: string): Promise<(typeof db.users
 
   return await db.findOrCreateUserDurable({
     seed_id: seedId,
-    display_name: `Traveler ${address.slice(0, 6)}…${address.slice(-4)}`,
+    display_name: `Traveler ${address.slice(0, 6)}â€¦${address.slice(-4)}`,
     email: `${normalized.slice(2)}@wallet.juanderquest.local`,
     avatar_url: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(normalized)}`,
     role: 'user',
@@ -830,7 +831,7 @@ router.post('/auth/demo-login', rateLimit({ policyId: 'auth:demo-login', windowM
           is_public: true,
           handle: 'juandelacruz',
           bio: 'Pangasinan explorer & cultural heritage scout.',
-          status_text: 'Exploring Hundred Islands & Bolinao 🌊',
+          status_text: 'Exploring Hundred Islands & Bolinao ðŸŒŠ',
         });
       } else if (seed_id === 'admin-1') {
         user = await db.findOrCreateUserDurable({
@@ -1005,11 +1006,13 @@ router.get('/auth/me', authenticateToken, async (req: AuthRequest, res: Response
   }
 
   res.setHeader('Cache-Control', 'private, no-store');
-  const cosmetics=(await cosmeticsFor([user.id])).get(user.id);
+  const cosmetics=(await safeCosmeticsFor([user.id])).get(user.id);
   return res.status(200).json({
     success: true,
     data: { ...user, cosmetics: cosmetics ?? {banner:null,frame:null,title:null,nameColor:null} },
   });
 });
+
+forwardAsyncRouteErrors(router);
 
 export default router;

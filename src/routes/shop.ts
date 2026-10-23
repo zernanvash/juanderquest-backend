@@ -4,7 +4,8 @@ import { authenticateToken, optionalAuthenticateToken, AuthRequest } from '../mi
 import { rateLimit } from '../middleware/rateLimit.js';
 import { getPool } from '../db/pool.js';
 import { listCosmetics, purchaseCosmetic, ownedCosmetics } from '../shop/cosmetics.js';
-import { cosmeticsFor } from '../shop/render.js';
+import { safeCosmeticsFor } from '../shop/render.js';
+import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
 
 export const shopRouter = Router();
 const fail=(res:any,error:unknown)=>{
@@ -33,7 +34,8 @@ shopRouter.put('/me/cosmetics/loadout',authenticateToken,rateLimit({policyId:'sh
     const existing=(await c.query('SELECT banner_id,frame_id,title_id,name_color_id FROM user_cosmetic_loadout WHERE user_id=$1',[req.user!.id])).rows[0]??{};
     const next={banner_id:parsed.data.banner_id===undefined?existing.banner_id??null:parsed.data.banner_id,frame_id:parsed.data.frame_id===undefined?existing.frame_id??null:parsed.data.frame_id,title_id:parsed.data.title_id===undefined?existing.title_id??null:parsed.data.title_id,name_color_id:parsed.data.name_color_id===undefined?existing.name_color_id??null:parsed.data.name_color_id};
     await c.query(`INSERT INTO user_cosmetic_loadout(user_id,banner_id,frame_id,title_id,name_color_id,updated_at) VALUES($1,$2,$3,$4,$5,now()) ON CONFLICT(user_id) DO UPDATE SET banner_id=EXCLUDED.banner_id,frame_id=EXCLUDED.frame_id,title_id=EXCLUDED.title_id,name_color_id=EXCLUDED.name_color_id,updated_at=now()`,[req.user!.id,next.banner_id,next.frame_id,next.title_id,next.name_color_id]);
-    await c.query('COMMIT');const render=(await cosmeticsFor([req.user!.id],pool)).get(req.user!.id);return res.json({success:true,data:{loadout:next,cosmetics:render}});
+    await c.query('COMMIT');const render=(await safeCosmeticsFor([req.user!.id],pool)).get(req.user!.id);return res.json({success:true,data:{loadout:next,cosmetics:render}});
   }catch(e){await c.query('ROLLBACK').catch(()=>{});return fail(res,e);}finally{c.release();}
 });
 shopRouter.get('/shop/teasers',async(_req,res)=>{const pool=getPool();if(!pool)return res.json({success:true,data:[]});try{const r=await pool.query('SELECT id,title,description,icon_key AS "iconKey",eta_text AS "etaText" FROM shop_teasers WHERE is_active=TRUE ORDER BY sort_order,id');return res.json({success:true,data:r.rows});}catch{return res.status(503).json({success:false,error:{code:'STORAGE_UNAVAILABLE',message:'Shop storage is unavailable.'}});}});
+forwardAsyncRouteErrors(shopRouter);

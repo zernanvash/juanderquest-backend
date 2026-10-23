@@ -51,6 +51,7 @@ export async function purchaseCosmetic(userId:string,itemId:string,key:string) {
     if(replay) { if(replay.item_id!==itemId) throw new Error('IDEMPOTENCY_CONFLICT'); await commitGovernanceTransaction(c); return { item:{id:replay.item_id,name:replay.name,kind:replay.kind,asset:replay.asset},pointsBalance:Number(replay.demo_points),replayed:true,statusCode:200 }; }
     const item=(await c.query(`SELECT * FROM cosmetic_items WHERE id=$1 AND is_active=TRUE AND (available_from IS NULL OR available_from<=now()) AND (available_until IS NULL OR available_until>now()) FOR SHARE`,[itemId])).rows[0];
     if(!item) throw new Error('NOT_AVAILABLE'); if(item.price_points==null) throw new Error('NOT_FOR_SALE');
+    if(item.is_test && !u.is_test) throw new Error('NOT_AVAILABLE');
     if(item.unlock_achievement_id) throw new Error('BADGE_REQUIRED');
     if((await c.query('SELECT 1 FROM user_cosmetics WHERE user_id=$1 AND item_id=$2',[userId,itemId])).rowCount) throw new Error('ALREADY_OWNED');
     if(Number(u.demo_points)<Number(item.price_points)) throw new Error('INSUFFICIENT_POINTS');

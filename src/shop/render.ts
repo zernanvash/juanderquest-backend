@@ -3,6 +3,16 @@ import { getPool } from '../db/pool.js';
 
 export type CosmeticSlot = { id: string; kind: string; asset: Record<string, unknown> } | null;
 export type CosmeticRenderData = { banner: CosmeticSlot; frame: CosmeticSlot; title: CosmeticSlot; nameColor: CosmeticSlot };
+export const emptyCosmetics = (): CosmeticRenderData => ({ banner:null, frame:null, title:null, nameColor:null });
+
+/** Cosmetics are optional decoration: a failed lookup must not fail its owning response. */
+export async function safeCosmeticsFor(userIds: string[], client?: Pool | PoolClient): Promise<Map<string, CosmeticRenderData>> {
+  try { return await cosmeticsFor(userIds, client); }
+  catch (error) {
+    console.error('[shop] cosmetic render enrichment failed:', error);
+    return new Map(userIds.filter(Boolean).map((id) => [id, emptyCosmetics()]));
+  }
+}
 
 /** Resolve equipped cosmetics in one query for a set of public actors. */
 export async function cosmeticsFor(userIds: string[], client?: Pool | PoolClient): Promise<Map<string, CosmeticRenderData>> {

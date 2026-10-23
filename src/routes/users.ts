@@ -7,7 +7,8 @@ import { validateRequest } from '../middleware/validate.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { notify } from '../social/notify.js';
 import { manilaHour } from '../social/time.js';
-import { cosmeticsFor } from '../shop/render.js';
+import { safeCosmeticsFor } from '../shop/render.js';
+import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
 
 export const usersRouter = Router();
 
@@ -25,7 +26,7 @@ const followLimiter = rateLimit({ policyId: 'users:follow-mutation', windowMs: 6
 // 1. Literal Routes (Must precede /users/:id)
 // ==========================================
 
-// GET /users?limit=3 — Public discovery rail (default 3, max 6)
+// GET /users?limit=3 â€” Public discovery rail (default 3, max 6)
 usersRouter.get('/users', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res: Response) => {
   res.set('Cache-Control', 'no-store');
   const allowTest = isAuthorizedQA(req);
@@ -34,7 +35,7 @@ usersRouter.get('/users', optionalAuthenticateToken, checkQAAuthorization, async
   const parsedLimit = rawLimit ? parseInt(rawLimit as string, 10) : 3;
   const limit = Math.min(6, Math.max(1, isNaN(parsedLimit) ? 3 : parsedLimit));
   const items = await db.listPublicUsers(limit, allowTest);
-  const cosmetics=await cosmeticsFor(items.map((item:any)=>item.id));
+  const cosmetics=await safeCosmeticsFor(items.map((item:any)=>item.id));
   return res.status(200).json({
     success: true,
     data: {
@@ -45,7 +46,7 @@ usersRouter.get('/users', optionalAuthenticateToken, checkQAAuthorization, async
 });
 
 
-// GET /users/me/profile — Authenticated self profile and settings
+// GET /users/me/profile â€” Authenticated self profile and settings
 usersRouter.get(
   '/users/me/profile',
   authenticateToken,
@@ -61,7 +62,7 @@ usersRouter.get(
     }
 
     const counts = await db.getFollowCounts(user.id, true);
-    const cosmetics=(await cosmeticsFor([user.id])).get(user.id);
+    const cosmetics=(await safeCosmeticsFor([user.id])).get(user.id);
     return res.status(200).json({
       success: true,
       data: {
@@ -102,7 +103,7 @@ const updateProfileSchema = z.object({
   }),
 });
 
-// PATCH /users/me/profile — Update Authenticated User's Profile / Privacy Settings
+// PATCH /users/me/profile â€” Update Authenticated User's Profile / Privacy Settings
 usersRouter.patch(
   '/users/me/profile',
   authenticateToken,
@@ -178,7 +179,7 @@ usersRouter.get('/users/me/followers', authenticateToken, publicProfileLimiter, 
   }
 });
 
-// GET /users/me/following — Authenticated cleanup of retained outgoing edges
+// GET /users/me/following â€” Authenticated cleanup of retained outgoing edges
 usersRouter.get(
   '/users/me/following',
   authenticateToken,
@@ -215,7 +216,7 @@ usersRouter.get(
 // 2. Parameterized Routes (/users/:id/...)
 // ==========================================
 
-// GET /users/:id/profile — Public Profile Lookup by User ID or Handle
+// GET /users/:id/profile â€” Public Profile Lookup by User ID or Handle
 usersRouter.get(
   '/users/:id/profile',
   publicProfileLimiter,
@@ -253,7 +254,7 @@ usersRouter.get(
     }
 
     const counts = await db.getFollowCounts(user.id, false, allowTest);
-    const cosmetics=(await cosmeticsFor([user.id])).get(user.id);
+    const cosmetics=(await safeCosmeticsFor([user.id])).get(user.id);
 
     // Strict Privacy-Safe Projection: Never leak email, wallet address, balances, or private logs
     return res.status(200).json({
@@ -277,7 +278,7 @@ usersRouter.get(
   }
 );
 
-// GET /users/:id/relationship — Authenticated query for follower relationship
+// GET /users/:id/relationship â€” Authenticated query for follower relationship
 usersRouter.get(
   '/users/:id/relationship',
   authenticateToken,
@@ -315,7 +316,7 @@ usersRouter.get(
   }
 );
 
-// PUT /users/:id/follow — Authenticated actor follows public target
+// PUT /users/:id/follow â€” Authenticated actor follows public target
 usersRouter.put(
   '/users/:id/follow',
   authenticateToken,
@@ -426,7 +427,7 @@ usersRouter.put(
   }
 );
 
-// DELETE /users/:id/follow — Authenticated actor unfollows target (idempotent 204)
+// DELETE /users/:id/follow â€” Authenticated actor unfollows target (idempotent 204)
 usersRouter.delete(
   '/users/:id/follow',
   authenticateToken,
@@ -454,7 +455,7 @@ usersRouter.delete(
   }
 );
 
-// GET /users/:id/followers — Public followers list with keyset cursor pagination
+// GET /users/:id/followers â€” Public followers list with keyset cursor pagination
 usersRouter.get(
   '/users/:id/followers',
   publicProfileLimiter,
@@ -519,7 +520,7 @@ usersRouter.get(
   }
 );
 
-// GET /users/:id/following — Public following list with keyset cursor pagination
+// GET /users/:id/following â€” Public following list with keyset cursor pagination
 usersRouter.get(
   '/users/:id/following',
   publicProfileLimiter,
@@ -583,3 +584,5 @@ usersRouter.get(
     }
   }
 );
+
+forwardAsyncRouteErrors(usersRouter);

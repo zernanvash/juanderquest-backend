@@ -7,6 +7,7 @@ import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
 import { vouchersService } from '../services/vouchers.js';
 import { getPool } from '../db/pool.js';
+import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
 
 const router = Router();
 
@@ -25,6 +26,9 @@ async function handleRedemption(voucherId: string, req: AuthRequest, res: Respon
     if (preview.rowCount) return res.status(409).json({ success:false, error:{ code:'NOT_REDEEMABLE', message:'This partner offer is coming soon.' } });
   } else if (['v1','v2','v3'].includes(voucherId)) {
     return res.status(409).json({ success:false, error:{ code:'NOT_REDEEMABLE', message:'This partner offer is coming soon.' } });
+  }
+  if (!env.MARKETPLACE_ENABLED) {
+    return res.status(503).json({ success:false, error:{ code:'FEATURE_UNAVAILABLE', message:'Merchant vouchers are under development.' } });
   }
   if (governanceStore.getControls().pause_vouchers) {
     return res.status(403).json({
@@ -69,7 +73,7 @@ router.get('/vouchers', async (_req, res: Response) => {
     try { const r=await pool.query(`SELECT v.*,m.name AS merchant_name,v.partner_label AS "partnerLabel",v.icon_key AS "iconKey",(v.availability='live' AND $1::boolean) AS redeemable FROM vouchers v JOIN merchants m ON m.id=v.merchant_id WHERE v.is_active=TRUE AND (v.availability='preview' OR $1::boolean) ORDER BY v.sort_order,v.id`,[env.MARKETPLACE_ENABLED]); return res.json({success:true,data:r.rows}); }
     catch { return res.status(503).json({success:false,error:{code:'STORAGE_UNAVAILABLE',message:'Voucher catalog unavailable.'}}); }
   }
-  const values=db.listVouchers().filter(v=>env.MARKETPLACE_ENABLED?true:['v1','v2','v3'].includes(v.id)).map(v=>({...v,availability:'preview',redeemable:false,partnerLabel:v.id==='v1'?'Partner grill · Dagupan':v.id==='v2'?'Partner café · Bolinao':'Souvenir shop · Alaminos',iconKey:v.id==='v1'?'meal':v.id==='v2'?'coffee':'souvenir'}));
+  const values=db.listVouchers().filter(v=>env.MARKETPLACE_ENABLED?true:['v1','v2','v3'].includes(v.id)).map(v=>({...v,availability:'preview',redeemable:false,partnerLabel:v.id==='v1'?'Partner grill \u00b7 Dagupan':v.id==='v2'?'Partner caf\u00e9 \u00b7 Bolinao':'Souvenir shop \u00b7 Alaminos',iconKey:v.id==='v1'?'meal':v.id==='v2'?'coffee':'souvenir'}));
   res.json({ success: true, data: values });
 });
 
@@ -87,5 +91,7 @@ router.post('/vouchers/redeem', authenticateToken, validateRequest(redeemSchema)
   }
   return await handleRedemption(voucherId, req, res);
 });
+
+forwardAsyncRouteErrors(router);
 
 export default router;
