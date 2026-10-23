@@ -60,9 +60,13 @@ realPg('Shop v1 against disposable PostgreSQL (Plan 52 §7)', () => {
   beforeEach(async () => {
     fixture = await createTestDb({ poolMax: 10 });
     setPool(fixture.pool);
+    db.attachDurabilityPool(fixture.pool);
     db.usersRepo.setPool(fixture.pool);
   }, 120_000);
-  afterEach(async () => { await fixture?.close(); }, 120_000);
+  afterEach(async () => {
+    db.attachDurabilityPool(null);
+    await fixture?.close();
+  }, 120_000);
 
   it('deducts once, writes a balanced ledger group and reconciles treasury balances', async () => {
     const user=await addUser({points:100}); const item=await addItem({price:25});
