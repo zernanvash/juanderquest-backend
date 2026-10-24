@@ -75,6 +75,7 @@ export const MIGRATIONS = [
   '061_onchain_badge_minting.sql',
   '062_shop_v1.sql',
   '064_procedural_banners.sql',
+  '065_quest_marker_urls.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
