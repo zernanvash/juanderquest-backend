@@ -74,6 +74,7 @@ export const MIGRATIONS = [
   '060_polygon_amoy_chain_registry.sql',
   '061_onchain_badge_minting.sql',
   '062_shop_v1.sql',
+  '064_procedural_banners.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
