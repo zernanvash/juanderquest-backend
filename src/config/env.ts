@@ -218,6 +218,29 @@ if (requestedProfile === 'dev') {
   }
 }
 
+// Local safety: a non-production run must never reach the live alpha
+// database, and a development run must name its profile (JDQ_ENV=dev uses
+// .env.dev) so the *_dev database guard above always applies.
+const LIVE_DATABASE_PORTS = new Set(['55433']);
+const LIVE_DATABASE_NAMES = new Set(['juanderquest_alpha']);
+
+export function localRuntimeSafetyError(nodeEnv: string, profile: string | undefined, databaseUrl: string): string | null {
+  if (nodeEnv === 'production') return null;
+  let port = '';
+  try { port = new URL(databaseUrl).port; } catch { /* checked by name below */ }
+  const dbName = extractDatabaseName(databaseUrl);
+  if (LIVE_DATABASE_PORTS.has(port) || (dbName && LIVE_DATABASE_NAMES.has(dbName))) {
+    return `NODE_ENV=${nodeEnv} refuses the live alpha database${dbName ? ` "${dbName}"` : ''}. Local runs use a *_dev database.`;
+  }
+  if (nodeEnv === 'development' && !profile) {
+    return 'NODE_ENV=development requires JDQ_ENV (e.g. JDQ_ENV=dev, which loads .env.dev and only allows *_dev databases).';
+  }
+  return null;
+}
+
+const localSafetyError = localRuntimeSafetyError(env.NODE_ENV, requestedProfile, env.DATABASE_URL);
+if (localSafetyError) throw new Error(localSafetyError);
+
 export const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function extractDatabaseName(databaseUrl: string): string | null {
