@@ -12,6 +12,7 @@ import { reconcileFunding } from '../src/funding/reconcile.js';
 import { fnv1a32 } from '../src/shop/render.js';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { recordActivity } from '../src/social/activity.js';
 
 describe('Shop v1 cosmetics', () => {
   let fixture: TestDbInstance;
@@ -202,6 +203,54 @@ realPg('Shop v1 against disposable PostgreSQL (Plan 52 §7)', () => {
     expect(ownership.rows[0].banner_id).toBe('banner-bangus-festival');
     expect(ownership.rows[0].asset).toMatchObject({ style: 'procedural', generator: 'bangus', palette: 'silver' });
     expect((await listCosmetics(owner)).find((entry) => entry.id === 'banner-bangus-festival')?.owned).toBe(true);
+  });
+
+  it('includes the deterministic banner seed in Plaza and leaderboard actor payloads', async () => {
+    const user = await addUser();
+    await fixture.pool.query(`UPDATE users SET is_public=TRUE, share_activity=TRUE, scout_reputation=321 WHERE id=$1`, [user]);
+    await fixture.pool.query(`INSERT INTO user_cosmetics(user_id,item_id,source) VALUES($1,'banner-bangus-festival','grant')`, [user]);
+    await fixture.pool.query(`INSERT INTO user_cosmetic_loadout(user_id,banner_id) VALUES($1,'banner-bangus-festival')`, [user]);
+    const memoryUser = {
+      id: user,
+      seed_id: `seed-${user}`,
+      display_name: user,
+      handle: user,
+      email: `${user}@shop.test`,
+      avatar_url: '',
+      role: 'user',
+      demo_points: 1000,
+      mjdq_balance: 1_000_000,
+      jdq_governance_balance: 0,
+      scout_reputation: 321,
+      is_public: true,
+      is_test: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    db.users.push(memoryUser as any);
+    try {
+      await recordActivity(fixture.pool, {
+        eventKey: `banner-seed:${user}:${suffix()}`,
+        actorId: user,
+        verb: 'quest_completed',
+        subjectType: 'quest',
+        subjectId: `quest-${suffix()}`,
+        subjectTitle: 'Seed payload test',
+        subjectHref: '/quests',
+        payload: {},
+        isTest: false,
+      });
+      const expectedSeed = fnv1a32(`${user}|banner-bangus-festival`);
+      const plaza = await request(app).get('/api/v1/plaza/feed?scope=mixed');
+      expect(plaza.status).toBe(200);
+      expect(plaza.body.data.items.find((item: any) => item.actor.user_id === user)?.actor.cosmetics.banner.seed).toBe(expectedSeed);
+
+      const leaderboard = await request(app).get('/api/v1/leaderboard');
+      expect(leaderboard.status).toBe(200);
+      expect(leaderboard.body.data.top_scouts.find((item: any) => item.user_id === user)?.cosmetics.banner.seed).toBe(expectedSeed);
+    } finally {
+      db.users = db.users.filter((entry) => entry.id !== user);
+    }
   });
 
   it('unlocks achievements on award and lazily, but never grants revoked badges', async () => {
