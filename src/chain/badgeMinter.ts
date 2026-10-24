@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { readFileSync, statSync } from 'fs';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { Contract, Interface, JsonRpcProvider, Transaction, Wallet, parseUnits } from 'ethers';
 import { env } from '../config/env.js';
 import { getPool } from '../db/pool.js';
@@ -343,14 +343,23 @@ export function badgeMinterStatus(): { enabled: boolean; ready: boolean; error: 
   return { enabled: env.CHAIN_BADGE_MINTING_ENABLED, ready: chainInstance !== null, error: chainError };
 }
 
+// A dropped or slow database connection must never crash the API: log it,
+// discard the broken client and try again on the next tick.
 async function tick(): Promise<void> {
   if (running) return;
   const pool = getPool();
   if (!pool) return;
   running = true;
-  const client = await pool.connect();
+  let client: PoolClient | null = null;
   let locked = false;
+  let failure: Error | null = null;
+  const onClientError = (err: Error) => {
+    failure = err;
+    console.error('[badge-minter] connection error:', shortError(err));
+  };
   try {
+    client = await pool.connect();
+    client.on('error', onClientError);
     locked = Boolean((await client.query('SELECT pg_try_advisory_lock($1) AS acquired', [BADGE_MINTER_LOCK_KEY])).rows[0]?.acquired);
     if (!locked) return;
     const chain = await getBadgeChain(pool);
@@ -363,13 +372,21 @@ async function tick(): Promise<void> {
       console.log(`[badge-minter] enqueued ${r.enqueued}, sent ${r.sent ?? 'none'}, included ${r.included}, finalized ${r.finalized}, retried ${r.retried}, failed ${r.failed}`);
     }
   } catch (err) {
+    failure = err instanceof Error ? err : new Error(String(err));
     console.error('[badge-minter] tick failed:', shortError(err));
   } finally {
-    if (locked) await client.query('SELECT pg_advisory_unlock($1)', [BADGE_MINTER_LOCK_KEY]).catch(() => {});
-    client.release();
+    if (client) {
+      if (locked && !failure) await client.query('SELECT pg_advisory_unlock($1)', [BADGE_MINTER_LOCK_KEY]).catch(() => {});
+      client.off('error', onClientError);
+      // Releasing with an error destroys the connection, which also drops its advisory lock.
+      client.release(failure ?? undefined);
+    }
     running = false;
   }
 }
+
+/** One background tick, exported for tests. Never throws. */
+export const runBadgeMinterLoopTickForTests = tick;
 
 /** Off unless CHAIN_BADGE_MINTING_ENABLED. Never keeps the process alive. */
 export function startBadgeMinter(): void {
