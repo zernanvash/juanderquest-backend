@@ -8,7 +8,13 @@ const realDockerPg = process.env.JDQ_REAL_PG_URL && process.platform === 'linux'
   ? describe : describe.skip;
 
 realDockerPg('economy shadow backup/restore on isolated real PostgreSQL', () => {
-  const container = 'jdq-reliability-pg-20260910';
+  // The workspace assigns each implementer a separate disposable container.
+  // CI/orchestrator runs retain the historical default; local agents pass the
+  // container that owns JDQ_REAL_PG_URL explicitly.
+  const container = process.env.JDQ_REAL_PG_DOCKER_CONTAINER ?? 'jdq-reliability-pg-20260910';
+  if (!/^jdq-reliability-pg-[a-z0-9-]+$/.test(container)) {
+    throw new Error('UNSAFE_REAL_PG_DOCKER_CONTAINER');
+  }
   const databaseUser = 'jdq_test';
   let source: TestDbInstance;
 
