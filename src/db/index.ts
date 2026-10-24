@@ -270,7 +270,7 @@ export interface QuestRow {
   geo_multiplier: number;
   reward_points: number;          // reward_mjdq (e.g. 50,000 mJDQ / 50 JDQ)
   marker_code: string;
-  marker_image_url: string;
+  marker_image_url: string | null;
   is_active: boolean;
   is_test?: boolean;
   created_at: string;
@@ -637,7 +637,7 @@ const mockQuests: QuestRow[] = [
     geo_multiplier: 2.0, // LGU priority zone surge
     reward_points: 50,  // (25 * 1.0 * 2.0) / 1.0
     marker_code: 'MARKER_HUNDRED_ISLANDS_01',
-    marker_image_url: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/hundred_islands.png',
+    marker_image_url: null,
     is_active: true,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -656,7 +656,7 @@ const mockQuests: QuestRow[] = [
     geo_multiplier: 1.6667,
     reward_points: 75,
     marker_code: 'MARKER_BOLINAO_LIGHTHOUSE_01',
-    marker_image_url: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/bolinao_lighthouse.png',
+    marker_image_url: null,
     is_active: true,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -675,7 +675,7 @@ const mockQuests: QuestRow[] = [
     geo_multiplier: 2.0,
     reward_points: 60,
     marker_code: 'MARKER_MANAOAG_SHRINE_01',
-    marker_image_url: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/manaoag.png',
+    marker_image_url: null,
     is_active: true,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -694,7 +694,7 @@ const mockQuests: QuestRow[] = [
     geo_multiplier: 2.0,
     reward_points: 40,
     marker_code: 'MARKER_LINGAYEN_CAPITOL_01',
-    marker_image_url: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/lingayen.png',
+    marker_image_url: null,
     is_active: true,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -713,7 +713,7 @@ const mockQuests: QuestRow[] = [
     geo_multiplier: 2.0,
     reward_points: 50,
     marker_code: 'MARKER_DAGUPAN_BANGUS_01',
-    marker_image_url: 'https://raw.githubusercontent.com/JuanderQuest/assets/main/markers/dagupan_bangus.png',
+    marker_image_url: null,
     is_active: true,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
