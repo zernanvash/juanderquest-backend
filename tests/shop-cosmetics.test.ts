@@ -7,7 +7,7 @@ import { db } from '../src/db/index.js';
 import { setPool } from '../src/db/pool.js';
 import { signSessionToken } from '../src/auth/tokens.js';
 import { env } from '../src/config/env.js';
-import { purchaseCosmetic, listCosmetics, grantAchievementCosmetics } from '../src/shop/cosmetics.js';
+import { purchaseCosmetic, listCosmetics, grantAchievementCosmetics, ownedCosmetics } from '../src/shop/cosmetics.js';
 import { reconcileFunding } from '../src/funding/reconcile.js';
 import { fnv1a32 } from '../src/shop/render.js';
 import { readFileSync } from 'fs';
@@ -180,6 +180,14 @@ realPg('Shop v1 against disposable PostgreSQL (Plan 52 §7)', () => {
     expect(b.seed).toBe(fnv1a32(`${userB}|${item}`));
     expect(b.seed).not.toBe(a.seed);
     expect(guest.seed).toBe(fnv1a32(`guest|${item}`));
+    await fixture.pool.query(
+      `INSERT INTO user_cosmetics(user_id,item_id,source) VALUES($1,$2,'grant')`,
+      [userA, item],
+    );
+    const owned = await ownedCosmetics(userA);
+    expect(owned.owned.find((entry: any) => entry.id === item)?.seed).toBe(
+      fnv1a32(`${userA}|${item}`),
+    );
   });
 
   it('applies migration 064 repeatedly without changing existing Bangus ownership or loadout', async () => {

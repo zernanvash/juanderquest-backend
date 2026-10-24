@@ -82,5 +82,13 @@ export async function ownedCosmetics(userId:string) {
     pool.query('SELECT i.*,uc.acquired_at,uc.source,uc.points_spent FROM user_cosmetics uc JOIN cosmetic_items i ON i.id=uc.item_id WHERE uc.user_id=$1 ORDER BY i.kind,i.sort_order',[userId]),
     pool.query('SELECT banner_id,frame_id,title_id,name_color_id FROM user_cosmetic_loadout WHERE user_id=$1',[userId]),
     pool.query('SELECT demo_points FROM users WHERE id=$1',[userId])]);
-  return {owned:owned.rows.map((i:any)=>({...i,acquiredAt:i.acquired_at})),loadout:loadout.rows[0]??{banner_id:null,frame_id:null,title_id:null,name_color_id:null},pointsBalance:Number(user.rows[0]?.demo_points??0)};
+  return {
+    owned: owned.rows.map((i: any) => ({
+      ...i,
+      acquiredAt: i.acquired_at,
+      ...(i.kind === 'banner' ? { seed: fnv1a32(`${userId}|${i.id}`) } : {}),
+    })),
+    loadout: loadout.rows[0] ?? { banner_id: null, frame_id: null, title_id: null, name_color_id: null },
+    pointsBalance: Number(user.rows[0]?.demo_points ?? 0),
+  };
 }
