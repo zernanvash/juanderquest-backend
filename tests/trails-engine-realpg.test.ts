@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createTestDb } from '../src/db/testHarness.js';
 import { generateTrail, TrailGenerationError } from '../src/trails/generate.js';
-import { MIGRATIONS } from '../src/db/migrations.js';
+import { applyMigrations, MIGRATIONS } from '../src/db/migrations.js';
 
 const describeRealPg = process.env.JDQ_REAL_PG_URL ? describe : describe.skip;
 const curatedIds = ['coastal_wonders_trail','pangasinan_heritage_trail','pangasinan_eco_escapes','pangasinan_culinary_trail'];
@@ -13,8 +13,9 @@ describeRealPg('Plan 44 real PostgreSQL acceptance (isolated reliability schema)
   afterAll(async () => { if (instance) await instance.close(); }, 30_000);
 
   test('055 migrates from the registered 053 baseline, upgrades curated ids and ordered stops idempotently', async () => {
-    expect(MIGRATIONS.indexOf('053_plaza_push.sql')).toBeLessThan(MIGRATIONS.indexOf('055_trail_engine.sql'));
-    expect(MIGRATIONS).not.toContain('054_quest_builder.sql');
+    expect(MIGRATIONS.indexOf('053_plaza_push.sql')).toBeLessThan(MIGRATIONS.indexOf('054_quest_builder.sql'));
+    expect(MIGRATIONS.indexOf('054_quest_builder.sql')).toBeLessThan(MIGRATIONS.indexOf('055_trail_engine.sql'));
+    expect(MIGRATIONS.indexOf('055_trail_engine.sql')).toBeLessThan(MIGRATIONS.indexOf('056_admin_areas.sql'));
     {
       expect((await instance.pool.query(`SELECT 1 FROM schema_migrations WHERE filename='055_trail_engine.sql'`)).rowCount).toBe(1);
       const { rows: spots } = await instance.pool.query(`SELECT id FROM spots WHERE COALESCE(is_test,FALSE)=FALSE ORDER BY id LIMIT 6`);
@@ -41,6 +42,40 @@ describeRealPg('Plan 44 real PostgreSQL acceptance (isolated reliability schema)
         expect(route.map(r=>Number(r.position))).toEqual(route.map((_r,i)=>i+1));
       }
     }
+  }, 120_000);
+
+  test('applies 055 on boot when the database already has later migrations recorded', async () => {
+    const laterFiles = MIGRATIONS.slice(MIGRATIONS.indexOf('055_trail_engine.sql') + 1);
+    const { rows: before } = await instance.pool.query(
+      `SELECT filename FROM schema_migrations WHERE filename = ANY($1::text[]) ORDER BY filename`, [laterFiles],
+    );
+    expect(before.map((row) => row.filename)).toEqual([...laterFiles].sort());
+
+    await instance.pool.query(`DROP TABLE trail_checkins, trail_completions, trail_unlocks, travel_time_matrix,
+      trail_stops, trails, trail_generations, trend_digests, ai_cache CASCADE`);
+    await instance.pool.query(`DELETE FROM schema_migrations WHERE filename='055_trail_engine.sql'`);
+
+    await expect(applyMigrations(instance.pool)).resolves.toBeUndefined();
+
+    const applied = await instance.pool.query(
+      `SELECT filename FROM schema_migrations WHERE filename='055_trail_engine.sql'`,
+    );
+    expect(applied.rowCount).toBe(1);
+    const { rows: curated } = await instance.pool.query(
+      `SELECT t.id,t.status,t.tier,t.source,ts.position,ts.spot_id FROM trails t
+       LEFT JOIN trail_stops ts ON ts.trail_id=t.id
+       WHERE t.id=ANY($1::text[]) ORDER BY t.id,ts.position`, [curatedIds],
+    );
+    expect(new Set(curated.map((row) => row.id))).toEqual(new Set(curatedIds));
+    for (const id of curatedIds) {
+      const stops = curated.filter((row) => row.id === id);
+      expect(stops[0]).toMatchObject({ status: 'published', tier: 'starter', source: 'curated' });
+      expect(stops.map((row) => Number(row.position))).toEqual(stops.map((_row, index) => index + 1));
+    }
+    const { rows: laterAfter } = await instance.pool.query(
+      `SELECT filename FROM schema_migrations WHERE filename = ANY($1::text[]) ORDER BY filename`, [laterFiles],
+    );
+    expect(laterAfter).toEqual(before);
   }, 120_000);
 
   test('generation has NO_FEASIBLE_TRAIL and a forced mid-write failure leaves all three tables unchanged', async () => {
