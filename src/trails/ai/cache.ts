@@ -24,6 +24,12 @@ export interface CachedAiOptions<T> {
 
 export async function cachedTrailAi<T>(options: CachedAiOptions<T>): Promise<CachedAiResult<T>> {
   const client = options.client ?? createNimClient();
+  // Tests must supply an explicit local/mock NIM client to make a request.
+  // A developer's private key file must never turn an unrelated test into a
+  // real NVIDIA call.
+  if (process.env.NODE_ENV === 'test' && !options.client) {
+    return fallbackResult(options, 'nim_not_configured', client.model);
+  }
   const canonicalInput = canonicalize(options.input);
   const cacheKey = createHash('sha256').update(JSON.stringify({
     purpose: options.purpose, model: client.model, promptVersion: TRAIL_PROMPT_VERSION, input: canonicalInput,

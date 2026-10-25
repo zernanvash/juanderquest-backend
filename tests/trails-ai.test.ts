@@ -115,6 +115,20 @@ describe('Trail advisory AI client (mock NIM only)', () => {
     expect(result.value.intro).not.toContain('Hundred Islands');
   });
 
+  test('does not use an implicit key-backed NIM client in tests', async () => {
+    const fallback = { title: 'Safe template', tagline: '', intro: 'Template copy.', stops: [{ spot_id: 's1', narration: 'Source description.' }] };
+    const queryable = { query: jest.fn() };
+    const result = await cachedTrailAi({
+      queryable: queryable as any,
+      purpose: 'tell_story',
+      input: { sample: 'must stay local' },
+      schema: tellStorySchema,
+      fallback: () => fallback,
+    });
+    expect(result).toMatchObject({ aiUsed: false, fallbackReason: 'nim_not_configured', value: fallback });
+    expect(queryable.query).not.toHaveBeenCalled();
+  });
+
   test('successful responses are cached by purpose/model/version/canonical input', async () => {
     let requests = 0;
     handler = (_req, res) => {

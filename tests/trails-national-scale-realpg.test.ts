@@ -1,5 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import { createTestDb, type TestDbInstance } from '../src/db/testHarness.js';
+import type { PoolClient } from 'pg';
 import { generateTrail } from '../src/trails/generate.js';
 import type { MatrixFetch } from '../src/trails/matrix.js';
 import { loadTrailSignalInputs } from '../src/trails/signals.js';
@@ -66,17 +67,33 @@ describeRealPg('Trail Engine national bounded generation (isolated real PostgreS
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     };
 
+    const generationClient = await fixture.pool.connect();
+    const queryDurations: Array<{ ms: number; sql: string }> = [];
+    const instrumentedClient = new Proxy(generationClient, {
+      get(target, property) {
+        if (property === 'query') return async (...args: unknown[]) => {
+          const queryStartedAt = performance.now();
+          try { return await (target.query as (...queryArgs: unknown[]) => Promise<unknown>)(...args); }
+          finally { queryDurations.push({ ms: performance.now() - queryStartedAt, sql: String(args[0]).replace(/\s+/g, ' ').slice(0, 90) }); }
+        };
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    }) as PoolClient;
+    await generationClient.query('BEGIN');
     const startedAt = performance.now();
     const generated = await generateTrail(fixture.pool, {
       kind: 'admin', areaId: 'trail-national-town', theme: 'National Scale', seed: 20261025,
       budgetMin: 240, minStops: 3, maxStops: 6, maxLegMin: 60, maxPerCategory: 2,
-      matrixFetch,
+      matrixFetch, transactionClient: instrumentedClient,
     });
+    await generationClient.query('COMMIT');
+    generationClient.release();
     const elapsedMs = performance.now() - startedAt;
     const persisted = await fixture.pool.query(`SELECT input FROM trail_generations WHERE id=$1`, [generated.generation.id]);
     const input = persisted.rows[0].input as { area_id: string; candidate_count: number; matrix_pairs: number };
 
-    console.info(`[trail-national-scale] generation_ms=${elapsedMs.toFixed(1)} candidates=${input.candidate_count} matrix_nodes=${observedMatrixNodes} matrix_pairs=${input.matrix_pairs}`);
+    console.info(`[trail-national-scale] generation_ms=${elapsedMs.toFixed(1)} candidates=${input.candidate_count} matrix_nodes=${observedMatrixNodes} matrix_pairs=${input.matrix_pairs} query_top=${JSON.stringify(queryDurations.sort((a, b) => b.ms - a.ms).slice(0, 6))}`);
     expect(input.area_id).toBe('trail-national-town');
     expect(input.candidate_count).toBeLessThanOrEqual(60);
     expect(input.matrix_pairs).toBeLessThanOrEqual(60 * 60);
