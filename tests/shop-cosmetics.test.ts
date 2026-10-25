@@ -7,8 +7,12 @@ import { db } from '../src/db/index.js';
 import { setPool } from '../src/db/pool.js';
 import { signSessionToken } from '../src/auth/tokens.js';
 import { env } from '../src/config/env.js';
-import { purchaseCosmetic, listCosmetics, grantAchievementCosmetics } from '../src/shop/cosmetics.js';
+import { purchaseCosmetic, listCosmetics, grantAchievementCosmetics, ownedCosmetics } from '../src/shop/cosmetics.js';
 import { reconcileFunding } from '../src/funding/reconcile.js';
+import { fnv1a32 } from '../src/shop/render.js';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { recordActivity } from '../src/social/activity.js';
 
 describe('Shop v1 cosmetics', () => {
   let fixture: TestDbInstance;
@@ -18,6 +22,13 @@ describe('Shop v1 cosmetics', () => {
   it('validates the self-describing asset shapes for each slot', () => {
     expect(validateAsset('banner', { style: 'gradient', colors: ['#f4a261', '#e76f51'], angle: 135, pattern: 'sun' })).toBe(true);
     expect(validateAsset('banner', { style: 'gradient', colors: ['#fff'], angle: 135, pattern: 'sun' })).toBe(false);
+    const procedural = { style: 'procedural', generator: 'bangus', palette: 'silver', colors: ['#0f5e72', '#06283a', '#2d4c63'], angle: 160, pattern: 'waves' };
+    expect(validateAsset('banner', procedural)).toBe(true);
+    expect(validateAsset('banner', { ...procedural, generator: 'not-a-generator' })).toBe(false);
+    expect(validateAsset('banner', { ...procedural, palette: 'bad palette' })).toBe(false);
+    expect(validateAsset('banner', { ...procedural, colors: ['#fff', '#06283a', '#2d4c63'] })).toBe(false);
+    expect(validateAsset('banner', { ...procedural, angle: 361 })).toBe(false);
+    expect(validateAsset('banner', { ...procedural, pattern: 'unknown' })).toBe(false);
     expect(validateAsset('frame', { style: 'ring', colors: ['#95d5b2'], width: 3, animated: false })).toBe(true);
     expect(validateAsset('frame', { style: 'ring', colors: ['#95d5b2'], width: 1, animated: false })).toBe(false);
     expect(validateAsset('title', { text: 'Island Hopper' })).toBe(true);
@@ -32,7 +43,7 @@ describe('Shop v1 cosmetics', () => {
       fixture.pool.query("SELECT count(*)::int AS count FROM vouchers WHERE availability='preview'"),
       fixture.pool.query('SELECT count(*)::int AS count FROM shop_teasers'),
     ]);
-    expect(items.rows[0].count).toBe(20);
+    expect(items.rows[0].count).toBe(33);
     expect(previews.rows[0].count).toBe(8);
     expect(teasers.rows[0].count).toBe(4);
   });
@@ -151,8 +162,103 @@ realPg('Shop v1 against disposable PostgreSQL (Plan 52 §7)', () => {
     const profile=await request(app).get(`/api/v1/users/${user}/profile`);
     expect(profile.status).toBe(200); expect(profile.body.data.cosmetics.banner).toMatchObject({id:item,kind:'banner'});
     expect(Object.keys(profile.body.data.cosmetics).sort()).toEqual(['banner','frame','nameColor','title']);
-    expect(Object.keys(profile.body.data.cosmetics.banner).sort()).toEqual(['asset','id','kind']);
+    expect(profile.body.data.cosmetics.banner.seed).toBe(fnv1a32(`${user}|${item}`));
+    expect(Object.keys(profile.body.data.cosmetics.banner).sort()).toEqual(['asset','id','kind','seed']);
     expect(profile.body.data.cosmetics.banner).not.toHaveProperty('price_points');
+  });
+
+  it('generates stable per-user and guest seeds for banner catalog entries', async () => {
+    const userA = await addUser();
+    const userB = await addUser();
+    const item = await addItem({ kind: 'banner' });
+    const a = (await listCosmetics(userA)).find((entry) => entry.id === item)!;
+    const aAgain = (await listCosmetics(userA)).find((entry) => entry.id === item)!;
+    const b = (await listCosmetics(userB)).find((entry) => entry.id === item)!;
+    const guest = (await listCosmetics()).find((entry) => entry.id === item)!;
+    expect(a.seed).toBe(fnv1a32(`${userA}|${item}`));
+    expect(aAgain.seed).toBe(a.seed);
+    expect(b.seed).toBe(fnv1a32(`${userB}|${item}`));
+    expect(b.seed).not.toBe(a.seed);
+    expect(guest.seed).toBe(fnv1a32(`guest|${item}`));
+    await fixture.pool.query(
+      `INSERT INTO user_cosmetics(user_id,item_id,source) VALUES($1,$2,'grant')`,
+      [userA, item],
+    );
+    const owned = await ownedCosmetics(userA);
+    expect(owned.owned.find((entry: any) => entry.id === item)?.seed).toBe(
+      fnv1a32(`${userA}|${item}`),
+    );
+  });
+
+  it('applies migration 064 repeatedly without changing existing Bangus ownership or loadout', async () => {
+    const owner = await addUser();
+    await fixture.pool.query(`INSERT INTO user_cosmetics(user_id,item_id,source) VALUES($1,'banner-bangus-festival','purchase')`, [owner]);
+    await fixture.pool.query(`INSERT INTO user_cosmetic_loadout(user_id,banner_id) VALUES($1,'banner-bangus-festival')`, [owner]);
+    const migration = readFileSync(join(process.cwd(), 'migrations/064_procedural_banners.sql'), 'utf8');
+    const before = (await fixture.pool.query('SELECT count(*)::int AS count FROM cosmetic_items')).rows[0].count;
+    await fixture.pool.query(migration);
+    await fixture.pool.query(migration);
+    const after = (await fixture.pool.query('SELECT count(*)::int AS count FROM cosmetic_items')).rows[0].count;
+    expect(after).toBe(before);
+    const ownership = await fixture.pool.query(`
+      SELECT uc.item_id, l.banner_id, i.asset
+      FROM user_cosmetics uc
+      JOIN user_cosmetic_loadout l USING(user_id)
+      JOIN cosmetic_items i ON i.id=uc.item_id
+      WHERE uc.user_id=$1 AND uc.item_id='banner-bangus-festival'
+    `, [owner]);
+    expect(ownership.rows).toHaveLength(1);
+    expect(ownership.rows[0].banner_id).toBe('banner-bangus-festival');
+    expect(ownership.rows[0].asset).toMatchObject({ style: 'procedural', generator: 'bangus', palette: 'silver' });
+    expect((await listCosmetics(owner)).find((entry) => entry.id === 'banner-bangus-festival')?.owned).toBe(true);
+  });
+
+  it('includes the deterministic banner seed in Plaza and leaderboard actor payloads', async () => {
+    const user = await addUser();
+    await fixture.pool.query(`UPDATE users SET is_public=TRUE, share_activity=TRUE, scout_reputation=321 WHERE id=$1`, [user]);
+    await fixture.pool.query(`INSERT INTO user_cosmetics(user_id,item_id,source) VALUES($1,'banner-bangus-festival','grant')`, [user]);
+    await fixture.pool.query(`INSERT INTO user_cosmetic_loadout(user_id,banner_id) VALUES($1,'banner-bangus-festival')`, [user]);
+    const memoryUser = {
+      id: user,
+      seed_id: `seed-${user}`,
+      display_name: user,
+      handle: user,
+      email: `${user}@shop.test`,
+      avatar_url: '',
+      role: 'user',
+      demo_points: 1000,
+      mjdq_balance: 1_000_000,
+      jdq_governance_balance: 0,
+      scout_reputation: 321,
+      is_public: true,
+      is_test: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    db.users.push(memoryUser as any);
+    try {
+      await recordActivity(fixture.pool, {
+        eventKey: `banner-seed:${user}:${suffix()}`,
+        actorId: user,
+        verb: 'quest_completed',
+        subjectType: 'quest',
+        subjectId: `quest-${suffix()}`,
+        subjectTitle: 'Seed payload test',
+        subjectHref: '/quests',
+        payload: {},
+        isTest: false,
+      });
+      const expectedSeed = fnv1a32(`${user}|banner-bangus-festival`);
+      const plaza = await request(app).get('/api/v1/plaza/feed?scope=mixed');
+      expect(plaza.status).toBe(200);
+      expect(plaza.body.data.items.find((item: any) => item.actor.user_id === user)?.actor.cosmetics.banner.seed).toBe(expectedSeed);
+
+      const leaderboard = await request(app).get('/api/v1/leaderboard');
+      expect(leaderboard.status).toBe(200);
+      expect(leaderboard.body.data.top_scouts.find((item: any) => item.user_id === user)?.cosmetics.banner.seed).toBe(expectedSeed);
+    } finally {
+      db.users = db.users.filter((entry) => entry.id !== user);
+    }
   });
 
   it('unlocks achievements on award and lazily, but never grants revoked badges', async () => {

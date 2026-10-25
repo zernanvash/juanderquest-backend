@@ -2,12 +2,23 @@ import { randomUUID } from 'crypto';
 import { getPool } from '../db/pool.js';
 import { lockGovernanceSnapshot, commitGovernanceTransaction } from '../governance/transaction.js';
 import { movePoints } from '../funding/ledger.js';
+import { fnv1a32 } from './render.js';
 
 export const NAME_COLORS = ['#2d6a4f','#c2410c','#1d4ed8','#7e22ce'] as const;
 export const validateAsset = (kind: string, asset: any): boolean => {
   if (!asset || typeof asset !== 'object' || Array.isArray(asset)) return false;
   const hex = (v: unknown) => typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v);
-  if (kind === 'banner') return asset.style === 'gradient' && Array.isArray(asset.colors) && asset.colors.length >= 2 && asset.colors.length <= 3 && asset.colors.every(hex) && Number.isInteger(asset.angle) && asset.angle >= 0 && asset.angle <= 360 && ['none','waves','islands','capiz','bamboo','sun'].includes(asset.pattern);
+  if (kind === 'banner') {
+    const legacyShape = asset.style === 'gradient' && Array.isArray(asset.colors) && asset.colors.length >= 2 && asset.colors.length <= 3 && asset.colors.every(hex) && Number.isInteger(asset.angle) && asset.angle >= 0 && asset.angle <= 360 && ['none','waves','islands','capiz','bamboo','sun'].includes(asset.pattern);
+    if (legacyShape) return true;
+    const generators = ['sunset','islands','bangus','banderitas','asin','topo','habi','alitaptap'];
+    return asset.style === 'procedural'
+      && generators.includes(asset.generator)
+      && typeof asset.palette === 'string' && /^[a-z0-9-]{2,20}$/.test(asset.palette)
+      && Array.isArray(asset.colors) && asset.colors.length >= 3 && asset.colors.length <= 6 && asset.colors.every(hex)
+      && Number.isInteger(asset.angle) && asset.angle >= 0 && asset.angle <= 360
+      && ['none','waves','islands','capiz','bamboo','sun'].includes(asset.pattern);
+  }
   if (kind === 'frame') return asset.style === 'ring' && Array.isArray(asset.colors) && asset.colors.length >= 1 && asset.colors.length <= 3 && asset.colors.every(hex) && Number.isInteger(asset.width) && asset.width >= 2 && asset.width <= 6 && typeof asset.animated === 'boolean';
   if (kind === 'title') return typeof asset.text === 'string' && asset.text.length > 0 && asset.text.length <= 24;
   if (kind === 'name_color') return NAME_COLORS.includes(asset.color);
@@ -29,7 +40,7 @@ export async function listCosmetics(userId?: string) {
   return result.rows.map((r:any) => {
     const achievement = r.unlock_achievement_id ? { achievementId:r.unlock_achievement_id,title:r.achievement_title ?? r.unlock_achievement_id } : undefined;
     const lockedReason = r.unlock_achievement_id && !r.owned ? 'badge_required' : r.price_tjdq != null && r.price_points == null && !achievement ? 'tjdq_coming_soon' : r.price_points == null && !achievement ? 'not_for_sale' : undefined;
-    return { id:r.id,kind:r.kind,name:r.name,description:r.description,rarity:r.rarity,pricePoints:r.price_points,priceTjdq:r.price_tjdq == null ? null : Number(r.price_tjdq),unlock:achievement,asset:r.asset,owned:Boolean(r.owned),equipped:Boolean(r.equipped),buyable:r.price_points != null && !r.owned && !achievement,lockedReason };
+    return { id:r.id,kind:r.kind,name:r.name,description:r.description,rarity:r.rarity,pricePoints:r.price_points,priceTjdq:r.price_tjdq == null ? null : Number(r.price_tjdq),unlock:achievement,asset:r.asset,...(r.kind === 'banner' ? { seed: fnv1a32(`${userId || 'guest'}|${r.id}`) } : {}),owned:Boolean(r.owned),equipped:Boolean(r.equipped),buyable:r.price_points != null && !r.owned && !achievement,lockedReason };
   });
 }
 
@@ -71,5 +82,13 @@ export async function ownedCosmetics(userId:string) {
     pool.query('SELECT i.*,uc.acquired_at,uc.source,uc.points_spent FROM user_cosmetics uc JOIN cosmetic_items i ON i.id=uc.item_id WHERE uc.user_id=$1 ORDER BY i.kind,i.sort_order',[userId]),
     pool.query('SELECT banner_id,frame_id,title_id,name_color_id FROM user_cosmetic_loadout WHERE user_id=$1',[userId]),
     pool.query('SELECT demo_points FROM users WHERE id=$1',[userId])]);
-  return {owned:owned.rows.map((i:any)=>({...i,acquiredAt:i.acquired_at})),loadout:loadout.rows[0]??{banner_id:null,frame_id:null,title_id:null,name_color_id:null},pointsBalance:Number(user.rows[0]?.demo_points??0)};
+  return {
+    owned: owned.rows.map((i: any) => ({
+      ...i,
+      acquiredAt: i.acquired_at,
+      ...(i.kind === 'banner' ? { seed: fnv1a32(`${userId}|${i.id}`) } : {}),
+    })),
+    loadout: loadout.rows[0] ?? { banner_id: null, frame_id: null, title_id: null, name_color_id: null },
+    pointsBalance: Number(user.rows[0]?.demo_points ?? 0),
+  };
 }

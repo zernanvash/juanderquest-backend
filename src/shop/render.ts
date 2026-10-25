@@ -1,9 +1,19 @@
 import type { Pool, PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
 
-export type CosmeticSlot = { id: string; kind: string; asset: Record<string, unknown> } | null;
+export type CosmeticSlot = { id: string; kind: string; asset: Record<string, unknown>; seed?: number } | null;
 export type CosmeticRenderData = { banner: CosmeticSlot; frame: CosmeticSlot; title: CosmeticSlot; nameColor: CosmeticSlot };
 export const emptyCosmetics = (): CosmeticRenderData => ({ banner:null, frame:null, title:null, nameColor:null });
+
+/** FNV-1a 32-bit hash shared with the approved banner lab and client ports. */
+export function fnv1a32(value: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
 
 /** Cosmetics are optional decoration: a failed lookup must not fail its owning response. */
 export async function safeCosmeticsFor(userIds: string[], client?: Pool | PoolClient): Promise<Map<string, CosmeticRenderData>> {
@@ -31,7 +41,11 @@ export async function cosmeticsFor(userIds: string[], client?: Pool | PoolClient
     const data = out.get(row.user_id);
     if (!data || !row.id) continue;
     const slot = row.kind === 'name_color' ? 'nameColor' : row.kind as keyof CosmeticRenderData;
-    if (slot in data) data[slot] = { id: row.id, kind: row.kind, asset: row.asset };
+    if (slot in data) {
+      data[slot] = row.kind === 'banner'
+        ? { id: row.id, kind: row.kind, asset: row.asset, seed: fnv1a32(`${row.user_id}|${row.id}`) }
+        : { id: row.id, kind: row.kind, asset: row.asset };
+    }
   }
   return out;
 }
