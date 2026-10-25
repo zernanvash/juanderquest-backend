@@ -38,6 +38,10 @@ import { sponsorshipsRouter } from './routes/sponsorships.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { plazaRouter } from './routes/plaza.js';
 import { areasRouter } from './routes/areas.js';
+import { chainAdminRouter } from './routes/chainAdmin.js';
+import { chainBadgesRouter } from './routes/chainBadges.js';
+import { shopRouter } from './routes/shop.js';
+import { adminShopRouter } from './routes/adminShop.js';
 import { errorHandler } from './middleware/error.js';
 import { readinessGate } from './middleware/readiness.js';
 import { appVersionGate } from './middleware/appVersionGate.js';
@@ -131,6 +135,10 @@ app.use('/api/v1', sponsorshipsRouter);
 app.use('/api/v1', notificationsRouter);
 app.use('/api/v1', plazaRouter);
 app.use('/api/v1', areasRouter);
+app.use('/api/v1', chainBadgesRouter);
+app.use('/api/v1', shopRouter);
+app.use('/api/v1', adminShopRouter);
+app.use('/api/v1/admin/chain', chainAdminRouter);
 
 // JSON parse errors -> 400 instead of 500
 app.use((err: Error & { type?: string }, _req: express.Request, res: express.Response, next: express.NextFunction) => {

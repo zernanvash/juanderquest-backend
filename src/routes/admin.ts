@@ -82,13 +82,150 @@ router.patch('/admin/submissions/:id', validateRequest(reviewSchema), async (req
   }
 });
 
-router.get('/admin/quest-attempts', (req: AuthRequest, res: Response) => {
+router.get('/admin/quest-attempts', async (req: AuthRequest, res: Response) => {
   const statusFilter = req.query.status as string | undefined;
+  const pool = getPool();
+  if (pool) {
+    try {
+      const whereClause = statusFilter ? 'WHERE a.status = $1' : '';
+      const params = statusFilter ? [statusFilter] : [];
+      const query = `
+        SELECT 
+          a.*,
+          q.title AS quest_title,
+          q.location_name AS quest_location,
+          u.display_name AS traveler_name,
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'id', e.id,
+                'step_order', e.step_order,
+                'task_key', e.task_key,
+                'title', e.title,
+                'description', e.description,
+                'checkpoint_type', e.checkpoint_type,
+                'required', e.required,
+                'status', e.status,
+                'evidence_payload', e.evidence_payload,
+                'failed_tries', e.failed_tries,
+                'first_try_at', e.first_try_at,
+                'submitted_at', e.submitted_at,
+                'needs_changes_reason', e.needs_changes_reason,
+                'rejection_reason', e.rejection_reason,
+                'reviewed_by', e.reviewed_by,
+                'reviewed_at', e.reviewed_at,
+                'verified_at', e.verified_at
+              ) ORDER BY e.step_order ASC
+            ) FILTER (WHERE e.id IS NOT NULL),
+            '[]'::json
+          ) AS steps
+        FROM quest_attempts a
+        JOIN quests q ON q.id = a.quest_id
+        LEFT JOIN users u ON u.id = a.user_id
+        LEFT JOIN quest_step_evidence e ON e.attempt_id = a.id
+        ${whereClause}
+        GROUP BY a.id, q.title, q.location_name, u.display_name
+        ORDER BY a.created_at DESC
+      `;
+      const result = await pool.query(query, params);
+      return res.status(200).json({ success: true, data: result.rows });
+    } catch (err) {
+      console.error('[admin] Failed to list quest attempts from pool:', err);
+      return res.status(500).json({ success: false, error: { code: 'DATABASE_ERROR', message: 'Failed to query quest attempts.' } });
+    }
+  }
+
   let attempts = db.quest_attempts;
   if (statusFilter) {
     attempts = attempts.filter((a) => a.status === statusFilter);
   }
-  return res.status(200).json({ success: true, data: attempts });
+  const enriched = attempts.map((a) => {
+    const q = db.findQuestById(a.quest_id);
+    const u = db.users.find((user) => user.id === a.user_id);
+    const steps = db.getStepEvidence(a.id);
+    return {
+      ...a,
+      quest_title: q?.title,
+      quest_location: q?.location_name,
+      traveler_name: u?.display_name || 'Traveler',
+      steps,
+    };
+  });
+  return res.status(200).json({ success: true, data: enriched });
+});
+
+router.get('/admin/quest-attempts/:id', async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const pool = getPool();
+  if (pool) {
+    try {
+      const query = `
+        SELECT 
+          a.*,
+          q.title AS quest_title,
+          q.location_name AS quest_location,
+          q.author_id AS quest_author_id,
+          u.display_name AS traveler_name,
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'id', e.id,
+                'step_order', e.step_order,
+                'task_key', e.task_key,
+                'title', e.title,
+                'description', e.description,
+                'checkpoint_type', e.checkpoint_type,
+                'required', e.required,
+                'status', e.status,
+                'evidence_payload', e.evidence_payload,
+                'failed_tries', e.failed_tries,
+                'first_try_at', e.first_try_at,
+                'submitted_at', e.submitted_at,
+                'needs_changes_reason', e.needs_changes_reason,
+                'rejection_reason', e.rejection_reason,
+                'reviewed_by', e.reviewed_by,
+                'reviewed_at', e.reviewed_at,
+                'verified_at', e.verified_at
+              ) ORDER BY e.step_order ASC
+            ) FILTER (WHERE e.id IS NOT NULL),
+            '[]'::json
+          ) AS steps
+        FROM quest_attempts a
+        JOIN quests q ON q.id = a.quest_id
+        LEFT JOIN users u ON u.id = a.user_id
+        LEFT JOIN quest_step_evidence e ON e.attempt_id = a.id
+        WHERE a.id = $1
+        GROUP BY a.id, q.title, q.location_name, q.author_id, u.display_name
+      `;
+      const result = await pool.query(query, [id]);
+      if (!result.rows[0]) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Quest attempt not found.' } });
+      }
+      return res.status(200).json({ success: true, data: result.rows[0] });
+    } catch (err) {
+      console.error('[admin] Failed to fetch quest attempt detail:', err);
+      return res.status(500).json({ success: false, error: { code: 'DATABASE_ERROR', message: 'Failed to query quest attempt.' } });
+    }
+  }
+
+  const memAttempt = db.quest_attempts.find((a) => a.id === id);
+  if (!memAttempt) {
+    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Quest attempt not found.' } });
+  }
+  const q = db.findQuestById(memAttempt.quest_id);
+  const u = db.users.find((user) => user.id === memAttempt.user_id);
+  const steps = db.getStepEvidence(id);
+  return res.status(200).json({
+    success: true,
+    data: {
+      ...memAttempt,
+      quest_title: q?.title,
+      quest_location: q?.location_name,
+      quest_author_id: q?.author_id,
+      traveler_name: u?.display_name || 'Traveler',
+      steps,
+    },
+  });
 });
 
 const questAttemptReviewSchema = z.object({
@@ -168,14 +305,29 @@ router.patch('/admin/quest-attempts/:id', validateRequest(questAttemptReviewSche
             code: 'ALREADY_COMPLETED', message: 'This traveler has already completed this quest and cannot receive another reward.'
           } });
         }
-        const awardedPoints = quest.reward_points || 0;
-
-        // Mark any pending_review steps as verified
-        await client.query(
-          "UPDATE quest_step_evidence SET status = 'verified', reviewed_by = $1, reviewed_at = NOW(), updated_at = NOW() WHERE attempt_id = $2 AND status = 'pending_review'",
-          [adminId, id]
+        // Plan 43 §4.5: Attempt approval requires EVERY required photo task already verified.
+        // Auto-verify of pending photo tasks is removed.
+        const pendingStepsRes = await client.query(
+          "SELECT step_order, title, checkpoint_type FROM quest_step_evidence WHERE attempt_id = $1 AND required = TRUE AND status != 'verified'",
+          [id]
         );
+        if (pendingStepsRes.rows.length > 0) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({
+            success: false,
+            error: {
+              code: 'TASKS_PENDING_REVIEW',
+              message: 'All required quest tasks must be verified before the attempt can be approved.',
+              pending_tasks: pendingStepsRes.rows.map((r: any) => ({
+                step_order: r.step_order,
+                title: r.title,
+                checkpoint_type: r.checkpoint_type,
+              })),
+            },
+          });
+        }
 
+        const awardedPoints = quest.reward_points || 0;
         const rewardSettlement = await settleReward({
           client, userId: attempt.user_id, questId: quest.id, referenceId: id,
           actorId: adminId, rewardPoints: awardedPoints,
@@ -397,5 +549,169 @@ router.patch('/admin/quest-attempts/:id', validateRequest(questAttemptReviewSche
     return res.status(200).json({ success: true, data: { attempt }, message: 'Quest attempt rejected.' });
   }
 });
+
+// PATCH /admin/quest-attempts/:id/steps/:stepOrder - Per-task review (Plan 43 §4.5)
+const perTaskReviewSchema = z.object({
+  params: z.object({ id: z.string().min(1), stepOrder: z.string().regex(/^[1-9]\d{0,2}$/) }),
+  body: z.object({
+    action: z.enum(['approve', 'needs_changes']),
+    reason: z.string().trim().min(10).max(300).optional(),
+  }),
+});
+
+router.patch(
+  '/admin/quest-attempts/:id/steps/:stepOrder',
+  validateRequest(perTaskReviewSchema),
+  async (req: AuthRequest, res: Response) => {
+    const { id, stepOrder: stepOrderStr } = req.params;
+    const stepOrder = Number(stepOrderStr);
+    const { action, reason } = req.body;
+    const adminId = req.user!.id;
+
+    if (action === 'needs_changes' && !reason) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Reason (10–300 characters) is required when requesting changes.' },
+      });
+    }
+
+    const pool = getPool();
+    if (pool) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        // Check attempt and creator self-review rule
+        const attemptRes = await client.query('SELECT * FROM quest_attempts WHERE id = $1 FOR UPDATE', [id]);
+        if (!attemptRes.rows[0]) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Quest attempt not found.' } });
+        }
+        const attempt = attemptRes.rows[0];
+
+        const questRes = await client.query('SELECT author_id FROM quests WHERE id = $1', [attempt.quest_id]);
+        if (questRes.rows[0]?.author_id === adminId) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({
+            success: false,
+            error: { code: 'CREATOR_SELF_ATTEMPT', message: 'Quest authors cannot review tasks on their own quests.' },
+          });
+        }
+
+        if (attempt.user_id === adminId) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({
+            success: false,
+            error: { code: 'CANNOT_REVIEW_OWN_ATTEMPT', message: 'Administrators cannot review their own quest attempts.' },
+          });
+        }
+
+        const stepRes = await client.query(
+          'SELECT * FROM quest_step_evidence WHERE attempt_id = $1 AND step_order = $2 FOR UPDATE',
+          [id, stepOrder]
+        );
+        if (!stepRes.rows[0]) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: `Step ${stepOrder} not found.` } });
+        }
+        const step = stepRes.rows[0];
+
+        if (step.status !== 'pending_review') {
+          await client.query('ROLLBACK');
+          return res.status(409).json({
+            success: false,
+            error: { code: 'STEP_NOT_PENDING_REVIEW', message: `Task is currently '${step.status}', not pending review.` },
+          });
+        }
+
+        let updatedStepRes;
+        if (action === 'approve') {
+          updatedStepRes = await client.query(
+            `UPDATE quest_step_evidence
+             SET status = 'verified', reviewed_by = $1, reviewed_at = NOW(), verified_at = NOW(), updated_at = NOW()
+             WHERE attempt_id = $2 AND step_order = $3
+             RETURNING *`,
+            [adminId, id, stepOrder]
+          );
+
+          // Update verified steps count on attempt
+          const countRes = await client.query(
+            "SELECT COUNT(*) FROM quest_step_evidence WHERE attempt_id = $1 AND status = 'verified'",
+            [id]
+          );
+          await client.query(
+            'UPDATE quest_attempts SET verified_steps = $1, updated_at = NOW() WHERE id = $2',
+            [parseInt(countRes.rows[0].count, 10), id]
+          );
+        } else {
+          updatedStepRes = await client.query(
+            `UPDATE quest_step_evidence
+             SET status = 'needs_changes', needs_changes_reason = $1, rejection_reason = $1,
+                 reviewed_by = $2, reviewed_at = NOW(), updated_at = NOW()
+             WHERE attempt_id = $3 AND step_order = $4
+             RETURNING *`,
+            [reason, adminId, id, stepOrder]
+          );
+        }
+
+        await client.query('COMMIT');
+        return res.status(200).json({
+          success: true,
+          data: { step: updatedStepRes.rows[0] },
+          message: action === 'approve' ? 'Task evidence verified.' : 'Changes requested for task evidence.',
+        });
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        console.error('[admin] per-task review error:', err);
+        return res.status(500).json({ success: false, error: { code: 'REVIEW_FAILED', message: 'Internal review processing failure.' } });
+      } finally {
+        client.release();
+      }
+    }
+
+    // In-memory fallback
+    const memAttempt = db.quest_attempts.find((a) => a.id === id);
+    if (!memAttempt) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Quest attempt not found.' } });
+
+    const memQuest = db.findQuestById(memAttempt.quest_id);
+    if (memQuest?.author_id === adminId) {
+      return res.status(403).json({ success: false, error: { code: 'CREATOR_SELF_ATTEMPT', message: 'Quest authors cannot review tasks on their own quests.' } });
+    }
+    if (memAttempt.user_id === adminId) {
+      return res.status(403).json({ success: false, error: { code: 'CANNOT_REVIEW_OWN_ATTEMPT', message: 'Administrators cannot review their own quest attempts.' } });
+    }
+
+    const memStep = db.findStepEvidence(id, stepOrder);
+    if (!memStep) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: `Step ${stepOrder} not found.` } });
+    if (memStep.status !== 'pending_review') {
+      return res.status(409).json({ success: false, error: { code: 'STEP_NOT_PENDING_REVIEW', message: `Task is currently '${memStep.status}', not pending review.` } });
+    }
+
+    const nowIso = new Date().toISOString();
+    if (action === 'approve') {
+      memStep.status = 'verified';
+      memStep.reviewed_by = adminId;
+      memStep.reviewed_at = nowIso;
+      memStep.verified_at = nowIso;
+      memStep.updated_at = nowIso;
+      const memSteps = db.getStepEvidence(id);
+      memAttempt.verified_steps = memSteps.filter((s) => s.status === 'verified').length;
+    } else {
+      memStep.status = 'needs_changes';
+      memStep.needs_changes_reason = reason;
+      memStep.rejection_reason = reason;
+      memStep.reviewed_by = adminId;
+      memStep.reviewed_at = nowIso;
+      memStep.updated_at = nowIso;
+    }
+    db.saveStepEvidence(memStep);
+
+    return res.status(200).json({
+      success: true,
+      data: { step: memStep },
+      message: action === 'approve' ? 'Task evidence verified.' : 'Changes requested for task evidence.',
+    });
+  }
+);
 
 export default router;

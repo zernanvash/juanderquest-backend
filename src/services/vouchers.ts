@@ -109,6 +109,11 @@ export class VouchersService {
         }
         const voucher = voucherRows[0];
 
+        if (voucher.availability === 'preview') {
+          await client.query('ROLLBACK');
+          return { success:false,statusCode:409,error:{code:'NOT_REDEEMABLE',message:'This partner offer is coming soon.'} };
+        }
+
         if (user.demo_points < voucher.cost_points) {
           await client.query('ROLLBACK');
           return {

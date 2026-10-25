@@ -20,7 +20,8 @@
     "test:juanchoice-browser-fixture": "tsx scripts/juanchoice-browser-fixture.ts",
     "check:juanchoice-browser-fixture": "tsc -p tsconfig.browser-fixture.json",
     "check:juanchoice-capacity": "tsc -p tsconfig.capacity.json",
-    "test:juanchoice-capacity": "tsx scripts/juanchoice-capacity-rehearsal.ts"
+    "test:juanchoice-capacity": "tsx scripts/juanchoice-capacity-rehearsal.ts",
+    "chain:index": "tsx scripts/chain-index-once.ts"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.33.0",

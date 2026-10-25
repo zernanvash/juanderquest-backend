@@ -1,4 +1,5 @@
 import { db, UserRow, SubmissionRow } from '../db/index.js';
+import type { CosmeticRenderData } from '../shop/render.js';
 
 export interface LeaderboardRankEntry {
   rank: number;
@@ -12,6 +13,7 @@ export interface LeaderboardRankEntry {
   badge: string;
   primary_town: string;
   is_self?: boolean;
+  cosmetics?: CosmeticRenderData;
 }
 
 export interface MunicipalityAggregate {

@@ -6,6 +6,8 @@ import { beginServiceShutdown, setServiceReady } from './middleware/readiness.js
 import { stopStandingsJob } from './social/standingsJob.js';
 import { stopPushDispatcher } from './push/dispatcher.js';
 import { stopWeeklyRecapJob } from './social/weeklyRecapJob.js';
+import { stopChainBalanceWatch } from './chain/balanceWatch.js';
+import { stopBadgeMinter } from './chain/badgeMinter.js';
 import { stopWeeklyTrailTrendJob } from './trails/jobs/weeklyTrends.js';
 
 const startedAt = Date.now();
@@ -41,6 +43,8 @@ function shutdown(signal: NodeJS.Signals): void {
   stopPushDispatcher();
   stopWeeklyRecapJob();
   stopWeeklyTrailTrendJob();
+  stopChainBalanceWatch();
+  stopBadgeMinter();
   beginServiceShutdown();
   console.log(`[shutdown] ${signal} received — draining in-flight requests (10 s cap)`);
 
