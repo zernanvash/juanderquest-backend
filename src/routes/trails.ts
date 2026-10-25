@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import type { TrailCosting, TrailProblem } from '../trails/types.js';
 import { checkinTrailStop, TrailProgressError, unlockTrail } from '../trails/progress.js';
 import { createPersonalTrail, PersonalTrailError } from '../trails/personal.js';
+import { loadTrailEconomy } from '../trails/economy.js';
 
 export const trailsRouter = Router();
 // Every endpoint in this router is operational/admin-only, including reads.
@@ -46,8 +47,17 @@ trailsRouter.get('/trails', optionalAuthenticateToken, async (req: AuthRequest, 
         (t.owner_user_id=$2 OR EXISTS(SELECT 1 FROM trail_unlocks u WHERE u.trail_id=t.id AND u.user_id=$2)) AS is_unlocked
       FROM trails t WHERE t.status='published' AND t.is_test=$1 AND (t.owner_user_id IS NULL OR t.owner_user_id=$2)
       ORDER BY CASE t.tier WHEN 'starter' THEN 1 WHEN 'explorer' THEN 2 WHEN 'signature' THEN 3 WHEN 'legendary' THEN 4 ELSE 5 END,t.title`,[isTest,user?.id??null]);
+    let personalGeneration: { free_remaining:number; price_points:number } | null = null;
+    if (user) {
+      const [economy, used] = await Promise.all([
+        loadTrailEconomy(pool),
+        pool.query(`SELECT COUNT(*)::int AS count FROM trail_generations WHERE kind='personal' AND requested_by=$1
+          AND created_at >= (date_trunc('week', clock_timestamp() AT TIME ZONE 'Asia/Manila') AT TIME ZONE 'Asia/Manila')`, [user.id]),
+      ]);
+      personalGeneration = { free_remaining: Math.max(0,economy.personalFreePerWeek-Number(used.rows[0]?.count??0)), price_points:economy.personalGenerationPoints };
+    }
     res.set('Cache-Control',req.user?'private, no-store':'public, max-age=60');
-    return res.json({success:true,data:{items:rows.map(row=>lockedTrailShape(row,Boolean(row.is_unlocked))),total:rows.length}});
+    return res.json({success:true,data:{items:rows.map(row=>lockedTrailShape(row,Boolean(row.is_unlocked))),total:rows.length,personal_generation:personalGeneration}});
   } catch { return res.status(503).json({success:false,error:{code:'TRAILS_UNAVAILABLE',message:'Trail catalog is unavailable.'}}); }
 });
 
