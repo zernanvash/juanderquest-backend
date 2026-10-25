@@ -420,6 +420,13 @@ export async function applyMigrations(pg: Pool) {
           // pg-mem does not implement PostgreSQL's regular-expression match
           // operator. The API validates cosmetic IDs with the same pattern.
           await client.query(sql.replace(/CHECK\s*\(id\s*~\s*'\^\[a-z0-9-\]\{3,60\}\$'\)/, ''));
+        } else if (file === '055_trail_engine.sql' && pgMemMigrationAdapters.has(pg as object)) {
+          // pg-mem cannot faithfully type the curated-trail INSERT ... SELECT
+          // into TEXT[]/JSONB columns. Real PostgreSQL exercises the complete
+          // additive migration and starter-trail upgrade; in-memory tests need
+          // the schema only, not its historical data migration.
+          const schemaSql = sql.split('-- Idempotent upgrade of available curated trails.')[0];
+          await client.query(schemaSql);
         } else if (file === '054_quest_builder.sql' && pgMemMigrationAdapters.has(pg as object)) {
           await client.query(`
             ALTER TABLE quests ADD COLUMN IF NOT EXISTS step_order_mode TEXT NOT NULL DEFAULT 'sequential';
