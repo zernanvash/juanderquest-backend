@@ -12,6 +12,7 @@ import { createCuoptSolver, cuoptEnabledWithKey, CuoptError } from '../trails/so
 import { randomUUID } from 'node:crypto';
 import type { TrailCosting, TrailProblem } from '../trails/types.js';
 import { checkinTrailStop, TrailProgressError, unlockTrail } from '../trails/progress.js';
+import { createPersonalTrail, PersonalTrailError } from '../trails/personal.js';
 
 export const trailsRouter = Router();
 // Every endpoint in this router is operational/admin-only, including reads.
@@ -19,6 +20,7 @@ trailsRouter.use('/admin/trails', authenticateToken, requireAdmin);
 
 const unlockRateLimiter = rateLimit({ policyId: 'trails:unlock', windowMs: 60_000, max: 10, keyStrategy: 'actor' });
 const checkinRateLimiter = rateLimit({ policyId: 'trails:checkin', windowMs: 60_000, max: 6, keyStrategy: 'actor' });
+const personalTrailRateLimiter = rateLimit({ policyId: 'trails:personal', windowMs: 60 * 60_000, max: 3, keyStrategy: 'actor' });
 
 function sendTrailProgressError(res: Response, error: unknown) {
   if (error instanceof TrailProgressError) return res.status(error.status).json({ success:false,error:{code:error.code,message:error.message} });
@@ -75,6 +77,33 @@ trailsRouter.get('/trails/:id', optionalAuthenticateToken, async (req: AuthReque
       checked_in:checkinByPosition.has(Number(stop.position)),...(checkinByPosition.get(Number(stop.position))??{})
     }))}});
   } catch { return res.status(503).json({success:false,error:{code:'TRAILS_UNAVAILABLE',message:'Trail details are unavailable.'}}); }
+});
+
+const personalTrailSchema = z.object({
+  text: z.string().trim().max(300).optional(),
+  themes: z.array(z.string().trim().min(1).max(80)).max(12).optional(),
+  good_for: z.array(z.string().trim().min(1).max(80)).max(12).optional(),
+  municipalities: z.array(z.string().trim().min(1).max(100)).max(12).optional(),
+  budget_min: z.number().int().min(120).max(600).optional(),
+  pace: z.enum(['relaxed','balanced','packed']).optional(),
+  start: z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).strict().optional(),
+}).strict().refine(value => Boolean(value.text || value.themes?.length || value.good_for?.length || value.municipalities?.length), {
+  message: 'Describe the trip or choose at least one preference.',
+});
+
+trailsRouter.post('/trails/personal', authenticateToken, personalTrailRateLimiter, async (req: AuthRequest, res: Response) => {
+  const parsed = personalTrailSchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ success:false,error:{code:'VALIDATION_ERROR',message:parsed.error.issues[0]?.message ?? 'Invalid personal trail request.'} });
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ success:false,error:{code:'DATABASE_UNAVAILABLE',message:'Personal trail generation is unavailable.'} });
+  try {
+    const result = await createPersonalTrail(pool, req.user!.id, req.header('Idempotency-Key') ?? '', parsed.data);
+    return res.status(201).json({ success:true,data:result });
+  } catch (error) {
+    if (error instanceof PersonalTrailError) return res.status(error.status).json({success:false,error:{code:error.code,message:error.message}});
+    if (error instanceof TrailGenerationError) return res.status(422).json({success:false,error:{code:error.code,message:error.message}});
+    return res.status(503).json({success:false,error:{code:'PERSONAL_TRAIL_FAILED',message:'Personal trail could not be created; any points charge was rolled back.'}});
+  }
 });
 
 trailsRouter.post('/trails/:id/unlock', authenticateToken, unlockRateLimiter, async (req: AuthRequest, res: Response) => {

@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { computeSpotSignals, loadTrailSignalInputs } from './signals.js';
 import { loadTravelTimeLookup } from './matrix.js';
 import { solveLocal } from './solver/local.js';
@@ -8,11 +8,13 @@ import { loadTrailEconomy } from './economy.js';
 import type { TrailCosting, TrailProblem, TrailSignalRequest } from './types.js';
 
 export interface GenerateTrailInput {
-  kind?: 'admin' | 'weekly_batch' | 'benchmark'; theme?: string; constraints?: TrailSignalRequest; tier?: 'starter'|'explorer'|'signature'|'legendary';
-  startNode?: string; budgetMin?: number; seed?: number; solver?: 'local'; minStops?: number; maxStops?: number;
+  kind?: 'admin' | 'weekly_batch' | 'benchmark' | 'personal'; theme?: string; constraints?: TrailSignalRequest; tier?: 'starter'|'explorer'|'signature'|'legendary'|'personal';
+  startNode?: string | { lat: number; lng: number }; budgetMin?: number; seed?: number; solver?: 'local'; minStops?: number; maxStops?: number;
   maxLegMin?: number; maxPerCategory?: number; mustInclude?: string[]; exclude?: string[]; costing?: TrailCosting;
   isTest?: boolean; requestedBy?: string; status?: 'draft'|'pending_review'|'published';
   availableFrom?: Date | null; availableUntil?: Date | null; weekId?: string; candidateKey?: string;
+  ownerUserId?: string; transactionClient?: PoolClient;
+  allowedMunicipalities?: string[];
 }
 
 export class TrailGenerationError extends Error {
@@ -21,10 +23,15 @@ export class TrailGenerationError extends Error {
 }
 
 export async function generateTrail(pool: Pool, input: GenerateTrailInput) {
-  const client = await pool.connect();
+  const ownsClient = !input.transactionClient;
+  const client = input.transactionClient ?? await pool.connect();
   try {
-    await client.query('BEGIN');
-    const inputs = await loadTrailSignalInputs(client);
+    if (ownsClient) await client.query('BEGIN');
+    const loadedInputs = await loadTrailSignalInputs(client);
+    const allowedMunicipalities = input.allowedMunicipalities?.map(value => value.trim().toLocaleLowerCase()).filter(Boolean) ?? [];
+    const inputs = allowedMunicipalities.length
+      ? loadedInputs.filter(spot => allowedMunicipalities.some(municipality => spot.municipality?.toLocaleLowerCase() === municipality))
+      : loadedInputs;
     const trendResult = await client.query(`SELECT digest FROM trend_digests ORDER BY created_at DESC LIMIT 1`);
     const trendDigest = trendResult.rows[0]?.digest as { themes?: TrailSignalRequest['trendThemes'] } | undefined;
     const signalRequest = { ...(input.constraints ?? {}), themes: input.constraints?.themes ?? (input.theme ? [input.theme] : []), trendThemes: trendDigest?.themes ?? [] };
@@ -77,15 +84,17 @@ export async function generateTrail(pool: Pool, input: GenerateTrailInput) {
     const duration = Math.max(1, solution.totalMin);
     const economy = await loadTrailEconomy(client);
     const tier = input.tier ?? 'starter';
-    const unlockRule = tier === 'starter' ? { type: 'free' }
+    const unlockRule = tier === 'personal' ? { type: 'owner' }
+      : tier === 'starter' ? { type: 'free' }
       : tier === 'explorer' ? { type: 'level', min_level: economy.explorerMinLevel }
         : tier === 'signature' ? { type: 'points', price_points: economy.signatureUnlockPoints }
           : { type: 'points', price_points: economy.legendaryUnlockPoints };
     const trailResult = await client.query(`INSERT INTO trails
       (id,slug,title,tagline,tier,theme,municipalities,unlock_rule,costing,total_minutes,total_km,story,status,source,owner_user_id,generation_id,is_test,available_from,available_until)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12::jsonb,$13,'engine',NULL,NULL,$14,$15,$16)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12::jsonb,$13,$14,$15,NULL,$16,$17,$18)
       RETURNING *`, [trailId, slug, story.title, story.tagline, tier, input.theme ?? 'mixed', municipalities, JSON.stringify(unlockRule), costing, duration, solution.totalKm,
-      JSON.stringify(story), input.status ?? 'draft', Boolean(input.isTest), input.availableFrom ?? null, input.availableUntil ?? null]);
+      JSON.stringify(story), input.status ?? 'draft', tier === 'personal' ? 'personal' : 'engine', input.ownerUserId ?? null,
+      Boolean(input.isTest), input.availableFrom ?? null, input.availableUntil ?? null]);
     for (let i = 0; i < solution.stops.length; i++) {
       const stop = solution.stops[i];
       const leg = i === 0 ? { minutes: 0, km: 0 } : matrix(solution.stops[i - 1].spotId, stop.spotId) ?? { minutes: 0, km: 0 };
@@ -98,12 +107,12 @@ export async function generateTrail(pool: Pool, input: GenerateTrailInput) {
       JSON.stringify({ theme: input.theme ?? null, costing, seed: problem.seed, ...(input.weekId ? { week_id: input.weekId } : {}), ...(input.candidateKey ? { candidate_key: input.candidateKey } : {}) }), JSON.stringify(problemConstraints(problem)), Math.max(0, Math.round(solution.ms)), solution.objective,
       JSON.stringify({ trail_id: trailId, stops: solution.stops, total_minutes: duration, total_km: solution.totalKm }), storyResult.model, storyResult.aiUsed, storyResult.fallbackReason]);
     await client.query('UPDATE trails SET generation_id=$1 WHERE id=$2', [generationId, trailId]);
-    await client.query('COMMIT');
+    if (ownsClient) await client.query('COMMIT');
     return { trail: { ...trailResult.rows[0], generation_id: generationId }, generation: { id: generationId, solver_ms: Math.max(0, Math.round(solution.ms)), objective: solution.objective, solver: 'local', ai_used: storyResult.aiUsed, ai_model: storyResult.model, ai_fallback_reason: storyResult.fallbackReason }, solution };
   } catch (error) {
-    await client.query('ROLLBACK');
+    if (ownsClient) await client.query('ROLLBACK');
     throw error;
-  } finally { client.release(); }
+  } finally { if (ownsClient) client.release(); }
 }
 
 export function windowsFromBestTime(tags: string[]): Array<[number, number]> {
