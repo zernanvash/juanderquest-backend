@@ -8,6 +8,7 @@ import type { TrailLeg, TrailProblem } from '../src/trails/types.js';
 import request from 'supertest';
 import { app } from '../src/app.js';
 import { signSessionToken } from '../src/auth/tokens.js';
+import { db } from '../src/db/index.js';
 
 function makeFeasibilityTrap(seed: number, count: number): { problem: TrailProblem; lookup: (from: string, to: string) => TrailLeg | undefined } {
   const rng = seededRandom(seed);
@@ -189,9 +190,15 @@ describe('Plan 44 trail engine phase 0–2', () => {
 
   test('admin generation refuses an unscoped national candidate search', async () => {
     const admin = signSessionToken({ id:'test-admin',seed_id:'seed-test-admin',role:'admin' });
-    const response = await request(app).post('/api/v1/admin/trails/generate')
-      .set('Authorization',`Bearer ${admin}`).send({ theme:'unscoped request' });
-    expect(response.status).toBe(400);
-    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+    const adminUser = { id:'test-admin',seed_id:'seed-test-admin',role:'admin',is_test:false } as any;
+    db.users.push(adminUser);
+    try {
+      const response = await request(app).post('/api/v1/admin/trails/generate')
+        .set('Authorization',`Bearer ${admin}`).send({ theme:'unscoped request' });
+      expect(response.status).toBe(400);
+      expect(response.body.error.code).toBe('VALIDATION_ERROR');
+    } finally {
+      db.users = db.users.filter(user => user.id !== adminUser.id);
+    }
   });
 });

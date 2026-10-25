@@ -80,6 +80,15 @@ export async function createTestDb(options: { poolMax?: number } = {}): Promise<
   });
 
   memDb.public.registerFunction({
+    name: 'left',
+    args: [DataType.text, DataType.integer],
+    returns: DataType.text,
+    implementation: (value: string, count: number) => value == null ? null : count < 0
+      ? value.slice(0, Math.max(0, value.length + count))
+      : value.slice(0, count),
+  });
+
+  memDb.public.registerFunction({
     name: 'trim',
     args: [DataType.text],
     returns: DataType.text,
