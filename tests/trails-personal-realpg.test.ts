@@ -11,6 +11,7 @@ const describeRealPg = process.env.JDQ_REAL_PG_URL ? describe : describe.skip;
 describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
   let fixture: Awaited<ReturnType<typeof createTestDb>>;
   let token: string;
+  let validatorToken: string;
   const userId = 'trail-personal-user';
 
   beforeAll(async () => {
@@ -19,11 +20,14 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
     db.usersRepo.setPool(fixture.pool);
     await fixture.pool.query(`INSERT INTO users(id,seed_id,display_name,email,role,demo_points,is_test)
       VALUES($1::text,$1::text,'Personal Trail Pilot','personal-trail@example.test','user',1000,FALSE)`, [userId]);
+    await fixture.pool.query(`INSERT INTO users(id,seed_id,display_name,email,role,demo_points,is_test)
+      VALUES('trail-personal-validator','trail-personal-validator','Validation Pilot','personal-validator@example.test','user',1000,FALSE)`);
     await fixture.pool.query(`INSERT INTO spots(id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,source_type,source_name,status,is_test)
       VALUES ('personal-a','personal-a','Personal Beach A','A peaceful beach for an easy coastal stop.','beach','coast','Bolinao','Bolinao, Pangasinan',16.0,120.0,'editorial','Trail test','published',FALSE),
              ('personal-b','personal-b','Personal Heritage B','A quiet historic landmark to explore.','heritage','culture','Bolinao','Bolinao, Pangasinan',16.001,120.001,'editorial','Trail test','published',FALSE),
              ('personal-c','personal-c','Personal Cafe C','A family cafe and local food stop.','food','cafe','Bolinao','Bolinao, Pangasinan',16.002,120.002,'editorial','Trail test','published',FALSE)`);
     token = jwt.sign({ id:userId,seed_id:userId,role:'user' },env.JWT_SECRET,{ expiresIn:'1h' });
+    validatorToken = jwt.sign({ id:'trail-personal-validator',seed_id:'trail-personal-validator',role:'user' },env.JWT_SECRET,{ expiresIn:'1h' });
   }, 120_000);
 
   afterAll(async () => {
@@ -59,7 +63,7 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
 
   test('validates input and does not allow anonymous generation', async () => {
     expect((await request(app).post('/api/v1/trails/personal').send({ themes:['beach'] })).status).toBe(401);
-    const invalid = await request(app).post('/api/v1/trails/personal').set('Authorization',`Bearer ${token}`)
+    const invalid = await request(app).post('/api/v1/trails/personal').set('Authorization',`Bearer ${validatorToken}`)
       .set('Idempotency-Key','personal-invalid-1').send({ text:'x'.repeat(301) });
     expect(invalid.status).toBe(400);
     expect(invalid.body.error.code).toBe('VALIDATION_ERROR');

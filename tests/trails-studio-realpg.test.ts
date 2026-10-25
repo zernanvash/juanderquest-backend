@@ -93,7 +93,7 @@ describeRealPg('Trail Studio API (isolated real PostgreSQL schema)', () => {
     const approximateTrail = 'trl_studio_approximate';
     await fixture.pool.query(`INSERT INTO spots
       (id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,source_type,source_name,status,is_test)
-      VALUES ($1,$1,'Studio Heritage','Second fixture place.','heritage','culture','Bolinao','Bolinao, Pangasinan',16.01,120.01,'editorial','Fixture','published',FALSE)`, [secondSpot]);
+      VALUES ($1::text,$1::text,'Studio Heritage','Second fixture place.','heritage','culture','Bolinao','Bolinao, Pangasinan',16.01,120.01,'editorial','Fixture','published',FALSE)`, [secondSpot]);
     await fixture.pool.query(`INSERT INTO trails
       (id,slug,title,tier,theme,municipalities,unlock_rule,total_minutes,total_km,story,status,source)
       VALUES ($1,$1,'Approximate Trail','starter','mixed',ARRAY['Bolinao'],'{"type":"free"}'::jsonb,90,2,'{}'::jsonb,'pending_review','engine')`, [approximateTrail]);
