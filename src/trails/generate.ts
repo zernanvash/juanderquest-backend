@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import type { Pool, PoolClient } from 'pg';
 import { computeSpotSignals, loadTrailSignalInputs } from './signals.js';
-import { loadTravelTimeLookup } from './matrix.js';
+import { ensureTravelTimeMatrix, type MatrixFetch } from './matrix.js';
 import { solveLocal } from './solver/local.js';
 import { writeTrailStory } from './ai/service.js';
 import { loadTrailEconomy } from './economy.js';
@@ -15,29 +15,68 @@ export interface GenerateTrailInput {
   availableFrom?: Date | null; availableUntil?: Date | null; weekId?: string; candidateKey?: string;
   ownerUserId?: string; transactionClient?: PoolClient;
   allowedMunicipalities?: string[];
+  areaId?: string;
+  /** Injectable only for deterministic tests; HTTP routes never accept a fetcher. */
+  matrixFetch?: MatrixFetch;
 }
 
 export class TrailGenerationError extends Error {
-  readonly code = 'NO_FEASIBLE_TRAIL';
-  constructor() { super('No feasible trail meets the requested stop, time-window, travel, and diversity constraints.'); }
+  readonly code: string;
+  constructor(code = 'NO_FEASIBLE_TRAIL') {
+    super(code === 'START_NODE_NOT_FOUND'
+      ? 'The requested start spot is unavailable for trail generation.'
+      : 'No feasible trail meets the requested stop, time-window, travel, and diversity constraints.');
+    this.code = code;
+  }
 }
+
+const MAX_CANDIDATE_SPOTS = 60;
+const DEFAULT_START_RADIUS_KM = 60;
 
 export async function generateTrail(pool: Pool, input: GenerateTrailInput) {
   const ownsClient = !input.transactionClient;
   const client = input.transactionClient ?? await pool.connect();
   try {
     if (ownsClient) await client.query('BEGIN');
-    const loadedInputs = await loadTrailSignalInputs(client);
     const allowedMunicipalities = input.allowedMunicipalities?.map(value => value.trim().toLocaleLowerCase()).filter(Boolean) ?? [];
-    const inputs = allowedMunicipalities.length
-      ? loadedInputs.filter(spot => allowedMunicipalities.some(municipality => spot.municipality?.toLocaleLowerCase() === municipality))
+    let center = typeof input.startNode === 'object' ? input.startNode : undefined;
+    if (!input.areaId && !allowedMunicipalities.length && typeof input.startNode === 'string') {
+      const start = await client.query(`SELECT gps_lat,gps_lng FROM spots
+        WHERE id=$1 AND status='published' AND COALESCE(is_test,FALSE)=FALSE AND gps_lat IS NOT NULL AND gps_lng IS NOT NULL`, [input.startNode]);
+      if (!start.rows[0]) throw new TrailGenerationError('START_NODE_NOT_FOUND');
+      center = { lat: Number(start.rows[0].gps_lat), lng: Number(start.rows[0].gps_lng) };
+    }
+    const radiusCenter = !input.areaId && !allowedMunicipalities.length ? center : undefined;
+    const loadedInputs = await loadTrailSignalInputs(client, undefined, {
+      areaId: input.areaId,
+      center: radiusCenter,
+      radiusKm: DEFAULT_START_RADIUS_KM,
+      municipalities: allowedMunicipalities,
+    });
+    const inRadius = radiusCenter
+      ? loadedInputs.filter(spot => haversineKm(radiusCenter, { lat: spot.lat!, lng: spot.lng! }) <= DEFAULT_START_RADIUS_KM)
       : loadedInputs;
     const trendResult = await client.query(`SELECT digest FROM trend_digests ORDER BY created_at DESC LIMIT 1`);
     const trendDigest = trendResult.rows[0]?.digest as { themes?: TrailSignalRequest['trendThemes'] } | undefined;
     const signalRequest = { ...(input.constraints ?? {}), themes: input.constraints?.themes ?? (input.theme ? [input.theme] : []), trendThemes: trendDigest?.themes ?? [] };
-    const signals = new Map(computeSpotSignals(inputs, signalRequest).map(s => [s.spotId, s]));
+    const signals = new Map(computeSpotSignals(inRadius, signalRequest).map(s => [s.spotId, s]));
+    const excluded = new Set(input.exclude ?? []);
+    const requiredIds = [...new Set(input.mustInclude ?? [])];
+    const eligible = inRadius.filter(spot => !excluded.has(spot.spotId));
+    const ranked = [...eligible].sort((a, b) => (signals.get(b.spotId)?.value ?? 0) - (signals.get(a.spotId)?.value ?? 0) || a.spotId.localeCompare(b.spotId));
+    const required = requiredIds.map(id => ranked.find(spot => spot.spotId === id)).filter((spot): spot is typeof ranked[number] => Boolean(spot));
+    const selectedIds = new Set(required.map(spot => spot.spotId));
+    const availableSlots = Math.max(0, MAX_CANDIDATE_SPOTS - required.length);
+    const inputs = [
+      ...required,
+      ...ranked.filter(spot => !selectedIds.has(spot.spotId)).slice(0, availableSlots),
+    ];
     const costing = input.costing ?? 'auto';
-    const matrix = await loadTravelTimeLookup(client, costing);
+    if (inputs.length > MAX_CANDIDATE_SPOTS) throw new Error('Trail candidate selection exceeded its configured limit.');
+    const matrixResult = await ensureTravelTimeMatrix(client, costing, inputs.map(spot => ({ id: spot.spotId, lat: spot.lat!, lng: spot.lng! })), {
+      fetchImpl: input.matrixFetch,
+    });
+    const matrix = matrixResult.lookup;
     const nodes = inputs.map(spot => {
       const timeWindows = windowsFromBestTime(spot.bestTime ?? []);
       return {
@@ -104,7 +143,8 @@ export async function generateTrail(pool: Pool, input: GenerateTrailInput) {
     const generationId = randomUUID();
     await client.query(`INSERT INTO trail_generations (id,kind,requested_by,input,constraints,solver,solver_ms,objective,result,ai_model,ai_used,ai_fallback_reason)
       VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,'local',$6,$7,$8::jsonb,$9,$10,$11)`, [generationId, input.kind ?? 'admin', input.requestedBy ?? null,
-      JSON.stringify({ theme: input.theme ?? null, costing, seed: problem.seed, ...(input.weekId ? { week_id: input.weekId } : {}), ...(input.candidateKey ? { candidate_key: input.candidateKey } : {}) }), JSON.stringify(problemConstraints(problem)), Math.max(0, Math.round(solution.ms)), solution.objective,
+      JSON.stringify({ theme: input.theme ?? null, costing, seed: problem.seed, area_id: input.areaId ?? null, candidate_count: inputs.length,
+        matrix_pairs: matrixResult.requested, ...(input.weekId ? { week_id: input.weekId } : {}), ...(input.candidateKey ? { candidate_key: input.candidateKey } : {}) }), JSON.stringify(problemConstraints(problem)), Math.max(0, Math.round(solution.ms)), solution.objective,
       JSON.stringify({ trail_id: trailId, stops: solution.stops, total_minutes: duration, total_km: solution.totalKm }), storyResult.model, storyResult.aiUsed, storyResult.fallbackReason]);
     await client.query('UPDATE trails SET generation_id=$1 WHERE id=$2', [generationId, trailId]);
     if (ownsClient) await client.query('COMMIT');
@@ -113,6 +153,13 @@ export async function generateTrail(pool: Pool, input: GenerateTrailInput) {
     if (ownsClient) await client.query('ROLLBACK');
     throw error;
   } finally { if (ownsClient) client.release(); }
+}
+
+function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const radians = (value: number) => value * Math.PI / 180;
+  const lat = radians(b.lat - a.lat), lng = radians(b.lng - a.lng);
+  const h = Math.sin(lat / 2) ** 2 + Math.cos(radians(a.lat)) * Math.cos(radians(b.lat)) * Math.sin(lng / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
 export function windowsFromBestTime(tags: string[]): Array<[number, number]> {

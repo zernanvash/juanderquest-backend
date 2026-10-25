@@ -143,6 +143,32 @@ trailsRouter.get('/admin/trails/matrix/status', async (_req: AuthRequest, res: R
   catch { return res.status(503).json({ success: false, error: { code: 'MATRIX_UNAVAILABLE', message: 'Travel matrix status is unavailable.' } }); }
 });
 
+trailsRouter.get('/admin/trails/areas', async (_req: AuthRequest, res: Response) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ success: false, error: { code: 'DATABASE_UNAVAILABLE', message: 'Trail areas are unavailable.' } });
+  try {
+    const { rows } = await pool.query(`
+      WITH RECURSIVE area_scope(root_id,id,name,level,path) AS (
+        SELECT id,id,name,level,ARRAY[id]::text[] FROM admin_areas
+        UNION ALL
+        SELECT scope.root_id,child.id,child.name,child.level,scope.path||child.id
+        FROM admin_areas child JOIN area_scope scope ON child.parent_id=scope.id
+        WHERE NOT child.id=ANY(scope.path)
+      )
+      SELECT root.id,root.level,root.name,root.display_name,root.parent_id,COUNT(DISTINCT s.id)::int AS published_spot_count
+      FROM admin_areas root
+      JOIN area_scope scope ON scope.root_id=root.id
+      LEFT JOIN spots s ON s.status='published' AND COALESCE(s.is_test,FALSE)=FALSE AND s.gps_lat IS NOT NULL AND s.gps_lng IS NOT NULL
+        AND (s.town_area_id=scope.id OR (s.town_area_id IS NULL AND scope.level='town' AND lower(s.municipality)=lower(scope.name)))
+      WHERE root.level IN ('region','province','town')
+      GROUP BY root.id,root.level,root.name,root.display_name,root.parent_id
+      HAVING COUNT(DISTINCT s.id)>0
+      ORDER BY CASE root.level WHEN 'region' THEN 0 WHEN 'province' THEN 1 ELSE 2 END,root.display_name
+    `);
+    return res.json({ success: true, data: rows });
+  } catch { return res.status(503).json({ success: false, error: { code: 'TRAIL_AREAS_UNAVAILABLE', message: 'Trail areas are unavailable.' } }); }
+});
+
 trailsRouter.post('/admin/trails/matrix/refresh', async (req: AuthRequest, res: Response) => {
   const costing = String(req.body?.costing ?? 'auto');
   if (!['auto','pedestrian','bicycle','motorcycle'].includes(costing)) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Unsupported routing costing.' } });
@@ -192,14 +218,17 @@ trailsRouter.get('/admin/trails/review', async (_req: AuthRequest, res: Response
 });
 
 const generationSchema = z.object({
+  area_id: z.string().trim().min(1).max(120).optional(),
   theme: z.string().trim().min(1).max(80).optional(), tier: z.enum(['starter','explorer','signature','legendary']).optional(),
   budgetMin: z.number().int().min(60).max(600).optional(), seed: z.number().int().optional(),
   minStops: z.number().int().min(2).max(12).optional(), maxStops: z.number().int().min(2).max(12).optional(),
   maxLegMin: z.number().int().min(15).max(180).optional(), maxPerCategory: z.number().int().min(1).max(12).optional(),
   mustInclude: z.array(z.string().max(120)).max(12).optional(), exclude: z.array(z.string().max(120)).max(100).optional(),
   startNode: z.string().max(120).optional(), costing: z.enum(['auto','pedestrian','bicycle','motorcycle']).optional(),
+  start_point: z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).strict().optional(),
   constraints: z.object({ themes: z.array(z.string().max(80)).optional(), goodFor: z.array(z.string().max(80)).optional() }).optional(),
-}).refine(v => !v.minStops || !v.maxStops || v.minStops <= v.maxStops, { message: 'minStops must not exceed maxStops.' });
+}).refine(v => !v.minStops || !v.maxStops || v.minStops <= v.maxStops, { message: 'minStops must not exceed maxStops.' })
+  .refine(v => [v.area_id, v.startNode, v.start_point].filter(Boolean).length === 1, { message: 'Choose exactly one area, start spot, or start location.' });
 
 trailsRouter.post('/admin/trails/generate', async (req: AuthRequest, res: Response) => {
   const parsed = generationSchema.safeParse(req.body ?? {});
@@ -207,7 +236,8 @@ trailsRouter.post('/admin/trails/generate', async (req: AuthRequest, res: Respon
   const pool = getPool();
   if (!pool) return res.status(503).json({ success: false, error: { code: 'DATABASE_UNAVAILABLE', message: 'Trail storage is unavailable.' } });
   try {
-    const result = await generateTrail(pool, { ...parsed.data, kind: 'admin', requestedBy: req.user!.id });
+    const { area_id, start_point, ...generation } = parsed.data;
+    const result = await generateTrail(pool, { ...generation, areaId: area_id, startNode: start_point ?? generation.startNode, kind: 'admin', requestedBy: req.user!.id });
     return res.status(201).json({ success: true, data: result });
   } catch (error) {
     if (error instanceof TrailGenerationError) return res.status(422).json({ success: false, error: { code: error.code, message: error.message } });
@@ -240,7 +270,7 @@ trailsRouter.post('/admin/trails/compare-solvers', async (req: AuthRequest, res:
   const pool = getPool();
   if (!pool) return res.status(503).json({ success: false, error: { code: 'DATABASE_UNAVAILABLE', message: 'Trail storage is unavailable.' } });
   try {
-    const allSpots = await loadTrailSignalInputs(pool);
+    const allSpots = await loadTrailSignalInputs(pool, undefined, { spotIds: parsed.data.spot_ids });
     const byId = new Map(allSpots.map(spot => [spot.spotId, spot]));
     const selected = parsed.data.spot_ids.map(id => byId.get(id));
     if (selected.some(spot => !spot)) return res.status(400).json({ success: false, error: { code: 'SPOT_SET_INVALID', message: 'Every spot must be published, public, and non-test.' } });

@@ -80,6 +80,13 @@ describeRealPg('Plan 44 real PostgreSQL acceptance (isolated reliability schema)
 
   test('generation has NO_FEASIBLE_TRAIL and a forced mid-write failure leaves all three tables unchanged', async () => {
     {
+      const available = ['trail-realpg-a','trail-realpg-b','trail-realpg-c','trail-realpg-d'];
+      await instance.pool.query(`INSERT INTO spots
+        (id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,source_type,source_name,status,is_test)
+        VALUES ('trail-realpg-a','trail-realpg-a','Trail Test A','A test beach.','beach','coast','Test Town','Test Town',16,120,'editorial','fixture','published',FALSE),
+               ('trail-realpg-b','trail-realpg-b','Trail Test B','A test landmark.','heritage','culture','Test Town','Test Town',16.001,120.001,'editorial','fixture','published',FALSE),
+               ('trail-realpg-c','trail-realpg-c','Trail Test C','A test food stop.','food','cafe','Test Town','Test Town',16.002,120.002,'editorial','fixture','published',FALSE),
+               ('trail-realpg-d','trail-realpg-d','Trail Test D','A test nature stop.','nature','outdoors','Test Town','Test Town',16.003,120.003,'editorial','fixture','published',FALSE)`);
       const { rows: beforeRows } = await instance.pool.query(`SELECT
         (SELECT count(*)::int FROM trails) trails,
         (SELECT count(*)::int FROM trail_stops) stops,
@@ -97,8 +104,11 @@ describeRealPg('Plan 44 real PostgreSQL acceptance (isolated reliability schema)
           return query(sql,values);
         }) as typeof client.query, release:()=>client.release()};
       }};
-      const available = allSpotIds.slice(0,4);
-      await expect(generateTrail(proxyPool as any,{kind:'admin',theme:'transaction rollback',minStops:2,maxStops:4,budgetMin:600,maxLegMin:180,maxPerCategory:6,seed:11,exclude:allSpotIds.filter(id=>!available.includes(id))})).rejects.toThrow('injected trail stop failure');
+      const matrixFetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { sources: unknown[]; targets: unknown[] };
+        return new Response(JSON.stringify({ sources_to_targets: body.sources.map((_source, i) => body.targets.map((_target, j) => ({ time: i === j ? 0 : 60, distance: i === j ? 0 : 0.1 }))) }), { status: 200 });
+      };
+      await expect(generateTrail(proxyPool as any,{kind:'admin',theme:'transaction rollback',minStops:2,maxStops:4,budgetMin:600,maxLegMin:180,maxPerCategory:6,seed:11,matrixFetch,exclude:allSpotIds.filter(id=>!available.includes(id))})).rejects.toThrow('injected trail stop failure');
       const { rows: afterRows } = await instance.pool.query(`SELECT
         (SELECT count(*)::int FROM trails) trails,
         (SELECT count(*)::int FROM trail_stops) stops,

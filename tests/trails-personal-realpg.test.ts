@@ -31,6 +31,12 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
       VALUES ('personal-a','personal-a','Personal Beach A','A peaceful beach for an easy coastal stop.','beach','coast','Bolinao','Bolinao, Pangasinan',16.0,120.0,'editorial','Trail test','published',FALSE),
              ('personal-b','personal-b','Personal Heritage B','A quiet historic landmark to explore.','heritage','culture','Bolinao','Bolinao, Pangasinan',16.001,120.001,'editorial','Trail test','published',FALSE),
              ('personal-c','personal-c','Personal Cafe C','A family cafe and local food stop.','food','cafe','Bolinao','Bolinao, Pangasinan',16.002,120.002,'editorial','Trail test','published',FALSE)`);
+    await fixture.pool.query(`INSERT INTO travel_time_matrix(costing,from_spot,to_spot,seconds,meters,approximate,graph_label)
+      SELECT 'auto',from_spot.id,to_spot.id,CASE WHEN from_spot.id=to_spot.id THEN 0 ELSE 60 END,
+        CASE WHEN from_spot.id=to_spot.id THEN 0 ELSE 100 END,FALSE,'personal-test'
+      FROM (SELECT id FROM spots WHERE municipality='Bolinao' AND status='published' AND COALESCE(is_test,FALSE)=FALSE AND gps_lat IS NOT NULL AND gps_lng IS NOT NULL) from_spot
+      CROSS JOIN (SELECT id FROM spots WHERE municipality='Bolinao' AND status='published' AND COALESCE(is_test,FALSE)=FALSE AND gps_lat IS NOT NULL AND gps_lng IS NOT NULL) to_spot
+      ON CONFLICT DO NOTHING`);
     token = jwt.sign({ id:userId,seed_id:userId,role:'user' },env.JWT_SECRET,{ expiresIn:'1h' });
     validatorToken = jwt.sign({ id:'trail-personal-validator',seed_id:'trail-personal-validator',role:'user' },env.JWT_SECRET,{ expiresIn:'1h' });
     poorToken = jwt.sign({ id:'trail-personal-poor',seed_id:'trail-personal-poor',role:'user' },env.JWT_SECRET,{ expiresIn:'1h' });
@@ -81,6 +87,10 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
 
   test('validates input and does not allow anonymous generation', async () => {
     expect((await request(app).post('/api/v1/trails/personal').send({ themes:['beach'] })).status).toBe(401);
+    const unscoped = await request(app).post('/api/v1/trails/personal').set('Authorization',`Bearer ${validatorToken}`)
+      .set('Idempotency-Key','personal-missing-area-1').send({ themes:['beach'] });
+    expect(unscoped.status).toBe(400);
+    expect(unscoped.body.error.code).toBe('AREA_REQUIRED');
     const invalid = await request(app).post('/api/v1/trails/personal').set('Authorization',`Bearer ${validatorToken}`)
       .set('Idempotency-Key','personal-invalid-1').send({ text:'x'.repeat(301) });
     expect(invalid.status).toBe(400);

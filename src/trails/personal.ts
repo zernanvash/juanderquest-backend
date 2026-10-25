@@ -35,6 +35,9 @@ export async function createPersonalTrail(pool: Pool, userId: string, key: strin
     : null;
   const themes = themeChips.length ? themeChips : parsed?.value.themes ?? [];
   const municipalities = towns.length ? towns : parsed?.value.municipalities ?? [];
+  if (!municipalities.length && !request.start) {
+    throw new PersonalTrailError('AREA_REQUIRED', 400, 'Choose a municipality or start location to keep the trail within a 60 km area.');
+  }
   const budgetMin = request.budget_min ?? parsed?.value.budget_min ?? 240;
   const maxLegMin = request.pace === 'relaxed' || parsed?.value.pace === 'relaxed' ? 45
     : request.pace === 'packed' || parsed?.value.pace === 'packed' ? 90 : parsed?.value.max_leg_min ?? 60;
