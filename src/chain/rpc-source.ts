@@ -64,13 +64,17 @@ export class JsonRpcChainSource implements ChainSource {
 
     for (let i = 0; i < maxAttempts; i++) {
       const provider = this.providers[i];
+      let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`RPC_TIMEOUT_${this.timeoutMs}MS`)), this.timeoutMs)
-        );
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error(`RPC_TIMEOUT_${this.timeoutMs}MS`)), this.timeoutMs);
+          timeout.unref?.();
+        });
         return await Promise.race([operation(provider, i), timeoutPromise]);
       } catch (err) {
         lastError = err;
+      } finally {
+        if (timeout) clearTimeout(timeout);
       }
     }
     throw lastError ?? new Error('ALL_CHAIN_RPCS_FAILED');
