@@ -18,7 +18,7 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
     setPool(fixture.pool);
     db.usersRepo.setPool(fixture.pool);
     await fixture.pool.query(`INSERT INTO users(id,seed_id,display_name,email,role,demo_points,is_test)
-      VALUES($1,$1,'Personal Trail Pilot','personal-trail@example.test','user',1000,FALSE)`, [userId]);
+      VALUES($1::text,$1::text,'Personal Trail Pilot','personal-trail@example.test','user',1000,FALSE)`, [userId]);
     await fixture.pool.query(`INSERT INTO spots(id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,source_type,source_name,status,is_test)
       VALUES ('personal-a','personal-a','Personal Beach A','A peaceful beach for an easy coastal stop.','beach','coast','Bolinao','Bolinao, Pangasinan',16.0,120.0,'editorial','Trail test','published',FALSE),
              ('personal-b','personal-b','Personal Heritage B','A quiet historic landmark to explore.','heritage','culture','Bolinao','Bolinao, Pangasinan',16.001,120.001,'editorial','Trail test','published',FALSE),

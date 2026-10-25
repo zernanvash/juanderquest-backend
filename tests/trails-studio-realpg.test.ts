@@ -59,6 +59,9 @@ describeRealPg('Trail Studio API (isolated real PostgreSQL schema)', () => {
     const queue = await request(app).get('/api/v1/admin/trails/review').set('Authorization', `Bearer ${adminToken}`);
     expect(queue.status).toBe(200);
     expect(queue.body.data.map((trail: any) => trail.id)).toContain(trailId);
+    expect(queue.body.data.find((trail: any) => trail.id === trailId).stops).toEqual([
+      expect.objectContaining({ position:1, spot_id:spotId, name:'Studio Beach', approximate:false }),
+    ]);
 
     const availableFrom = '2026-10-20T00:00:00.000Z';
     const availableUntil = '2026-11-03T00:00:00.000Z';
@@ -83,6 +86,27 @@ describeRealPg('Trail Studio API (isolated real PostgreSQL schema)', () => {
       FROM trails t JOIN trail_stops s ON s.trail_id=t.id WHERE t.id=$1`, [trailId]);
     expect(row.rows[0]).toMatchObject({ title: 'Updated Trail Story', tier: 'legendary', narration: 'A reviewed and accurate narration.' });
     expect(Number(row.rows[0].version)).toBe(2);
+  });
+
+  test('approximate legs need explicit publish confirmation and generation history is available', async () => {
+    const secondSpot = `${spotId}-b`;
+    const approximateTrail = 'trl_studio_approximate';
+    await fixture.pool.query(`INSERT INTO spots
+      (id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,source_type,source_name,status,is_test)
+      VALUES ($1,$1,'Studio Heritage','Second fixture place.','heritage','culture','Bolinao','Bolinao, Pangasinan',16.01,120.01,'editorial','Fixture','published',FALSE)`, [secondSpot]);
+    await fixture.pool.query(`INSERT INTO trails
+      (id,slug,title,tier,theme,municipalities,unlock_rule,total_minutes,total_km,story,status,source)
+      VALUES ($1,$1,'Approximate Trail','starter','mixed',ARRAY['Bolinao'],'{"type":"free"}'::jsonb,90,2,'{}'::jsonb,'pending_review','engine')`, [approximateTrail]);
+    await fixture.pool.query(`INSERT INTO trail_stops(trail_id,position,spot_id,arrive_offset_min,dwell_min,leg_minutes,leg_km)
+      VALUES($1,1,$2,0,30,0,0),($1,2,$3,45,30,15,2)`, [approximateTrail,spotId,secondSpot]);
+    const missingConfirmation = await request(app).post(`/api/v1/admin/trails/${approximateTrail}/publish`).set('Authorization',`Bearer ${adminToken}`).send({});
+    expect(missingConfirmation.status).toBe(409);
+    expect(missingConfirmation.body.error.code).toBe('APPROXIMATE_LEGS_CONFIRMATION_REQUIRED');
+    const confirmed = await request(app).post(`/api/v1/admin/trails/${approximateTrail}/publish`).set('Authorization',`Bearer ${adminToken}`).send({confirm_approximate:true});
+    expect(confirmed.status).toBe(200);
+    const history = await request(app).get('/api/v1/admin/trails/generations').set('Authorization',`Bearer ${adminToken}`);
+    expect(history.status).toBe(200);
+    expect(Array.isArray(history.body.data)).toBe(true);
   });
 
   test('invalid availability and invalid stop edits are rejected without partial writes', async () => {

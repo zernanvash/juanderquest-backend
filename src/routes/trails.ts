@@ -153,11 +153,28 @@ trailsRouter.get('/admin/trails', async (req: AuthRequest, res: Response) => {
   } catch { return res.status(503).json({ success: false, error: { code: 'TRAILS_UNAVAILABLE', message: 'Trails are unavailable.' } }); }
 });
 
+trailsRouter.get('/admin/trails/generations', async (_req: AuthRequest, res: Response) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ success:false,error:{code:'DATABASE_UNAVAILABLE',message:'Trail generation history is unavailable.'} });
+  try {
+    const { rows } = await pool.query(`SELECT id,kind,requested_by,input,constraints,solver,solver_ms,objective,result,ai_model,ai_used,ai_fallback_reason,created_at
+      FROM trail_generations ORDER BY created_at DESC LIMIT 100`);
+    return res.json({success:true,data:rows});
+  } catch { return res.status(503).json({success:false,error:{code:'TRAIL_GENERATIONS_UNAVAILABLE',message:'Trail generation history is unavailable.'}}); }
+});
+
 trailsRouter.get('/admin/trails/review', async (_req: AuthRequest, res: Response) => {
   const pool = getPool();
   if (!pool) return res.status(503).json({ success: false, error: { code: 'DATABASE_UNAVAILABLE', message: 'Trail storage is unavailable.' } });
   try {
-    const { rows } = await pool.query(`SELECT t.*, g.solver_ms, g.objective, g.solver, g.ai_model, g.ai_used, g.ai_fallback_reason
+    const { rows } = await pool.query(`SELECT t.*, g.solver_ms, g.objective, g.solver, g.ai_model, g.ai_used, g.ai_fallback_reason,
+      COALESCE((SELECT json_agg(json_build_object('position',s.position,'spot_id',s.spot_id,'name',p.name,'municipality',p.municipality,
+        'lat',p.gps_lat,'lng',p.gps_lng,'narration',s.narration,'leg_minutes',s.leg_minutes,'leg_km',s.leg_km,
+        'approximate',CASE WHEN s.position=1 THEN FALSE ELSE COALESCE(m.approximate,TRUE) END) ORDER BY s.position)
+        FROM trail_stops s JOIN spots p ON p.id=s.spot_id
+        LEFT JOIN trail_stops previous ON previous.trail_id=s.trail_id AND previous.position=s.position-1
+        LEFT JOIN travel_time_matrix m ON m.costing=t.costing AND m.from_spot=previous.spot_id AND m.to_spot=s.spot_id
+        WHERE s.trail_id=t.id),'[]'::json) AS stops
       FROM trails t LEFT JOIN trail_generations g ON g.id=t.generation_id
       WHERE t.source='engine' AND t.status='pending_review' ORDER BY t.created_at ASC LIMIT 100`);
     return res.json({ success: true, data: rows });
@@ -260,7 +277,21 @@ trailsRouter.post('/admin/trails/:id/review', async (req: AuthRequest, res: Resp
   if (decision !== 'submit') return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: "Review decision must be 'submit'." } });
   return updateTrailStatus(req.params.id, 'pending_review', req.user!.id, res);
 });
-trailsRouter.post('/admin/trails/:id/publish', async (req: AuthRequest, res: Response) => updateTrailStatus(req.params.id, 'published', req.user!.id, res, true));
+trailsRouter.post('/admin/trails/:id/publish', async (req: AuthRequest, res: Response) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({success:false,error:{code:'DATABASE_UNAVAILABLE',message:'Trail storage is unavailable.'}});
+  try {
+    const approximate = await pool.query(`SELECT EXISTS(
+      SELECT 1 FROM trail_stops s JOIN trails t ON t.id=s.trail_id
+      LEFT JOIN trail_stops previous ON previous.trail_id=s.trail_id AND previous.position=s.position-1
+      LEFT JOIN travel_time_matrix m ON m.costing=t.costing AND m.from_spot=previous.spot_id AND m.to_spot=s.spot_id
+      WHERE s.trail_id=$1 AND s.position>1 AND COALESCE(m.approximate,TRUE)) AS has_approximate`, [req.params.id]);
+    if (approximate.rows[0]?.has_approximate && req.body?.confirm_approximate !== true) {
+      return res.status(409).json({success:false,error:{code:'APPROXIMATE_LEGS_CONFIRMATION_REQUIRED',message:'This route has estimated straight-line legs. Review them and explicitly confirm before publishing.'}});
+    }
+  } catch { return res.status(503).json({success:false,error:{code:'TRAIL_UPDATE_FAILED',message:'Trail routing quality could not be checked.'}}); }
+  return updateTrailStatus(req.params.id, 'published', req.user!.id, res, true);
+});
 trailsRouter.post('/admin/trails/:id/reject', async (req: AuthRequest, res: Response) => updateTrailStatus(req.params.id, 'rejected', req.user!.id, res));
 trailsRouter.post('/admin/trails/:id/retire', async (req: AuthRequest, res: Response) => updateTrailStatus(req.params.id, 'retired', req.user!.id, res));
 
