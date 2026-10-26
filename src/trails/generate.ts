@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { performance } from 'node:perf_hooks';
 import type { Pool, PoolClient } from 'pg';
 import { computeSpotSignals, loadTrailSignalInputs } from './signals.js';
 import { ensureTravelTimeMatrix, type MatrixFetch } from './matrix.js';
@@ -47,10 +48,14 @@ export interface PreparedTrail {
   duration: number;
 }
 
-/** Candidate loading, routing and story generation are deliberately outside any funding transaction. */
-export async function prepareTrail(pool: Pool, input: GenerateTrailInput, options: {
+export interface TrailGenerationOptions {
   storyWriter?: typeof writeTrailStory;
-} = {}): Promise<PreparedTrail> {
+  /** Internal profiling hook; never populated from an HTTP request. */
+  onTiming?: (stage: 'candidate_load' | 'scoring' | 'ranking' | 'matrix' | 'solver' | 'story' | 'persistence', ms: number) => void;
+}
+
+/** Candidate loading, routing and story generation are deliberately outside any funding transaction. */
+export async function prepareTrail(pool: Pool, input: GenerateTrailInput, options: TrailGenerationOptions = {}): Promise<PreparedTrail> {
   const client = await pool.connect();
   let released = false;
   try {
@@ -63,19 +68,24 @@ export async function prepareTrail(pool: Pool, input: GenerateTrailInput, option
       center = { lat: Number(start.rows[0].gps_lat), lng: Number(start.rows[0].gps_lng) };
     }
     const radiusCenter = !input.areaId && !allowedMunicipalities.length ? center : undefined;
+    const candidateStarted = performance.now();
     const loadedInputs = await loadTrailSignalInputs(client, undefined, {
       areaId: input.areaId,
       center: radiusCenter,
       radiusKm: DEFAULT_START_RADIUS_KM,
       municipalities: allowedMunicipalities,
     });
+    options.onTiming?.('candidate_load', performance.now() - candidateStarted);
     const inRadius = radiusCenter
       ? loadedInputs.filter(spot => haversineKm(radiusCenter, { lat: spot.lat!, lng: spot.lng! }) <= DEFAULT_START_RADIUS_KM)
       : loadedInputs;
     const trendResult = await client.query(`SELECT digest FROM trend_digests ORDER BY created_at DESC LIMIT 1`);
     const trendDigest = trendResult.rows[0]?.digest as { themes?: TrailSignalRequest['trendThemes'] } | undefined;
     const signalRequest = { ...(input.constraints ?? {}), themes: input.constraints?.themes ?? (input.theme ? [input.theme] : []), trendThemes: trendDigest?.themes ?? [] };
+    const scoringStarted = performance.now();
     const signals = new Map(computeSpotSignals(inRadius, signalRequest).map(s => [s.spotId, s]));
+    options.onTiming?.('scoring', performance.now() - scoringStarted);
+    const rankingStarted = performance.now();
     const excluded = new Set(input.exclude ?? []);
     const requiredIds = [...new Set(input.mustInclude ?? [])];
     const eligible = inRadius.filter(spot => !excluded.has(spot.spotId));
@@ -87,13 +97,16 @@ export async function prepareTrail(pool: Pool, input: GenerateTrailInput, option
       ...required,
       ...ranked.filter(spot => !selectedIds.has(spot.spotId)).slice(0, availableSlots),
     ];
+    options.onTiming?.('ranking', performance.now() - rankingStarted);
     const costing = input.costing ?? 'auto';
     if (inputs.length > MAX_CANDIDATE_SPOTS) throw new Error('Trail candidate selection exceeded its configured limit.');
     client.release();
     released = true;
+    const matrixStarted = performance.now();
     const matrixResult = await ensureTravelTimeMatrix(pool, costing, inputs.map(spot => ({ id: spot.spotId, lat: spot.lat!, lng: spot.lng! })), {
       fetchImpl: input.matrixFetch,
     });
+    options.onTiming?.('matrix', performance.now() - matrixStarted);
     const matrix = matrixResult.lookup;
     const nodes = inputs.map(spot => {
       const timeWindows = windowsFromBestTime(spot.bestTime ?? []);
@@ -110,6 +123,7 @@ export async function prepareTrail(pool: Pool, input: GenerateTrailInput, option
       weights: { crowdPenalty: 0.15, travelPenalty: 0.003 }, seed: input.seed ?? 44, costing,
     };
     let problem = base;
+    const solverStarted = performance.now();
     let solution = solveLocal(problem, matrix);
     // Relax only in the documented order, once per relaxation, up to three.
     for (const relax of [
@@ -122,11 +136,13 @@ export async function prepareTrail(pool: Pool, input: GenerateTrailInput, option
       solution = solveLocal(problem, matrix);
     }
     if (!solution.feasible || solution.stops.length < problem.minStops) throw new TrailGenerationError();
+    options.onTiming?.('solver', performance.now() - solverStarted);
     const municipalities = [...new Set(solution.stops.map(s => nodes.find(n => n.spotId === s.spotId)?.municipality).filter((v): v is string => Boolean(v)))];
     const selectedStops = solution.stops.map(stop => {
       const node = nodes.find(item => item.spotId === stop.spotId)!;
       return { spot_id: node.spotId, name: node.title ?? node.spotId, municipality: node.municipality ?? 'Pangasinan', category: node.category, description: node.description };
     });
+    const storyStarted = performance.now();
     const storyResult = await (options.storyWriter ?? writeTrailStory)(pool, {
       theme: input.theme ?? signalRequest.themes?.[0] ?? 'Pangasinan discoveries',
       municipalities,
@@ -134,6 +150,7 @@ export async function prepareTrail(pool: Pool, input: GenerateTrailInput, option
       stops: selectedStops,
       known_catalog_places: nodes.map(node => node.title ?? node.spotId),
     }, { nodes, solution });
+    options.onTiming?.('story', performance.now() - storyStarted);
     const trailId = `trl_${randomUUID()}`;
     const slugBase = (input.theme ?? 'pangasinan-trail').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'pangasinan-trail';
     const slug = `${slugBase}-${randomUUID().slice(0, 8)}`;
@@ -175,13 +192,15 @@ export async function persistTrail(client: PoolClient, prepared: PreparedTrail) 
     return { trail: { ...trailResult.rows[0], generation_id: generationId }, generation: { id: generationId, solver_ms: Math.max(0, Math.round(solution.ms)), objective: solution.objective, solver: 'local', ai_used: storyResult.aiUsed, ai_model: storyResult.model, ai_fallback_reason: storyResult.fallbackReason }, solution };
 }
 
-export async function generateTrail(pool: Pool, input: GenerateTrailInput) {
-  const prepared = await prepareTrail(pool, input);
+export async function generateTrail(pool: Pool, input: GenerateTrailInput, options: TrailGenerationOptions = {}) {
+  const prepared = await prepareTrail(pool, input, options);
+  const persistenceStarted = performance.now();
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const result = await persistTrail(client, prepared);
     await client.query('COMMIT');
+    options.onTiming?.('persistence', performance.now() - persistenceStarted);
     return result;
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);

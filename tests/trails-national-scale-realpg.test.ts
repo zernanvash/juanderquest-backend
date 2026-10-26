@@ -1,6 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import { createTestDb, type TestDbInstance } from '../src/db/testHarness.js';
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { generateTrail } from '../src/trails/generate.js';
 import type { MatrixFetch } from '../src/trails/matrix.js';
 import { loadTrailSignalInputs } from '../src/trails/signals.js';
@@ -67,33 +67,39 @@ describeRealPg('Trail Engine national bounded generation (isolated real PostgreS
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     };
 
-    const generationClient = await fixture.pool.connect();
     const queryDurations: Array<{ ms: number; sql: string }> = [];
-    const instrumentedClient = new Proxy(generationClient, {
-      get(target, property) {
-        if (property === 'query') return async (...args: unknown[]) => {
-          const queryStartedAt = performance.now();
-          try { return await (target.query as (...queryArgs: unknown[]) => Promise<unknown>)(...args); }
-          finally { queryDurations.push({ ms: performance.now() - queryStartedAt, sql: String(args[0]).replace(/\s+/g, ' ').slice(0, 90) }); }
-        };
-        const value = Reflect.get(target, property, target);
-        return typeof value === 'function' ? value.bind(target) : value;
-      },
-    }) as PoolClient;
-    await generationClient.query('BEGIN');
+    const stages: Record<string, number> = {};
+    // Generation uses both pool.query and independent checked-out clients.
+    // Bind calls to the real target to avoid counting pool-internal queries twice.
+    function instrument<T extends Pool | PoolClient>(connection: T): T {
+      return new Proxy(connection, {
+        get(target, property) {
+          if (property === 'query') return async (...args: unknown[]) => {
+            const queryStartedAt = performance.now();
+            try { return await (target.query as (...queryArgs: unknown[]) => Promise<unknown>)(...args); }
+            finally { queryDurations.push({ ms: performance.now() - queryStartedAt, sql: String(args[0]).replace(/\s+/g, ' ').trim().slice(0, 120) }); }
+          };
+          if (property === 'connect') return async () => instrument(await (target as Pool).connect());
+          const value = Reflect.get(target, property, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    }
+    const instrumentedPool = instrument(fixture.pool);
     const startedAt = performance.now();
-    const generated = await generateTrail(fixture.pool, {
+    const generated = await generateTrail(instrumentedPool, {
       kind: 'admin', areaId: 'trail-national-town', theme: 'National Scale', seed: 20261025,
       budgetMin: 240, minStops: 3, maxStops: 6, maxLegMin: 60, maxPerCategory: 2,
-      matrixFetch, transactionClient: instrumentedClient,
-    });
-    await generationClient.query('COMMIT');
-    generationClient.release();
+      matrixFetch,
+    }, { onTiming: (stage, ms) => { stages[stage] = (stages[stage] ?? 0) + ms; } });
     const elapsedMs = performance.now() - startedAt;
     const persisted = await fixture.pool.query(`SELECT input FROM trail_generations WHERE id=$1`, [generated.generation.id]);
     const input = persisted.rows[0].input as { area_id: string; candidate_count: number; matrix_pairs: number };
 
-    console.info(`[trail-national-scale] generation_ms=${elapsedMs.toFixed(1)} candidates=${input.candidate_count} matrix_nodes=${observedMatrixNodes} matrix_pairs=${input.matrix_pairs} query_top=${JSON.stringify(queryDurations.sort((a, b) => b.ms - a.ms).slice(0, 6))}`);
+    const sqlMs = queryDurations.reduce((sum, query) => sum + query.ms, 0);
+    console.info(`[trail-national-scale] generation_ms=${elapsedMs.toFixed(1)} sql_ms=${sqlMs.toFixed(1)} stages_ms=${JSON.stringify(stages)} candidates=${input.candidate_count} matrix_nodes=${observedMatrixNodes} matrix_pairs=${input.matrix_pairs} query_top=${JSON.stringify(queryDurations.sort((a, b) => b.ms - a.ms).slice(0, 6))}`);
+    expect(queryDurations.some(query => query.sql.startsWith('WITH RECURSIVE area_scope'))).toBe(true);
+    expect(queryDurations.some(query => query.sql.startsWith('INSERT INTO travel_time_matrix'))).toBe(true);
     expect(input.area_id).toBe('trail-national-town');
     expect(input.candidate_count).toBeLessThanOrEqual(60);
     expect(input.matrix_pairs).toBeLessThanOrEqual(60 * 60);
