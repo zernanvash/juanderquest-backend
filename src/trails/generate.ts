@@ -79,13 +79,7 @@ export async function prepareTrail(pool: Pool, input: GenerateTrailInput, option
     const excluded = new Set(input.exclude ?? []);
     const requiredIds = [...new Set(input.mustInclude ?? [])];
     const eligible = inRadius.filter(spot => !excluded.has(spot.spotId));
-    const ranked = [...eligible].sort((a, b) => {
-      const scoreDifference = (signals.get(b.spotId)?.value ?? 0) - (signals.get(a.spotId)?.value ?? 0);
-      if (scoreDifference !== 0) return scoreDifference;
-      // Candidate sets can contain 50k spots; a codepoint comparison keeps
-      // deterministic tie-breaking without repeated locale collation work.
-      return a.spotId < b.spotId ? -1 : a.spotId > b.spotId ? 1 : 0;
-    });
+    const ranked = [...eligible].sort((a, b) => (signals.get(b.spotId)?.value ?? 0) - (signals.get(a.spotId)?.value ?? 0) || a.spotId.localeCompare(b.spotId));
     const required = requiredIds.map(id => ranked.find(spot => spot.spotId === id)).filter((spot): spot is typeof ranked[number] => Boolean(spot));
     const selectedIds = new Set(required.map(spot => spot.spotId));
     const availableSlots = Math.max(0, MAX_CANDIDATE_SPOTS - required.length);
