@@ -12,6 +12,9 @@ import {
   getStampHistory,
   listDailyMissions,
   listQotdCandidates,
+  listQotdPoolQuestions,
+  createQotdQuestion,
+  updateQotdQuestion,
   scheduleQuestionOfTheDay,
   setDailyMissionActive,
   spendStamps,
@@ -200,6 +203,71 @@ stampsRouter.get('/admin/stamps/qotd/candidates', authenticateToken, requireAdmi
   }
   try {
     return res.json({ success: true, data: await listQotdCandidates(pool, limit) });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+const qotdOptionSchema = z.object({
+  option_text: z.string().trim().min(1).max(200),
+  is_correct: z.boolean(),
+});
+
+const qotdCreateSchema = z.object({
+  question_text: z.string().trim().min(5).max(300),
+  explanation: z.string().trim().min(3).max(1000),
+  source_url: z.string().url().max(500).nullable().optional(),
+  options: z.array(qotdOptionSchema).length(4),
+}).strict();
+
+const qotdPatchSchema = z.object({
+  question_text: z.string().trim().min(5).max(300).optional(),
+  explanation: z.string().trim().min(3).max(1000).optional(),
+  source_url: z.string().url().max(500).nullable().optional(),
+  active: z.boolean().optional(),
+  options: z.array(qotdOptionSchema).length(4).optional(),
+}).strict().refine((value) => Object.keys(value).length > 0, {
+  message: 'Provide at least one field to update.',
+});
+
+stampsRouter.get('/admin/stamps/qotd/questions', authenticateToken, requireAdmin, async (_req: AuthRequest, res: Response) => {
+  const pool = getPool();
+  if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
+  try {
+    return res.json({ success: true, data: await listQotdPoolQuestions(pool) });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+stampsRouter.post('/admin/stamps/qotd/questions', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const pool = getPool();
+  if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
+  const parsed = qotdCreateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_REQUEST', message: 'Provide question_text, explanation and exactly four options with one correct.' },
+    });
+  }
+  try {
+    const question = await createQotdQuestion(pool, parsed.data, req.user!.id);
+    return res.status(201).json({ success: true, data: question });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+stampsRouter.patch('/admin/stamps/qotd/questions/:id', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const pool = getPool();
+  if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
+  const parsed = qotdPatchSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST', message: 'Invalid QotD question update.' } });
+  }
+  try {
+    const question = await updateQotdQuestion(pool, req.params.id, parsed.data);
+    return res.json({ success: true, data: question });
   } catch (error) {
     return fail(res, error);
   }

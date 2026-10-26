@@ -16,6 +16,7 @@ import {
   getStampHistory,
   recordMissionEvent,
   spendStamps,
+  stampAdminStats,
 } from '../src/stamps/service.js';
 import {
   handlePlazaCheer,
@@ -478,6 +479,10 @@ realPg('Plan 61 Phase 1 — passport stamps (real PostgreSQL)', () => {
     const now = at('2026-12-07');
     const before = await getQuestionOfTheDay(fixture.pool, userId, { now });
     expect(before.question?.options).toHaveLength(4);
+    // The QotD must come from the curated pool, never from rewarded quiz content.
+    expect(before.question!.id).not.toBe(questionId);
+    const poolQuestion = await fixture.pool.query('SELECT 1 FROM qotd_questions WHERE id = $1', [before.question!.id]);
+    expect(poolQuestion.rowCount).toBe(1);
     for (const option of before.question!.options) {
       expect(option).not.toHaveProperty('is_correct');
       expect(option).not.toHaveProperty('correct');
@@ -486,10 +491,20 @@ realPg('Plan 61 Phase 1 — passport stamps (real PostgreSQL)', () => {
     expect(before.answered).toBe(false);
     expect(before.answer).toBeNull();
 
-    const answer = await answerQuestionOfTheDay(fixture.pool, userId, correctOptionId, { now });
+    const correct = await fixture.pool.query(
+      `SELECT o.id, q.explanation FROM qotd_options o
+         JOIN qotd_questions q ON q.id = o.question_id
+        WHERE o.question_id = $1 AND o.is_correct = TRUE`,
+      [before.question!.id],
+    );
+    const correctPoolOptionId = correct.rows[0].id;
+    const answer = await answerQuestionOfTheDay(fixture.pool, userId, correctPoolOptionId, { now });
     expect(answer.correct).toBe(true);
-    expect(answer.correct_option_id).toBe(correctOptionId);
-    await expect(answerQuestionOfTheDay(fixture.pool, userId, correctOptionId, { now }))
+    expect(answer.correct_option_id).toBe(correctPoolOptionId);
+    expect(answer.explanation).toBe(correct.rows[0].explanation);
+    const revealed = await fixture.pool.query('SELECT 1 FROM qotd_options WHERE id = $1 AND question_id = $2', [answer.correct_option_id, before.question!.id]);
+    expect(revealed.rowCount).toBe(1);
+    await expect(answerQuestionOfTheDay(fixture.pool, userId, correctPoolOptionId, { now }))
       .rejects.toMatchObject({ code: 'ALREADY_ANSWERED' });
     const answered = await getQuestionOfTheDay(fixture.pool, userId, { now });
     expect(answered.answered).toBe(true);
@@ -498,8 +513,8 @@ realPg('Plan 61 Phase 1 — passport stamps (real PostgreSQL)', () => {
     expect(rows.rows[0].count).toBe(1);
 
     const wrongOption = await fixture.pool.query(
-      'SELECT id FROM cultural_quiz_options WHERE question_id = $1 AND is_correct = FALSE ORDER BY ordinal LIMIT 1',
-      [questionId],
+      'SELECT id FROM qotd_options WHERE question_id = $1 AND is_correct = FALSE ORDER BY ordinal LIMIT 1',
+      [before.question!.id],
     );
     const otherAnswer = await answerQuestionOfTheDay(fixture.pool, other, wrongOption.rows[0].id, { now });
     expect(otherAnswer.correct).toBe(false);
@@ -537,10 +552,17 @@ realPg('Plan 61 Phase 1 — passport stamps (real PostgreSQL)', () => {
     expect(await hasPerk('any-user', 'some_future_key')).toBe(false);
   });
 
-  it('blocks unverified email accounts from claiming', async () => {
+  it('blocks unverified email accounts from claiming and from the monthly shield', async () => {
     const userId = await createUser('unverified', { verifiedEmail: false });
     await expect(claimDaily(fixture.pool, userId, { now: at('2026-12-10') }))
       .rejects.toMatchObject({ code: 'ACCOUNT_NOT_VERIFIED' });
+    const daily = await getDailyState(fixture.pool, userId, { now: at('2026-12-10') });
+    expect(daily.streak.shields_held).toBe(0);
+    const events = await fixture.pool.query(
+      'SELECT COUNT(*)::int AS count FROM streak_shield_events WHERE user_id = $1',
+      [userId],
+    );
+    expect(events.rows[0].count).toBe(0);
   });
 
   it('serves platform-admin mission, reward table, QotD schedule and stats endpoints', async () => {
@@ -576,13 +598,35 @@ realPg('Plan 61 Phase 1 — passport stamps (real PostgreSQL)', () => {
     });
     expect(restore.status).toBe(200);
 
+    const createdQotd = await request(app).post('/api/v1/admin/stamps/qotd/questions').set(auth).send({
+      question_text: 'Which Pangasinan festival celebrates the bangus harvest?',
+      explanation: 'The Dagupan Bangus Festival celebrates the city’s milkfish industry.',
+      options: [
+        { option_text: 'Bangus Festival', is_correct: true },
+        { option_text: 'Panagbenga Festival', is_correct: false },
+        { option_text: 'Pahiyas Festival', is_correct: false },
+        { option_text: 'Sinulog Festival', is_correct: false },
+      ],
+    });
+    expect(createdQotd.status).toBe(201);
+    expect(createdQotd.body.data.options).toHaveLength(4);
+    expect(createdQotd.body.data.options.filter((option: { is_correct: boolean }) => option.is_correct)).toHaveLength(1);
+    const createdId = createdQotd.body.data.id;
+    const poolList = await request(app).get('/api/v1/admin/stamps/qotd/questions').set(auth);
+    expect(poolList.status).toBe(200);
+    expect(poolList.body.data.some((item: { id: string }) => item.id === createdId)).toBe(true);
+    const deactivate = await request(app).patch(`/api/v1/admin/stamps/qotd/questions/${createdId}`)
+      .set(auth).send({ active: false });
+    expect(deactivate.status).toBe(200);
+    expect(deactivate.body.data.active).toBe(false);
+
     const future = '2026-12-22';
     const schedule = await request(app).put('/api/v1/admin/stamps/qotd').set(auth).send({
-      manila_date: future, question_id: questionId,
+      manila_date: future, question_id: 'qotd-seed-capital',
     });
     expect(schedule.status).toBe(200);
     const scheduled = await getQuestionOfTheDay(fixture.pool, null, { now: at(future) });
-    expect(scheduled.question?.id).toBe(questionId);
+    expect(scheduled.question?.id).toBe('qotd-seed-capital');
 
     const stats = await request(app).get('/api/v1/admin/stamps/stats').set(auth);
     expect(stats.status).toBe(200);
@@ -594,7 +638,30 @@ realPg('Plan 61 Phase 1 — passport stamps (real PostgreSQL)', () => {
     }));
 
     await fixture.pool.query("DELETE FROM daily_missions WHERE id = 'mission-admin-test'");
+    await fixture.pool.query("DELETE FROM qotd_questions WHERE id = $1", [createdId]);
     await fixture.pool.query("DELETE FROM question_of_the_day WHERE manila_date = '2026-12-22'");
+  });
+
+  it('keeps test-account stamps out of admin stats', async () => {
+    const now = at('2026-12-23');
+    const date = '2026-12-23';
+    const testUser = await createUser('test-stamps');
+    await fixture.pool.query('UPDATE users SET is_test = TRUE WHERE id = $1', [testUser]);
+    const before = await stampAdminStats(fixture.pool, { now });
+    const claim = await claimDaily(fixture.pool, testUser, { now });
+    expect(claim.claim.awarded).toBe(5);
+    await assignMission(testUser, date, 'qotd');
+    const mission = await recordMissionEvent(fixture.pool, testUser, 'qotd', { now, sourceKey: 'test-account' });
+    expect(mission.awarded).toBe(5);
+    const ledger = await fixture.pool.query('SELECT is_test FROM stamp_ledger WHERE user_id = $1', [testUser]);
+    expect(ledger.rows.length).toBeGreaterThanOrEqual(2);
+    expect(ledger.rows.every((row: { is_test: boolean }) => row.is_test === true)).toBe(true);
+    const after = await stampAdminStats(fixture.pool, { now });
+    expect(after.claims_today).toBe(before.claims_today);
+    expect(after.missions_completed_today).toBe(before.missions_completed_today);
+    expect(after.travelers_today).toBe(before.travelers_today);
+    expect(after.weekly_cap_hits).toBe(before.weekly_cap_hits);
+    expect(after.outstanding_balance).toBe(before.outstanding_balance);
   });
 
   it('serves the HTTP contract for daily, history, spend and QotD routes', async () => {
@@ -624,8 +691,12 @@ realPg('Plan 61 Phase 1 — passport stamps (real PostgreSQL)', () => {
     expect(qotd.status).toBe(200);
     expect(qotd.body.data.question.options).toHaveLength(4);
     expect(JSON.stringify(qotd.body.data.question)).not.toContain('is_correct');
+    const correct = await fixture.pool.query(
+      'SELECT id FROM qotd_options WHERE question_id = $1 AND is_correct = TRUE',
+      [qotd.body.data.question.id],
+    );
     const answered = await request(app).post('/api/v1/qotd/answer')
-      .set(auth).send({ option_id: correctOptionId });
+      .set(auth).send({ option_id: correct.rows[0].id });
     expect(answered.status).toBe(201);
     expect(answered.body.data.correct).toBe(true);
 

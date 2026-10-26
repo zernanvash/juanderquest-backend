@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import type { Pool, PoolClient } from 'pg';
 import { canonicalSettings } from '../settings/schema.js';
 import {
@@ -37,7 +37,13 @@ export interface StampAwardInput {
   manilaDate: string;
   weekId: string;
   reason?: string | null;
+  isTest: boolean;
   settings: RewardSettings;
+}
+
+export interface StampEligibility {
+  eligible: boolean;
+  isTest: boolean;
 }
 
 export interface StampAwardResult {
@@ -86,9 +92,9 @@ export async function loadRewardSettings(db: Db): Promise<RewardSettings> {
   };
 }
 
-export async function isEligibleForStamps(db: Db, userId: string): Promise<boolean> {
+export async function getStampEligibility(db: Db, userId: string): Promise<StampEligibility> {
   const result = await db.query(
-    `SELECT u.id,
+    `SELECT u.is_test,
             (SELECT e.is_verified FROM account_emails e
               WHERE e.user_id = u.id AND e.is_primary = TRUE
               ORDER BY e.created_at ASC LIMIT 1) AS email_verified
@@ -96,9 +102,12 @@ export async function isEligibleForStamps(db: Db, userId: string): Promise<boole
     [userId],
   );
   const row = result.rows[0];
-  if (!row) return false;
-  if (row.email_verified === false) return false;
-  return true;
+  if (!row) return { eligible: false, isTest: false };
+  return { eligible: row.email_verified !== false, isTest: Boolean(row.is_test) };
+}
+
+export async function isEligibleForStamps(db: Db, userId: string): Promise<boolean> {
+  return (await getStampEligibility(db, userId)).eligible;
 }
 
 async function withTransaction<T>(pool: Pool, work: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -180,11 +189,11 @@ async function awardStampsWithLock(client: PoolClient, input: StampAwardInput): 
   const capped = awarded < input.amount;
   const reason = capped ? `${input.reason ? `${input.reason}:` : ''}weekly_cap` : (input.reason ?? null);
   const inserted = await client.query(
-    `INSERT INTO stamp_ledger(user_id, delta, source, source_key, manila_date, week_id, reason)
-     VALUES($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO stamp_ledger(user_id, delta, source, source_key, manila_date, week_id, reason, is_test)
+     VALUES($1, $2, $3, $4, $5, $6, $7, $8)
      ON CONFLICT (user_id, source, source_key) DO NOTHING
      RETURNING id`,
-    [input.userId, awarded, input.source, input.sourceKey, input.manilaDate, input.weekId, reason],
+    [input.userId, awarded, input.source, input.sourceKey, input.manilaDate, input.weekId, reason, input.isTest],
   );
   if (!inserted.rowCount) return { awarded: 0, capped: false, inserted: false };
   if (awarded > 0) {
@@ -352,7 +361,8 @@ export async function claimDaily(pool: Pool, userId: string, options: ClaimDaily
   const date = manilaDateString(now);
   const week = manilaWeekId(date);
   return withTransaction(pool, async (client) => {
-    if (!(await isEligibleForStamps(client, userId))) {
+    const eligibility = await getStampEligibility(client, userId);
+    if (!eligibility.eligible) {
       throw new StampsError('ACCOUNT_NOT_VERIFIED', 403, 'Verify your account before claiming stamp rewards.');
     }
     await lockBalance(client, userId);
@@ -414,7 +424,7 @@ export async function claimDaily(pool: Pool, userId: string, options: ClaimDaily
     );
     await awardStampsWithLock(client, {
       userId, amount: nominalStamps, source: 'daily_claim', sourceKey: date,
-      manilaDate: date, weekId: week, reason: 'daily_claim', settings,
+      manilaDate: date, weekId: week, reason: 'daily_claim', isTest: eligibility.isTest, settings,
     });
     return { ...(await claimSnapshot(client, userId, date, week, settings)), replayed: false };
   });
@@ -426,7 +436,10 @@ export async function getDailyState(pool: Pool, userId: string, options: { now?:
   const week = manilaWeekId(date);
   return withTransaction(pool, async (client) => {
     const settings = await loadRewardSettings(client);
-    await ensureMonthlyShield(client, userId, date, settings);
+    const eligibility = await getStampEligibility(client, userId);
+    if (eligibility.eligible) {
+      await ensureMonthlyShield(client, userId, date, settings);
+    }
     await ensureDailyAssignments(client, userId, date);
     const snapshot = await claimSnapshot(client, userId, date, week, settings);
     const missions = await client.query(
@@ -474,8 +487,27 @@ export async function recordMissionEvent(
   const now = options.now ?? new Date();
   const date = manilaDateString(now);
   const week = manilaWeekId(date);
+
+  // Cheap read first: most destination views/cheers arrive after today's missions
+  // are already complete. Avoid opening a transaction and locking the balance
+  // unless assignments are missing or a matching mission is still incomplete.
+  const prepared = await pool.query(
+    `SELECT
+       EXISTS (SELECT 1 FROM user_daily_missions udm
+                 JOIN daily_missions dm ON dm.id = udm.mission_id
+                WHERE udm.user_id = $1 AND udm.manila_date = $2 AND dm.kind = $3
+                  AND udm.completed_at IS NULL) AS matching,
+       EXISTS (SELECT 1 FROM user_daily_missions
+                WHERE user_id = $1 AND manila_date = $2) AS assigned`,
+    [userId, date, kind],
+  );
+  if (prepared.rows[0]?.assigned && !prepared.rows[0]?.matching) {
+    return { completed: false, reason: 'not_assigned' as const };
+  }
+
   return withTransaction(pool, async (client) => {
-    if (!(await isEligibleForStamps(client, userId))) {
+    const eligibility = await getStampEligibility(client, userId);
+    if (!eligibility.eligible) {
       return { completed: false, reason: 'ineligible' as const };
     }
     await lockBalance(client, userId);
@@ -507,6 +539,7 @@ export async function recordMissionEvent(
       manilaDate: date,
       weekId: week,
       reason: kind,
+      isTest: eligibility.isTest,
       settings,
     });
     const chest = await chestSnapshot(client, userId, week, settings);
@@ -520,6 +553,7 @@ export async function recordMissionEvent(
         manilaDate: date,
         weekId: week,
         reason: 'weekly_chest',
+        isTest: eligibility.isTest,
         settings,
       });
       chestAwarded = chestResult.awarded;
@@ -550,7 +584,8 @@ export async function spendStamps(
   const now = options.now ?? new Date();
   const date = manilaDateString(now);
   return withTransaction(pool, async (client) => {
-    if (!(await isEligibleForStamps(client, userId))) {
+    const eligibility = await getStampEligibility(client, userId);
+    if (!eligibility.eligible) {
       throw new StampsError('ACCOUNT_NOT_VERIFIED', 403, 'Verify your account before spending stamps.');
     }
     const balance = await lockBalance(client, userId);
@@ -575,11 +610,11 @@ export async function spendStamps(
       throw new StampsError('INSUFFICIENT_STAMPS', 409, 'You do not have enough stamps for a streak shield.');
     }
     const inserted = await client.query(
-      `INSERT INTO stamp_ledger(user_id, delta, source, source_key, manila_date, week_id, reason)
-       VALUES($1, $2, 'spend:streak_shield', $3, $4, $5, 'streak_shield')
+      `INSERT INTO stamp_ledger(user_id, delta, source, source_key, manila_date, week_id, reason, is_test)
+       VALUES($1, $2, 'spend:streak_shield', $3, $4, $5, 'streak_shield', $6)
        ON CONFLICT (user_id, source, source_key) DO NOTHING
        RETURNING id`,
-      [userId, -settings.shieldPrice, idempotencyKey, date, manilaWeekId(date)],
+      [userId, -settings.shieldPrice, idempotencyKey, date, manilaWeekId(date), eligibility.isTest],
     );
     if (!inserted.rowCount) {
       return { item, price: settings.shieldPrice, balance, shields_held: streak.shields_held, replayed: true };
@@ -642,10 +677,8 @@ export async function ensureQuestionOfTheDay(client: Db, date: string): Promise<
   await client.query(
     `INSERT INTO question_of_the_day(manila_date, question_id)
      SELECT $1::date, q.id
-       FROM cultural_quiz_questions q
-       JOIN cultural_quiz_versions v ON v.id = q.version_id
-       JOIN cultural_quizzes z ON z.id = v.quiz_id
-      WHERE z.status = 'published' AND z.is_test = FALSE
+       FROM qotd_questions q
+      WHERE q.active = TRUE
       ORDER BY md5(q.id || $1::text)
       LIMIT 1
      ON CONFLICT (manila_date) DO NOTHING`,
@@ -660,16 +693,14 @@ export async function ensureQuestionOfTheDay(client: Db, date: string): Promise<
 
 async function qotdPayload(client: Db, questionId: string) {
   const question = await client.query(
-    `SELECT q.id, q.question_text, q.explanation, q.source_url, v.title AS quiz_title
-       FROM cultural_quiz_questions q
-       JOIN cultural_quiz_versions v ON v.id = q.version_id
-      WHERE q.id = $1`,
+    `SELECT id, question_text, explanation, source_url
+       FROM qotd_questions WHERE id = $1`,
     [questionId],
   );
   const row = question.rows[0];
   if (!row) return null;
   const options = await client.query(
-    'SELECT id, ordinal, option_text FROM cultural_quiz_options WHERE question_id = $1 ORDER BY ordinal',
+    'SELECT id, ordinal, option_text FROM qotd_options WHERE question_id = $1 ORDER BY ordinal',
     [questionId],
   );
   return {
@@ -677,7 +708,7 @@ async function qotdPayload(client: Db, questionId: string) {
     text: row.question_text,
     explanation: row.explanation,
     source_url: row.source_url,
-    quiz_title: row.quiz_title,
+    quiz_title: 'Pangasinan Heritage',
     options: options.rows.map((option: any) => ({
       id: option.id,
       ordinal: Number(option.ordinal),
@@ -740,9 +771,9 @@ export async function answerQuestionOfTheDay(
   const date = manilaDateString(now);
   const result = await withTransaction(pool, async (client) => {
     const questionId = await ensureQuestionOfTheDay(client, date);
-    if (!questionId) throw new StampsError('QOTD_UNAVAILABLE', 404, 'No published question is available today.');
+    if (!questionId) throw new StampsError('QOTD_UNAVAILABLE', 404, 'No active question is available today.');
     const option = await client.query(
-      `SELECT id, is_correct FROM cultural_quiz_options
+      `SELECT id, is_correct FROM qotd_options
         WHERE id = $1 AND question_id = $2`,
       [optionId, questionId],
     );
@@ -759,11 +790,11 @@ export async function answerQuestionOfTheDay(
       throw new StampsError('ALREADY_ANSWERED', 409, 'You already answered today\'s question.');
     }
     const correctOption = await client.query(
-      'SELECT id FROM cultural_quiz_options WHERE question_id = $1 AND is_correct = TRUE LIMIT 1',
+      'SELECT id FROM qotd_options WHERE question_id = $1 AND is_correct = TRUE LIMIT 1',
       [questionId],
     );
     const detail = await client.query(
-      'SELECT explanation, source_url FROM cultural_quiz_questions WHERE id = $1',
+      'SELECT explanation, source_url FROM qotd_questions WHERE id = $1',
       [questionId],
     );
     return {
@@ -816,15 +847,132 @@ export async function setDailyMissionActive(pool: Pool, id: string, active: bool
   if (!result.rowCount) throw new StampsError('NOT_FOUND', 404, 'Mission not found.');
 }
 
+export interface QotdOptionInput {
+  option_text: string;
+  is_correct: boolean;
+}
+
+export interface QotdQuestionInput {
+  question_text: string;
+  explanation: string;
+  source_url?: string | null;
+  options: QotdOptionInput[];
+}
+
+export interface QotdQuestionPatch {
+  question_text?: string;
+  explanation?: string;
+  source_url?: string | null;
+  active?: boolean;
+  options?: QotdOptionInput[];
+}
+
+function validateQotdOptions(options: QotdOptionInput[]): void {
+  if (!Array.isArray(options) || options.length !== 4) {
+    throw new StampsError('INVALID_QOTD', 400, 'Provide exactly four options.');
+  }
+  if (options.filter((option) => option.is_correct).length !== 1) {
+    throw new StampsError('INVALID_QOTD', 400, 'Exactly one option must be marked correct.');
+  }
+  if (options.some((option) => !option.option_text?.trim())) {
+    throw new StampsError('INVALID_QOTD', 400, 'Every option needs text.');
+  }
+}
+
+async function qotdQuestionWithOptions(client: Db, id: string) {
+  const question = await client.query(
+    `SELECT id, question_text, explanation, source_url, active, created_by, created_at
+       FROM qotd_questions WHERE id = $1`,
+    [id],
+  );
+  const row = question.rows[0];
+  if (!row) return null;
+  const options = await client.query(
+    'SELECT id, ordinal, option_text, is_correct FROM qotd_options WHERE question_id = $1 ORDER BY ordinal',
+    [id],
+  );
+  return {
+    id: row.id,
+    question_text: row.question_text,
+    explanation: row.explanation,
+    source_url: row.source_url,
+    active: Boolean(row.active),
+    created_by: row.created_by,
+    created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
+    options: options.rows.map((option: any) => ({
+      id: option.id,
+      ordinal: Number(option.ordinal),
+      option_text: option.option_text,
+      is_correct: Boolean(option.is_correct),
+    })),
+  };
+}
+
+export async function listQotdPoolQuestions(pool: Pool) {
+  const questions = await pool.query(
+    `SELECT id FROM qotd_questions ORDER BY created_at DESC, id ASC`,
+  );
+  return Promise.all(questions.rows.map((row: any) => qotdQuestionWithOptions(pool, row.id)));
+}
+
+export async function createQotdQuestion(pool: Pool, input: QotdQuestionInput, createdBy: string) {
+  validateQotdOptions(input.options);
+  const id = `qotd-${randomUUID()}`;
+  return withTransaction(pool, async (client) => {
+    await client.query(
+      `INSERT INTO qotd_questions(id, question_text, explanation, source_url, active, created_by)
+       VALUES($1, $2, $3, $4, TRUE, $5)`,
+      [id, input.question_text, input.explanation, input.source_url ?? null, createdBy],
+    );
+    for (const [index, option] of input.options.entries()) {
+      await client.query(
+        `INSERT INTO qotd_options(id, question_id, ordinal, option_text, is_correct)
+         VALUES($1, $2, $3, $4, $5)`,
+        [`qotd-opt-${randomUUID()}`, id, index + 1, option.option_text.trim(), option.is_correct],
+      );
+    }
+    return qotdQuestionWithOptions(client, id);
+  });
+}
+
+export async function updateQotdQuestion(pool: Pool, id: string, patch: QotdQuestionPatch) {
+  if (patch.options !== undefined) validateQotdOptions(patch.options);
+  return withTransaction(pool, async (client) => {
+    const existing = await client.query('SELECT id FROM qotd_questions WHERE id = $1', [id]);
+    if (!existing.rowCount) throw new StampsError('NOT_FOUND', 404, 'QotD question not found.');
+    await client.query(
+      `UPDATE qotd_questions
+          SET question_text = COALESCE($2, question_text),
+              explanation = COALESCE($3, explanation),
+              source_url = CASE WHEN $4::boolean THEN $5 ELSE source_url END,
+              active = COALESCE($6, active),
+              updated_at = NOW()
+        WHERE id = $1`,
+      [id, patch.question_text ?? null, patch.explanation ?? null,
+        patch.source_url !== undefined, patch.source_url ?? null, patch.active ?? null],
+    );
+    if (patch.options) {
+      await client.query('DELETE FROM qotd_options WHERE question_id = $1', [id]);
+      for (const [index, option] of patch.options.entries()) {
+        await client.query(
+          `INSERT INTO qotd_options(id, question_id, ordinal, option_text, is_correct)
+           VALUES($1, $2, $3, $4, $5)`,
+          [`qotd-opt-${randomUUID()}`, id, index + 1, option.option_text.trim(), option.is_correct],
+        );
+      }
+    }
+    return qotdQuestionWithOptions(client, id);
+  });
+}
+
 export async function scheduleQuestionOfTheDay(pool: Pool, date: string, questionId: string) {
   const question = await pool.query(
-    `SELECT q.id FROM cultural_quiz_questions q
-       JOIN cultural_quiz_versions v ON v.id = q.version_id
-       JOIN cultural_quizzes z ON z.id = v.quiz_id
-      WHERE q.id = $1 AND z.status = 'published' AND z.is_test = FALSE`,
+    'SELECT id FROM qotd_questions WHERE id = $1 AND active = TRUE',
     [questionId],
   );
-  if (!question.rowCount) throw new StampsError('INVALID_QUESTION', 400, 'Pick a question from a published quiz.');
+  if (!question.rowCount) {
+    throw new StampsError('INVALID_QUESTION', 400, 'Pick an active question from the QotD pool.');
+  }
   await pool.query(
     `INSERT INTO question_of_the_day(manila_date, question_id) VALUES($1, $2)
      ON CONFLICT (manila_date) DO UPDATE SET question_id = EXCLUDED.question_id, created_at = NOW()`,
@@ -834,16 +982,13 @@ export async function scheduleQuestionOfTheDay(pool: Pool, date: string, questio
 
 export async function listQotdCandidates(pool: Pool, limit = 50) {
   const result = await pool.query(
-    `SELECT q.id, q.question_text, v.title AS quiz_title
-       FROM cultural_quiz_questions q
-       JOIN cultural_quiz_versions v ON v.id = q.version_id
-       JOIN cultural_quizzes z ON z.id = v.quiz_id
-      WHERE z.status = 'published' AND z.is_test = FALSE
-      ORDER BY v.title ASC, q.ordinal ASC LIMIT $1`,
+    `SELECT id, question_text, active
+       FROM qotd_questions
+      ORDER BY active DESC, created_at ASC, id ASC LIMIT $1`,
     [Math.min(Math.max(limit, 1), 100)],
   );
   return result.rows.map((row: any) => ({
-    id: row.id, question_text: row.question_text, quiz_title: row.quiz_title,
+    id: row.id, question_text: row.question_text, active: Boolean(row.active),
   }));
 }
 
@@ -853,11 +998,32 @@ export async function stampAdminStats(pool: Pool, options: { now?: Date } = {}) 
   const week = manilaWeekId(date);
   const bounds = manilaWeekBounds(date);
   const [claims, missions, capHits, travelers, outstanding] = await Promise.all([
-    pool.query('SELECT COUNT(*)::int AS count FROM daily_claims WHERE manila_date = $1', [date]),
-    pool.query('SELECT COUNT(*)::int AS count FROM user_daily_missions WHERE manila_date = $1 AND completed_at IS NOT NULL', [date]),
-    pool.query(`SELECT COUNT(*)::int AS count FROM stamp_ledger WHERE week_id = $1 AND reason LIKE '%weekly_cap%'`, [week]),
-    pool.query('SELECT COUNT(DISTINCT user_id)::int AS count FROM stamp_ledger WHERE manila_date = $1', [date]),
-    pool.query('SELECT COALESCE(SUM(balance), 0)::int AS total FROM stamp_balances'),
+    pool.query(
+      `SELECT COUNT(*)::int AS count FROM daily_claims dc
+         JOIN users u ON u.id = dc.user_id
+        WHERE dc.manila_date = $1 AND u.is_test = FALSE`,
+      [date],
+    ),
+    pool.query(
+      `SELECT COUNT(*)::int AS count FROM user_daily_missions udm
+         JOIN users u ON u.id = udm.user_id
+        WHERE udm.manila_date = $1 AND udm.completed_at IS NOT NULL AND u.is_test = FALSE`,
+      [date],
+    ),
+    pool.query(
+      `SELECT COUNT(*)::int AS count FROM stamp_ledger
+        WHERE week_id = $1 AND reason LIKE '%weekly_cap%' AND is_test = FALSE`,
+      [week],
+    ),
+    pool.query(
+      'SELECT COUNT(DISTINCT user_id)::int AS count FROM stamp_ledger WHERE manila_date = $1 AND is_test = FALSE',
+      [date],
+    ),
+    pool.query(
+      `SELECT COALESCE(SUM(b.balance), 0)::int AS total FROM stamp_balances b
+         JOIN users u ON u.id = b.user_id
+        WHERE u.is_test = FALSE`,
+    ),
   ]);
   return {
     date,
