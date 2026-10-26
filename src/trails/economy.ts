@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from 'pg';
 import { canonicalSettings } from '../settings/schema.js';
 
 export interface TrailEconomyConfig {
+  personalGenerationEnabled: boolean;
   starterRewardPoints: number;
   explorerMinLevel: number;
   explorerRewardPoints: number;
@@ -15,6 +16,7 @@ export interface TrailEconomyConfig {
 }
 
 const defaults: TrailEconomyConfig = {
+  personalGenerationEnabled: false,
   starterRewardPoints: 50,
   explorerMinLevel: 5,
   explorerRewardPoints: 100,
@@ -27,7 +29,7 @@ const defaults: TrailEconomyConfig = {
   personalRewardPoints: 50,
 };
 
-const keys: Record<keyof TrailEconomyConfig, string> = {
+const keys: Record<Exclude<keyof TrailEconomyConfig, 'personalGenerationEnabled'>, string> = {
   starterRewardPoints: 'trail_starter_reward_points',
   explorerMinLevel: 'trail_explorer_min_level',
   explorerRewardPoints: 'trail_explorer_reward_points',
@@ -47,7 +49,8 @@ export async function loadTrailEconomy(client: SettingsClient): Promise<TrailEco
   const { rows } = await client.query('SELECT values FROM system_settings_document WHERE id=1');
   const stored = canonicalSettings(rows[0]?.values ?? {});
   const result = { ...defaults };
-  for (const [property, key] of Object.entries(keys) as Array<[keyof TrailEconomyConfig, string]>) {
+  result.personalGenerationEnabled = stored.trail_personal_generation_enabled === true;
+  for (const [property, key] of Object.entries(keys) as Array<[Exclude<keyof TrailEconomyConfig, 'personalGenerationEnabled'>, string]>) {
     const value = Number(stored[key]);
     if (Number.isInteger(value) && value >= 0 && Number.isSafeInteger(value)) result[property] = value;
   }

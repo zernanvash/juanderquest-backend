@@ -31,6 +31,10 @@ export async function createPersonalTrail(pool: Pool, userId: string, key: strin
   matrixFetch?: MatrixFetch;
   storyWriter?: typeof writeTrailStory;
 } = {}) {
+  const initialEconomy = await loadTrailEconomy(pool);
+  if (!initialEconomy.personalGenerationEnabled) {
+    throw new PersonalTrailError('PERSONAL_TRAILS_DISABLED', 404, 'Traveler-created trails are currently unavailable.');
+  }
   if (!key || key.length < 8 || key.length > 200) throw new PersonalTrailError('IDEMPOTENCY_KEY_REQUIRED', 400, 'A valid Idempotency-Key header is required.');
   const themeChips = request.themes ?? [];
   const goodFor = request.good_for ?? [];

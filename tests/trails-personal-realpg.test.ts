@@ -5,7 +5,7 @@ import { env } from '../src/config/env.js';
 import { createTestDb } from '../src/db/testHarness.js';
 import { setPool } from '../src/db/pool.js';
 import { db } from '../src/db/index.js';
-import { createPersonalTrail } from '../src/trails/personal.js';
+import { createPersonalTrail, PersonalTrailError } from '../src/trails/personal.js';
 import { fundingCommand } from '../src/funding/transaction.js';
 
 const describeRealPg = process.env.JDQ_REAL_PG_URL ? describe : describe.skip;
@@ -52,7 +52,37 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
     if (fixture) await fixture.close();
   }, 30_000);
 
+  async function setPersonalGenerationEnabled(enabled: boolean) {
+    await fixture.pool.query(`INSERT INTO system_settings_document(id,values,revision) VALUES(1,$1::jsonb,1)
+      ON CONFLICT(id) DO UPDATE SET values=system_settings_document.values || EXCLUDED.values, revision=system_settings_document.revision+1`,
+      [JSON.stringify({trail_personal_generation_enabled:enabled})]);
+  }
+
+  test('personal generation is disabled by default before preference, story, matrix, charge or trail work', async () => {
+    await fixture.pool.query(`INSERT INTO system_settings_document(id,values,revision) VALUES(1,'{}'::jsonb,0)
+      ON CONFLICT(id) DO UPDATE SET values=system_settings_document.values-'trail_personal_generation_enabled'`);
+    const beforeGenerations = await fixture.pool.query("SELECT COUNT(*)::int AS count FROM trail_generations WHERE kind='personal' AND requested_by=$1", [userId]);
+    const beforeLedger = await fixture.pool.query("SELECT COUNT(*)::int AS count FROM governance_ledger WHERE actor_id=$1 AND reference_type='personal_generation'", [userId]);
+    const storyWriter = jest.fn();
+    await expect(createPersonalTrail(fixture.pool,userId,'personal-disabled-generation-1',{text:'a relaxed beach trip'}, {storyWriter})).rejects.toMatchObject({
+      code:'PERSONAL_TRAILS_DISABLED', status:404,
+    } satisfies Partial<PersonalTrailError>);
+    expect(storyWriter).not.toHaveBeenCalled();
+
+    const catalog = await request(app).get('/api/v1/trails').set('Authorization',`Bearer ${token}`);
+    expect(catalog.status).toBe(200);
+    expect(catalog.body.data.personal_generation).toBeNull();
+    const response = await request(app).post('/api/v1/trails/personal').set('Authorization',`Bearer ${token}`)
+      .set('Idempotency-Key','personal-disabled-api-1').send({text:'a relaxed beach trip'});
+    expect(response.status).toBe(404);
+    expect(response.body.error.code).toBe('PERSONAL_TRAILS_DISABLED');
+    expect((await fixture.pool.query("SELECT COUNT(*)::int AS count FROM trail_generations WHERE kind='personal' AND requested_by=$1", [userId])).rows[0].count).toBe(beforeGenerations.rows[0].count);
+    expect((await fixture.pool.query("SELECT COUNT(*)::int AS count FROM governance_ledger WHERE actor_id=$1 AND reference_type='personal_generation'", [userId])).rows[0].count).toBe(beforeLedger.rows[0].count);
+    await setPersonalGenerationEnabled(true);
+  },45_000);
+
   test('creates private owner trail and atomically charges only after the weekly free allowance', async () => {
+    await setPersonalGenerationEnabled(true);
     const first = await request(app).post('/api/v1/trails/personal').set('Authorization',`Bearer ${token}`)
       .set('Idempotency-Key','personal-free-generation-1').send({ themes:['beach','heritage'], municipalities:['Bolinao'], budget_min:240, pace:'relaxed' });
     expect(first.status).toBe(201);
@@ -88,6 +118,7 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
   }, 45_000);
 
   test('insufficient points rolls back the generated private trail and all debit ledger entries', async () => {
+    await setPersonalGenerationEnabled(true);
     const response = await request(app).post('/api/v1/trails/personal').set('Authorization',`Bearer ${poorToken}`)
       .set('Idempotency-Key','personal-insufficient-points-1').send({ themes:['beach'], municipalities:['Bolinao'], budget_min:240 });
     expect(response.status).toBe(409);
@@ -97,6 +128,7 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
   }, 45_000);
 
   test('another traveler transfer proceeds while personal generation is waiting on its matrix provider', async () => {
+    await setPersonalGenerationEnabled(true);
     await fixture.pool.query(`DELETE FROM travel_time_matrix WHERE from_spot IN (SELECT id FROM spots WHERE municipality='Bolinao')
       OR to_spot IN (SELECT id FROM spots WHERE municipality='Bolinao')`);
     await fixture.pool.query(`INSERT INTO points_accounts(id,kind,is_test,balance_points)
@@ -137,6 +169,7 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
   }, 45_000);
 
   test('validates input and does not allow anonymous generation', async () => {
+    await setPersonalGenerationEnabled(true);
     expect((await request(app).post('/api/v1/trails/personal').send({ themes:['beach'] })).status).toBe(401);
     const unscoped = await request(app).post('/api/v1/trails/personal').set('Authorization',`Bearer ${validatorToken}`)
       .set('Idempotency-Key','personal-missing-area-1').send({ themes:['beach'] });

@@ -43,9 +43,11 @@ describe('Admin settings, audit and observation', () => {
     expect(response.status).toBe(200);
     expect(response.body.data.revision).toBe(0);
     expect(response.body.data.values.quiz_default_radius_meters).toBe(200);
+    expect(response.body.data.values.trail_personal_generation_enabled).toBe(false);
     expect(response.body.data.values.support_contact_email).toBe('');
     const keys = response.body.data.definitions.map((definition: { key: string }) => definition.key);
     expect(keys).toContain('quiz_default_language');
+    expect(keys).toContain('trail_personal_generation_enabled');
     expect(keys).not.toContain('jwt_secret');
     expect(JSON.stringify(response.body)).not.toContain('AZURE_STORAGE_CONNECTION_STRING');
   });
@@ -90,6 +92,7 @@ describe('Admin settings, audit and observation', () => {
           support_contact_email: 'tourism@pangasinan.gov.ph',
           announcement_message: 'Cultural quiz pilot is live.',
           quiz_default_radius_meters: 300,
+          trail_personal_generation_enabled: true,
         },
       });
 
@@ -97,6 +100,7 @@ describe('Admin settings, audit and observation', () => {
     expect(response.body.data.revision).toBe(1);
     expect(response.body.data.values.support_contact_email).toBe('tourism@pangasinan.gov.ph');
     expect(response.body.data.values.quiz_default_radius_meters).toBe(300);
+    expect(response.body.data.values.trail_personal_generation_enabled).toBe(true);
 
     const reloaded = await request(app)
       .get('/api/v1/admin/settings')
@@ -134,9 +138,11 @@ describe('Admin settings, audit and observation', () => {
     expect(entry.revision).toBe(1);
     expect(entry.request_id).toBe('req-settings-test-1');
     expect(entry.reason).toBe('Initial support contact for the pilot.');
-    expect(entry.changed_keys).toEqual(['support_contact_email', 'announcement_message', 'quiz_default_radius_meters']);
+    expect(entry.changed_keys).toEqual(['support_contact_email', 'announcement_message', 'quiz_default_radius_meters', 'trail_personal_generation_enabled']);
     expect(entry.before_values.quiz_default_radius_meters).toBe(200);
     expect(entry.after_values.quiz_default_radius_meters).toBe(300);
+    expect(entry.before_values.trail_personal_generation_enabled).toBe(false);
+    expect(entry.after_values.trail_personal_generation_enabled).toBe(true);
     expect(JSON.stringify(response.body)).not.toContain(env.JWT_SECRET);
   });
 

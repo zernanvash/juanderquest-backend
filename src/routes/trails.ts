@@ -49,12 +49,12 @@ trailsRouter.get('/trails', optionalAuthenticateToken, async (req: AuthRequest, 
       ORDER BY CASE t.tier WHEN 'starter' THEN 1 WHEN 'explorer' THEN 2 WHEN 'signature' THEN 3 WHEN 'legendary' THEN 4 ELSE 5 END,t.title`,[isTest,user?.id??null]);
     let personalGeneration: { free_remaining:number; price_points:number } | null = null;
     if (user) {
-      const [economy, used] = await Promise.all([
-        loadTrailEconomy(pool),
-        pool.query(`SELECT COUNT(*)::int AS count FROM trail_generations WHERE kind='personal' AND requested_by=$1
-          AND created_at >= (date_trunc('week', clock_timestamp() AT TIME ZONE 'Asia/Manila') AT TIME ZONE 'Asia/Manila')`, [user.id]),
-      ]);
-      personalGeneration = { free_remaining: Math.max(0,economy.personalFreePerWeek-Number(used.rows[0]?.count??0)), price_points:economy.personalGenerationPoints };
+      const economy = await loadTrailEconomy(pool);
+      if (economy.personalGenerationEnabled) {
+        const used = await pool.query(`SELECT COUNT(*)::int AS count FROM trail_generations WHERE kind='personal' AND requested_by=$1
+          AND created_at >= (date_trunc('week', clock_timestamp() AT TIME ZONE 'Asia/Manila') AT TIME ZONE 'Asia/Manila')`, [user.id]);
+        personalGeneration = { free_remaining: Math.max(0,economy.personalFreePerWeek-Number(used.rows[0]?.count??0)), price_points:economy.personalGenerationPoints };
+      }
     }
     res.set('Cache-Control',req.user?'private, no-store':'public, max-age=60');
     return res.json({success:true,data:{items:rows.map(row=>lockedTrailShape(row,Boolean(row.is_unlocked))),total:rows.length,personal_generation:personalGeneration}});
@@ -102,10 +102,16 @@ const personalTrailSchema = z.object({
 });
 
 trailsRouter.post('/trails/personal', authenticateToken, personalTrailRateLimiter, async (req: AuthRequest, res: Response) => {
-  const parsed = personalTrailSchema.safeParse(req.body ?? {});
-  if (!parsed.success) return res.status(400).json({ success:false,error:{code:'VALIDATION_ERROR',message:parsed.error.issues[0]?.message ?? 'Invalid personal trail request.'} });
   const pool = getPool();
   if (!pool) return res.status(503).json({ success:false,error:{code:'DATABASE_UNAVAILABLE',message:'Personal trail generation is unavailable.'} });
+  try {
+    const economy = await loadTrailEconomy(pool);
+    if (!economy.personalGenerationEnabled) return res.status(404).json({ success:false,error:{code:'PERSONAL_TRAILS_DISABLED',message:'Traveler-created trails are currently unavailable.'} });
+  } catch {
+    return res.status(503).json({success:false,error:{code:'TRAILS_UNAVAILABLE',message:'Trail settings are unavailable.'}});
+  }
+  const parsed = personalTrailSchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ success:false,error:{code:'VALIDATION_ERROR',message:parsed.error.issues[0]?.message ?? 'Invalid personal trail request.'} });
   try {
     const result = await createPersonalTrail(pool, req.user!.id, req.header('Idempotency-Key') ?? '', parsed.data);
     return res.status(201).json({ success:true,data:result });
