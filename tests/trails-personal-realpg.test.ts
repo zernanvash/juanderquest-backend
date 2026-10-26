@@ -69,10 +69,13 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
     } satisfies Partial<PersonalTrailError>);
     expect(storyWriter).not.toHaveBeenCalled();
 
-    const catalog = await request(app).get('/api/v1/trails').set('Authorization',`Bearer ${token}`);
+    // Keep this API probe on its own actor: the personal-generation limiter is
+    // intentionally shared across tests for a given traveler, and the existing
+    // paid-generation test uses all three hourly slots for its free/replay/paid path.
+    const catalog = await request(app).get('/api/v1/trails').set('Authorization',`Bearer ${validatorToken}`);
     expect(catalog.status).toBe(200);
     expect(catalog.body.data.personal_generation).toBeNull();
-    const response = await request(app).post('/api/v1/trails/personal').set('Authorization',`Bearer ${token}`)
+    const response = await request(app).post('/api/v1/trails/personal').set('Authorization',`Bearer ${validatorToken}`)
       .set('Idempotency-Key','personal-disabled-api-1').send({text:'a relaxed beach trip'});
     expect(response.status).toBe(404);
     expect(response.body.error.code).toBe('PERSONAL_TRAILS_DISABLED');
