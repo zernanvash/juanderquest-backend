@@ -77,7 +77,14 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
     expect(second.status).toBe(201);
     expect(second.body.data.charged_points).toBe(100);
     expect(Number((await fixture.pool.query('SELECT demo_points FROM users WHERE id=$1',[userId])).rows[0].demo_points)).toBe(900);
-    expect((await fixture.pool.query(`SELECT COUNT(*)::int AS count FROM governance_ledger WHERE type='trail_generation_debit' AND reference_type='personal_generation'`,[])).rows[0].count).toBe(1);
+    const ledgerPair = await fixture.pool.query(`SELECT COUNT(*)::int AS rows,
+      COUNT(*) FILTER (WHERE account=$1 AND amount_mjdq<0)::int AS traveler_debits,
+      SUM(amount_mjdq)::bigint AS balanced
+      FROM governance_ledger WHERE type='trail_generation_debit' AND reference_type='personal_generation' AND reference_id=$2`,
+      [userId, second.body.data.trail.id]);
+    expect(Number(ledgerPair.rows[0].rows)).toBe(2);
+    expect(Number(ledgerPair.rows[0].traveler_debits)).toBe(1);
+    expect(BigInt(ledgerPair.rows[0].balanced)).toBe(0n);
   }, 45_000);
 
   test('insufficient points rolls back the generated private trail and all debit ledger entries', async () => {
