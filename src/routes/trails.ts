@@ -371,6 +371,7 @@ trailsRouter.patch('/admin/trails/:id', async (req: AuthRequest, res: Response) 
     }
 
     const tier = body.tier ?? trail.tier;
+    const economy = await loadTrailEconomy(client);
     const oldRule = typeof trail.unlock_rule === 'string' ? JSON.parse(trail.unlock_rule) : trail.unlock_rule ?? {};
     let unlockRule = oldRule;
     if (body.price_points !== undefined && !['signature', 'legendary'].includes(tier)) {
@@ -379,11 +380,12 @@ trailsRouter.patch('/admin/trails/:id', async (req: AuthRequest, res: Response) 
     }
     if (body.tier !== undefined || body.price_points !== undefined) {
       if (tier === 'starter') unlockRule = { type: 'free' };
-      else if (tier === 'explorer') unlockRule = { type: 'level', min_level: 5 };
+      else if (tier === 'explorer') unlockRule = { type: 'level', min_level: economy.explorerMinLevel };
       else {
         const changedTier = body.tier !== undefined && body.tier !== trail.tier;
         const existingPrice = changedTier ? undefined : oldRule.price_points;
-        unlockRule = { type: 'points', price_points: body.price_points ?? existingPrice ?? (tier === 'legendary' ? 500 : 300) };
+        const configuredPrice = tier === 'legendary' ? economy.legendaryUnlockPoints : economy.signatureUnlockPoints;
+        unlockRule = { type: 'points', price_points: body.price_points ?? existingPrice ?? configuredPrice };
       }
     }
 

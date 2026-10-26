@@ -114,7 +114,7 @@ export async function computeWeeklyScores(
   const sql = `
     SELECT l.account AS user_id,
            (SUM(l.amount_mjdq) / $4)::int AS score,
-           COUNT(DISTINCT l.reference_id)::int AS quests
+           COUNT(DISTINCT CASE WHEN l.type IN ('quest_reward_credit', 'quest_reward_paid') THEN l.reference_id END)::int AS quests
       FROM governance_ledger l
       JOIN users u ON u.id = l.account AND u.is_test = $3 AND u.role <> 'admin'
      WHERE l.type IN ('quest_reward_credit', 'quest_reward_paid', 'trail_reward_credit')

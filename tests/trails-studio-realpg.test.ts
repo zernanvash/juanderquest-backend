@@ -56,6 +56,8 @@ describeRealPg('Trail Studio API (isolated real PostgreSQL schema)', () => {
   });
 
   test('admin review queue and PATCH atomically edit story, stop narration, tier, price and availability', async () => {
+    await fixture.pool.query(`UPDATE system_settings_document SET values=COALESCE(values,'{}'::jsonb) ||
+      '{"trail_explorer_min_level":9,"trail_legendary_unlock_points":777}'::jsonb WHERE id=1`);
     const queue = await request(app).get('/api/v1/admin/trails/review').set('Authorization', `Bearer ${adminToken}`);
     expect(queue.status).toBe(200);
     expect(queue.body.data.map((trail: any) => trail.id)).toContain(trailId);
@@ -82,10 +84,19 @@ describeRealPg('Trail Studio API (isolated real PostgreSQL schema)', () => {
     expect(response.body.data.available_from).toEqual(availableFrom);
     expect(response.body.data.available_until).toEqual(availableUntil);
 
+    const explorer = await request(app).patch(`/api/v1/admin/trails/${trailId}`)
+      .set('Authorization', `Bearer ${adminToken}`).send({ tier:'explorer' });
+    expect(explorer.status).toBe(200);
+    expect(explorer.body.data.unlock_rule).toEqual({ type:'level', min_level:9 });
+    const configuredLegendary = await request(app).patch(`/api/v1/admin/trails/${trailId}`)
+      .set('Authorization', `Bearer ${adminToken}`).send({ tier:'legendary' });
+    expect(configuredLegendary.status).toBe(200);
+    expect(configuredLegendary.body.data.unlock_rule).toEqual({ type:'points', price_points:777 });
+
     const row = await fixture.pool.query(`SELECT t.title,t.tagline,t.tier,t.unlock_rule,t.available_from,t.available_until,t.version,s.narration
       FROM trails t JOIN trail_stops s ON s.trail_id=t.id WHERE t.id=$1`, [trailId]);
     expect(row.rows[0]).toMatchObject({ title: 'Updated Trail Story', tier: 'legendary', narration: 'A reviewed and accurate narration.' });
-    expect(Number(row.rows[0].version)).toBe(2);
+    expect(Number(row.rows[0].version)).toBe(4);
   });
 
   test('approximate legs need explicit publish confirmation and generation history is available', async () => {

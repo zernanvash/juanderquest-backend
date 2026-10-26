@@ -29,10 +29,12 @@ describeRealPg('Plan 44 real PostgreSQL acceptance (isolated reliability schema)
       }
       const migration = readFileSync(join(process.cwd(),'migrations','055_trail_engine.sql'),'utf8');
       await instance.pool.query(migration);
-      const first = await instance.pool.query(`SELECT t.id,t.status,t.tier,t.source,ts.position,ts.spot_id,ts.dwell_min
+      const first = await instance.pool.query(`SELECT t.id,t.status,t.tier,t.source,t.total_minutes,t.total_km,
+        ts.position,ts.spot_id,ts.dwell_min,ts.arrive_offset_min,ts.leg_minutes,ts.leg_km
         FROM trails t LEFT JOIN trail_stops ts ON ts.trail_id=t.id WHERE t.id=ANY($1::text[]) ORDER BY t.id,ts.position`, [curatedIds]);
       await instance.pool.query(migration);
-      const second = await instance.pool.query(`SELECT t.id,t.status,t.tier,t.source,ts.position,ts.spot_id,ts.dwell_min
+      const second = await instance.pool.query(`SELECT t.id,t.status,t.tier,t.source,t.total_minutes,t.total_km,
+        ts.position,ts.spot_id,ts.dwell_min,ts.arrive_offset_min,ts.leg_minutes,ts.leg_km
         FROM trails t LEFT JOIN trail_stops ts ON ts.trail_id=t.id WHERE t.id=ANY($1::text[]) ORDER BY t.id,ts.position`, [curatedIds]);
       expect(first.rows).toEqual(second.rows);
       expect(new Set(second.rows.map(r=>r.id))).toEqual(new Set(curatedIds));
@@ -40,6 +42,10 @@ describeRealPg('Plan 44 real PostgreSQL acceptance (isolated reliability schema)
         const route = second.rows.filter(r=>r.id===id);
         expect(route[0]).toMatchObject({status:'published',tier:'starter',source:'curated',position:1,dwell_min:45});
         expect(route.map(r=>Number(r.position))).toEqual(route.map((_r,i)=>i+1));
+        expect(Number(route[0].total_minutes)).toBeGreaterThanOrEqual(route.length * 45);
+        expect(route.every(r => Number(r.arrive_offset_min) >= 0 && Number(r.leg_minutes) >= 0 && Number(r.leg_km) >= 0)).toBe(true);
+        expect(Number(route[0].total_minutes)).not.toBe(1);
+        expect(Number(route[0].total_km)).toBeCloseTo(route.reduce((sum, row) => sum + Number(row.leg_km), 0), 1);
       }
     }
   }, 120_000);

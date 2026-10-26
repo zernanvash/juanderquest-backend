@@ -160,16 +160,17 @@ describe('Plan 44 trail engine phase 0–2', () => {
     await expect(ensureTravelTimeMatrix({query:cachedQuery} as any,'auto',Array.from({length:61},(_,i)=>({id:String(i),lat:16,lng:120})))).rejects.toThrow('limited to 60');
   });
 
-  test('generation reports NO_FEASIBLE_TRAIL and rolls back every inserted row on mid-transaction failure', async () => {
+  test('generation reports NO_FEASIBLE_TRAIL before opening a persistence transaction', async () => {
     const client={query:jest.fn().mockImplementation(async (sql:string) => {
       if(sql==='BEGIN'||sql==='ROLLBACK'||sql==='COMMIT')return {rows:[]};
       if(sql.includes('FROM spots'))return {rows:[]};
       if(sql.includes('SELECT digest')||sql.includes('travel_time_matrix'))return {rows:[]};
       throw new Error('unexpected query');
     }),release:jest.fn()};
-    const pool={connect:jest.fn().mockResolvedValue(client)};
+    const pool={connect:jest.fn().mockResolvedValue(client),query:jest.fn().mockResolvedValue({rows:[]})};
     await expect(generateTrail(pool as any,{theme:'empty'})).rejects.toBeInstanceOf(TrailGenerationError);
-    expect(client.query).toHaveBeenCalledWith('ROLLBACK');
+    expect(client.query).not.toHaveBeenCalledWith('BEGIN');
+    expect(client.query).not.toHaveBeenCalledWith('ROLLBACK');
   });
 
   test('every trail administration endpoint requires authentication before reaching storage', async () => {

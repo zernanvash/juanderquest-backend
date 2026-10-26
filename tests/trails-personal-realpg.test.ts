@@ -5,6 +5,8 @@ import { env } from '../src/config/env.js';
 import { createTestDb } from '../src/db/testHarness.js';
 import { setPool } from '../src/db/pool.js';
 import { db } from '../src/db/index.js';
+import { createPersonalTrail } from '../src/trails/personal.js';
+import { fundingCommand } from '../src/funding/transaction.js';
 
 const describeRealPg = process.env.JDQ_REAL_PG_URL ? describe : describe.skip;
 
@@ -25,6 +27,8 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
       VALUES('trail-personal-validator','trail-personal-validator','Validation Pilot','personal-validator@example.test','user',1000,FALSE)`);
     await fixture.pool.query(`INSERT INTO users(id,seed_id,display_name,email,role,demo_points,is_test)
       VALUES('trail-personal-poor','trail-personal-poor','Low Balance Pilot','personal-poor@example.test','user',50,FALSE)`);
+    await fixture.pool.query(`INSERT INTO users(id,seed_id,display_name,email,role,demo_points,is_test)
+      VALUES('trail-personal-transfer','trail-personal-transfer','Transfer Pilot','personal-transfer@example.test','user',100,FALSE)`);
     await fixture.pool.query(`INSERT INTO trail_generations(id,kind,requested_by,input,constraints,solver,solver_ms,objective,result)
       VALUES('trail-personal-prior','personal','trail-personal-poor','{}'::jsonb,'{}'::jsonb,'local',0,0,'{}'::jsonb)`);
     await fixture.pool.query(`INSERT INTO spots(id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,source_type,source_name,status,is_test)
@@ -73,7 +77,7 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
     expect(second.status).toBe(201);
     expect(second.body.data.charged_points).toBe(100);
     expect(Number((await fixture.pool.query('SELECT demo_points FROM users WHERE id=$1',[userId])).rows[0].demo_points)).toBe(900);
-    expect((await fixture.pool.query(`SELECT COUNT(*)::int AS count FROM governance_ledger WHERE type='trail_unlock_debit' AND reference_type='personal_generation'`,[])).rows[0].count).toBe(2);
+    expect((await fixture.pool.query(`SELECT COUNT(*)::int AS count FROM governance_ledger WHERE type='trail_generation_debit' AND reference_type='personal_generation'`,[])).rows[0].count).toBe(1);
   }, 45_000);
 
   test('insufficient points rolls back the generated private trail and all debit ledger entries', async () => {
@@ -83,6 +87,46 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
     expect(response.body.error.code).toBe('INSUFFICIENT_POINTS');
     expect((await fixture.pool.query("SELECT 1 FROM trails WHERE owner_user_id='trail-personal-poor'")).rowCount).toBe(0);
     expect((await fixture.pool.query("SELECT 1 FROM governance_ledger WHERE reference_type='personal_generation' AND actor_id='trail-personal-poor'")).rowCount).toBe(0);
+  }, 45_000);
+
+  test('another traveler transfer proceeds while personal generation is waiting on its matrix provider', async () => {
+    await fixture.pool.query(`DELETE FROM travel_time_matrix WHERE from_spot IN (SELECT id FROM spots WHERE municipality='Bolinao')
+      OR to_spot IN (SELECT id FROM spots WHERE municipality='Bolinao')`);
+    await fixture.pool.query(`INSERT INTO points_accounts(id,kind,is_test,balance_points)
+      VALUES('personal-transfer-sink','treasury',FALSE,0) ON CONFLICT(id) DO NOTHING`);
+    let enterMatrix!: () => void;
+    let releaseMatrix!: () => void;
+    const matrixStarted = new Promise<void>(resolve => { enterMatrix = resolve; });
+    const matrixGate = new Promise<void>(resolve => { releaseMatrix = resolve; });
+    const generation = createPersonalTrail(fixture.pool, userId, 'personal-slow-matrix-1', {
+      themes:['beach','heritage'], municipalities:['Bolinao'], budget_min:240,
+    }, { matrixFetch: async (_input, init) => {
+      enterMatrix();
+      await matrixGate;
+      const body = JSON.parse(String(init?.body)) as { sources: unknown[]; targets: unknown[] };
+      return new Response(JSON.stringify({ sources_to_targets: body.sources.map((_source, i) => body.targets.map((_target, j) => ({
+        time: i === j ? 0 : 60, distance: i === j ? 0 : 0.1,
+      }))) }), { status:200 });
+    } });
+    try {
+      await matrixStarted;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const transferCompleted = await Promise.race([
+        fundingCommand(fixture.pool, 'trail-personal-transfer', 'review_lock_probe', 'review-lock-probe-1', {}, async tx => {
+          await tx.transfer({ from:{id:'trail-personal-transfer',kind:'traveler',userId:'trail-personal-transfer'},
+            to:{id:'personal-transfer-sink',kind:'treasury'}, points:1, type:'review_probe', referenceType:'test',
+            referenceId:'personal-generation-lock-probe', actorId:'trail-personal-transfer' });
+          return { transferred:true };
+        }).then(() => true),
+        new Promise<boolean>(resolve => { timeout = setTimeout(() => resolve(false), 1500); }),
+      ]);
+      if (timeout) clearTimeout(timeout);
+      expect(transferCompleted).toBe(true);
+    } finally {
+      releaseMatrix();
+    }
+    const result = await generation;
+    expect(result.trail.owner_user_id).toBe(userId);
   }, 45_000);
 
   test('validates input and does not allow anonymous generation', async () => {

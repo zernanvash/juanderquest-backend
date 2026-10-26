@@ -120,23 +120,66 @@ CREATE TABLE IF NOT EXISTS ai_cache (
   expires_at TIMESTAMPTZ NOT NULL
 );
 
--- Idempotent upgrade of available curated trails. Production has all four;
--- installations with only the original two retain those and can receive later
--- curated additions through the same INSERT pattern.
+-- Idempotent upgrade of available curated trails. The original curated stops
+-- have no routing matrix yet, so use an explicitly approximate straight-line
+-- estimate at 30 km/h (auto) instead of the misleading 1 min / 1 km sentinel.
+-- Runtime matrix refresh can replace these estimates with Valhalla legs.
+WITH route_points AS (
+  SELECT c.id AS trail_id, cs.order_index, cs.spot_id, s.gps_lat, s.gps_lng,
+    row_number() OVER (PARTITION BY c.id ORDER BY cs.order_index, cs.spot_id) AS position
+  FROM curated_collections c JOIN curated_collection_spots cs ON cs.collection_id=c.id
+  JOIN spots s ON s.id=cs.spot_id
+  WHERE c.is_active=TRUE AND c.category='trail'
+    AND c.id IN ('coastal_wonders_trail','pangasinan_heritage_trail','pangasinan_eco_escapes','pangasinan_culinary_trail')
+    AND s.gps_lat IS NOT NULL AND s.gps_lng IS NOT NULL
+), route_legs AS (
+  SELECT rp.trail_id, rp.position,
+    CASE WHEN prev.spot_id IS NULL THEN 0::double precision ELSE
+      6371 * 2 * asin(sqrt(
+        sin(radians(rp.gps_lat-prev.gps_lat)/2)^2 +
+        cos(radians(prev.gps_lat))*cos(radians(rp.gps_lat))*
+        sin(radians(rp.gps_lng-prev.gps_lng)/2)^2)) END AS leg_km
+  FROM route_points rp LEFT JOIN route_points prev
+    ON prev.trail_id=rp.trail_id AND prev.position=rp.position-1
+), route_totals AS (
+  SELECT trail_id, COUNT(*)::int AS stop_count,
+    SUM(leg_km)::numeric(8,2) AS total_km,
+    (SUM(CEIL(leg_km / 30 * 60)) + COUNT(*) * 45)::int AS total_minutes
+  FROM route_legs GROUP BY trail_id
+)
 INSERT INTO trails (id, slug, title, tagline, tier, theme, municipalities, unlock_rule, costing,
   total_minutes, total_km, story, status, source, is_test, created_at)
 SELECT c.id, c.id, left(c.title,80), '', 'starter', COALESCE(c.category,'mixed'), '{}',
-  '{"type":"free"}'::jsonb, 'auto', 1, 1, jsonb_build_object('source','curated','intro',c.description),
+  '{"type":"free"}'::jsonb, 'auto', totals.total_minutes, totals.total_km, jsonb_build_object('source','curated','intro',c.description,'estimate','straight-line at 30 km/h'),
   'published', 'curated', FALSE, c.created_at
-FROM curated_collections c WHERE c.is_active=TRUE AND c.category='trail'
+FROM curated_collections c JOIN route_totals totals ON totals.trail_id=c.id WHERE c.is_active=TRUE AND c.category='trail'
   AND c.id IN ('coastal_wonders_trail','pangasinan_heritage_trail','pangasinan_eco_escapes','pangasinan_culinary_trail')
 ON CONFLICT (id) DO NOTHING;
 
+WITH route_points AS (
+  SELECT c.id AS trail_id, cs.order_index, cs.spot_id, s.gps_lat, s.gps_lng,
+    row_number() OVER (PARTITION BY c.id ORDER BY cs.order_index, cs.spot_id) AS position
+  FROM curated_collections c JOIN curated_collection_spots cs ON cs.collection_id=c.id
+  JOIN spots s ON s.id=cs.spot_id
+  WHERE c.is_active=TRUE AND c.category='trail'
+    AND c.id IN ('coastal_wonders_trail','pangasinan_heritage_trail','pangasinan_eco_escapes','pangasinan_culinary_trail')
+    AND s.gps_lat IS NOT NULL AND s.gps_lng IS NOT NULL
+), route_legs AS (
+  SELECT rp.*,
+    CASE WHEN prev.spot_id IS NULL THEN 0::double precision ELSE
+      6371 * 2 * asin(sqrt(
+        sin(radians(rp.gps_lat-prev.gps_lat)/2)^2 +
+        cos(radians(prev.gps_lat))*cos(radians(rp.gps_lat))*
+        sin(radians(rp.gps_lng-prev.gps_lng)/2)^2)) END AS leg_km
+  FROM route_points rp LEFT JOIN route_points prev
+    ON prev.trail_id=rp.trail_id AND prev.position=rp.position-1
+), stop_metrics AS (
+  SELECT *, CEIL(leg_km / 30 * 60)::int AS leg_minutes,
+    (SUM(CEIL(leg_km / 30 * 60)) OVER (PARTITION BY trail_id ORDER BY position) + (position-1)*45)::int AS arrive_offset_min
+  FROM route_legs
+)
 INSERT INTO trail_stops (trail_id, position, spot_id, arrive_offset_min, dwell_min, leg_minutes, leg_km, narration)
-SELECT c.id, (row_number() OVER (PARTITION BY c.id ORDER BY cs.order_index, cs.spot_id))::smallint,
-  cs.spot_id, 0, 45, 0, 0, ''
-FROM curated_collections c JOIN curated_collection_spots cs ON cs.collection_id=c.id
-JOIN trails t ON t.id=c.id AND t.source='curated'
-WHERE c.is_active=TRUE AND c.category='trail'
-  AND c.id IN ('coastal_wonders_trail','pangasinan_heritage_trail','pangasinan_eco_escapes','pangasinan_culinary_trail')
+SELECT metrics.trail_id, metrics.position::smallint, metrics.spot_id, metrics.arrive_offset_min,
+  45, metrics.leg_minutes, metrics.leg_km, ''
+FROM stop_metrics metrics JOIN trails t ON t.id=metrics.trail_id AND t.source='curated'
 ON CONFLICT (trail_id, position) DO NOTHING;

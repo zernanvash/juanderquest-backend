@@ -13,7 +13,7 @@ export interface GenerateTrailInput {
   maxLegMin?: number; maxPerCategory?: number; mustInclude?: string[]; exclude?: string[]; costing?: TrailCosting;
   isTest?: boolean; requestedBy?: string; status?: 'draft'|'pending_review'|'published';
   availableFrom?: Date | null; availableUntil?: Date | null; weekId?: string; candidateKey?: string;
-  ownerUserId?: string; transactionClient?: PoolClient;
+  ownerUserId?: string;
   allowedMunicipalities?: string[];
   areaId?: string;
   /** Injectable only for deterministic tests; HTTP routes never accept a fetcher. */
@@ -33,11 +33,27 @@ export class TrailGenerationError extends Error {
 const MAX_CANDIDATE_SPOTS = 60;
 const DEFAULT_START_RADIUS_KM = 60;
 
-export async function generateTrail(pool: Pool, input: GenerateTrailInput) {
-  const ownsClient = !input.transactionClient;
-  const client = input.transactionClient ?? await pool.connect();
+export interface PreparedTrail {
+  trailId: string;
+  slug: string;
+  input: GenerateTrailInput;
+  tier: NonNullable<GenerateTrailInput['tier']>;
+  costing: TrailCosting;
+  municipalities: string[];
+  solution: ReturnType<typeof solveLocal>;
+  problem: TrailProblem;
+  matrix: ReturnType<typeof ensureTravelTimeMatrix> extends Promise<infer T> ? T : never;
+  story: Awaited<ReturnType<typeof writeTrailStory>>;
+  duration: number;
+}
+
+/** Candidate loading, routing and story generation are deliberately outside any funding transaction. */
+export async function prepareTrail(pool: Pool, input: GenerateTrailInput, options: {
+  storyWriter?: typeof writeTrailStory;
+} = {}): Promise<PreparedTrail> {
+  const client = await pool.connect();
+  let released = false;
   try {
-    if (ownsClient) await client.query('BEGIN');
     const allowedMunicipalities = input.allowedMunicipalities?.map(value => value.trim().toLocaleLowerCase()).filter(Boolean) ?? [];
     let center = typeof input.startNode === 'object' ? input.startNode : undefined;
     if (!input.areaId && !allowedMunicipalities.length && typeof input.startNode === 'string') {
@@ -73,7 +89,9 @@ export async function generateTrail(pool: Pool, input: GenerateTrailInput) {
     ];
     const costing = input.costing ?? 'auto';
     if (inputs.length > MAX_CANDIDATE_SPOTS) throw new Error('Trail candidate selection exceeded its configured limit.');
-    const matrixResult = await ensureTravelTimeMatrix(client, costing, inputs.map(spot => ({ id: spot.spotId, lat: spot.lat!, lng: spot.lng! })), {
+    client.release();
+    released = true;
+    const matrixResult = await ensureTravelTimeMatrix(pool, costing, inputs.map(spot => ({ id: spot.spotId, lat: spot.lat!, lng: spot.lng! })), {
       fetchImpl: input.matrixFetch,
     });
     const matrix = matrixResult.lookup;
@@ -109,20 +127,27 @@ export async function generateTrail(pool: Pool, input: GenerateTrailInput) {
       const node = nodes.find(item => item.spotId === stop.spotId)!;
       return { spot_id: node.spotId, name: node.title ?? node.spotId, municipality: node.municipality ?? 'Pangasinan', category: node.category, description: node.description };
     });
-    const storyResult = await writeTrailStory(client, {
+    const storyResult = await (options.storyWriter ?? writeTrailStory)(pool, {
       theme: input.theme ?? signalRequest.themes?.[0] ?? 'Pangasinan discoveries',
       municipalities,
       total_minutes: solution.totalMin,
       stops: selectedStops,
       known_catalog_places: nodes.map(node => node.title ?? node.spotId),
     }, { nodes, solution });
-    const story = storyResult.value;
     const trailId = `trl_${randomUUID()}`;
     const slugBase = (input.theme ?? 'pangasinan-trail').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'pangasinan-trail';
     const slug = `${slugBase}-${randomUUID().slice(0, 8)}`;
     const duration = Math.max(1, solution.totalMin);
-    const economy = await loadTrailEconomy(client);
     const tier = input.tier ?? 'starter';
+    return { trailId, slug, input, tier, costing, municipalities, solution, problem, matrix: matrixResult, story: storyResult, duration };
+  } finally { if (!released) client.release(); }
+}
+
+/** Persist a prepared trail using the caller's transaction. This function makes no network calls. */
+export async function persistTrail(client: PoolClient, prepared: PreparedTrail) {
+    const { trailId, slug, input, tier, costing, municipalities, solution, problem, matrix: matrixResult, story: storyResult, duration } = prepared;
+    const story = storyResult.value;
+    const economy = await loadTrailEconomy(client);
     const unlockRule = tier === 'personal' ? { type: 'owner' }
       : tier === 'starter' ? { type: 'free' }
       : tier === 'explorer' ? { type: 'level', min_level: economy.explorerMinLevel }
@@ -136,23 +161,32 @@ export async function generateTrail(pool: Pool, input: GenerateTrailInput) {
       Boolean(input.isTest), input.availableFrom ?? null, input.availableUntil ?? null]);
     for (let i = 0; i < solution.stops.length; i++) {
       const stop = solution.stops[i];
-      const leg = i === 0 ? { minutes: 0, km: 0 } : matrix(solution.stops[i - 1].spotId, stop.spotId) ?? { minutes: 0, km: 0 };
+      const leg = i === 0 ? { minutes: 0, km: 0 } : matrixResult.lookup(solution.stops[i - 1].spotId, stop.spotId) ?? { minutes: 0, km: 0 };
       await client.query(`INSERT INTO trail_stops (trail_id,position,spot_id,arrive_offset_min,dwell_min,leg_minutes,leg_km,narration)
-        VALUES ($1,$2,$3,$4,45,$5,$6,$7)`, [trailId, i + 1, stop.spotId, Math.max(0, stop.arriveMin - base.dayStartMin), Math.round(leg.minutes), leg.km, story.stops[i]?.narration ?? '']);
+        VALUES ($1,$2,$3,$4,45,$5,$6,$7)`, [trailId, i + 1, stop.spotId, Math.max(0, stop.arriveMin - problem.dayStartMin), Math.round(leg.minutes), leg.km, story.stops[i]?.narration ?? '']);
     }
     const generationId = randomUUID();
     await client.query(`INSERT INTO trail_generations (id,kind,requested_by,input,constraints,solver,solver_ms,objective,result,ai_model,ai_used,ai_fallback_reason)
       VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,'local',$6,$7,$8::jsonb,$9,$10,$11)`, [generationId, input.kind ?? 'admin', input.requestedBy ?? null,
-      JSON.stringify({ theme: input.theme ?? null, costing, seed: problem.seed, area_id: input.areaId ?? null, candidate_count: inputs.length,
+      JSON.stringify({ theme: input.theme ?? null, costing, seed: problem.seed, area_id: input.areaId ?? null, candidate_count: problem.nodes.length,
         matrix_pairs: matrixResult.requested, ...(input.weekId ? { week_id: input.weekId } : {}), ...(input.candidateKey ? { candidate_key: input.candidateKey } : {}) }), JSON.stringify(problemConstraints(problem)), Math.max(0, Math.round(solution.ms)), solution.objective,
       JSON.stringify({ trail_id: trailId, stops: solution.stops, total_minutes: duration, total_km: solution.totalKm }), storyResult.model, storyResult.aiUsed, storyResult.fallbackReason]);
     await client.query('UPDATE trails SET generation_id=$1 WHERE id=$2', [generationId, trailId]);
-    if (ownsClient) await client.query('COMMIT');
     return { trail: { ...trailResult.rows[0], generation_id: generationId }, generation: { id: generationId, solver_ms: Math.max(0, Math.round(solution.ms)), objective: solution.objective, solver: 'local', ai_used: storyResult.aiUsed, ai_model: storyResult.model, ai_fallback_reason: storyResult.fallbackReason }, solution };
+}
+
+export async function generateTrail(pool: Pool, input: GenerateTrailInput) {
+  const prepared = await prepareTrail(pool, input);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await persistTrail(client, prepared);
+    await client.query('COMMIT');
+    return result;
   } catch (error) {
-    if (ownsClient) await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => undefined);
     throw error;
-  } finally { if (ownsClient) client.release(); }
+  } finally { client.release(); }
 }
 
 function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {

@@ -188,7 +188,8 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
       const withinWeek = new Date('2026-10-14T08:00:00.000Z');
       const outsideWeek = new Date('2026-10-01T08:00:00.000Z');
 
-      // Alpha: quest rewards plus a 200-point completed trail.
+      // Alpha: two quest rewards plus a 200-point trail reward. Trail points
+      // contribute to the score, but a trail is not counted as a quest.
       await testDb.pool.query(
         `INSERT INTO governance_ledger (id, transaction_group_id, type, account, amount_mjdq, reference_type, reference_id, actor_id, created_at)
          VALUES ('led-a1', 'txg-1', 'quest_reward_credit', $1, 1000000, 'submission', 'sub-a1', $1, $2),
@@ -226,13 +227,13 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
       );
     });
 
-    it('sums reward credits and divides by MJDQ_PER_JDQ, excluding admins and dates outside the week', async () => {
+    it('sums quest and trail reward credits but counts only quests in the quest tiebreaker', async () => {
       const scores = await computeWeeklyScores(testDb.pool, ws, we, false);
 
       const alphaScore = scores.find((s) => s.user_id === userAlpha.id);
       expect(alphaScore).toBeDefined();
       expect(alphaScore?.score).toBe(1700);
-      expect(alphaScore?.quests).toBe(3);
+      expect(alphaScore?.quests).toBe(2);
 
       const betaScore = scores.find((s) => s.user_id === userBeta.id);
       expect(betaScore?.score).toBe(800);
