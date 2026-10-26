@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { performance } from 'node:perf_hooks';
 import type { Pool, PoolClient } from 'pg';
-import { computeSpotSignals, loadTrailSignalInputs } from './signals.js';
+import { computeSpotSignals, hydrateTrailCandidates, loadTrailSignalInputs } from './signals.js';
 import { ensureTravelTimeMatrix, type MatrixFetch } from './matrix.js';
 import { solveLocal } from './solver/local.js';
 import { writeTrailStory } from './ai/service.js';
@@ -51,7 +51,7 @@ export interface PreparedTrail {
 export interface TrailGenerationOptions {
   storyWriter?: typeof writeTrailStory;
   /** Internal profiling hook; never populated from an HTTP request. */
-  onTiming?: (stage: 'candidate_load' | 'scoring' | 'ranking' | 'matrix' | 'solver' | 'story' | 'persistence', ms: number) => void;
+  onTiming?: (stage: 'candidate_load' | 'scoring' | 'ranking' | 'candidate_details' | 'matrix' | 'solver' | 'story' | 'persistence', ms: number) => void;
 }
 
 /** Candidate loading, routing and story generation are deliberately outside any funding transaction. */
@@ -68,12 +68,16 @@ export async function prepareTrail(pool: Pool, input: GenerateTrailInput, option
       center = { lat: Number(start.rows[0].gps_lat), lng: Number(start.rows[0].gps_lng) };
     }
     const radiusCenter = !input.areaId && !allowedMunicipalities.length ? center : undefined;
+    // Radius filtering still needs all coordinates. Area/town generation can
+    // defer display and routing metadata until the top 60 have been selected.
+    const compactCandidates = !radiusCenter;
     const candidateStarted = performance.now();
     const loadedInputs = await loadTrailSignalInputs(client, undefined, {
       areaId: input.areaId,
       center: radiusCenter,
       radiusKm: DEFAULT_START_RADIUS_KM,
       municipalities: allowedMunicipalities,
+      compact: compactCandidates,
     });
     options.onTiming?.('candidate_load', performance.now() - candidateStarted);
     const inRadius = radiusCenter
@@ -98,6 +102,9 @@ export async function prepareTrail(pool: Pool, input: GenerateTrailInput, option
       ...ranked.filter(spot => !selectedIds.has(spot.spotId)).slice(0, availableSlots),
     ];
     options.onTiming?.('ranking', performance.now() - rankingStarted);
+    const detailsStarted = performance.now();
+    if (compactCandidates) await hydrateTrailCandidates(client, inputs);
+    options.onTiming?.('candidate_details', performance.now() - detailsStarted);
     const costing = input.costing ?? 'auto';
     if (inputs.length > MAX_CANDIDATE_SPOTS) throw new Error('Trail candidate selection exceeded its configured limit.');
     client.release();

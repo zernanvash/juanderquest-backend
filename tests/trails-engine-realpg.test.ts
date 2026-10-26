@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { createTestDb } from '../src/db/testHarness.js';
 import { generateTrail, TrailGenerationError } from '../src/trails/generate.js';
 import { applyMigrations, MIGRATIONS } from '../src/db/migrations.js';
+import { computeSpotSignals, hydrateTrailCandidates, loadTrailSignalInputs } from '../src/trails/signals.js';
 
 const describeRealPg = process.env.JDQ_REAL_PG_URL ? describe : describe.skip;
 const curatedIds = ['coastal_wonders_trail','pangasinan_heritage_trail','pangasinan_eco_escapes','pangasinan_culinary_trail'];
@@ -83,6 +84,21 @@ describeRealPg('Plan 44 real PostgreSQL acceptance (isolated reliability schema)
     );
     expect(laterAfter).toEqual(before);
   }, 120_000);
+
+  test('compact candidate scoring matches full rows and hydrates the selected metadata without reordering', async () => {
+    const spots = await instance.pool.query(`SELECT id FROM spots WHERE status='published'
+      AND COALESCE(is_test,FALSE)=FALSE AND gps_lat IS NOT NULL AND gps_lng IS NOT NULL ORDER BY id LIMIT 4`);
+    const spotIds = spots.rows.map(row => String(row.id));
+    expect(spotIds.length).toBeGreaterThan(0);
+    const full = await loadTrailSignalInputs(instance.pool, undefined, { spotIds });
+    const compact = await loadTrailSignalInputs(instance.pool, undefined, { spotIds, compact: true });
+    const request = { themes: ['beach'], goodFor: ['family'], trendThemes: [{ categories: ['nature'], weight: 0.5 }] };
+    expect(computeSpotSignals(compact, request)).toEqual(computeSpotSignals(full, request));
+    expect(compact.every(spot => spot.title === undefined && spot.lat === undefined && spot.bestTime === undefined)).toBe(true);
+    compact.reverse();
+    await hydrateTrailCandidates(instance.pool, compact);
+    expect(compact).toEqual([...full].reverse());
+  });
 
   test('generation has NO_FEASIBLE_TRAIL and a forced mid-write failure leaves all three tables unchanged', async () => {
     {

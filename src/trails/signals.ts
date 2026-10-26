@@ -29,6 +29,8 @@ export interface TrailSignalScope {
   radiusKm?: number;
   municipalities?: string[];
   spotIds?: string[];
+  /** Omit display/route metadata while scoring a large candidate set. */
+  compact?: boolean;
 }
 
 export async function loadTrailSignalInputs(
@@ -102,9 +104,13 @@ export async function loadTrailSignalInputs(
       FROM trail_checkins tc JOIN trail_stops ts ON ts.trail_id=tc.trail_id AND ts.position=tc.position
       WHERE $1::text IS NOT NULL AND tc.user_id=$1
     )
-    SELECT s.id AS spot_id, s.name, s.category, COALESCE(s.good_for, '[]'::jsonb) AS good_for,
-      COALESCE(s.best_time, '[]'::jsonb) AS best_time, s.description, s.source_type,
-      s.gps_lat, s.gps_lng, s.municipality,
+    SELECT s.id AS spot_id, CASE WHEN $9::boolean THEN NULL ELSE s.name END AS name,
+      s.category, COALESCE(s.good_for, '[]'::jsonb) AS good_for,
+      CASE WHEN $9::boolean THEN NULL ELSE COALESCE(s.best_time, '[]'::jsonb) END AS best_time,
+      s.description, s.source_type,
+      CASE WHEN $9::boolean THEN NULL ELSE s.gps_lat END AS gps_lat,
+      CASE WHEN $9::boolean THEN NULL ELSE s.gps_lng END AS gps_lng,
+      CASE WHEN $9::boolean THEN NULL ELSE s.municipality END AS municipality,
       COALESCE(pc.photo_count,0) AS approved_photo_count,
       COALESCE(ic.saves_30d,0) AS saves_30d,
       COALESCE(ic.interactions_30d,0) AS interactions_30d,
@@ -126,13 +132,31 @@ export async function loadTrailSignalInputs(
       AND ($7::text[] IS NULL OR lower(s.municipality)=ANY($7::text[]))
       AND ($8::text[] IS NULL OR s.id=ANY($8::text[]))
     ORDER BY s.id
-  `, [userId ?? null, scope.areaId ?? null, center?.lat ?? null, center?.lng ?? null, latDelta, lngDelta, municipalities, spotIds]);
+  `, [userId ?? null, scope.areaId ?? null, center?.lat ?? null, center?.lng ?? null, latDelta, lngDelta, municipalities, spotIds, Boolean(scope.compact)]);
   return result.rows.map(r => ({
-    spotId: String(r.spot_id), title: String(r.name), category: String(r.category), goodFor: asStringArray(r.good_for), bestTime: asStringArray(r.best_time),
+    spotId: String(r.spot_id), category: String(r.category), goodFor: asStringArray(r.good_for),
     description: String(r.description ?? ''), sourceType: String(r.source_type ?? ''), approvedPhotoCount: Number(r.approved_photo_count),
     saves30d: Number(r.saves_30d), interactions30d: Number(r.interactions_30d), questCompletions30d: Number(r.completions_30d), priorVisit: Boolean(r.prior_visit),
-    lat: Number(r.gps_lat), lng: Number(r.gps_lng), municipality: String(r.municipality),
+    ...(scope.compact ? {} : {
+      title: String(r.name), bestTime: asStringArray(r.best_time),
+      lat: Number(r.gps_lat), lng: Number(r.gps_lng), municipality: String(r.municipality),
+    }),
   }));
+}
+
+/** Hydrate only the bounded set selected for routing, preserving its score/order. */
+export async function hydrateTrailCandidates(pool: Pool | PoolClient, candidates: SpotSignalInput[]): Promise<void> {
+  if (!candidates.length) return;
+  const result = await pool.query(`SELECT id,name,best_time,gps_lat,gps_lng,municipality FROM spots
+    WHERE id=ANY($1::text[]) AND status='published' AND COALESCE(is_test,FALSE)=FALSE
+      AND gps_lat IS NOT NULL AND gps_lng IS NOT NULL`, [candidates.map(candidate => candidate.spotId)]);
+  const details = new Map(result.rows.map(row => [String(row.id), row]));
+  for (const candidate of candidates) {
+    const row = details.get(candidate.spotId);
+    if (!row) throw new Error('A selected trail candidate is no longer available. Retry generation.');
+    Object.assign(candidate, { title: String(row.name), bestTime: asStringArray(row.best_time),
+      lat: Number(row.gps_lat), lng: Number(row.gps_lng), municipality: String(row.municipality) });
+  }
 }
 
 function asStringArray(value: unknown): string[] {
