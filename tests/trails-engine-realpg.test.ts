@@ -101,7 +101,7 @@ describeRealPg('Plan 44 real PostgreSQL acceptance (isolated reliability schema)
       const allSpotIds = spotRows.map(row => String(row.id));
       await expect(generateTrail(instance.pool,{kind:'admin',theme:'impossible',minStops:12,maxStops:12,budgetMin:60,maxLegMin:15,maxPerCategory:1,exclude:allSpotIds})).rejects.toBeInstanceOf(TrailGenerationError);
       const originalConnect=instance.pool.connect.bind(instance.pool);
-      const proxyPool={connect:async()=>{
+      const proxyPool={query:instance.pool.query.bind(instance.pool),connect:async()=>{
         const client=await originalConnect();
         const query=client.query.bind(client);
         let injected=false;
