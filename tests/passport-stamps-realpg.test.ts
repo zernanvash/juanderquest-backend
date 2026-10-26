@@ -3,8 +3,10 @@ import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { app } from '../src/app.js';
 import { env } from '../src/config/env.js';
+import { db } from '../src/db/index.js';
 import { setPool } from '../src/db/pool.js';
 import { createTestDb, type TestDbInstance } from '../src/db/testHarness.js';
+import { cheer } from '../src/social/interactions.js';
 import {
   StampsError,
   claimDaily,
@@ -23,6 +25,7 @@ import {
 import { hasPerk } from '../src/perks/index.js';
 
 const realPg = process.env.JDQ_REAL_PG_URL ? describe : describe.skip;
+jest.setTimeout(180_000);
 
 const at = (date: string, time = '12:00:00') => new Date(`${date}T${time}+08:00`);
 const id = (label: string) => `${label}-${randomUUID()}`;
@@ -75,6 +78,7 @@ realPg('Plan 61 Phase 1 — passport stamps (real PostgreSQL)', () => {
   beforeAll(async () => {
     fixture = await createTestDb();
     setPool(fixture.pool);
+    db.usersRepo.setPool(fixture.pool);
     spotId = id('spot');
     await fixture.pool.query(
       `INSERT INTO spots(id, slug, name, description, category, subcategory, municipality, address,
@@ -120,6 +124,7 @@ realPg('Plan 61 Phase 1 — passport stamps (real PostgreSQL)', () => {
 
   afterAll(async () => {
     setPool(null);
+    db.usersRepo.setPool(null);
     if (fixture) await fixture.close();
   });
 
@@ -302,6 +307,38 @@ realPg('Plan 61 Phase 1 — passport stamps (real PostgreSQL)', () => {
     }
   });
 
+  it('applies one cap to a daily claim and a mission award together', async () => {
+    const userId = await createUser('cap-sources');
+    const now = at('2026-12-21');
+    const date = '2026-12-21';
+    await assignMission(userId, date, 'check_in');
+    await fixture.pool.query(
+      `UPDATE system_settings_document SET values = values || '{"stamps_weekly_cap": 10}'::jsonb WHERE id = 1`,
+    );
+    try {
+      const claim = await claimDaily(fixture.pool, userId, { now });
+      const mission = await recordMissionEvent(fixture.pool, userId, 'check_in', { now, sourceKey: 'cap-sources' });
+      expect(claim.claim.awarded).toBe(5);
+      expect(mission.awarded).toBe(5);
+      expect(mission.capped).toBe(true);
+      const earned = await fixture.pool.query(
+        'SELECT COALESCE(SUM(delta), 0)::int AS total FROM stamp_ledger WHERE user_id = $1 AND delta > 0',
+        [userId],
+      );
+      const capped = await fixture.pool.query(
+        `SELECT COUNT(*)::int AS count FROM stamp_ledger WHERE user_id = $1 AND reason LIKE '%weekly_cap%'`,
+        [userId],
+      );
+      expect(Number(earned.rows[0].total)).toBe(10);
+      expect(Number(capped.rows[0].count)).toBe(1);
+      expect(await balanceOf(userId)).toBe(10);
+    } finally {
+      await fixture.pool.query(
+        `UPDATE system_settings_document SET values = values - 'stamps_weekly_cap' WHERE id = 1`,
+      );
+    }
+  });
+
   it('never lets concurrent spends drive the balance negative', async () => {
     const userId = await createUser('spend');
     await fixture.pool.query('INSERT INTO stamp_balances(user_id, balance) VALUES($1, 150)', [userId]);
@@ -359,6 +396,17 @@ realPg('Plan 61 Phase 1 — passport stamps (real PostgreSQL)', () => {
     expect(await fixture.pool.query(
       `SELECT COUNT(*)::int AS count FROM stamp_ledger WHERE user_id = $1 AND source = 'mission'`, [owner],
     )).toMatchObject({ rows: [{ count: 0 }] });
+
+    // The real Plaza producer must enforce the same rule, not only the hook.
+    const producer = await cheer(fixture.pool, owner, activityId, false);
+    expect(producer.cheered).toBe(true);
+    const afterProducer = await fixture.pool.query(
+      `SELECT udm.completed_at FROM user_daily_missions udm JOIN daily_missions dm ON dm.id = udm.mission_id
+        WHERE udm.user_id = $1 AND udm.manila_date = $2 AND dm.kind = 'cheer_post'`,
+      [owner, date],
+    );
+    expect(afterProducer.rows[0].completed_at).toBeNull();
+    expect(await balanceOf(owner)).toBe(0);
 
     const other = await handlePlazaCheer(fixture.pool, { viewerId: friend, activityOwnerId: owner, activityId, now });
     expect(other).toMatchObject({ completed: true });
@@ -493,6 +541,60 @@ realPg('Plan 61 Phase 1 — passport stamps (real PostgreSQL)', () => {
     const userId = await createUser('unverified', { verifiedEmail: false });
     await expect(claimDaily(fixture.pool, userId, { now: at('2026-12-10') }))
       .rejects.toMatchObject({ code: 'ACCOUNT_NOT_VERIFIED' });
+  });
+
+  it('serves platform-admin mission, reward table, QotD schedule and stats endpoints', async () => {
+    const adminId = await createUser('stamp-admin');
+    await fixture.pool.query("UPDATE users SET role = 'admin' WHERE id = $1", [adminId]);
+    const token = jwt.sign({ id: adminId, seed_id: adminId, role: 'admin' }, env.JWT_SECRET);
+    const auth = { Authorization: `Bearer ${token}` };
+
+    const mission = await request(app).post('/api/v1/admin/stamps/missions').set(auth).send({
+      id: 'mission-admin-test', kind: 'admin_test_mission', title: 'Admin test mission', stamps: 7, on_site: false,
+    });
+    expect(mission.status).toBe(201);
+    expect(mission.body.data).toMatchObject({ id: 'mission-admin-test', kind: 'admin_test_mission', active: true });
+    const list = await request(app).get('/api/v1/admin/stamps/missions').set(auth);
+    expect(list.body.data.some((item: { id: string }) => item.id === 'mission-admin-test')).toBe(true);
+    const patched = await request(app).patch('/api/v1/admin/stamps/missions/mission-admin-test').set(auth).send({ active: false });
+    expect(patched.status).toBe(200);
+
+    const settings = await request(app).get('/api/v1/admin/settings').set(auth);
+    expect(settings.status).toBe(200);
+    expect(settings.body.data.values.stamps_weekly_cap).toBe(250);
+    const update = await request(app).put('/api/v1/admin/settings').set(auth).send({
+      expected_revision: settings.body.data.revision,
+      changes: { stamps_weekly_cap: 240 },
+      reason: 'stamps test',
+    });
+    expect(update.status).toBe(200);
+    expect(update.body.data.values.stamps_weekly_cap).toBe(240);
+    const restore = await request(app).put('/api/v1/admin/settings').set(auth).send({
+      expected_revision: update.body.data.revision,
+      changes: { stamps_weekly_cap: 250 },
+      reason: 'stamps test restore',
+    });
+    expect(restore.status).toBe(200);
+
+    const future = '2026-12-22';
+    const schedule = await request(app).put('/api/v1/admin/stamps/qotd').set(auth).send({
+      manila_date: future, question_id: questionId,
+    });
+    expect(schedule.status).toBe(200);
+    const scheduled = await getQuestionOfTheDay(fixture.pool, null, { now: at(future) });
+    expect(scheduled.question?.id).toBe(questionId);
+
+    const stats = await request(app).get('/api/v1/admin/stamps/stats').set(auth);
+    expect(stats.status).toBe(200);
+    expect(stats.body.data).toEqual(expect.objectContaining({
+      claims_today: expect.any(Number),
+      missions_completed_today: expect.any(Number),
+      weekly_cap_hits: expect.any(Number),
+      travelers_today: expect.any(Number),
+    }));
+
+    await fixture.pool.query("DELETE FROM daily_missions WHERE id = 'mission-admin-test'");
+    await fixture.pool.query("DELETE FROM question_of_the_day WHERE manila_date = '2026-12-22'");
   });
 
   it('serves the HTTP contract for daily, history, spend and QotD routes', async () => {
