@@ -32,7 +32,8 @@ async function main() {
     const a = cache[k];
     if (a.country_code && a.country_code !== 'ph') continue;
     const town = a.city || a.town || a.municipality || a.village;
-    const province = a.state || (a.region === 'Metro Manila' ? 'Metro Manila' : undefined);
+    // Highly urbanized cities have no province in Nominatim; fall back to the region.
+    const province = a.state || a.region;
     if (town || province) {
       it.municipality = town || it.municipality; it.province = province || it.province; it.region = a.region || it.region;
       it.location_source = 'nominatim'; delete it.location_from; fixed++;

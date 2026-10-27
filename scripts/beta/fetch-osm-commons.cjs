@@ -41,6 +41,16 @@ function classify(p) {
 const GENERIC = new Set(['beach', 'falls', 'fall', 'waterfall', 'waterfalls', 'cave', 'caves', 'spring', 'springs', 'hot', 'cold', 'park', 'resort', 'view', 'viewpoint', 'view deck', 'deck',
   'museum', 'the', 'of', 'and', 'de', 'del', 'la', 'ng', 'sa', 'mt', 'mount', 'volcano', 'island', 'national', 'white', 'sand', 'point', 'lookout', 'zoo', 'garden', 'gardens', 'philippines', 'city', 'old', 'new', 'san', 'santa', 'santo', 'sto']);
 const distinctive = (name) => norm(name).split(' ').filter((w) => w.length >= 4 && !GENERIC.has(w));
+// For nature places the file title must also name the feature, and the photo must be close:
+// a shared town name alone matched churches and covered courts in the first run.
+const FEATURE_WORD = { beach: /\bbeach/, waterfall: /\b(falls?|waterfalls?)\b/, cave: /\bcaves?\b/, hot_spring: /\b(hot ?springs?|spring)\b/, spring: /\bsprings?\b/ };
+const MAX_DIST = { beach: 1000, waterfall: 1000, cave: 800, hot_spring: 800, spring: 800 };
+function acceptable(c, title, dist) {
+  const t = norm(title.replace(/^File:/, ''));
+  if (!c.words.every((w) => t.includes(w))) return false;
+  const fw = FEATURE_WORD[c.subcategory];
+  return !fw || (fw.test(t) && dist <= MAX_DIST[c.subcategory]);
+}
 
 async function api(params, attempt = 1) {
   const url = `https://commons.wikimedia.org/w/api.php?${new URLSearchParams({ format: 'json', formatversion: '2', maxlag: '5', ...params })}`;
@@ -58,6 +68,16 @@ async function api(params, attempt = 1) {
 
 async function main() {
   const OSM = arg('--osm'), WD = arg('--wikidata'), OUT = arg('--out'), LIMIT = Number(arg('--limit', '0'));
+  if (OUT && process.argv.includes('--refilter')) {
+    // Re-apply the acceptance rule to an existing output without new requests.
+    const data = JSON.parse(fs.readFileSync(OUT, 'utf8'));
+    const kept = data.items.filter((it) => acceptable({ ...it, words: distinctive(it.name) }, it.image_file, it.photo_dist_m));
+    for (const it of kept) if (!it.province && it.region) it.province = it.region;
+    fs.writeFileSync(OUT, JSON.stringify({ ...data, refiltered_at: new Date().toISOString(), items: kept }, null, 1));
+    const by = Object.entries(kept.reduce((a, it) => ((a[it.subcategory] = (a[it.subcategory] || 0) + 1), a), {})).sort((a, b) => b[1] - a[1]);
+    console.log(`refilter kept ${kept.length} of ${data.items.length}; ${by.map(([k, n]) => `${k}:${n}`).join(' ')}`);
+    return;
+  }
   if (!OSM || !WD || !OUT) throw new Error('--osm, --wikidata and --out are required');
   const wd = JSON.parse(fs.readFileSync(WD, 'utf8')).items;
   const wdIds = new Set(wd.map((it) => it.qid));
@@ -90,7 +110,7 @@ async function main() {
   for (const c of work) {
     const body = await api({ action: 'query', list: 'geosearch', gscoord: `${c.lat}|${c.lng}`, gsradius: String(c.radius), gsnamespace: '6', gslimit: '100' });
     const hits = (body.query?.geosearch || []).filter((h) => /\.(jpe?g|png|webp)$/i.test(h.title) && !usedFiles.has(h.title))
-      .filter((h) => { const t = norm(h.title.replace(/^File:/, '')); return c.words.every((w) => t.includes(w)); })
+      .filter((h) => acceptable(c, h.title, h.dist))
       .sort((a, b) => a.dist - b.dist);
     if (hits.length) { c.image_file = hits[0].title.replace(/^File:/, ''); c.photo_dist_m = Math.round(hits[0].dist); usedFiles.add(hits[0].title); matched++; }
     if (++done % 250 === 0) console.log(`searched ${done}/${work.length}; matched ${matched}`);
