@@ -246,4 +246,5 @@ async function main() {
   await db.end();
 }
 
-main().catch((err) => { console.error(err.message || err); process.exit(1); });
+if (require.main === module) main().catch((err) => { console.error(err.message || err); process.exit(1); });
+module.exports = { COMMENTS, STATUS };
