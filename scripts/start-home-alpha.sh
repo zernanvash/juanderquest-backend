@@ -75,6 +75,9 @@ export JUANCHOICE_PROMOTION_ENABLED=false
 export JUANCHOICE_ECONOMY_ENABLED=false
 export JUANCHOICE_FINALIZER_WORKER_ENABLED=false
 export JUANCHOICE_SCHEDULER_ENABLED=false
+# Deliver progression outbox events: approved quest proofs become verified
+# visits and explorer XP. Off (the env default), approvals only queued them.
+export PROGRESSION_OUTBOX_WORKER_ENABLED=true
 
 # Optional non-secret runtime overrides (release runbook Part B.3), e.g. after the
 # Valhalla Philippines rebuild. The file is parsed, never executed, and only the
