@@ -3,6 +3,7 @@ import { getPool } from '../db/pool.js';
 import { env } from '../config/env.js';
 import { JuanChoiceError } from './service.js';
 import { getActiveJuanChoicePerks } from './perks.js';
+import { isoWeekKey } from './weekly-policy.js';
 
 async function queryMonthlyOverview(regionKey: string, isTest: boolean) {
   const pool = getPool();
@@ -33,7 +34,7 @@ async function queryMonthlyOverview(regionKey: string, isTest: boolean) {
        WHERE schedule_id=$1 AND opens_at > $2 AND status IN ('planned','prepared')
        ORDER BY opens_at,id LIMIT 1`,[schedule.id,now])).rows[0] ?? null;
     const previous = (await client.query(
-      `SELECT c.id AS campaign_id,c.theme,p.period_start,p.opens_at,p.closes_at,
+      `SELECT c.id AS campaign_id,c.theme,p.period_start,to_char(p.period_start,'YYYY-MM-DD') AS period_key,p.opens_at,p.closes_at,
          r.finalized_at,r.valid_ballots,r.co_winner_ids,r.standings
        FROM juanchoice_schedule_periods p JOIN juanchoice_campaigns c ON c.id=p.campaign_id
        JOIN juanchoice_results r ON r.campaign_id=c.id
@@ -90,7 +91,12 @@ async function queryMonthlyOverview(regionKey: string, isTest: boolean) {
       view:current?'open' as const:'between' as const,availability,current,reigning,
       next:next?{opens_at:next.opens_at,closes_at:next.closes_at,theme:next.selected_theme,
         schedule_status:'scheduled' as const}:null,
-      previous:previous?{...previous,period_label:new Intl.DateTimeFormat('en-PH',{timeZone:schedule.timezone,
+      previous:previous?{...previous,period_label:schedule.cadence==='weekly'
+        // Plan 65: "Week 43 · Oct 19 – Oct 25" (the closing Monday 00:00 is the end of Sunday).
+        ? `Week ${Number(isoWeekKey(previous.period_key).slice(-2))} · ${
+          new Intl.DateTimeFormat('en-PH',{timeZone:schedule.timezone,month:'short',day:'numeric'}).formatRange(
+            new Date(previous.opens_at),new Date(new Date(previous.closes_at).getTime()-1))}`
+        : new Intl.DateTimeFormat('en-PH',{timeZone:schedule.timezone,
         month:'long',year:'numeric'}).format(new Date(previous.opens_at))}:null,
       notice,
     };
