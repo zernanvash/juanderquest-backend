@@ -91,7 +91,7 @@ describe('Plan 65 weekly elections on isolated real PostgreSQL', () => {
     const towns = ['Bolinao', 'Anda', 'Sual', 'Lingayen', 'Dagupan City', 'Alaminos City', 'Bani'];
     for (let i = 0; i < towns.length; i++) {
       await fixture.pool.query(`INSERT INTO spots(id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,
-        source_type,source_name,status,is_test) VALUES($1,$1,$2,'Weekly fixture','nature_outdoors','coast',$3,$3,16,120,'lgu','Fixture','published',false)`,
+        source_type,source_name,status,is_test) VALUES($1::text,$1::text,$2::text,'Weekly fixture','nature_outdoors','coast',$3::text,$3::text,16,120,'lgu','Fixture','published',false)`,
         [`wk-spot-${i}`, `Weekly destination ${i}`, towns[i]]);
     }
   }, 120_000);
