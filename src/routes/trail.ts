@@ -19,9 +19,10 @@ const TrailPlanSchema = z.object({
     }),
     costing: z.enum(['auto', 'pedestrian', 'bicycle', 'motorcycle']).optional(),
     max_stops: z.number().int().min(1).max(5).optional(),
-    max_detour_km: z.number().min(1).max(50).optional(),
+    max_detour_km: z.number().min(1).max(120).optional(),
     preferred_categories: z.array(z.string()).optional(),
     avoid_congested: z.boolean().optional(),
+    via: z.array(z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) })).max(3).optional(),
   }),
 });
 
@@ -44,6 +45,7 @@ trailRouter.post('/trail/plan', validateRequest(TrailPlanSchema), async (req: Re
       max_detour_km: req.body.max_detour_km,
       preferred_categories: req.body.preferred_categories,
       avoid_congested: req.body.avoid_congested,
+      via: req.body.via,
     });
 
     return res.status(200).json({

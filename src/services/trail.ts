@@ -42,6 +42,8 @@ export interface TrailPlanRequest {
   max_detour_km?: number;
   preferred_categories?: string[];
   avoid_congested?: boolean;
+  /** Detour areas the traveler added, routed through in this order. */
+  via?: { lat: number; lng: number }[];
 }
 
 export interface CandidateStop {
@@ -59,11 +61,23 @@ export interface CandidateStop {
   recommendation_label: 'Curated' | 'Suggested';
 }
 
+/** Spots near the route grouped by town: the free trip suggests areas, not a fixed itinerary. */
+export interface DetourArea {
+  municipality: string;
+  detour_km: number;
+  extra_minutes: number;
+  score: number;
+  center: { lat: number; lng: number };
+  spot_count: number;
+  highlights: { spot_id: string; name: string; category: string }[];
+}
+
 export interface TrailPlanResponse {
   service_area: ServiceAreaMetadata;
   is_within_primary_service_area: boolean;
   baseline_route: RouteResponse;
   suggested_stops: CandidateStop[];
+  detour_areas: DetourArea[];
   total_candidates_evaluated: number;
   disclaimer: string;
 }
@@ -80,7 +94,10 @@ export function isLocationWithinBbox(lat: number, lng: number, bbox: ServiceArea
 export async function planTrailCorridor(req: TrailPlanRequest): Promise<TrailPlanResponse> {
   const costing = req.costing || 'auto';
   const maxStops = Math.min(Math.max(req.max_stops ?? 3, 1), 5);
-  const maxDetourKm = Math.min(Math.max(req.max_detour_km ?? 15, 1), 50);
+  const straightKm = computeHaversineDistanceKm(req.start.lat, req.start.lng, req.end.lat, req.end.lng);
+  // Long trips tolerate longer detours (Manila to Baguio can swing through Pangasinan).
+  const maxDetourKm = Math.min(Math.max(req.max_detour_km ?? Math.min(80, Math.max(15, straightKm * 0.25)), 1), 120);
+  const via = (req.via ?? []).slice(0, 3);
   const avoidCongested = req.avoid_congested !== false;
   const preferredCategories = new Set(req.preferred_categories || []);
 
@@ -97,18 +114,14 @@ export async function planTrailCorridor(req: TrailPlanRequest): Promise<TrailPla
     endLng: req.end.lng,
     costing,
     avoidCongested,
+    via,
   });
 
-  const baselineDistKm = computeHaversineDistanceKm(
-    req.start.lat,
-    req.start.lng,
-    req.end.lat,
-    req.end.lng
-  );
+  const baselineDistKm = straightKm;
 
   // 2. Evaluate all published spots as detour candidates along corridor
   const candidates: CandidateStop[] = [];
-  const publishedSpots = spotStore.spots;
+  const publishedSpots = spotStore.spots.filter((spot) => spot.status === 'published' && !spot.is_test);
 
   for (const spot of publishedSpots) {
     // Distance from start to spot and spot to end
@@ -197,6 +210,7 @@ export async function planTrailCorridor(req: TrailPlanRequest): Promise<TrailPla
   candidates.sort((a, b) => b.score - a.score || a.detour_km - b.detour_km);
 
   const selectedStops = candidates.slice(0, maxStops);
+  const detourAreas = groupDetourAreas(candidates, req.end);
 
   return {
     service_area: {
@@ -206,8 +220,41 @@ export async function planTrailCorridor(req: TrailPlanRequest): Promise<TrailPla
     is_within_primary_service_area: isWithinPrimary,
     baseline_route: baselineRoute,
     suggested_stops: selectedStops,
+    detour_areas: detourAreas,
     total_candidates_evaluated: candidates.length,
     disclaimer:
       'Deterministic corridor route and stop suggestions based on published destination coordinates and sovereign routing geometry. No synthetic AI stops, hallucinated opening hours, or unverified merchant inventories.',
   };
+}
+
+// Groups ranked candidates by municipality; the destination's own town is left out
+// (the traveler is already going there). Minutes assume ~45 km/h plus an hour on site.
+export function groupDetourAreas(candidates: CandidateStop[], end: { lat: number; lng: number }, limit = 3): DetourArea[] {
+  const groups = new Map<string, CandidateStop[]>();
+  for (const candidate of candidates) {
+    const town = candidate.municipality || 'Nearby';
+    if (!groups.has(town)) groups.set(town, []);
+    groups.get(town)!.push(candidate);
+  }
+  const areas: DetourArea[] = [];
+  for (const [municipality, stops] of groups) {
+    const nearDestination = stops.some((stop) => computeHaversineDistanceKm(stop.gps_lat, stop.gps_lng, end.lat, end.lng) < 3);
+    if (nearDestination) continue;
+    const top = [...stops].sort((a, b) => b.score - a.score || a.detour_km - b.detour_km);
+    const highlights = top.slice(0, 3);
+    const detourKm = Math.min(...stops.map((stop) => stop.detour_km));
+    areas.push({
+      municipality,
+      detour_km: Number(detourKm.toFixed(1)),
+      extra_minutes: Math.round((detourKm / 45) * 60) + 60,
+      score: top[0].score + Math.min(stops.length - 1, 4) * 3,
+      center: {
+        lat: Number((highlights.reduce((sum, stop) => sum + stop.gps_lat, 0) / highlights.length).toFixed(5)),
+        lng: Number((highlights.reduce((sum, stop) => sum + stop.gps_lng, 0) / highlights.length).toFixed(5)),
+      },
+      spot_count: stops.length,
+      highlights: highlights.map((stop) => ({ spot_id: stop.spot_id, name: stop.name, category: stop.category })),
+    });
+  }
+  return areas.sort((a, b) => b.score - a.score || a.detour_km - b.detour_km).slice(0, limit);
 }

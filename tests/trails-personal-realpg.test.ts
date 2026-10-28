@@ -58,9 +58,8 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
       [JSON.stringify({trail_personal_generation_enabled:enabled})]);
   }
 
-  test('personal generation is disabled by default before preference, story, matrix, charge or trail work', async () => {
-    await fixture.pool.query(`INSERT INTO system_settings_document(id,values,revision) VALUES(1,'{}'::jsonb,0)
-      ON CONFLICT(id) DO UPDATE SET values=system_settings_document.values-'trail_personal_generation_enabled'`);
+  test('tailored generation switched off by an admin stops before preference, story, matrix, charge or trail work', async () => {
+    await setPersonalGenerationEnabled(false);
     const beforeGenerations = await fixture.pool.query("SELECT COUNT(*)::int AS count FROM trail_generations WHERE kind='personal' AND requested_by=$1", [userId]);
     const beforeLedger = await fixture.pool.query("SELECT COUNT(*)::int AS count FROM governance_ledger WHERE actor_id=$1 AND reference_type='personal_generation'", [userId]);
     const storyWriter = jest.fn();
@@ -84,19 +83,19 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
     await setPersonalGenerationEnabled(true);
   },45_000);
 
-  test('creates private owner trail and atomically charges only after the weekly free allowance', async () => {
+  test('creates a private owner trail and atomically charges 150 points for every tailored trail (no free allowance)', async () => {
     await setPersonalGenerationEnabled(true);
     const first = await request(app).post('/api/v1/trails/personal').set('Authorization',`Bearer ${token}`)
       .set('Idempotency-Key','personal-free-generation-1').send({ themes:['beach','heritage'], municipalities:['Bolinao'], budget_min:240, pace:'relaxed' });
     expect(first.status).toBe(201);
     expect(first.body.data.trail).toMatchObject({ tier:'personal',status:'published',source:'personal',owner_user_id:userId });
-    expect(first.body.data.charged_points).toBe(0);
+    expect(first.body.data.charged_points).toBe(150);
     expect(first.body.data.free_generation_remaining).toBe(0);
     expect(first.body.data.solution.stops.length).toBeGreaterThanOrEqual(2);
     const selectedMunicipalities = await fixture.pool.query(`SELECT DISTINCT p.municipality FROM trail_stops s JOIN spots p ON p.id=s.spot_id WHERE s.trail_id=$1`, [first.body.data.trail.id]);
     expect(selectedMunicipalities.rows.every((row: any) => row.municipality === 'Bolinao')).toBe(true);
     const catalog = await request(app).get('/api/v1/trails').set('Authorization',`Bearer ${token}`);
-    expect(catalog.body.data.personal_generation).toMatchObject({free_remaining:0,price_points:100});
+    expect(catalog.body.data.personal_generation).toMatchObject({free_remaining:0,price_points:150});
     expect(catalog.body.data.items.find((trail: any) => trail.id === first.body.data.trail.id).is_unlocked).toBe(true);
 
     const replay = await request(app).post('/api/v1/trails/personal').set('Authorization',`Bearer ${token}`)
@@ -108,8 +107,9 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
     const second = await request(app).post('/api/v1/trails/personal').set('Authorization',`Bearer ${token}`)
       .set('Idempotency-Key','personal-paid-generation-2').send({ themes:['beach'], municipalities:['Bolinao'], budget_min:240 });
     expect(second.status).toBe(201);
-    expect(second.body.data.charged_points).toBe(100);
-    expect(Number((await fixture.pool.query('SELECT demo_points FROM users WHERE id=$1',[userId])).rows[0].demo_points)).toBe(900);
+    expect(second.body.data.charged_points).toBe(150);
+    // 1,000 - 150 (first) - 150 (second); the idempotent replay is not charged again.
+    expect(Number((await fixture.pool.query('SELECT demo_points FROM users WHERE id=$1',[userId])).rows[0].demo_points)).toBe(700);
     const ledgerPair = await fixture.pool.query(`SELECT COUNT(*)::int AS rows,
       COUNT(*) FILTER (WHERE account=$1 AND amount_mjdq<0)::int AS traveler_debits,
       SUM(amount_mjdq)::bigint AS balanced
