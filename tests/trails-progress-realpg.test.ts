@@ -90,6 +90,7 @@ describeRealPg('Trail unlock, location check-in, and completion (isolated real P
     // Plan 64: the locked modal may show what the trail offers (names, one line), never the order or map.
     expect(before.body.data.preview.map((stop: any) => stop.name)).toEqual(['Trail Checkpoint A','Trail Checkpoint B']);
     expect(before.body.data.preview[0]).toMatchObject({municipality:'Bolinao',blurb:'A real test checkpoint.'});
+    expect(before.body.data.reward_points).toBe(50);
     expect(serialized).not.toContain('position');
     expect(serialized).not.toContain('"lat"');
 

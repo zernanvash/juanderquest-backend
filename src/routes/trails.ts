@@ -28,6 +28,11 @@ function sendTrailProgressError(res: Response, error: unknown) {
   return res.status(503).json({ success:false,error:{code:'TRAIL_PROGRESS_UNAVAILABLE',message:'Trail progress could not be saved. Please try again.'} });
 }
 
+function rewardFor(tier: string, economy: Awaited<ReturnType<typeof loadTrailEconomy>>): number {
+  return tier === 'starter' ? economy.starterRewardPoints : tier === 'explorer' ? economy.explorerRewardPoints
+    : tier === 'signature' ? economy.signatureRewardPoints : tier === 'legendary' ? economy.legendaryRewardPoints : economy.personalRewardPoints;
+}
+
 function lockedTrailShape(row: any, unlocked: boolean) {
   return { id:row.id,slug:row.slug,title:row.title,tagline:row.tagline,tier:row.tier,theme:row.theme,
     municipalities:row.municipalities,stop_count:Number(row.stop_count ?? 0),total_minutes:Number(row.total_minutes),
@@ -91,8 +96,9 @@ trailsRouter.get('/trails/near', optionalAuthenticateToken, async (req: AuthRequ
         AND (t.available_until IS NULL OR t.available_until > now())
       ORDER BY near.passes_here DESC, near.nearest_km, CASE t.tier WHEN 'starter' THEN 1 WHEN 'explorer' THEN 2 WHEN 'signature' THEN 3 ELSE 4 END
       LIMIT 12`,[lat,lng,radius_km,spot_id??null,user?.id??null,isTest]);
+    const economy=await loadTrailEconomy(pool);
     res.set('Cache-Control',req.user?'private, no-store':'public, max-age=60');
-    return res.json({success:true,data:{items:rows.map(row=>({...lockedTrailShape(row,Boolean(row.is_unlocked)),
+    return res.json({success:true,data:{items:rows.map(row=>({...lockedTrailShape(row,Boolean(row.is_unlocked)),reward_points:rewardFor(row.tier,economy),
       cover_image_url:row.cover_image_url||null,passes_here:Boolean(row.passes_here),nearest_km:Math.round(Number(row.nearest_km)*10)/10}))}});
   } catch { return res.status(503).json({success:false,error:{code:'TRAILS_UNAVAILABLE',message:'Trail catalog is unavailable.'}}); }
 });
@@ -115,7 +121,7 @@ trailsRouter.get('/trails/:id', optionalAuthenticateToken, async (req: AuthReque
       // The order, map, coordinates and narration stay private until it is unlocked.
       const preview=await pool.query(`SELECT p.name,p.municipality,p.category,COALESCE(p.image_url,'') AS image_url,p.description
         FROM trail_stops s JOIN spots p ON p.id=s.spot_id WHERE s.trail_id=$1 ORDER BY p.name`,[trail.id]);
-      return res.json({success:true,data:{...lockedTrailShape(trail,false),intro:typeof trail.story?.intro==='string'?trail.story.intro:'',
+      return res.json({success:true,data:{...lockedTrailShape(trail,false),reward_points:rewardFor(trail.tier,await loadTrailEconomy(pool)),intro:typeof trail.story?.intro==='string'?trail.story.intro:'',
         preview:preview.rows.map((row:any)=>({name:row.name,municipality:row.municipality,category:row.category,image_url:row.image_url||null,
           blurb:String(row.description||'').split(/(?<=[.!?])s/)[0].slice(0,160)}))}});
     }
@@ -124,7 +130,7 @@ trailsRouter.get('/trails/:id', optionalAuthenticateToken, async (req: AuthReque
       FROM trail_stops s JOIN spots p ON p.id=s.spot_id WHERE s.trail_id=$1 ORDER BY s.position`,[trail.id]);
     const checkins=user ? await pool.query('SELECT position,verified_at,distance_m,accuracy_m FROM trail_checkins WHERE trail_id=$1 AND user_id=$2',[trail.id,user.id]) : {rows:[]};
     const checkinByPosition=new Map(checkins.rows.map((row:any)=>[Number(row.position),row]));
-    return res.json({success:true,data:{...trail,stops:stops.rows.map((stop:any)=>({
+    return res.json({success:true,data:{...trail,reward_points:rewardFor(trail.tier,await loadTrailEconomy(pool)),stops:stops.rows.map((stop:any)=>({
       position:Number(stop.position),spot_id:stop.spot_id,arrive_offset_min:Number(stop.arrive_offset_min),dwell_min:Number(stop.dwell_min),
       leg_minutes:Number(stop.leg_minutes),leg_km:Number(stop.leg_km),narration:stop.narration,checkin_radius_m:Number(stop.checkin_radius_m),
       name:stop.name,municipality:stop.municipality,category:stop.category,lat:Number(stop.gps_lat),lng:Number(stop.gps_lng),
