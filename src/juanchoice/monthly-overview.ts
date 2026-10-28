@@ -35,7 +35,7 @@ async function queryMonthlyOverview(regionKey: string, isTest: boolean) {
        ORDER BY opens_at,id LIMIT 1`,[schedule.id,now])).rows[0] ?? null;
     const previous = (await client.query(
       `SELECT c.id AS campaign_id,c.theme,p.period_start,to_char(p.period_start,'YYYY-MM-DD') AS period_key,p.opens_at,p.closes_at,
-         r.finalized_at,r.valid_ballots,r.co_winner_ids,r.standings
+         r.finalized_at,r.valid_ballots,r.co_winner_ids,r.standings,r.minister_candidate_id,r.total_weighted_votes
        FROM juanchoice_schedule_periods p JOIN juanchoice_campaigns c ON c.id=p.campaign_id
        JOIN juanchoice_results r ON r.campaign_id=c.id
        WHERE p.schedule_id=$1 AND c.status IN ('finalized','archived')
