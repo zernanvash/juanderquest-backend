@@ -308,7 +308,8 @@ async function reconcileSchedule(scheduleId: string, now: Date): Promise<{prepar
     const first = dateOnly(schedule.effective_period);
     const periods = [current,weekly ? nextWeek(current) : nextMonth(current)].filter(period => period >= first);
     const festivals = weekly ? (await client.query(
-      'SELECT name,starts_on,ends_on,boost_multiplier FROM juanchoice_festivals WHERE is_test=$1',[schedule.is_test])).rows : [];
+      `SELECT name,to_char(starts_on,'YYYY-MM-DD') AS starts_on,to_char(ends_on,'YYYY-MM-DD') AS ends_on,boost_multiplier
+       FROM juanchoice_festivals WHERE is_test=$1`,[schedule.is_test])).rows : [];
     const outcome = {prepared:0,postponed:0,missed:0};
     for (const period of periods) {
       const row = await ensurePeriod(client,schedule,period,now);
