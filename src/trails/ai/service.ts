@@ -88,7 +88,7 @@ export async function templateStoryWriter(
   const theme = facts.theme.trim() || 'local';
   const town = facts.municipalities[0];
   const title = `Your ${theme.charAt(0).toUpperCase()}${theme.slice(1)} trail${town ? ` around ${town}` : ''}`.slice(0, 80);
-  return { value: { ...story, title, source: 'template' as const }, aiUsed: false, model: undefined, fallbackReason: 'traveler_request' };
+  return { value: { ...story, title, source: 'template' as const }, aiUsed: false, model: null, fallbackReason: 'traveler_request' };
 }
 
 export function fallbackTrendDigest(facts: Pick<WeeklyTrendFacts, 'top_categories' | 'top_good_for'>): TrendDigest {
