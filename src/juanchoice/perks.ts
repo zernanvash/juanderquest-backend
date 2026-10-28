@@ -152,3 +152,18 @@ export async function getActiveJuanChoicePerks(client: Queryable, isTest = false
   activeCache.set(key, { at: now.getTime(), value });
   return value;
 }
+
+/**
+ * Plan 65 checkpoint 1b: total bonus from reigning perks matching `match` (values add up,
+ * e.g. +50% spot XP and +25% category XP = 0.75). Returns the keys for audit trails.
+ * A perk read failure never blocks the gameplay action; it just applies no bonus.
+ */
+export async function perkBonus(client: Queryable, isTest: boolean, match: (perk: ActivePerk) => boolean): Promise<{ value: number; keys: PerkKey[] }> {
+  try {
+    const perks = (await getActiveJuanChoicePerks(client, isTest)).filter(match);
+    return { value: perks.reduce((sum, perk) => sum + Number(perk.value || 0), 0), keys: perks.map(perk => perk.key) };
+  } catch (error) {
+    console.error('[juanchoice-perks] bonus lookup failed; applying none', error);
+    return { value: 0, keys: [] };
+  }
+}

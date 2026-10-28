@@ -1,3 +1,4 @@
+import { perkBonus } from '../juanchoice/perks.js';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { commitGovernanceTransaction, lockGovernanceSnapshot } from '../governance/transaction.js';
@@ -65,13 +66,25 @@ export async function unlockTrail(pool: Pool, userId: string, trailId: string, i
       if (price > 0) method = 'points';
       if (trail.tier === 'personal' && trail.owner_user_id === userId) { method = 'owner'; price = 0; }
       if (!Number.isSafeInteger(price) || price < 0) throw new TrailProgressError('INVALID_UNLOCK_RULE', 503, 'Trail unlock configuration is invalid.');
+      // Plan 65: a reigning corridor_trail_discount makes Hiyas Trails through that town cheaper
+      // (never below 1 point). Replays return the stored price above, so a perk change cannot re-price.
+      let perkKeys: string[] = [];
+      if (price > 0 && (trail.tier === 'signature' || trail.tier === 'legendary')) {
+        const towns: string[] = Array.isArray(trail.municipalities) ? trail.municipalities : [];
+        const discount = await perkBonus(tx.client, isTest, perk => perk.key === 'corridor_trail_discount' && towns.includes(perk.municipality));
+        if (discount.value > 0) {
+          price = Math.max(1, Math.round(price * (1 - Math.min(discount.value, 0.9))));
+          perkKeys = discount.keys;
+        }
+      }
       let ledgerGroupId: string | null = null;
       if (price > 0) {
         const sinkId = `trail_sink:${isTest ? 'test' : 'live'}`;
         await tx.client.query(`INSERT INTO points_accounts(id,kind,is_test) VALUES($1,'treasury',$2) ON CONFLICT(id) DO NOTHING`, [sinkId, isTest]);
         const group = await tx.transfer({ from: { id: userId, kind: 'traveler', userId }, to: { id: sinkId, kind: 'treasury' },
           points: price, type: 'trail_unlock_debit', referenceType: 'trail', referenceId: trailId, actorId: userId,
-          idempotencyKey, metadata: { trail_id: trailId, tier: trail.tier, points_unit: 'mJDQ prototype points', is_test: isTest } });
+          idempotencyKey, metadata: { trail_id: trailId, tier: trail.tier, points_unit: 'mJDQ prototype points', is_test: isTest,
+            ...(perkKeys.length ? { juanchoice_perks: perkKeys } : {}) } });
         ledgerGroupId = group.entries[0]?.transaction_group_id ?? null;
       }
       // The table's idempotency key is globally unique; scope the caller's key to this traveler.
@@ -140,11 +153,14 @@ export async function checkinTrailStop(pool: Pool, userId: string, trailId: stri
         FROM trail_checkins WHERE trail_id=$1 AND user_id=$2`, [trailId,userId]);
       if (Number(progress.rows[0].total) > 0 && Number(progress.rows[0].checked) >= Number(progress.rows[0].total)) {
         const config = await loadTrailEconomy(client);
-        const rewardPoints = stop.tier === 'legendary' ? config.legendaryRewardPoints
+        const baseRewardPoints = stop.tier === 'legendary' ? config.legendaryRewardPoints
           : stop.tier === 'signature' ? config.signatureRewardPoints
             : stop.tier === 'explorer' ? config.explorerRewardPoints
               : stop.tier === 'personal' ? config.personalRewardPoints : config.starterRewardPoints;
-        if (!Number.isSafeInteger(rewardPoints) || rewardPoints < 0) throw new TrailProgressError('INVALID_REWARD_CONFIG', 503, 'Trail reward configuration is invalid.');
+        if (!Number.isSafeInteger(baseRewardPoints) || baseRewardPoints < 0) throw new TrailProgressError('INVALID_REWARD_CONFIG', 503, 'Trail reward configuration is invalid.');
+        // Plan 65: a reigning trail_completion_bonus pays +X% on completion.
+        const completionBonus = await perkBonus(client, isTest, perk => perk.key === 'trail_completion_bonus');
+        const rewardPoints = Math.round(baseRewardPoints * (1 + completionBonus.value));
         let ledgerGroupId: string | null = null;
         if (rewardPoints > 0) {
           const issuanceId = `trail_reward_issuance:${isTest ? 'test' : 'live'}`;

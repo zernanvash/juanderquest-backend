@@ -1,3 +1,4 @@
+import { perkBonus } from '../juanchoice/perks.js';
 import { randomUUID } from 'crypto';
 import type { Pool, PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
@@ -456,7 +457,9 @@ export class CulturalQuizService {
 
         if (!alreadyCompletedPrior) {
           const version = await this.repo.findVersionById(attemptRow.version_id, client);
-          xpToAward = version?.xp_reward ?? 25;
+          // Plan 65: a reigning quiz_arcade_xp_boost perk raises passed-quiz XP.
+          const quizBonus = await perkBonus(client, false, perk => perk.key === 'quiz_arcade_xp_boost');
+          xpToAward = Math.round((version?.xp_reward ?? 25) * (1 + quizBonus.value));
 
           // Record progression event
           const progressionEventId = randomUUID();

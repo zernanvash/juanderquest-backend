@@ -1,3 +1,4 @@
+import { perkBonus } from '../juanchoice/perks.js';
 import { createHash, randomUUID } from 'crypto';
 import type { Pool, PoolClient } from 'pg';
 import { canonicalSettings } from '../settings/schema.js';
@@ -426,6 +427,14 @@ export async function claimDaily(pool: Pool, userId: string, options: ClaimDaily
       userId, amount: nominalStamps, source: 'daily_claim', sourceKey: date,
       manilaDate: date, weekId: week, reason: 'daily_claim', isTest: eligibility.isTest, settings,
     });
+    // Plan 65: a reigning daily_stamp_bonus adds stamps as its own ledger row, still inside the weekly cap.
+    const stampBonus = await perkBonus(client, eligibility.isTest, perk => perk.key === 'daily_stamp_bonus');
+    if (stampBonus.value > 0) {
+      await awardStampsWithLock(client, {
+        userId, amount: Math.round(stampBonus.value), source: 'juanchoice_perk', sourceKey: `daily:${date}`,
+        manilaDate: date, weekId: week, reason: 'juanchoice_daily_bonus', isTest: eligibility.isTest, settings,
+      });
+    }
     return { ...(await claimSnapshot(client, userId, date, week, settings)), replayed: false };
   });
 }
