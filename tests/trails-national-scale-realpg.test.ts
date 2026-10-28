@@ -107,6 +107,7 @@ describeRealPg('Trail Engine national bounded generation (isolated real PostgreS
     expect(input.matrix_pairs).toBe(observedMatrixNodes * observedMatrixNodes);
     expect(generated.solution.feasible).toBe(true);
     expect(generated.solution.stops.length).toBeGreaterThanOrEqual(3);
-    expect(elapsedMs).toBeLessThan(3_000);
+    // Owner 2026-10-28: generation is admin/weekly only (personal trails off), so 5 s on the shared laptop.
+    expect(elapsedMs).toBeLessThan(5_000);
   }, 120_000);
 });
