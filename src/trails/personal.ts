@@ -2,7 +2,7 @@ import type { Pool } from 'pg';
 import { createHash } from 'node:crypto';
 import { fundingCommand, FundingError } from '../funding/transaction.js';
 import { loadTrailEconomy } from './economy.js';
-import { parseTrailPreferences, writeTrailStory } from './ai/service.js';
+import { parseTrailPreferences, templateStoryWriter, writeTrailStory } from './ai/service.js';
 import { persistTrail, prepareTrail } from './generate.js';
 import type { MatrixFetch } from './matrix.js';
 
@@ -73,7 +73,7 @@ export async function createPersonalTrail(pool: Pool, userId: string, key: strin
       isTest, theme, constraints: { themes, goodFor, trendThemes: [] }, budgetMin,
       maxLegMin, minStops: 2, maxStops: 6, maxPerCategory: 2,
       allowedMunicipalities: municipalities, startNode: request.start, matrixFetch: dependencies.matrixFetch,
-    }, { storyWriter: dependencies.storyWriter });
+    }, { storyWriter: dependencies.storyWriter ?? templateStoryWriter });
 
     return await fundingCommand(pool, userId, 'personal_trail_generation', key,
       payload,

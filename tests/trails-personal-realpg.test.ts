@@ -90,6 +90,8 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
     expect(first.status).toBe(201);
     expect(first.body.data.trail).toMatchObject({ tier:'personal',status:'published',source:'personal',owner_user_id:userId });
     expect(first.body.data.charged_points).toBe(150);
+    // Traveler requests never wait on NIM: the template story is used directly.
+    expect(first.body.data.trail.title).toMatch(/^Your .* trail/);
     expect(first.body.data.free_generation_remaining).toBe(0);
     expect(first.body.data.solution.stops.length).toBeGreaterThanOrEqual(2);
     const selectedMunicipalities = await fixture.pool.query(`SELECT DISTINCT p.municipality FROM trail_stops s JOIN spots p ON p.id=s.spot_id WHERE s.trail_id=$1`, [first.body.data.trail.id]);

@@ -75,6 +75,22 @@ export async function writeTrailStory(
   };
 }
 
+/**
+ * Traveler-paid (tailored) trails never wait on NIM inside the request (Plan 44 D3/§12): the live
+ * call can take its full 20 s timeout and then fall back anyway. Same shape as writeTrailStory.
+ */
+export async function templateStoryWriter(
+  _queryable: Pool | PoolClient,
+  facts: TrailStoryFacts,
+  template: { nodes: TrailNode[]; solution: TrailSolution },
+): Promise<Awaited<ReturnType<typeof writeTrailStory>>> {
+  const story = templateStory(facts.theme, template.nodes, template.solution, facts.municipalities);
+  const theme = facts.theme.trim() || 'local';
+  const town = facts.municipalities[0];
+  const title = `Your ${theme.charAt(0).toUpperCase()}${theme.slice(1)} trail${town ? ` around ${town}` : ''}`.slice(0, 80);
+  return { value: { ...story, title, source: 'template' as const }, aiUsed: false, model: undefined, fallbackReason: 'traveler_request' };
+}
+
 export function fallbackTrendDigest(facts: Pick<WeeklyTrendFacts, 'top_categories' | 'top_good_for'>): TrendDigest {
   const themes: TrendDigest['themes'] = facts.top_categories.slice(0, 3).map((item, index) => ({
     label: item.category.slice(0, 40), categories: [item.category], good_for: [],

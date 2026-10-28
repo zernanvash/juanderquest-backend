@@ -9,7 +9,7 @@ export const DEFAULT_NIM_BASE_URL = 'https://integrate.api.nvidia.com/v1';
 export const DEFAULT_NIM_MODEL = 'nvidia/nemotron-3.5-lightning-30b-a3b';
 
 export type AiFallbackReason =
-  | 'nim_not_configured' | 'nim_key_unavailable' | 'rate_limited' | 'timeout'
+  | 'traveler_request' | 'nim_not_configured' | 'nim_key_unavailable' | 'rate_limited' | 'timeout'
   | 'upstream_http_error' | 'upstream_unavailable' | 'invalid_json' | 'schema_mismatch'
   | 'hallucinated_place' | 'cache_unavailable';
 
