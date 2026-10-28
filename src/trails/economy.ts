@@ -16,7 +16,7 @@ export interface TrailEconomyConfig {
 }
 
 const defaults: TrailEconomyConfig = {
-  personalGenerationEnabled: true,
+  personalGenerationEnabled: false,
   starterRewardPoints: 50,
   explorerMinLevel: 5,
   explorerRewardPoints: 100,

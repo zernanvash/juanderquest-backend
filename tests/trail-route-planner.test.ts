@@ -168,4 +168,16 @@ describe('Phase 4: Deterministic Trail Corridor Route & Stop Planner Slice', () 
     });
     expect(bad.status).toBe(400);
   });
+
+  test('Plan 64: POST /routes routes trail navigation through its stops (via)', async () => {
+    const via = [{ lat: 16.2, lng: 119.97 }, { lat: 16.37, lng: 119.88 }];
+    const res = await request(app).post('/api/v1/routes').send({ start: { lat: 16.04, lng: 120.33 }, end: { lat: 16.39, lng: 119.9 }, via });
+    expect(res.status).toBe(200);
+    const coords = res.body.data.coordinates as [number, number][];
+    for (const point of via) {
+      expect(Math.min(...coords.map(([lat, lng]) => Math.hypot(lat - point.lat, lng - point.lng)))).toBeLessThan(0.05);
+    }
+    const tooMany = await request(app).post('/api/v1/routes').send({ start: { lat: 16, lng: 120 }, end: { lat: 16.1, lng: 120.1 }, via: Array(11).fill(via[0]) });
+    expect(tooMany.status).toBe(400);
+  });
 });

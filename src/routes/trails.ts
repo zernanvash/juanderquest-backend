@@ -61,6 +61,42 @@ trailsRouter.get('/trails', optionalAuthenticateToken, async (req: AuthRequest, 
   } catch { return res.status(503).json({success:false,error:{code:'TRAILS_UNAVAILABLE',message:'Trail catalog is unavailable.'}}); }
 });
 
+// Trails for a destination's side panel: published trails with a stop near the point, those
+// passing through the selected spot first. Stops stay private; only a cover photo is shared.
+const nearSchema = z.object({
+  lat: z.coerce.number().min(-90).max(90), lng: z.coerce.number().min(-180).max(180),
+  radius_km: z.coerce.number().min(1).max(60).default(30), spot_id: z.string().max(120).optional(),
+});
+trailsRouter.get('/trails/near', optionalAuthenticateToken, async (req: AuthRequest, res: Response) => {
+  const parsed = nearSchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ success:false,error:{code:'VALIDATION_ERROR',message:'Valid lat and lng are required.'} });
+  const pool=getPool();
+  if(!pool)return res.status(503).json({success:false,error:{code:'DATABASE_UNAVAILABLE',message:'Trail catalog is unavailable.'}});
+  const { lat, lng, radius_km, spot_id } = parsed.data;
+  try {
+    const user=req.user ? (await pool.query('SELECT id,is_test FROM users WHERE id=$1',[req.user.id])).rows[0] : null;
+    const isTest=Boolean(user?.is_test);
+    const {rows}=await pool.query(`WITH near AS (
+        SELECT s.trail_id,
+          MIN(6371*2*ASIN(SQRT(POWER(SIN(RADIANS(p.gps_lat-$1)/2),2)+COS(RADIANS($1))*COS(RADIANS(p.gps_lat))*POWER(SIN(RADIANS(p.gps_lng-$2)/2),2)))) AS nearest_km,
+          BOOL_OR(s.spot_id=$4) AS passes_here
+        FROM trail_stops s JOIN spots p ON p.id=s.spot_id GROUP BY s.trail_id)
+      SELECT t.id,t.slug,t.title,t.tagline,t.tier,t.theme,t.municipalities,t.unlock_rule,t.total_minutes,t.total_km,t.available_until,
+        (SELECT COUNT(*)::int FROM trail_stops s WHERE s.trail_id=t.id) AS stop_count,
+        (SELECT p.image_url FROM trail_stops s JOIN spots p ON p.id=s.spot_id WHERE s.trail_id=t.id AND COALESCE(p.image_url,'')<>'' ORDER BY s.position LIMIT 1) AS cover_image_url,
+        (t.owner_user_id=$5 OR EXISTS(SELECT 1 FROM trail_unlocks u WHERE u.trail_id=t.id AND u.user_id=$5)) AS is_unlocked,
+        near.nearest_km, near.passes_here
+      FROM trails t JOIN near ON near.trail_id=t.id
+      WHERE t.status='published' AND t.is_test=$6 AND t.owner_user_id IS NULL AND near.nearest_km <= $3
+        AND (t.available_until IS NULL OR t.available_until > now())
+      ORDER BY near.passes_here DESC, near.nearest_km, CASE t.tier WHEN 'starter' THEN 1 WHEN 'explorer' THEN 2 WHEN 'signature' THEN 3 ELSE 4 END
+      LIMIT 12`,[lat,lng,radius_km,spot_id??null,user?.id??null,isTest]);
+    res.set('Cache-Control',req.user?'private, no-store':'public, max-age=60');
+    return res.json({success:true,data:{items:rows.map(row=>({...lockedTrailShape(row,Boolean(row.is_unlocked)),
+      cover_image_url:row.cover_image_url||null,passes_here:Boolean(row.passes_here),nearest_km:Math.round(Number(row.nearest_km)*10)/10}))}});
+  } catch { return res.status(503).json({success:false,error:{code:'TRAILS_UNAVAILABLE',message:'Trail catalog is unavailable.'}}); }
+});
+
 trailsRouter.get('/trails/:id', optionalAuthenticateToken, async (req: AuthRequest, res: Response) => {
   const pool=getPool();
   if(!pool)return res.status(503).json({success:false,error:{code:'DATABASE_UNAVAILABLE',message:'Trail details are unavailable.'}});
@@ -74,7 +110,15 @@ trailsRouter.get('/trails/:id', optionalAuthenticateToken, async (req: AuthReque
     const trail=selected.rows[0];
     if(!trail)return res.status(404).json({success:false,error:{code:'TRAIL_NOT_FOUND',message:'Trail was not found.'}});
     res.set('Cache-Control',req.user?'private, no-store':'public, max-age=60');
-    if(!trail.is_unlocked)return res.json({success:true,data:lockedTrailShape(trail,false)});
+    if(!trail.is_unlocked){
+      // What the trail offers, so a traveler can decide: names, photos and one line per stop.
+      // The order, map, coordinates and narration stay private until it is unlocked.
+      const preview=await pool.query(`SELECT p.name,p.municipality,p.category,COALESCE(p.image_url,'') AS image_url,p.description
+        FROM trail_stops s JOIN spots p ON p.id=s.spot_id WHERE s.trail_id=$1 ORDER BY p.name`,[trail.id]);
+      return res.json({success:true,data:{...lockedTrailShape(trail,false),intro:typeof trail.story?.intro==='string'?trail.story.intro:'',
+        preview:preview.rows.map((row:any)=>({name:row.name,municipality:row.municipality,category:row.category,image_url:row.image_url||null,
+          blurb:String(row.description||'').split(/(?<=[.!?])s/)[0].slice(0,160)}))}});
+    }
     const stops=await pool.query(`SELECT s.position,s.spot_id,s.arrive_offset_min,s.dwell_min,s.leg_minutes,s.leg_km,s.narration,s.checkin_radius_m,
         p.name,p.municipality,p.category,p.gps_lat,p.gps_lng
       FROM trail_stops s JOIN spots p ON p.id=s.spot_id WHERE s.trail_id=$1 ORDER BY s.position`,[trail.id]);

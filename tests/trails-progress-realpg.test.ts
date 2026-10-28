@@ -87,6 +87,11 @@ describeRealPg('Trail unlock, location check-in, and completion (isolated real P
     expect(serialized).not.toContain('gps_lat');
     expect(serialized).not.toContain('Must not leak');
     expect(before.body.data).toMatchObject({id:lockedId,is_unlocked:false,stop_count:2});
+    // Plan 64: the locked modal may show what the trail offers (names, one line), never the order or map.
+    expect(before.body.data.preview.map((stop: any) => stop.name)).toEqual(['Trail Checkpoint A','Trail Checkpoint B']);
+    expect(before.body.data.preview[0]).toMatchObject({municipality:'Bolinao',blurb:'A real test checkpoint.'});
+    expect(serialized).not.toContain('position');
+    expect(serialized).not.toContain('"lat"');
 
     const detail=await request(app).get(`/api/v1/trails/${trailId}`).set('Authorization',`Bearer ${token}`);
     expect(detail.status).toBe(200);
@@ -95,6 +100,19 @@ describeRealPg('Trail unlock, location check-in, and completion (isolated real P
     const replay=await unlockTrail(fixture.pool,userId,trailId,'trail-unlock-process-a');
     expect(replay.replayed).toBe(true);
     expect(Number((await fixture.pool.query('SELECT demo_points FROM users WHERE id=$1',[userId])).rows[0].demo_points)).toBe(700);
+  }, 30_000);
+
+  test('Plan 64: trails near a destination list those passing through it first, without stop details', async () => {
+    const near=await request(app).get('/api/v1/trails/near').query({lat:16.0005,lng:120.0005,spot_id:'trail-progress-spot-b',radius_km:5});
+    expect(near.status).toBe(200);
+    const ids=near.body.data.items.map((item: any) => item.id);
+    expect(ids).toEqual(expect.arrayContaining([trailId,lockedId]));
+    expect(near.body.data.items[0]).toMatchObject({passes_here:true});
+    expect(JSON.stringify(near.body.data)).not.toContain('spot_id');
+    const far=await request(app).get('/api/v1/trails/near').query({lat:14.6,lng:120.98,radius_km:5});
+    expect(far.status).toBe(200);
+    expect(far.body.data.items).toHaveLength(0);
+    expect((await request(app).get('/api/v1/trails/near').query({lat:'x'})).status).toBe(400);
   }, 30_000);
 
   test('check-in validates radius and accuracy then completes and pays exactly once with a Plaza event', async () => {
