@@ -2,6 +2,7 @@ import { PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
 import { env } from '../config/env.js';
 import { JuanChoiceError } from './service.js';
+import { getActiveJuanChoicePerks } from './perks.js';
 
 async function queryMonthlyOverview(regionKey: string, isTest: boolean) {
   const pool = getPool();
@@ -12,15 +13,17 @@ async function queryMonthlyOverview(regionKey: string, isTest: boolean) {
     const now = new Date((await client.query('SELECT clock_timestamp() AS now')).rows[0].now);
     const schedule = (await client.query(
       `SELECT id,region_key,display_region,timezone,enabled FROM juanchoice_schedules
-       WHERE region_key=$1 AND is_test=$2 ORDER BY created_at,id LIMIT 1`,[regionKey,isTest])).rows[0];
+       WHERE region_key=$1 AND is_test=$2
+       ORDER BY enabled DESC, (cadence='weekly') DESC, created_at, id LIMIT 1`,[regionKey,isTest])).rows[0];
     if (!schedule) {
       await client.query('COMMIT');
       return {server_time:now.toISOString(),region:{key:regionKey,label:regionKey==='pangasinan'?'Pangasinan':regionKey,timezone:'Asia/Manila'},
-        view:'between' as const,availability:{voting_enabled:false,reason:'NO_SCHEDULE'},current:null,next:null,previous:null,
+        view:'between' as const,availability:{voting_enabled:false,reason:'NO_SCHEDULE'},current:null,reigning:null,next:null,previous:null,
         notice:{code:'NO_SCHEDULE',message:'The first community round has not been scheduled yet.'}};
     }
     const current = (await client.query(
-      `SELECT c.id,c.slug,c.region,c.theme,c.status,c.opens_at,c.closes_at,c.policy_version,p.period_start
+      `SELECT c.id,c.slug,c.region,c.theme,c.status,c.opens_at,c.closes_at,c.policy_version,p.period_start,
+         c.round_tier,c.festival_name,c.blind_tally_hours
        FROM juanchoice_schedule_periods p JOIN juanchoice_campaigns c ON c.id=p.campaign_id
        WHERE p.schedule_id=$1 AND p.status='prepared' AND c.status IN ('scheduled','voting')
          AND p.opens_at <= $2 AND p.closes_at > $2
@@ -36,6 +39,32 @@ async function queryMonthlyOverview(regionKey: string, isTest: boolean) {
        JOIN juanchoice_results r ON r.campaign_id=c.id
        WHERE p.schedule_id=$1 AND c.status IN ('finalized','archived')
        ORDER BY p.period_start DESC,c.id DESC LIMIT 1`,[schedule.id])).rows[0] ?? null;
+    // Plan 65: the destination(s) reigning this week (elected last week) and their live perks.
+    const reignRow = (await client.query(
+      `SELECT c.id AS campaign_id,c.theme,c.round_tier,c.festival_name,c.closes_at,r.co_winner_ids,r.minister_candidate_id,
+         r.total_weighted_votes,r.valid_ballots
+       FROM juanchoice_schedule_periods p JOIN juanchoice_campaigns c ON c.id=p.campaign_id
+       JOIN juanchoice_results r ON r.campaign_id=c.id
+       WHERE p.schedule_id=$1 AND c.status='finalized' AND c.policy_version='juanchoice-weekly-v1'
+         AND c.closes_at <= $2 AND c.closes_at + INTERVAL '7 days' > $2
+       ORDER BY c.closes_at DESC LIMIT 1`,[schedule.id,now])).rows[0] ?? null;
+    let reigning = null;
+    if (reignRow) {
+      const winnerIds: string[] = Array.isArray(reignRow.co_winner_ids) ? reignRow.co_winner_ids : [];
+      const ids = [...winnerIds, ...(reignRow.minister_candidate_id ? [reignRow.minister_candidate_id] : [])];
+      const people = ids.length ? (await client.query(
+        `SELECT c.id AS candidate_id,s.id AS spot_id,s.slug AS spot_slug,s.name AS spot_name,s.municipality,s.image_url
+         FROM juanchoice_candidates c JOIN spots s ON s.id=c.spot_id WHERE c.id = ANY($1::uuid[])`,[ids])).rows : [];
+      const perks = await getActiveJuanChoicePerks(client,isTest,now);
+      reigning = {
+        campaign_id:reignRow.campaign_id, theme:reignRow.theme, round_tier:reignRow.round_tier, festival_name:reignRow.festival_name,
+        reign_starts_at:new Date(reignRow.closes_at).toISOString(),
+        reign_ends_at:new Date(new Date(reignRow.closes_at).getTime()+7*86400000).toISOString(),
+        champions:people.filter(person=>winnerIds.includes(person.candidate_id)),
+        minister:people.find(person=>person.candidate_id===reignRow.minister_candidate_id) ?? null,
+        perks, total_weighted_votes:Number(reignRow.total_weighted_votes), valid_ballots:Number(reignRow.valid_ballots),
+      };
+    }
     const pending = (await client.query(
       `SELECT 1 FROM juanchoice_schedule_periods p JOIN juanchoice_campaigns c ON c.id=p.campaign_id
        LEFT JOIN juanchoice_results r ON r.campaign_id=c.id
@@ -58,7 +87,7 @@ async function queryMonthlyOverview(regionKey: string, isTest: boolean) {
     const dto = {
       server_time:now.toISOString(),
       region:{key:schedule.region_key,label:schedule.display_region,timezone:schedule.timezone},
-      view:current?'open' as const:'between' as const,availability,current,
+      view:current?'open' as const:'between' as const,availability,current,reigning,
       next:next?{opens_at:next.opens_at,closes_at:next.closes_at,theme:next.selected_theme,
         schedule_status:'scheduled' as const}:null,
       previous:previous?{...previous,period_label:new Intl.DateTimeFormat('en-PH',{timeZone:schedule.timezone,

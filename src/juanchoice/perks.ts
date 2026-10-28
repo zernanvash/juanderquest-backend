@@ -115,7 +115,7 @@ export function ministerPerk(perks: unknown): ManifestoPerk | null {
 }
 
 export interface ActivePerk extends ManifestoPerk {
-  role: 'champion' | 'minister'; campaign_id: string; spot_id: string; municipality: string; category: string;
+  role: 'champion' | 'minister'; campaign_id: string; candidate_id: string; spot_id: string; municipality: string; category: string;
   reign_starts_at: string; reign_ends_at: string;
 }
 
@@ -139,7 +139,16 @@ export async function getActiveJuanChoicePerks(client: Queryable, isTest = false
      WHERE c.is_test = $1 AND c.status = 'finalized' AND jsonb_array_length(r.active_perks) > 0
        AND c.closes_at <= $2 AND c.closes_at + INTERVAL '7 days' > $2
      ORDER BY c.closes_at DESC LIMIT 1`, [isTest, now])).rows[0];
-  const value: ActivePerk[] = row && Array.isArray(row.active_perks) ? row.active_perks : [];
+  let value: ActivePerk[] = row && Array.isArray(row.active_perks) ? row.active_perks : [];
+  if (value.length) {
+    // An admin 'restricted' override suspends a reigning destination's perks mid-week (Plan 65 D10).
+    const ids = [...new Set(value.map(perk => perk.candidate_id).filter(Boolean))];
+    const restricted = new Set((await client.query(
+      `SELECT DISTINCT ON (candidate_id) candidate_id, decision FROM juanchoice_promotion_assessments
+       WHERE candidate_id = ANY($1::uuid[]) ORDER BY candidate_id, revision DESC`, [ids])).rows
+      .filter(r => r.decision === 'restricted').map(r => String(r.candidate_id)));
+    value = value.filter(perk => !restricted.has(String(perk.candidate_id)));
+  }
   activeCache.set(key, { at: now.getTime(), value });
   return value;
 }

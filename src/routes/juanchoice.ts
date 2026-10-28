@@ -12,10 +12,13 @@ import { getMonthlyOverview } from '../juanchoice/monthly-overview.js';
 import { getPresentationOverview } from '../juanchoice/presentation-overview.js';
 import { createMonthlySchedule, reconcileMonthlySchedules } from '../juanchoice/monthly-service.js';
 import { getJuanChoiceSchedulerStatus } from '../jobs/juanchoice-scheduler.js';
+import { getActiveJuanChoicePerks } from '../juanchoice/perks.js';
 
 export const juanChoiceRouter = Router();
 const uuid = z.string().uuid();
-const ballotBody = z.object({ candidate_id: uuid, expected_version: z.number().int().min(0) }).strict();
+const ballotBody = z.object({ candidate_id: uuid, expected_version: z.number().int().min(0),
+  /** Plan 65: ballot weight 1..5 (boosts cost points); omitted keeps the current weight. */
+  target_weight: z.number().int().min(1).max(5).optional() }).strict();
 const campaignBody = z.object({
   slug: z.string().min(3).max(100).regex(/^[a-z0-9-]+$/),
   region: z.string().min(2).max(100), theme: z.string().min(2).max(120),
@@ -41,14 +44,15 @@ const promotionBudgetBody = z.object({ budget_mjdq: z.number().int().min(0).max(
 const monthlyScheduleBody = z.object({
   schedule_key:z.string().regex(/^[a-z0-9-]{3,80}$/),
   region_key:z.literal('pangasinan'),display_region:z.literal('Pangasinan'),timezone:z.literal('Asia/Manila'),
-  enabled:z.boolean().default(false),effective_period:z.string().regex(/^\d{4}-(0[1-9]|1[0-2])-01$/),
+  enabled:z.boolean().default(false),effective_period:z.string().regex(/^\d{4}-(0[1-9]|1[0-2])-\d{2}$/),
+  cadence:z.enum(['monthly','weekly']).default('monthly'),
   preparation_lead_days:z.number().int().min(1).max(28).default(7),
   minimum_candidates:z.number().int().min(2).max(6).default(2),
   target_candidates:z.number().int().min(2).max(6).default(4),
   maximum_candidates:z.number().int().min(2).max(6).default(6),
   themes:z.array(z.object({name:z.string().trim().min(3).max(100),
     categories:z.array(z.enum(['eat_drink','nature_outdoors','culture_heritage','activities_wellness','shopping_local','stay'])).min(1).max(6)}).strict()).min(1).max(12),
-  policy_version:z.literal('juanchoice-monthly-v1').default('juanchoice-monthly-v1'),
+  policy_version:z.enum(['juanchoice-monthly-v1','juanchoice-weekly-v1']).default('juanchoice-monthly-v1'),
   is_test:z.boolean().default(false),
 }).strict().refine(value=>value.minimum_candidates<=value.target_candidates&&value.target_candidates<=value.maximum_candidates);
 
@@ -85,6 +89,50 @@ juanChoiceRouter.get('/juanchoice/supporter-quest', optionalAuthenticateToken, c
     res.set('Cache-Control', 'private, no-store');
     return res.json({success:true,data:await getSupporterQuest(req.user?.id,isAuthorizedQA(req))});
   } catch(error){return failure(res,error);}
+});
+
+// Plan 65: the perks reigning right now (Champion + Minister), for the web and gameplay hooks.
+juanChoiceRouter.get('/juanchoice/perks/active', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res) => {
+  try {
+    const isTest = req.query.scope === 'test' && isAuthorizedQA(req);
+    res.set('Cache-Control', isTest ? 'private, no-store' : 'public, max-age=30');
+    return res.json({ success: true, data: { perks: await getActiveJuanChoicePerks(pool(), isTest) } });
+  } catch (error) { return failure(res, error); }
+});
+
+// Plan 65 §9.4: festival calendar for special festival rounds. Seeded empty; admins enter real dates.
+const festivalBody = z.object({ name: z.string().trim().min(2).max(160), municipality: z.string().trim().min(2).max(100).nullable().optional(),
+  starts_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), ends_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  boost_multiplier: z.number().min(1).max(3).default(1.5), is_test: z.boolean().default(false) }).strict()
+  .refine(value => value.ends_on >= value.starts_on, { message: 'ends_on must not be before starts_on' });
+juanChoiceRouter.get('/juanchoice/admin/festivals', authenticateToken, requireAdmin, async (_req: AuthRequest, res) => {
+  try {
+    const rows = (await pool().query('SELECT * FROM juanchoice_festivals ORDER BY starts_on DESC, name LIMIT 200')).rows;
+    return res.json({ success: true, data: rows });
+  } catch (error) { return failure(res, error); }
+});
+juanChoiceRouter.post('/juanchoice/admin/festivals', authenticateToken, requireAdmin,
+  rateLimit({ policyId: 'juanchoice:festival-write', windowMs: 60_000, max: 20, keyStrategy: 'actor' }),
+  async (req: AuthRequest, res) => {
+    const parsed = festivalBody.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST', message: parsed.error.issues[0]?.message } });
+    try {
+      const row = (await pool().query(
+        `INSERT INTO juanchoice_festivals(id,name,municipality,starts_on,ends_on,boost_multiplier,is_test,created_by)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+        [randomUUID(), parsed.data.name, parsed.data.municipality ?? null, parsed.data.starts_on, parsed.data.ends_on,
+          parsed.data.boost_multiplier, parsed.data.is_test, req.user!.id])).rows[0];
+      return res.status(201).json({ success: true, data: row });
+    } catch (error) { return failure(res, error); }
+  });
+juanChoiceRouter.delete('/juanchoice/admin/festivals/:id', authenticateToken, requireAdmin, async (req: AuthRequest, res) => {
+  const id = uuid.safeParse(req.params.id);
+  if (!id.success) return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
+  try {
+    const deleted = await pool().query('DELETE FROM juanchoice_festivals WHERE id=$1', [id.data]);
+    if (!deleted.rowCount) return res.status(404).json({ success: false, error: { code: 'FESTIVAL_NOT_FOUND' } });
+    return res.json({ success: true, data: { deleted: true } });
+  } catch (error) { return failure(res, error); }
 });
 
 juanChoiceRouter.get('/juanchoice/overview', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest,res) => {
@@ -258,7 +306,7 @@ juanChoiceRouter.put('/juanchoice/campaigns/:id/ballot', authenticateToken,
     if (!body.success || !key.success || !id.success) return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
     try {
       const result = await castBallot({ campaignId: id.data, userId: req.user!.id, candidateId: body.data.candidate_id,
-        expectedVersion: body.data.expected_version, idempotencyKey: key.data });
+        expectedVersion: body.data.expected_version, idempotencyKey: key.data, targetWeight: body.data.target_weight });
       res.set('Cache-Control', 'private, no-store');
       return res.json({ success: true, data: result });
     } catch (error) { return failure(res, error); }

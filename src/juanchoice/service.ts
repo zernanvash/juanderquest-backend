@@ -622,7 +622,7 @@ export async function getMyJuanChoiceCampaignState(campaignId: string, userId: s
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const campaign = (await client.query(
-      'SELECT is_test,status,opens_at,closes_at,series_key,round_number,counts_for_streak FROM juanchoice_campaigns WHERE id=$1', [campaignId]
+      'SELECT is_test,status,opens_at,closes_at,series_key,round_number,counts_for_streak,policy_version FROM juanchoice_campaigns WHERE id=$1', [campaignId]
     )).rows[0];
     await assertPresentationCampaignAccess(client, campaignId, campaign);
     const actor = (await client.query(
@@ -648,11 +648,22 @@ export async function getMyJuanChoiceCampaignState(campaignId: string, userId: s
     const inWindow = ['scheduled', 'voting'].includes(campaign.status)
       && now >= new Date(campaign.opens_at) && now < new Date(campaign.closes_at);
     const ballot = (await client.query(
-      'SELECT candidate_id,version FROM juanchoice_ballots WHERE campaign_id=$1 AND user_id=$2',
+      'SELECT candidate_id,version,vote_weight,boost_spent_points FROM juanchoice_ballots WHERE campaign_id=$1 AND user_id=$2',
       [campaignId, userId]
     )).rows[0] ?? null;
+    const weight = ballot ? Number(ballot.vote_weight) : 0;
+    const boostsOn = campaign.policy_version === WEEKLY_POLICY_VERSION && env.JUANCHOICE_ECONOMY_ENABLED;
     const result = {
       ballot,
+      // Plan 65: quadratic boosts. next_cost_points is the extra points for one more vote of weight.
+      boost: {
+        available: boostsOn,
+        current_weight: weight,
+        next_weight: boostsOn && weight >= 1 && weight < 5 ? weight + 1 : null,
+        next_cost_points: boostsOn && weight >= 1 && weight < 5 ? BOOST_COST_BY_WEIGHT[weight + 1] - BOOST_COST_BY_WEIGHT[weight] : null,
+        cost_by_weight: BOOST_COST_BY_WEIGHT,
+        civic_xp_per_tier: BOOST_CIVIC_XP_PER_TIER,
+      },
       eligibility: {
         eligible,
         reason: eligibility.reason,
