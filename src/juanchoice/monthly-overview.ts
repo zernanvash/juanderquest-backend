@@ -13,7 +13,7 @@ async function queryMonthlyOverview(regionKey: string, isTest: boolean) {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const now = new Date((await client.query('SELECT clock_timestamp() AS now')).rows[0].now);
     const schedule = (await client.query(
-      `SELECT id,region_key,display_region,timezone,enabled FROM juanchoice_schedules
+      `SELECT id,region_key,display_region,timezone,enabled,cadence FROM juanchoice_schedules
        WHERE region_key=$1 AND is_test=$2
        ORDER BY enabled DESC, (cadence='weekly') DESC, created_at, id LIMIT 1`,[regionKey,isTest])).rows[0];
     if (!schedule) {
