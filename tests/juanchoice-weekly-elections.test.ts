@@ -84,10 +84,10 @@ describe('Plan 65 weekly elections on isolated real PostgreSQL', () => {
       JUANCHOICE_BATCH_WRITES_ENABLED: false, JUANCHOICE_ECONOMY_ENABLED: true, PROGRESSION_ENABLED: true });
     const old = new Date(Date.now() - 10 * DAY);
     await fixture.pool.query(`INSERT INTO users(id,seed_id,display_name,email,role,demo_points,created_at,is_test) VALUES
-      ($1,$1,'Rich voter',$1||'@example.test','user',1000,$5,false),
-      ($2,$2,'Second voter',$2||'@example.test','user',1000,$5,false),
-      ($3,$3,'Poor voter',$3||'@example.test','user',10,$5,false),
-      ($4,$4,'Admin',$4||'@example.test','admin',0,$5,false)`, [rich, second, poor, admin, old]);
+      ($1::text,$1::text,'Rich voter',$1::text||'@example.test','user',1000,$5,false),
+      ($2::text,$2::text,'Second voter',$2::text||'@example.test','user',1000,$5,false),
+      ($3::text,$3::text,'Poor voter',$3::text||'@example.test','user',10,$5,false),
+      ($4::text,$4::text,'Admin',$4::text||'@example.test','admin',0,$5,false)`, [rich, second, poor, admin, old]);
     const towns = ['Bolinao', 'Anda', 'Sual', 'Lingayen', 'Dagupan City', 'Alaminos City', 'Bani'];
     for (let i = 0; i < towns.length; i++) {
       await fixture.pool.query(`INSERT INTO spots(id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,
