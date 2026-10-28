@@ -100,7 +100,7 @@ export async function createPersonalTrail(pool: Pool, userId: string, key: strin
     if (error instanceof PersonalTrailError) throw error;
     if ((error instanceof FundingError && error.code === 'INSUFFICIENT_TRAVELER_POINTS') ||
         (error instanceof Error && error.message === 'INSUFFICIENT_TRAVELER_POINTS')) {
-      throw new PersonalTrailError('INSUFFICIENT_POINTS', 409, 'You do not have enough points for another personal trail this week.');
+      throw new PersonalTrailError('INSUFFICIENT_POINTS', 409, 'You do not have enough points for a tailored trail.');
     }
     throw error;
   }
