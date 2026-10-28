@@ -107,7 +107,8 @@ const festivalBody = z.object({ name: z.string().trim().min(2).max(160), municip
   .refine(value => value.ends_on >= value.starts_on, { message: 'ends_on must not be before starts_on' });
 juanChoiceRouter.get('/juanchoice/admin/festivals', authenticateToken, requireAdmin, async (_req: AuthRequest, res) => {
   try {
-    const rows = (await pool().query('SELECT * FROM juanchoice_festivals ORDER BY starts_on DESC, name LIMIT 200')).rows;
+    const rows = (await pool().query(`SELECT id,name,municipality,to_char(starts_on,'YYYY-MM-DD') AS starts_on,to_char(ends_on,'YYYY-MM-DD') AS ends_on,
+       boost_multiplier,is_test,created_at FROM juanchoice_festivals ORDER BY starts_on DESC, name LIMIT 200`)).rows;
     return res.json({ success: true, data: rows });
   } catch (error) { return failure(res, error); }
 });
