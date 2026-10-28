@@ -244,13 +244,16 @@ juanChoiceRouter.get('/juanchoice/admin/campaigns/:id', authenticateToken, requi
     const [candidates, counts, audit, result] = await Promise.all([
       pool().query(`SELECT n.*,s.name AS spot_name,s.municipality,s.status AS spot_status,s.crowd_capacity_band,s.recommendation_suppressed
                     FROM juanchoice_candidates n JOIN spots s ON s.id=n.spot_id WHERE n.campaign_id=$1 ORDER BY n.created_at,n.id`,[id.data]),
-      pool().query('SELECT candidate_id,COUNT(*)::int AS votes FROM juanchoice_ballots WHERE campaign_id=$1 GROUP BY candidate_id',[id.data]),
+      pool().query(`SELECT candidate_id,COUNT(*)::int AS votes,COALESCE(SUM(vote_weight),0)::int AS weighted_votes,
+                    COALESCE(SUM(boost_spent_points),0)::int AS boost_points
+                    FROM juanchoice_ballots WHERE campaign_id=$1 GROUP BY candidate_id`,[id.data]),
       pool().query('SELECT action,reason,actor_id,created_at FROM juanchoice_campaign_audit WHERE campaign_id=$1 ORDER BY created_at DESC LIMIT 30',[id.data]),
       pool().query('SELECT * FROM juanchoice_results WHERE campaign_id=$1',[id.data]),
     ]);
-    const countByCandidate=new Map(counts.rows.map(row=>[row.candidate_id,Number(row.votes)]));
-    const ballotCount=counts.rows.reduce((sum,row)=>sum+Number(row.votes),0);
-    return res.json({success:true,data:{campaign:{...campaign,ballot_count:ballotCount},candidates:candidates.rows.map(row=>({...row,votes:countByCandidate.get(row.id)??0})),audit:audit.rows,result:result.rows[0]??null}});
+    const countByCandidate=new Map(counts.rows.map(row=>[row.candidate_id,row]));
+    const sum=(key:string)=>counts.rows.reduce((total,row)=>total+Number(row[key]),0);
+    return res.json({success:true,data:{campaign:{...campaign,ballot_count:sum('votes'),weighted_votes:sum('weighted_votes'),boost_points:sum('boost_points')},
+      candidates:candidates.rows.map(row=>{const count=countByCandidate.get(row.id);return {...row,votes:Number(count?.votes??0),weighted_votes:Number(count?.weighted_votes??0),boost_points:Number(count?.boost_points??0)};}),audit:audit.rows,result:result.rows[0]??null}});
   } catch (error) { return failure(res,error); }
 });
 
