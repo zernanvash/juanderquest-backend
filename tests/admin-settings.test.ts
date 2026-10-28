@@ -100,7 +100,7 @@ describe('Admin settings, audit and observation', () => {
     expect(response.body.data.revision).toBe(1);
     expect(response.body.data.values.support_contact_email).toBe('tourism@pangasinan.gov.ph');
     expect(response.body.data.values.quiz_default_radius_meters).toBe(300);
-    expect(response.body.data.values.trail_personal_generation_enabled).toBe(true);
+    expect(response.body.data.values.trail_personal_generation_enabled).toBe(false);
 
     const reloaded = await request(app)
       .get('/api/v1/admin/settings')
