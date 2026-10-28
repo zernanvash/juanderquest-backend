@@ -73,7 +73,6 @@ routesRouter.get('/routes', async (req: Request, res: Response) => {
       endLng: end_lng,
       costing: costing as TravelCosting,
       avoidCongested: avoid_congested,
-      via,
     });
 
     return res.json({
