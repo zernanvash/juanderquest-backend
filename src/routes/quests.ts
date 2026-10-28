@@ -26,6 +26,7 @@ import { FundingError } from '../funding/transaction.js';
 import { fundingErrorResponse } from './fundingPlans.js';
 import { lockGovernanceSnapshot } from '../governance/transaction.js';
 import { publicFundingSummaries } from '../funding/readModel.js';
+import { handleQuestStepVerified } from '../stamps/hooks.js';
 
 const router = Router();
 
@@ -1494,6 +1495,14 @@ router.post(
     const memSteps = db.getStepEvidence(activeAttempt.id);
     activeAttempt.verified_steps = memSteps.filter((s) => s.status === 'verified').length;
     claimedChallengeNonce = undefined;
+
+    if (newStatus === 'verified' && pool) {
+      await handleQuestStepVerified(pool, {
+        userId,
+        questId: activeAttempt.quest_id ?? quest.id,
+        evidenceId: stepEvidence.id,
+      });
+    }
 
     return res.status(200).json({
       success: true,

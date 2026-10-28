@@ -3,7 +3,7 @@ export type SettingValue = string | number | boolean;
 export interface SettingDefinition {
   key: string;
   label: string;
-  category: 'branding_support' | 'quiz_defaults' | 'quest_funding' | 'trail_economy';
+  category: 'branding_support' | 'quiz_defaults' | 'quest_funding' | 'trail_economy' | 'stamps';
   type: 'email' | 'url' | 'text' | 'integer' | 'boolean' | 'string';
   defaultValue: SettingValue;
   min?: number;
@@ -158,6 +158,41 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
   { key: 'trail_personal_generation_enabled', label: 'Traveler personal trail generation', category: 'trail_economy', type: 'boolean', defaultValue: false, restartRequired: false, description: 'Allow travelers to generate personal trails. Admin-created and reviewed trails remain available when this is off.' },
   { key: 'trail_personal_generation_points', label: 'Additional personal trail generation price', category: 'trail_economy', type: 'integer', defaultValue: 100, min: 1, max: 10000, restartRequired: false, description: 'mJDQ points charged after the free weekly allowance.' },
   { key: 'trail_personal_reward_points', label: 'Personal trail completion reward', category: 'trail_economy', type: 'integer', defaultValue: 50, min: 0, max: 10000, restartRequired: false, description: 'Off-chain mJDQ points awarded once after all trail stops are verified.' },
+  {
+    key: 'stamps_weekly_cap', label: 'Weekly stamp cap', category: 'stamps',
+    type: 'integer', defaultValue: 250, min: 0, max: 10000, restartRequired: false,
+    description: 'Hard maximum stamps earned per Manila week across every source.',
+  },
+  {
+    key: 'stamps_daily_claim_stamps', label: 'Daily claim stamps (days 1-6)', category: 'stamps',
+    type: 'integer', defaultValue: 5, min: 0, max: 100, restartRequired: false,
+    description: 'Stamps granted for each of the first six days of the forgiving calendar.',
+  },
+  {
+    key: 'stamps_daily_claim_day7_stamps', label: 'Daily claim stamps (day 7)', category: 'stamps',
+    type: 'integer', defaultValue: 25, min: 0, max: 100, restartRequired: false,
+    description: 'Stamps granted for the seventh day of the forgiving calendar.',
+  },
+  {
+    key: 'stamps_weekly_chest_required', label: 'Weekly chest missions required', category: 'stamps',
+    type: 'integer', defaultValue: 5, min: 1, max: 21, restartRequired: false,
+    description: 'Completed daily missions needed to open the weekly chest.',
+  },
+  {
+    key: 'stamps_weekly_chest_stamps', label: 'Weekly chest stamps', category: 'stamps',
+    type: 'integer', defaultValue: 30, min: 0, max: 500, restartRequired: false,
+    description: 'Stamps granted once per Manila week when the chest requirement is met.',
+  },
+  {
+    key: 'stamps_streak_shield_price', label: 'Streak shield price (stamps)', category: 'stamps',
+    type: 'integer', defaultValue: 100, min: 0, max: 10000, restartRequired: false,
+    description: 'Stamp price of one streak shield.',
+  },
+  {
+    key: 'stamps_streak_shields_max', label: 'Maximum streak shields held', category: 'stamps',
+    type: 'integer', defaultValue: 2, min: 0, max: 10, restartRequired: false,
+    description: 'Shields a traveler may hold at once. Shields never grant stamps.',
+  },
 ];
 
 export const SETTINGS_BY_KEY: ReadonlyMap<string, SettingDefinition> = new Map(
