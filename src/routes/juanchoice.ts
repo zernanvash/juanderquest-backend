@@ -437,6 +437,7 @@ juanChoiceRouter.get('/juanchoice/admin/campaigns/:id/candidates/:candidateId/pr
           eligible: eligibility.eligible,
           crowd_status: eligibility.crowd_status,
           crowd_confidence: eligibility.crowd_confidence,
+          gate: eligibility.gate ?? 'assessment',
         },
       });
     } catch (error) {
