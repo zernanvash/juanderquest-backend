@@ -129,6 +129,7 @@ realPg('JuanChoice perk controls (real PostgreSQL)', () => {
   });
 
   it('edits an upcoming contender\'s perks before voting opens, never after', async () => {
+    Object.assign(env, { JUANCHOICE_WRITES_ENABLED: true });
     const edited = await asStaff(request(app).put(`/api/v1/juanchoice/admin/campaigns/${upcomingId}/candidates/${upcomingCandidate}/manifesto`))
       .send({ perk_keys: ['spot_xp_boost', 'quiz_arcade_xp_boost'], mystery_key: 'quiz_arcade_xp_boost', reason });
     expect(edited.status).toBe(200);
