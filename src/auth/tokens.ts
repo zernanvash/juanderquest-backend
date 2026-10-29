@@ -60,6 +60,14 @@ export function signQuestArChallenge(input: Omit<QuestArChallengeClaims, 'sub' |
   );
 }
 
+// SESSIONS_VALID_AFTER signs everyone out at once (owner 2026-10-29, after Plan 67 made
+// wallet accounts finish with email + password). Tokens without iat predate the cutoff too.
+const issuedBeforeCutoff = (iat: unknown): boolean => {
+  const cutoff = Date.parse(env.SESSIONS_VALID_AFTER);
+  if (!Number.isFinite(cutoff)) return false;
+  return typeof iat !== 'number' || iat * 1000 < cutoff;
+};
+
 export function verifySessionToken(token: string): SessionClaims | null {
   try {
     const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ['HS256'] });
@@ -69,6 +77,7 @@ export function verifySessionToken(token: string): SessionClaims | null {
     if ((claims.typ !== undefined && claims.typ !== SESSION_TYP) || claims.sub === CHALLENGE_TYP || claims.sub === AR_CHALLENGE_TYP || claims.typ === AR_CHALLENGE_TYP) return null;
     if (typeof claims.id !== 'string' || claims.id.length === 0) return null;
     if (typeof claims.seed_id !== 'string' || !validRole(claims.role)) return null;
+    if (issuedBeforeCutoff(claims.iat)) return null;
     return { id: claims.id, seed_id: claims.seed_id, role: claims.role };
   } catch {
     return null;

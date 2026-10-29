@@ -67,6 +67,8 @@ export GUEST_LOGIN_ENABLED=true
 export MARKETPLACE_ENABLED=false
 export WALLET_AUTH_MODE=signature
 export ALLOW_INSECURE_LOCAL_WALLET_AUTH=false
+# Owner 2026-10-29: sign everyone out once Plan 67 is live, so every wallet account finishes with email + password.
+export SESSIONS_VALID_AFTER=2026-10-29T07:57:00Z
 export JUANCHOICE_ENABLED=true
 export ALPHA_WALLET_SIMULATION_ENABLED=true
 export JUANCHOICE_WRITES_ENABLED=true

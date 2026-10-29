@@ -55,6 +55,7 @@ describe('Fast-alpha launcher JuanChoice flag closure', () => {
       'export JUANCHOICE_PROMOTION_ENABLED=true',
       'export JUANCHOICE_ECONOMY_ENABLED=false',
       'export JUANCHOICE_BOOSTS_ENABLED=true',
+      'export SESSIONS_VALID_AFTER=2026-10-29T07:57:00Z',
       'export JUANCHOICE_FINALIZER_WORKER_ENABLED=true',
       'export JUANCHOICE_SCHEDULER_ENABLED=true',
     ];

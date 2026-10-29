@@ -59,6 +59,8 @@ const rawEnv = cleanEnv(process.env, {
   GUEST_LOGIN_ENABLED: bool({ default: false }),
   // Plan 67: OAuth web client ID for Google Identity Services. Empty keeps Google sign-in unavailable.
   GOOGLE_CLIENT_ID: str({ default: '' }),
+  // Sign everyone out: session tokens issued before this ISO time are rejected. Empty = no cutoff.
+  SESSIONS_VALID_AFTER: str({ default: '' }),
   ALPHA_WALLET_SIMULATION_ENABLED: bool({ default: false }),
   // Merchant offers in the prototype migrations are fixtures, not live deals.
   MARKETPLACE_ENABLED: bool({ default: isLocalRuntime }),

@@ -80,6 +80,7 @@ export const MIGRATIONS = [
   '071_passport_stamps.sql',
   '074_juanchoice_weekly_elections.sql',
   '075_juanchoice_perk_controls.sql',
+  '076_developer_roles.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
@@ -177,7 +178,7 @@ export async function applyMigrations(pg: Pool) {
         // UPDATE form used to reconcile historical submissions. Exercise the
         // production JSON backfill on PostgreSQL; keep the safety index active
         // in pg-mem so uniqueness behavior remains covered by unit tests.
-        if ((file === '074_juanchoice_weekly_elections.sql' || file === '075_juanchoice_perk_controls.sql') && pgMemMigrationAdapters.has(pg as object)) {
+        if ((file === '074_juanchoice_weekly_elections.sql' || file === '075_juanchoice_perk_controls.sql' || file === '076_developer_roles.sql') && pgMemMigrationAdapters.has(pg as object)) {
           // pg-mem cannot replace CHECK constraints (ISODOW expressions). In-memory tests keep the
           // monthly-only constraints and get the new columns/tables; PostgreSQL runs everything.
           await client.query(sql.replace(/ALTER TABLE \w+ (DROP|ADD) CONSTRAINT[^;]*;/g, ''));

@@ -103,7 +103,8 @@ export async function loadActiveSuspensions(client: Queryable, campaignId: strin
 export async function isPlatformStaff(userId: string, client: Queryable | null = getPool()): Promise<boolean> {
   if (!client) return false;
   const row = (await client.query("SELECT role, admin_scope FROM users WHERE id=$1", [userId])).rows[0];
-  return row?.role === 'admin' && row?.admin_scope === 'platform';
+  // Developers have access to everything, including JuanChoice perk controls.
+  return row?.role === 'admin' && (row?.admin_scope === 'platform' || row?.admin_scope === 'developer');
 }
 
 // --- Mutations (all audited, all need a reason) -----------------------------------------------
