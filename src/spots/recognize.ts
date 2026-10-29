@@ -114,6 +114,12 @@ const NAME_RULES: Array<[RegExp, keyof typeof PROFILES]> = [
   [/\b(lighthouse|capitol|heritage|ruins|monument)\b/i, 'heritage'],
 ];
 
+/** True when OSM tags or the name say what kind of destination this is (vs. a pharmacy, bank, road…). */
+export function isDestinationSignal(osm: { class: string; type: string } | null, name: string | null): boolean {
+  if (osm && TAG_RULES.some(([pattern]) => pattern.test(`${osm.class}=${osm.type}`))) return true;
+  return Boolean(name && NAME_RULES.some(([pattern]) => pattern.test(name)));
+}
+
 export function pickProfile(osm: { class: string; type: string } | null, name: string | null): Profile {
   if (osm) {
     const key = `${osm.class}=${osm.type}`;
@@ -142,6 +148,16 @@ export function hoursFromOsm(value: string | undefined): string | null {
   if (!match || value.includes(';')) return null;
   const fmt = (h: number, m: string) => `${String(h % 12 === 0 ? 12 : h % 12).padStart(2, '0')}:${m} ${h % 24 < 12 ? 'AM' : 'PM'}`;
   return `${fmt(Number(match[1]), match[2])} - ${fmt(Number(match[3]), match[4])}`;
+}
+
+/** No destination signal at the pin: helpful but neutral lines (no assumed beach views). */
+function neutralStarters(where: string, landmark: string | null): string[] {
+  return [
+    `A local spot in ${where} worth a stop when exploring the area.`,
+    landmark ? `Easy to find near ${landmark}; ask locals for directions if you get lost.` : 'Easy to reach from the main road; ask locals for directions if you get lost.',
+    'Good for a quick visit; check the hours and bring water on hot days.',
+    'Please keep it clean and respect the neighbors and local rules here.',
+  ];
 }
 
 function storyStarters(profile: Profile, where: string, placeName: string | null): string[] {
@@ -290,11 +306,13 @@ export async function recognizeSpotLocation(lat: number, lng: number, pool: Pick
   const osm = osmData?.category && osmData.type ? { class: osmData.category, type: osmData.type } : null;
   const rawName = (osmData?.namedetails?.name || osmData?.name || '').trim();
   const generic = [road, municipality, osmTown, osmBarangay, barangayArea?.name, province].filter(Boolean).map(value => value!.toLowerCase());
-  const placeName = rawName && !generic.includes(rawName.toLowerCase()) && osm && osm.class !== 'highway' && osm.class !== 'boundary' && osm.class !== 'place'
-    ? rawName : null;
+  // Only destination-like features name the spot; a pharmacy or bank at the pin is just a landmark.
+  const placeName = rawName && !generic.includes(rawName.toLowerCase()) && isDestinationSignal(osm, rawName) ? rawName : null;
+  const landmark = !placeName && rawName && !generic.includes(rawName.toLowerCase()) && osm?.class !== 'highway' ? rawName : null;
 
   // C. Suggestions in the API's vocabularies.
-  const profile = pickProfile(osm, placeName);
+  const profile = pickProfile(placeName ? osm : null, placeName);
+  const noSignal = !placeName;
   const extra = osmData?.extratags ?? {};
   const amenities = new Set<PostingAmenity>(profile.amenities);
   if (extra.wheelchair === 'yes') amenities.add('pwd_accessible');
@@ -324,7 +342,7 @@ export async function recognizeSpotLocation(lat: number, lng: number, pool: Pick
       daily_hours: hoursFromOsm(extra.opening_hours) ?? profile.hours,
       contact_number: (extra.phone || extra['contact:phone'] || '').trim(),
     },
-    story_starters: storyStarters(profile, where, placeName),
+    story_starters: noSignal ? neutralStarters(where, landmark) : storyStarters(profile, where, placeName),
     nearby_duplicates: findNearbyDuplicates(lat, lng),
   };
 }

@@ -81,6 +81,16 @@ describe('GET /api/v1/spots/recognize (Plan 66)', () => {
     expectPostable(road);
   });
 
+  it('does not name a spot after a non-destination POI (found by the real-data probe)', async () => {
+    upstream({ name: 'Mercury Drug', category: 'shop', type: 'chemist', address: { road: 'Milo St', town: 'Bolinao', state: 'Pangasinan' } });
+    const data = (await recognize(16.3404, 119.8104)).body.data;
+    expect(data.place_name).toBeNull();
+    expect(data.name_suggestions).not.toContain('Mercury Drug');
+    expect(data.story_starters[1]).toBe('Easy to find near Mercury Drug; ask locals for directions if you get lost.');
+    expect(data.story_starters.join(' ')).not.toMatch(/relaxing views/);
+    expectPostable(data);
+  });
+
   it('falls back to PSGC areas when Nominatim fails, without hanging', async () => {
     upstream(null);
     const res = await recognize(16.3269, 119.7843);
