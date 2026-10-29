@@ -14,6 +14,7 @@ import { getSpotPhotoStorageProvider } from '../storage/spot-photos.js';
 import { detectValidatedMediaMime } from '../utils/media-mime.js';
 import { fieldLogStore, FieldLogTag, SpotReportReason } from '../spots/field-logs.js';
 import { hiddenGemHighlights } from '../spots/highlights.js';
+import { recognizeSpotLocation } from '../spots/recognize.js';
 import { sanitizeQuestForViewer } from '../quests/sanitize.js';
 import { recordActivity } from '../social/activity.js';
 import { normalizeTasks } from '../quests/taskNormalize.js';
@@ -71,6 +72,24 @@ router.get('/spots/trending', optionalAuthenticateToken, checkQAAuthorization, (
   if (allowTest) res.set('X-Robots-Tag', 'noindex, nofollow');
   const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
   res.json({ success: true, data: spotStore.list({ municipality: req.query.municipality as string | undefined, sort: 'trending', userId: actorId, allowTest }).slice(0, 10) });
+});
+
+// Plan 66: recognize a map pin (town/barangay, POI name, suggested category/details, story starters,
+// nearby duplicates). Registered before /spots/:slug so "recognize" is never read as a slug.
+const recognizeQuery = z.object({ lat: z.coerce.number().min(4.5).max(21.5), lng: z.coerce.number().min(116).max(127) });
+const recognizeRateLimiter = rateLimit({ policyId: 'spots:recognize', windowMs: 60 * 1000, max: env.NODE_ENV === 'test' ? 1000 : 60, keyStrategy: 'actor_or_ip' });
+router.get('/spots/recognize', optionalAuthenticateToken, recognizeRateLimiter, async (req: AuthRequest, res) => {
+  const parsed = recognizeQuery.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'lat and lng must be inside the Philippines.' } });
+  }
+  try {
+    res.set('Cache-Control', 'private, max-age=300');
+    return res.json({ success: true, data: await recognizeSpotLocation(parsed.data.lat, parsed.data.lng, getPool()) });
+  } catch (error) {
+    console.error('[spots] recognize failed:', error instanceof Error ? error.message : error);
+    return res.status(503).json({ success: false, error: { code: 'RECOGNIZE_UNAVAILABLE', message: 'Place recognition is unavailable right now.' } });
+  }
 });
 
 router.get('/spots/:slug/alternatives', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
