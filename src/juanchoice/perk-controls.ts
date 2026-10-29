@@ -226,7 +226,7 @@ export async function editCandidateManifesto(input: {
   if (keys.length < 1 || keys.length > 4 || !keys.every(isPerkKey)) {
     throw new JuanChoiceError('INVALID_PERKS', 422, 'Choose 1 to 4 perks from the catalog.');
   }
-  if (input.mysteryKey && !keys.includes(input.mysteryKey)) throw new JuanChoiceError('INVALID_PERKS', 422, 'The mystery perk must be one of the chosen perks.');
+  if (input.mysteryKey && !(keys as string[]).includes(input.mysteryKey)) throw new JuanChoiceError('INVALID_PERKS', 422, 'The mystery perk must be one of the chosen perks.');
   const updated = await inTransaction(async client => {
     const row = (await client.query(
       `SELECT n.manifesto_perks, c.status, c.opens_at, c.round_tier, s.name AS spot_name, s.municipality, s.category
