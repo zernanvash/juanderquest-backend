@@ -2,6 +2,7 @@
 // and the reigning Champion (#1) plus Minister (#2) perks are what gameplay reads (checkpoint 1b).
 import { createHash } from 'crypto';
 import type { Pool, PoolClient } from 'pg';
+import { applyPerkControls, loadActiveSuspensions, loadPerkSettings } from './perk-controls.js';
 
 export type PerkDomain = 'quests' | 'trails' | 'stamps_quiz' | 'shop_msme';
 export type PerkKey =
@@ -69,19 +70,25 @@ export function unlockedPerkCount(consecutiveLosses: number): number {
 export function buildManifesto(input: {
   seed: string; spotId: string; spotName: string; municipality: string; category: string;
   count: number; festival: boolean;
+  /** Platform perk controls: disabled types are skipped, overridden values used. */
+  controls?: { enabled: (key: PerkKey) => boolean; value: (key: PerkKey, festival: boolean) => number };
 }): ManifestoPerk[] {
   const ctx: PerkContext = { spotName: input.spotName, municipality: input.municipality, category: input.category };
   const make = (key: PerkKey, isAnchor: boolean): ManifestoPerk => {
     const entry = JUANCHOICE_PERK_CATALOG[key];
-    const value = input.festival ? entry.festival : entry.standard;
+    const value = input.controls ? input.controls.value(key, input.festival) : (input.festival ? entry.festival : entry.standard);
     return { key, label: entry.label(value, ctx), description: entry.description(value, ctx), domain: entry.domain,
       value, is_anchor: isAnchor, is_mystery: false, revealed: true };
   };
-  const anchor: PerkKey = parseInt(hash(`${input.seed}:${input.spotId}:anchor`).slice(0, 8), 16) % 3 === 0
+  const enabled = (key: PerkKey) => input.controls?.enabled(key) ?? true;
+  const preferred: PerkKey = parseInt(hash(`${input.seed}:${input.spotId}:anchor`).slice(0, 8), 16) % 3 === 0
     ? 'msme_partner_spotlight' : 'spot_xp_boost';
-  const provincial = [...PROVINCIAL].sort((a, b) =>
+  const other: PerkKey = preferred === 'spot_xp_boost' ? 'msme_partner_spotlight' : 'spot_xp_boost';
+  const anchor = enabled(preferred) ? preferred : enabled(other) ? other : null;
+  const provincial = PROVINCIAL.filter(enabled).sort((a, b) =>
     hash(`${input.seed}:${input.spotId}:${a}`).localeCompare(hash(`${input.seed}:${input.spotId}:${b}`)));
-  return [make(anchor, true), ...provincial.slice(0, Math.max(0, Math.min(4, input.count) - 1)).map(key => make(key, false))];
+  const slots = Math.max(0, Math.min(4, input.count) - (anchor ? 1 : 0));
+  return [...(anchor ? [make(anchor, true)] : []), ...provincial.slice(0, slots).map(key => make(key, false))];
 }
 
 /** One non-anchor perk on one candidate per round becomes the mystery perk. */
@@ -134,7 +141,7 @@ export async function getActiveJuanChoicePerks(client: Queryable, isTest = false
   const cached = activeCache.get(key);
   if (cached && now.getTime() - cached.at < ACTIVE_TTL_MS) return cached.value;
   const row = (await client.query(
-    `SELECT r.campaign_id, r.active_perks, c.closes_at
+    `SELECT r.campaign_id, r.active_perks, c.closes_at, c.round_tier
      FROM juanchoice_results r JOIN juanchoice_campaigns c ON c.id = r.campaign_id
      WHERE c.is_test = $1 AND c.status = 'finalized' AND jsonb_array_length(r.active_perks) > 0
        AND c.closes_at <= $2 AND c.closes_at + INTERVAL '7 days' > $2
@@ -148,6 +155,9 @@ export async function getActiveJuanChoicePerks(client: Queryable, isTest = false
        WHERE candidate_id = ANY($1::uuid[]) ORDER BY candidate_id, revision DESC`, [ids])).rows
       .filter(r => r.decision === 'restricted').map(r => String(r.candidate_id)));
     value = value.filter(perk => !restricted.has(String(perk.candidate_id)));
+    // JuanderQuest platform controls: switched-off perk types, paused instances, adjusted values.
+    const [settings, suspended] = await Promise.all([loadPerkSettings(client), loadActiveSuspensions(client, row.campaign_id)]);
+    value = applyPerkControls(value, settings, suspended, row.round_tier === 'special_festival');
   }
   activeCache.set(key, { at: now.getTime(), value });
   return value;
