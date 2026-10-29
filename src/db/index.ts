@@ -29,6 +29,8 @@ export interface UserRow {
   bio?: string | null;
   status_text?: string | null;
   wallet_address?: string | null;
+  /** Admins only (075/076): platform staff, area admin, or developer. */
+  admin_scope?: 'platform' | 'area' | 'developer' | null;
   is_test?: boolean;
   created_at: string;
   updated_at: string;

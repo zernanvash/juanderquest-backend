@@ -54,6 +54,11 @@ realPg('developer roles (real PostgreSQL)', () => {
     expect(change.status).toBe(403);
   });
 
+  it('reports the admin scope on /auth/me so the dashboard can show developer tools', async () => {
+    const me = await request(app).get('/api/v1/auth/me').set(as(dev, 'admin'));
+    expect(me.body.data).toMatchObject({ role: 'admin', admin_scope: 'developer' });
+  });
+
   it('developers count as JuanChoice platform staff', async () => {
     expect(await isPlatformStaff(dev, fixture.pool)).toBe(true);
     expect(await isPlatformStaff(admin, fixture.pool)).toBe(false);

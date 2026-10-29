@@ -812,6 +812,7 @@ export class UsersRepository {
       bio: row.bio ?? null,
       status_text: row.status_text ?? null,
       wallet_address: row.wallet_address || null,
+      admin_scope: row.admin_scope ?? null,
       is_test: Boolean(row.is_test),
       created_at: new Date(row.created_at).toISOString(),
       updated_at: new Date(row.updated_at).toISOString(),
