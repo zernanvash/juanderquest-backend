@@ -11,6 +11,7 @@ import { clearSessionCookie, setSessionCookie } from '../auth/sessionCookie.js';
 import { signSessionToken } from '../auth/tokens.js';
 import { safeCosmeticsFor } from '../shop/render.js';
 import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
+import { devGoogleCredentialsEnabled, verifyGoogleCredential } from '../auth/google.js';
 
 const router = Router();
 
@@ -29,9 +30,10 @@ const localWalletIdentifierSchema = z.coerce.string().trim().min(1, 'A local wal
 
 const issueToken = (user: (typeof db.users)[number], rememberMe = false) => signSessionToken(user, rememberMe);
 
-const findOrCreateWalletUser = async (address: string): Promise<(typeof db.users)[number]> => {
-  const normalized = address.toLowerCase();
-  const seedId = `wallet:${normalized}`;
+type UserRecord = (typeof db.users)[number];
+
+const findWalletUser = async (address: string): Promise<UserRecord | undefined> => {
+  const seedId = `wallet:${address.toLowerCase()}`;
 
   // 1. Check if an account is already linked to this wallet address
   const existingByWallet = await db.findUserByWalletAddressDurable(address);
@@ -44,17 +46,18 @@ const findOrCreateWalletUser = async (address: string): Promise<(typeof db.users
     ? await db.findUserBySeedDurable(seedId)
     : db.findUserBySeed(seedId);
 
-  if (existingBySeed) {
-    if (!existingBySeed.wallet_address) {
-      return await db.bindWalletAddress(existingBySeed.id, address);
-    }
-    return existingBySeed;
+  if (existingBySeed && !existingBySeed.wallet_address) {
+    return await db.bindWalletAddress(existingBySeed.id, address);
   }
+  return existingBySeed;
+};
 
-  return await db.findOrCreateUserDurable({
-    seed_id: seedId,
-    display_name: `Traveler ${address.slice(0, 6)}â€¦${address.slice(-4)}`,
-    email: `${normalized.slice(2)}@wallet.juanderquest.local`,
+const createWalletUser = (address: string, email: string, displayName?: string): Promise<UserRecord> => {
+  const normalized = address.toLowerCase();
+  return db.findOrCreateUserDurable({
+    seed_id: `wallet:${normalized}`,
+    display_name: displayName?.trim() || `Traveler ${address.slice(0, 6)}…${address.slice(-4)}`,
+    email,
     avatar_url: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(normalized)}`,
     role: 'user',
     demo_points: 100,
@@ -69,9 +72,55 @@ const findOrCreateWalletUser = async (address: string): Promise<(typeof db.users
   });
 };
 
+const WALLET_ONBOARDING_TTL_SECONDS = 15 * 60;
+
+/**
+ * Plan 67: a wallet only signs straight in when its account already has a real
+ * email and password (or Google). A new wallet, or a legacy wallet-only record,
+ * gets a short grant to finish the account with email + password first.
+ */
+const walletSignIn = async (res: Response, address: string, rememberMe: boolean, extra: Record<string, unknown> = {}) => {
+  const user = await findWalletUser(address);
+  if (user && await db.identityService.hasCompletedCredentials(user.id, user.email)) {
+    const token = issueToken(user, rememberMe);
+    setSessionCookie(res, token, rememberMe);
+    return res.status(200).json({
+      success: true,
+      data: { status: 'authenticated', account_completion_required: false, token, user, wallet_address: address, ...extra },
+    });
+  }
+  const grant = randomUUID();
+  await db.challengeService.createChallenge({
+    purpose: 'wallet_onboarding_grant',
+    targetIdentifier: grant,
+    boundUserId: user?.id ?? null,
+    ttlSeconds: WALLET_ONBOARDING_TTL_SECONDS,
+    customCode: address.toLowerCase(),
+  });
+  res.setHeader('Cache-Control', 'private, no-store');
+  return res.status(200).json({
+    success: true,
+    data: {
+      status: 'requires_account_completion',
+      account_completion_required: true,
+      wallet_address: address,
+      wallet_onboarding_grant: grant,
+      expires_in_seconds: WALLET_ONBOARDING_TTL_SECONDS,
+      existing_display_name: user?.display_name ?? null,
+      message: 'Please set up your email and password to complete your wallet account.',
+      ...extra,
+    },
+  });
+};
+
 router.get('/auth/wallet/config', (_req, res) => res.status(200).json({
   success: true,
-  data: { mode: env.WALLET_AUTH_MODE, guest_login_enabled: env.GUEST_LOGIN_ENABLED },
+  data: {
+    mode: env.WALLET_AUTH_MODE,
+    guest_login_enabled: env.GUEST_LOGIN_ENABLED,
+    google_client_id: env.GOOGLE_CLIENT_ID || null,
+    google_dev_credentials: devGoogleCredentialsEnabled(),
+  },
 }));
 
 // Unified authentication routes: email/password, Google verification, password recovery,
@@ -469,19 +518,74 @@ router.post(
   validateRequest(
     z.object({
       body: z.object({
-        credential: z.string().min(1),
+        credential: z.string().min(1).max(4096),
         remember_me: z.boolean().optional(),
+        // A first Google sign-in creates an account, so it carries the same declarations as /auth/register.
+        age_eligibility_declared: z.boolean().optional(),
+        terms_accepted: z.boolean().optional(),
       }),
     })
   ),
   async (req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');
-    // Never trust an unverified ID token. Google sign-in stays unavailable until
-    // signature, issuer, audience, expiry, and email verification are checked.
-    return res.status(503).json({
-      success: false,
-      error: { code: 'GOOGLE_SIGNIN_UNAVAILABLE', message: 'Google sign-in is not available yet. Use email or wallet sign-in.' },
-    });
+    // Never trust an unverified ID token: verifyGoogleCredential checks signature,
+    // issuer, audience, expiry and email verification before anything is read.
+    const verification = await verifyGoogleCredential(req.body.credential);
+    if (!verification.ok) {
+      return verification.reason === 'UNAVAILABLE'
+        ? res.status(503).json({ success: false, error: { code: 'GOOGLE_SIGNIN_UNAVAILABLE', message: 'Google sign-in is not available right now. Use email or wallet sign-in.' } })
+        : res.status(401).json({ success: false, error: { code: 'INVALID_GOOGLE_CREDENTIAL', message: 'Google could not confirm this sign-in. Please try again.' } });
+    }
+    const { profile } = verification;
+    const email = db.identityService.normalizeEmail(profile.email);
+
+    try {
+      let user: UserRecord | undefined;
+      let created = false;
+      const byGoogle = await db.identityService.findIdentity('google', profile.sub);
+      const userId = byGoogle?.user_id ?? (await db.identityService.findIdentity('email', email))?.user_id;
+      if (userId) {
+        user = db.usersRepo.getPool() ? await db.usersRepo.findById(userId) : db.findUserById(userId);
+        if (!user) return res.status(401).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'Account no longer exists.' } });
+        if (!byGoogle) {
+          // Google verified this email, so linking it to the account that owns the email is safe.
+          await db.identityService.linkIdentity(user.id, 'google', profile.sub);
+          await db.identityService.markEmailVerified(email);
+        }
+      } else {
+        if (req.body.terms_accepted !== true || req.body.age_eligibility_declared !== true) {
+          return res.status(400).json({
+            success: false,
+            error: { code: 'TERMS_REQUIRED', message: 'Accept the terms and confirm the age requirement to create your account.' },
+          });
+        }
+        user = await db.findOrCreateUserDurable({
+          seed_id: `usr-${randomUUID().slice(0, 12)}`,
+          display_name: (profile.name ?? email.split('@')[0]).slice(0, 100),
+          email,
+          avatar_url: profile.picture ?? undefined,
+          role: 'user',
+          demo_points: 100,
+          mjdq_balance: 100000,
+          jdq_governance_balance: 15,
+          scout_reputation: 250,
+          is_public: false,
+        });
+        await db.identityService.linkIdentity(user.id, 'google', profile.sub);
+        await db.identityService.linkIdentity(user.id, 'email', email);
+        await db.identityService.recordAccountEmail(user.id, email, true);
+        await db.identityService.declareOnboardingPolicy(user.id, '1.0.0');
+        created = true;
+      }
+
+      const remember = req.body.remember_me === true;
+      const token = issueToken(user, remember);
+      setSessionCookie(res, token, remember);
+      return res.status(created ? 201 : 200).json({ success: true, data: { status: 'authenticated', token, user, created } });
+    } catch (err) {
+      console.error('[auth] google sign-in error:', err);
+      return res.status(503).json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Google sign-in is unavailable. Please try again.' } });
+    }
   }
 );
 
@@ -599,10 +703,7 @@ router.post(
       });
     }
     try {
-      const user = await findOrCreateWalletUser(address);
-      const token = issueToken(user, req.body.remember_me === true);
-      setSessionCookie(res, token, req.body.remember_me === true);
-      return res.status(200).json({ success: true, data: { token, user, wallet_address: address } });
+      return await walletSignIn(res, address, req.body.remember_me === true);
     } catch (err) {
       console.error('[auth] durable user creation failed in wallet login:', err);
       return res.status(503).json({
@@ -630,19 +731,112 @@ router.post(
     }
     const address = String(req.body.address).trim();
     try {
-      const user = await findOrCreateWalletUser(address);
-      const token = issueToken(user, req.body.remember_me === true);
-      setSessionCookie(res, token, req.body.remember_me === true);
-      return res.status(200).json({
-        success: true,
-        data: { token, user, wallet_address: address, auth_method: 'local_bypass' },
-      });
+      return await walletSignIn(res, address, req.body.remember_me === true, { auth_method: 'local_bypass' });
     } catch (err) {
       console.error('[auth] durable user creation failed in local wallet login:', err);
       return res.status(503).json({
         success: false,
         error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable user storage is unavailable. Please try again later.' },
       });
+    }
+  }
+);
+
+const completeWalletSchema = z.object({
+  body: z.object({
+    wallet_onboarding_grant: z.string().uuid(),
+    wallet_address: z.string().trim().min(1).max(100),
+    email: z.string().trim().email().max(255),
+    password: z.string().min(8, 'Password must be at least 8 characters').max(100),
+    display_name: z.string().trim().min(2, 'Name must be at least 2 characters').max(100).optional(),
+    age_eligibility_declared: z.boolean().optional(),
+    terms_accepted: z.boolean().optional(),
+    remember_me: z.boolean().optional(),
+  }),
+});
+
+const walletCompletionError = (res: Response, status: number, code: string, message: string) =>
+  res.status(status).json({ success: false, error: { code, message } });
+
+// Plan 67: finish a wallet sign-up/sign-in by giving the account an email and password.
+router.post(
+  '/auth/wallet/complete-registration',
+  rateLimit({ policyId: 'auth:wallet-complete', windowMs: 60_000, max: 10 }),
+  validateRequest(completeWalletSchema),
+  async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    const { wallet_onboarding_grant, email, password, display_name } = req.body;
+    // Signature mode only ever issues grants for checksummed EVM addresses; local mode uses free-form test identifiers.
+    let address = String(req.body.wallet_address).trim();
+    if (env.WALLET_AUTH_MODE === 'signature') {
+      try { address = getAddress(address); } catch { return walletCompletionError(res, 400, 'VALIDATION_ERROR', 'A valid EVM wallet address is required'); }
+    }
+    const normalizedEmail = db.identityService.normalizeEmail(email);
+    if (db.identityService.isPlaceholderEmail(normalizedEmail)) {
+      return walletCompletionError(res, 400, 'EMAIL_REQUIRED', 'Use a real email address you can sign in and recover your account with.');
+    }
+
+    try {
+      const grant = await db.challengeService.consumeChallenge({
+        purpose: 'wallet_onboarding_grant',
+        targetIdentifier: wallet_onboarding_grant,
+        code: address.toLowerCase(),
+      });
+      if (!grant.valid) {
+        return walletCompletionError(res, 401, 'INVALID_ONBOARDING_GRANT', 'Your wallet check expired. Connect your wallet again to continue.');
+      }
+      const walletUser = await findWalletUser(address);
+      if (grant.boundUserId && walletUser?.id !== grant.boundUserId) {
+        return walletCompletionError(res, 409, 'WALLET_ACCOUNT_CHANGED', 'This wallet changed accounts. Connect your wallet again to continue.');
+      }
+
+      let user: UserRecord | undefined;
+      const emailOwner = await db.identityService.findIdentity('email', normalizedEmail);
+      if (emailOwner) {
+        // The email already has an account: the wallet joins it only with that account's password.
+        if (!await db.identityService.verifyUserPassword(emailOwner.user_id, password)) {
+          return walletCompletionError(res, 409, 'EMAIL_ALREADY_EXISTS',
+            "This email is already registered. Enter that account's password to link your wallet, or use a different email.");
+        }
+        if (walletUser && walletUser.id !== emailOwner.user_id) {
+          return walletCompletionError(res, 409, 'WALLET_HAS_OWN_ACCOUNT',
+            'This wallet already has its own JuanderQuest progress. Use a new email to keep that account.');
+        }
+        user = db.usersRepo.getPool() ? await db.usersRepo.findById(emailOwner.user_id) : db.findUserById(emailOwner.user_id);
+        if (!user) return walletCompletionError(res, 404, 'USER_NOT_FOUND', 'Account not found.');
+        if (user.wallet_address && user.wallet_address.toLowerCase() !== address.toLowerCase()) {
+          return walletCompletionError(res, 409, 'ACCOUNT_HAS_OTHER_WALLET',
+            'That account already has a different wallet. Unlink it in Settings first, or use a different email.');
+        }
+        if (!user.wallet_address) user = await db.bindWalletAddress(user.id, address);
+      } else {
+        if (!walletUser && (req.body.terms_accepted !== true || req.body.age_eligibility_declared !== true)) {
+          return walletCompletionError(res, 400, 'TERMS_REQUIRED', 'Accept the terms and confirm the age requirement to create your account.');
+        }
+        if (walletUser) {
+          // Legacy wallet-only account: keep its progress, give it a real email.
+          user = await db.setUserEmail(walletUser.id, normalizedEmail) ?? walletUser;
+          if (display_name) user = await db.updateUserProfile(user.id, { display_name }) ?? user;
+        } else {
+          user = await createWalletUser(address, normalizedEmail, display_name);
+        }
+        await db.identityService.linkIdentity(user.id, 'email', normalizedEmail);
+        await db.identityService.setPassword(user.id, password);
+        await db.identityService.recordAccountEmail(user.id, normalizedEmail, false);
+        await db.identityService.declareOnboardingPolicy(user.id, '1.0.0');
+      }
+      await db.identityService.linkIdentity(user.id, 'wallet', address);
+
+      const remember = req.body.remember_me === true;
+      const token = issueToken(user, remember);
+      setSessionCookie(res, token, remember);
+      return res.status(200).json({ success: true, data: { status: 'authenticated', token, user, wallet_address: address } });
+    } catch (err: any) {
+      if (err?.code === 'WALLET_ALREADY_BOUND' || err?.code === 'IDENTITY_ALREADY_BOUND' || err?.code === '23505') {
+        return walletCompletionError(res, 409, 'ACCOUNT_CONFLICT', 'This email or wallet is already linked to another account.');
+      }
+      console.error('[auth] wallet account completion failed:', err);
+      return walletCompletionError(res, 503, 'STORAGE_UNAVAILABLE', 'Account setup is unavailable. Please try again.');
     }
   }
 );

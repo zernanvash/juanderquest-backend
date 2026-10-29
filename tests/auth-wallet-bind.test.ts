@@ -28,6 +28,8 @@ describe('Progressive Web3 Onboarding & Wallet Binding', () => {
       email: 'traveler-one@test.local',
       role: 'user',
     });
+    // Plan 67: wallet sign-in only skips account completion for accounts with a password.
+    await db.identityService.setPassword(traveler.id, 'Password123!');
 
     const travelerLogin = await request(app)
       .post('/api/v1/auth/demo-login')

@@ -231,6 +231,29 @@ export class UnifiedIdentityService {
     return this.inMemoryIdentities.filter((i) => i.user_id === userId);
   }
 
+  /** Placeholder addresses minted for wallet-only and guest accounts are not real, recoverable emails. */
+  isPlaceholderEmail(email: string | null | undefined): boolean {
+    return !email || /@(wallet\.juanderquest\.local|guest\.invalid)$/i.test(email.trim());
+  }
+
+  async hasPasswordCredential(userId: string): Promise<boolean> {
+    if (this.pool) {
+      const res = await this.pool.query('SELECT 1 FROM password_credentials WHERE user_id = $1', [userId]);
+      return (res.rowCount ?? 0) > 0;
+    }
+    return this.inMemoryPasswords.has(userId);
+  }
+
+  /**
+   * Plan 67: an account is complete when it has a real email and a way to sign in
+   * without the wallet (a password, or a linked Google identity).
+   */
+  async hasCompletedCredentials(userId: string, email: string | null | undefined): Promise<boolean> {
+    if (this.isPlaceholderEmail(email)) return false;
+    if (await this.hasPasswordCredential(userId)) return true;
+    return (await this.listUserIdentities(userId)).some((identity) => identity.provider === 'google');
+  }
+
   /**
    * Updates user age eligibility and terms acceptance declaration.
    */
