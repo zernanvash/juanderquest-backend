@@ -201,3 +201,31 @@ export const authorizeQAPreview = async (req: AuthRequest, res: Response, next: 
     });
   }
 };
+
+/**
+ * Plan 67: shop purchases and redemptions need a wallet bound to the account.
+ * Everything else (quests, EXP, map, posting, browsing the shop) stays open to
+ * any signed-in traveler. Run after authenticateToken.
+ */
+export const requireBoundWallet = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  let user: UserRow | undefined;
+  try {
+    user = db.usersRepo.getPool() ? await db.usersRepo.findById(req.user!.id) : db.findUserById(req.user!.id);
+  } catch {
+    return res.status(503).json({ success: false, error: { code: 'DATABASE_OUTAGE', message: 'Account could not be checked. Please try again.' } });
+  }
+  if (!user) {
+    return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Session account no longer exists.' } });
+  }
+  if (!user.wallet_address || !user.wallet_address.trim()) {
+    return res.status(403).json({
+      success: false,
+      error: {
+        code: 'WALLET_REQUIRED',
+        message: 'Connect a blockchain wallet to your account before purchasing or redeeming shop items.',
+        connect_url: '/wallet/connect',
+      },
+    });
+  }
+  next();
+};

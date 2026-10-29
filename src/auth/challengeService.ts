@@ -47,7 +47,7 @@ export class AuthChallengeService {
    * Creates a single-use purpose-bound challenge (e.g. signup OTP, password reset OTP, wallet challenge).
    */
   async createChallenge(params: {
-    purpose: 'signup_verify' | 'password_reset' | 'password_reset_grant' | 'email_change' | 'wallet_login' | 'wallet_bind';
+    purpose: 'signup_verify' | 'password_reset' | 'password_reset_grant' | 'email_change' | 'wallet_login' | 'wallet_bind' | 'wallet_onboarding_grant';
     targetIdentifier: string;
     boundUserId?: string | null;
     ttlSeconds?: number;

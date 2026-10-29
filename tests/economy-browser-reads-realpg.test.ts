@@ -36,6 +36,8 @@ realDescribe('local economy browser read contracts on disposable PostgreSQL', ()
       ($4, 'lab-read-other', 'Lab Other', 'lab-read-other@example.invalid', 'user'),
       ($5, 'lab-read-independent-admin', 'Lab Independent Admin', 'lab-read-independent-admin@example.invalid', 'admin')
     `, [adminId, authorId, travelerId, otherId, independentAdminId]);
+    // Plan 67: shop purchases need a bound wallet.
+    await fixture.pool.query(`UPDATE users SET wallet_address = '0x' || substr(md5(id) || md5(id || 'w'), 1, 40) WHERE id = ANY($1::text[])`, [[travelerId, otherId]]);
     await fixture.pool.query(`
       INSERT INTO quests(id, title, description, category, location_name, gps_lat, gps_lng,
         radius_meters, reward_points, marker_code, marker_image_url, status, is_active, author_id)

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { authenticateToken, optionalAuthenticateToken, AuthRequest } from '../middleware/auth.js';
+import { authenticateToken, optionalAuthenticateToken, requireBoundWallet, AuthRequest } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { getPool } from '../db/pool.js';
 import { listCosmetics, purchaseCosmetic, ownedCosmetics } from '../shop/cosmetics.js';
@@ -16,7 +16,7 @@ const fail=(res:any,error:unknown)=>{
 shopRouter.get('/shop/cosmetics',optionalAuthenticateToken,async(req:AuthRequest,res)=>{
   try { const data=await listCosmetics(req.user?.id); if(req.user)res.setHeader('Cache-Control','private, max-age=30'); return res.json({success:true,data}); } catch(e){return fail(res,e);}
 });
-shopRouter.post('/shop/cosmetics/:id/purchase',authenticateToken,rateLimit({policyId:'shop:purchase',windowMs:60_000,max:10,keyStrategy:'actor'}),async(req:AuthRequest,res)=>{
+shopRouter.post('/shop/cosmetics/:id/purchase',authenticateToken,rateLimit({policyId:'shop:purchase',windowMs:60_000,max:10,keyStrategy:'actor'}),requireBoundWallet,async(req:AuthRequest,res)=>{
   const parsed=z.object({idempotency_key:z.string().min(8).max(80)}).safeParse(req.body); if(!parsed.success)return res.status(400).json({success:false,error:{code:'INVALID_REQUEST',message:'A valid idempotency_key is required.'}});
   try { const result=await purchaseCosmetic(req.user!.id,req.params.id,parsed.data.idempotency_key);return res.status(result.statusCode).json({success:true,data:result});}catch(e){return fail(res,e);}
 });

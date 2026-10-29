@@ -1418,6 +1418,22 @@ export class MemoryDb {
     return user;
   }
 
+  async setUserEmail(userId: string, email: string): Promise<UserRow | undefined> {
+    if (this.pg) {
+      const { rows } = await this.pg.query('UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2 RETURNING id', [email, userId]);
+      if (!rows.length) return undefined;
+      const updated = await this.usersRepo.findById(userId);
+      const memIdx = this.users.findIndex((u) => u.id === userId);
+      if (updated && memIdx >= 0) this.users[memIdx] = updated;
+      return updated;
+    }
+    const user = this.findUserById(userId);
+    if (!user) return undefined;
+    user.email = email;
+    user.updated_at = new Date().toISOString();
+    return user;
+  }
+
   async unbindWalletAddress(userId: string): Promise<UserRow> {
     if (this.pg) {
       const updated = await this.usersRepo.unbindWalletAddress(userId);

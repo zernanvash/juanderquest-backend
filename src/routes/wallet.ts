@@ -1,5 +1,5 @@
-import { Router, Response } from 'express';
-import { authenticateToken, AuthRequest } from '../middleware/auth.js';
+import { Router, Response, NextFunction } from 'express';
+import { authenticateToken, requireBoundWallet, AuthRequest } from '../middleware/auth.js';
 import { db } from '../db/index.js';
 import { governanceStore } from './proposals.js';
 import { authoritativeBalance } from '../governance/transaction.js';
@@ -73,11 +73,15 @@ router.get('/wallet', authenticateToken, async (req: AuthRequest, res: Response)
   });
 });
 
-router.post('/wallet/cosmetics/:id/purchase', authenticateToken, async (req: AuthRequest, res: Response) => {
-  const pool = db.usersRepo.getPool();
-  if (!pool || !isLocalEconomyProfile()) {
+const cosmeticsPurchaseAvailable = (_req: AuthRequest, res: Response, next: NextFunction) => {
+  if (!db.usersRepo.getPool() || !isLocalEconomyProfile()) {
     return res.status(404).json({ success: false, error: { code: 'NOT_AVAILABLE', message: 'Simulation purchase is unavailable.' } });
   }
+  next();
+};
+
+router.post('/wallet/cosmetics/:id/purchase', authenticateToken, cosmeticsPurchaseAvailable, requireBoundWallet, async (req: AuthRequest, res: Response) => {
+  const pool = db.usersRepo.getPool()!;
   const key = req.header('x-idempotency-key') ?? '';
   try {
     const receipt = await new EconomyService(pool).purchaseCosmetic(req.user!.id, req.params.id, key);

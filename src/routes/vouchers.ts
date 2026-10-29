@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { env } from '../config/env.js';
 import { db } from '../db/index.js';
 import { governanceStore } from './proposals.js';
-import { authenticateToken, AuthRequest } from '../middleware/auth.js';
+import { authenticateToken, requireBoundWallet, AuthRequest } from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
 import { vouchersService } from '../services/vouchers.js';
 import { getPool } from '../db/pool.js';
@@ -99,11 +99,11 @@ router.get('/vouchers', async (_req, res: Response) => {
   res.json({ success: true, data: values });
 });
 
-router.post('/vouchers/:id/redeem', marketplaceRedemptionGate, authenticateToken, validateRequest(redeemSchema), async (req: AuthRequest, res: Response) => {
+router.post('/vouchers/:id/redeem', marketplaceRedemptionGate, authenticateToken, requireBoundWallet, validateRequest(redeemSchema), async (req: AuthRequest, res: Response) => {
   return await handleRedemption(req.params.id, req, res);
 });
 
-router.post('/vouchers/redeem', marketplaceRedemptionGate, authenticateToken, validateRequest(redeemSchema), async (req: AuthRequest, res: Response) => {
+router.post('/vouchers/redeem', marketplaceRedemptionGate, authenticateToken, requireBoundWallet, validateRequest(redeemSchema), async (req: AuthRequest, res: Response) => {
   const voucherId = req.body.voucher_id || req.body.id;
   if (!voucherId) {
     return res.status(400).json({

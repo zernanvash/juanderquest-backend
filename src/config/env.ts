@@ -57,6 +57,8 @@ const rawEnv = cleanEnv(process.env, {
   // Demo accounts include an admin fixture; never enable them by default in development.
   ALLOW_DEMO_LOGIN: bool({ default: process.env.NODE_ENV === 'test' }),
   GUEST_LOGIN_ENABLED: bool({ default: false }),
+  // Plan 67: OAuth web client ID for Google Identity Services. Empty keeps Google sign-in unavailable.
+  GOOGLE_CLIENT_ID: str({ default: '' }),
   ALPHA_WALLET_SIMULATION_ENABLED: bool({ default: false }),
   // Merchant offers in the prototype migrations are fixtures, not live deals.
   MARKETPLACE_ENABLED: bool({ default: isLocalRuntime }),
