@@ -1,4 +1,4 @@
-import { Router, Response } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { env } from '../config/env.js';
@@ -13,6 +13,7 @@ import { getPresentationOverview } from '../juanchoice/presentation-overview.js'
 import { createMonthlySchedule, reconcileMonthlySchedules } from '../juanchoice/monthly-service.js';
 import { getJuanChoiceSchedulerStatus } from '../jobs/juanchoice-scheduler.js';
 import { getActiveJuanChoicePerks } from '../juanchoice/perks.js';
+import { editCandidateManifesto, isPlatformStaff, liftSuspension, perkControlState, suspendLivePerk, updatePerkSetting } from '../juanchoice/perk-controls.js';
 
 export const juanChoiceRouter = Router();
 const uuid = z.string().uuid();
@@ -105,6 +106,67 @@ const festivalBody = z.object({ name: z.string().trim().min(2).max(160), municip
   starts_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), ends_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   boost_multiplier: z.number().min(1).max(3).default(1.5), is_test: z.boolean().default(false) }).strict()
   .refine(value => value.ends_on >= value.starts_on, { message: 'ends_on must not be before starts_on' });
+// JuanderQuest platform staff only (admin_scope = 'platform'), never area admins: perk switches,
+// value overrides, pausing one live perk, and editing a contender's perks before voting opens.
+const requirePlatformStaff = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (req.user && await isPlatformStaff(req.user.id)) return next();
+    return res.status(403).json({ success: false, error: { code: 'PLATFORM_STAFF_ONLY', message: 'Only JuanderQuest staff can change JuanChoice perks.' } });
+  } catch {
+    return res.status(503).json({ success: false, error: { code: 'DATABASE_OUTAGE', message: 'Could not verify JuanderQuest staff access.' } });
+  }
+};
+const perkControlWrites = rateLimit({ policyId: 'juanchoice:perk-controls', windowMs: 60_000, max: 20, keyStrategy: 'actor' });
+const perkSettingBody = z.object({
+  enabled: z.boolean().optional(), standard_value: z.number().nullable().optional(), festival_value: z.number().nullable().optional(),
+  reason: z.string().trim().min(10).max(500),
+}).strict();
+const suspendBody = z.object({ campaign_id: uuid, candidate_id: uuid, perk_key: z.string().min(2).max(60), reason: z.string().trim().min(10).max(500) }).strict();
+const reasonBody = z.object({ reason: z.string().trim().min(10).max(500) }).strict();
+const manifestoBody = z.object({ perk_keys: z.array(z.string().min(2).max(60)).min(1).max(4), mystery_key: z.string().nullable().optional(), reason: z.string().trim().min(10).max(500) }).strict();
+const badRequest = (res: Response, message?: string) => res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST', message: message ?? 'Check the request and include a reason of at least 10 characters.' } });
+
+juanChoiceRouter.get('/juanchoice/admin/perk-controls/access', authenticateToken, requireAdmin, async (req: AuthRequest, res) => {
+  try { return res.json({ success: true, data: { platform: await isPlatformStaff(req.user!.id) } }); }
+  catch { return res.json({ success: true, data: { platform: false } }); }
+});
+juanChoiceRouter.get('/juanchoice/admin/perk-controls', authenticateToken, requireAdmin, requirePlatformStaff, async (_req: AuthRequest, res) => {
+  try {
+    res.set('Cache-Control', 'private, no-store');
+    return res.json({ success: true, data: await perkControlState(pool()) });
+  } catch (error) { return failure(res, error); }
+});
+juanChoiceRouter.put('/juanchoice/admin/perk-controls/settings/:key', authenticateToken, requireAdmin, requirePlatformStaff, perkControlWrites, async (req: AuthRequest, res) => {
+  const parsed = perkSettingBody.safeParse(req.body);
+  if (!parsed.success) return badRequest(res);
+  try {
+    return res.json({ success: true, data: await updatePerkSetting({ perkKey: req.params.key, enabled: parsed.data.enabled,
+      standardValue: parsed.data.standard_value, festivalValue: parsed.data.festival_value, reason: parsed.data.reason, actorId: req.user!.id }) });
+  } catch (error) { return failure(res, error); }
+});
+juanChoiceRouter.post('/juanchoice/admin/perk-controls/suspensions', authenticateToken, requireAdmin, requirePlatformStaff, perkControlWrites, async (req: AuthRequest, res) => {
+  const parsed = suspendBody.safeParse(req.body);
+  if (!parsed.success) return badRequest(res);
+  try {
+    return res.status(201).json({ success: true, data: await suspendLivePerk({ campaignId: parsed.data.campaign_id, candidateId: parsed.data.candidate_id,
+      perkKey: parsed.data.perk_key, reason: parsed.data.reason, actorId: req.user!.id }) });
+  } catch (error) { return failure(res, error); }
+});
+juanChoiceRouter.post('/juanchoice/admin/perk-controls/suspensions/:id/lift', authenticateToken, requireAdmin, requirePlatformStaff, perkControlWrites, async (req: AuthRequest, res) => {
+  const id = uuid.safeParse(req.params.id); const parsed = reasonBody.safeParse(req.body);
+  if (!id.success || !parsed.success) return badRequest(res);
+  try { return res.json({ success: true, data: await liftSuspension({ suspensionId: id.data, reason: parsed.data.reason, actorId: req.user!.id }) }); }
+  catch (error) { return failure(res, error); }
+});
+juanChoiceRouter.put('/juanchoice/admin/campaigns/:id/candidates/:candidateId/manifesto', authenticateToken, requireAdmin, requirePlatformStaff, perkControlWrites, async (req: AuthRequest, res) => {
+  const id = uuid.safeParse(req.params.id); const candidateId = uuid.safeParse(req.params.candidateId); const parsed = manifestoBody.safeParse(req.body);
+  if (!id.success || !candidateId.success || !parsed.success) return badRequest(res);
+  try {
+    return res.json({ success: true, data: await editCandidateManifesto({ campaignId: id.data, candidateId: candidateId.data,
+      perkKeys: parsed.data.perk_keys, mysteryKey: parsed.data.mystery_key ?? null, reason: parsed.data.reason, actorId: req.user!.id }) });
+  } catch (error) { return failure(res, error); }
+});
+
 juanChoiceRouter.get('/juanchoice/admin/festivals', authenticateToken, requireAdmin, async (_req: AuthRequest, res) => {
   try {
     const rows = (await pool().query(`SELECT id,name,municipality,to_char(starts_on,'YYYY-MM-DD') AS starts_on,to_char(ends_on,'YYYY-MM-DD') AS ends_on,

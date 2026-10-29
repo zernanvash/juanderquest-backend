@@ -5,7 +5,8 @@ import { env } from '../config/env.js';
 import { finalizeDueCampaigns, JuanChoiceError } from './service.js';
 import { localMonth, monthlyWindow, nextMonth, selectMonthlyCandidates, themeForPeriod, MonthlyCandidate, MonthlyTheme } from './monthly-policy.js';
 import { isMonday, isoWeekKey, localWeek, nextWeek, roundTier, weeklyRoundNumber, weeklyWindow } from './weekly-policy.js';
-import { buildManifesto, markMystery, pickMysteryCandidate, unlockedPerkCount } from './perks.js';
+import { buildManifesto, markMystery, pickMysteryCandidate, unlockedPerkCount, type PerkKey } from './perks.js';
+import { effectivePerkValue, loadPerkSettings, perkEnabled } from './perk-controls.js';
 import { WEEKLY_POLICY_VERSION } from './promotion-safety.js';
 
 export interface MonthlySchedule {
@@ -205,13 +206,15 @@ async function insertCandidates(client: PoolClient, schedule: MonthlySchedule, c
   const state = await loadElectionState(client, schedule.is_test);
   // A safety replacement never adds a second mystery perk to a round.
   const mysteryId = allowMystery ? pickMysteryCandidate(seed, spotIds) : null;
+  const settings = await loadPerkSettings(client);
+  const controls = { enabled: (key: PerkKey) => perkEnabled(settings, key), value: (key: PerkKey, fest: boolean) => effectivePerkValue(settings, key, fest) };
   for (const spotId of spotIds) {
     const spot = spots.get(spotId);
     if (!spot) throw new JuanChoiceError('INVALID_SPOT', 422);
     const losses = Math.min(10, state.get(spotId)?.consecutive_losses ?? 0);
     const count = unlockedPerkCount(losses);
     let perks = buildManifesto({ seed, spotId, spotName: spot.name, municipality: spot.municipality, category: spot.category,
-      count, festival });
+      count, festival, controls });
     if (spotId === mysteryId) perks = markMystery(perks);
     await client.query(
       `INSERT INTO juanchoice_candidates(id,campaign_id,spot_id,is_test,manifesto_perks,prior_loss_streak,unlocked_perk_count)
