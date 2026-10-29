@@ -126,7 +126,7 @@ developerRouter.get('/admin/developer/role-audit', authenticateToken, requireAdm
   if (!pool) return unavailable(res);
   res.setHeader('Cache-Control', 'private, no-store');
   const rows = (await pool.query(
-    `SELECT a.created_at, a.old_role, a.new_role, a.old_scope, a.new_scope, a.reason,
+    `SELECT a.created_at, a.old_role, a.new_role, a.old_scope, a.new_scope, a.reason, a.actor_id,
             actor.display_name AS actor_name, target.display_name AS target_name, target.email AS target_email
        FROM user_role_audit a
        LEFT JOIN users actor ON actor.id::text = a.actor_id
