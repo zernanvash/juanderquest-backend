@@ -35,7 +35,8 @@ realPg('JuanChoice perk controls (real PostgreSQL)', () => {
     setPool(fixture.pool);
     db.attachDurabilityPool(fixture.pool);
     db.usersRepo.setPool(fixture.pool);
-    Object.assign(env, { JUANCHOICE_ENABLED: true });
+    // Writes stay OFF: perk controls must still work during a write pause; the manifesto test turns writes on.
+    Object.assign(env, { JUANCHOICE_ENABLED: true, JUANCHOICE_WRITES_ENABLED: false });
     await fixture.pool.query(`INSERT INTO users(id,seed_id,display_name,email,role,admin_scope,is_test) VALUES
       ($1::text,$1::text,'JDQ staff',$1::text||'@example.test','admin','platform',FALSE),
       ($2::text,$2::text,'Area admin',$2::text||'@example.test','admin','area',FALSE),

@@ -73,6 +73,8 @@ juanChoiceRouter.use('/juanchoice', (_req, res, next) => {
 });
 juanChoiceRouter.use('/juanchoice/admin', (_req, res, next) => {
   if (_req.path.startsWith('/schedules') && env.JUANCHOICE_SCHEDULER_ENABLED) return next();
+  // Perk controls are emergency tools: they keep working while JuanChoice writes are paused.
+  if (_req.path.startsWith('/perk-controls')) return next();
   if (_req.method !== 'GET' && !env.JUANCHOICE_WRITES_ENABLED) return res.status(503).json({ success: false, error: { code: 'WRITES_DISABLED' } });
   next();
 });
