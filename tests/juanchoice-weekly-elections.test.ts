@@ -62,7 +62,7 @@ describe('Plan 65 weekly elections on isolated real PostgreSQL', () => {
   const original = {
     JUANCHOICE_ENABLED: env.JUANCHOICE_ENABLED, JUANCHOICE_SCHEDULER_ENABLED: env.JUANCHOICE_SCHEDULER_ENABLED,
     JUANCHOICE_WRITES_ENABLED: env.JUANCHOICE_WRITES_ENABLED, JUANCHOICE_BATCH_WRITES_ENABLED: env.JUANCHOICE_BATCH_WRITES_ENABLED,
-    JUANCHOICE_ECONOMY_ENABLED: env.JUANCHOICE_ECONOMY_ENABLED, PROGRESSION_ENABLED: env.PROGRESSION_ENABLED,
+    JUANCHOICE_BOOSTS_ENABLED: env.JUANCHOICE_BOOSTS_ENABLED, PROGRESSION_ENABLED: env.PROGRESSION_ENABLED,
   };
   const rich = `wk-rich-${randomUUID()}`;
   const second = `wk-second-${randomUUID()}`;
@@ -81,7 +81,7 @@ describe('Plan 65 weekly elections on isolated real PostgreSQL', () => {
     setPool(fixture.pool);
     domainDb.usersRepo.setPool(fixture.pool);
     Object.assign(env, { JUANCHOICE_ENABLED: true, JUANCHOICE_SCHEDULER_ENABLED: true, JUANCHOICE_WRITES_ENABLED: true,
-      JUANCHOICE_BATCH_WRITES_ENABLED: false, JUANCHOICE_ECONOMY_ENABLED: true, PROGRESSION_ENABLED: true });
+      JUANCHOICE_BATCH_WRITES_ENABLED: false, JUANCHOICE_BOOSTS_ENABLED: true, PROGRESSION_ENABLED: true });
     const old = new Date(Date.now() - 10 * DAY);
     await fixture.pool.query(`INSERT INTO users(id,seed_id,display_name,email,role,demo_points,created_at,is_test) VALUES
       ($1::text,$1::text,'Rich voter',$1::text||'@example.test','user',1000,$5,false),

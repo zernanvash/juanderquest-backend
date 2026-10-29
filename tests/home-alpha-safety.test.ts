@@ -43,17 +43,20 @@ describe('Public alpha marketplace safety', () => {
 });
 
 describe('Fast-alpha launcher JuanChoice flag closure', () => {
-  it('explicitly sets all JuanChoice write and scheduler flags to false in start-home-alpha.sh', async () => {
+  // Plan 65 (owner-approved 2026-10-29): weekly elections run in production; batch writes and the
+  // quarantined budget economy stay closed.
+  it('pins the weekly JuanChoice production posture in start-home-alpha.sh', async () => {
     const scriptPath = path.resolve(__dirname, '../scripts/start-home-alpha.sh');
     const content = fs.readFileSync(scriptPath, 'utf8');
 
     const expectedFlags = [
-      'export JUANCHOICE_WRITES_ENABLED=false',
+      'export JUANCHOICE_WRITES_ENABLED=true',
       'export JUANCHOICE_BATCH_WRITES_ENABLED=false',
-      'export JUANCHOICE_PROMOTION_ENABLED=false',
+      'export JUANCHOICE_PROMOTION_ENABLED=true',
       'export JUANCHOICE_ECONOMY_ENABLED=false',
-      'export JUANCHOICE_FINALIZER_WORKER_ENABLED=false',
-      'export JUANCHOICE_SCHEDULER_ENABLED=false',
+      'export JUANCHOICE_BOOSTS_ENABLED=true',
+      'export JUANCHOICE_FINALIZER_WORKER_ENABLED=true',
+      'export JUANCHOICE_SCHEDULER_ENABLED=true',
     ];
 
     for (const flag of expectedFlags) {

@@ -86,6 +86,8 @@ const rawEnv = cleanEnv(process.env, {
   JUANCHOICE_BATCH_WRITES_ENABLED: bool({ default: false }),
   JUANCHOICE_PROMOTION_ENABLED: bool({ default: false }),
   JUANCHOICE_ECONOMY_ENABLED: bool({ default: false }),
+  // Plan 65 quadratic vote boosts (in-app points only); separate from the quarantined budget economy.
+  JUANCHOICE_BOOSTS_ENABLED: bool({ default: false }),
   JUANCHOICE_FINALIZER_WORKER_ENABLED: bool({ default: false }),
   JUANCHOICE_FINALIZER_INTERVAL_MS: num({ default: 30000 }),
   JUANCHOICE_SCHEDULER_ENABLED: bool({ default: false }),

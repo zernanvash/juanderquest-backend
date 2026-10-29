@@ -69,12 +69,15 @@ export WALLET_AUTH_MODE=signature
 export ALLOW_INSECURE_LOCAL_WALLET_AUTH=false
 export JUANCHOICE_ENABLED=true
 export ALPHA_WALLET_SIMULATION_ENABLED=true
-export JUANCHOICE_WRITES_ENABLED=false
+export JUANCHOICE_WRITES_ENABLED=true
 export JUANCHOICE_BATCH_WRITES_ENABLED=false
-export JUANCHOICE_PROMOTION_ENABLED=false
+export JUANCHOICE_PROMOTION_ENABLED=true
 export JUANCHOICE_ECONOMY_ENABLED=false
-export JUANCHOICE_FINALIZER_WORKER_ENABLED=false
-export JUANCHOICE_SCHEDULER_ENABLED=false
+# Plan 65 weekly elections (owner-approved 2026-10-29): free votes, point boosts (in-app only),
+# automated promotion gate, weekly scheduler and finalizer. The budget economy stays off.
+export JUANCHOICE_BOOSTS_ENABLED=true
+export JUANCHOICE_FINALIZER_WORKER_ENABLED=true
+export JUANCHOICE_SCHEDULER_ENABLED=true
 # Deliver progression outbox events: approved quest proofs become verified
 # visits and explorer XP. Off (the env default), approvals only queued them.
 export PROGRESSION_OUTBOX_WORKER_ENABLED=true

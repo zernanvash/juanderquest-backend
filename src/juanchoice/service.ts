@@ -501,7 +501,7 @@ export async function castBallot(input: {
   // Boosts move points, so they take the governance lock first (before any user lock) like every
   // accounting writer. A plain vote or switch keeps the original ballot path below.
   if (input.targetWeight !== undefined && input.targetWeight > 1) {
-    if (!env.JUANCHOICE_ECONOMY_ENABLED) throw new JuanChoiceError('BOOSTS_DISABLED', 503);
+    if (!env.JUANCHOICE_BOOSTS_ENABLED) throw new JuanChoiceError('BOOSTS_DISABLED', 503);
     const prior = (await pool().query('SELECT vote_weight FROM juanchoice_ballots WHERE campaign_id=$1 AND user_id=$2',
       [input.campaignId, input.userId])).rows[0];
     const currentWeight = prior ? Number(prior.vote_weight) : 0;
@@ -652,7 +652,7 @@ export async function getMyJuanChoiceCampaignState(campaignId: string, userId: s
       [campaignId, userId]
     )).rows[0] ?? null;
     const weight = ballot ? Number(ballot.vote_weight) : 0;
-    const boostsOn = campaign.policy_version === WEEKLY_POLICY_VERSION && env.JUANCHOICE_ECONOMY_ENABLED;
+    const boostsOn = campaign.policy_version === WEEKLY_POLICY_VERSION && env.JUANCHOICE_BOOSTS_ENABLED;
     const result = {
       ballot,
       // Plan 65: quadratic boosts. next_cost_points is the extra points for one more vote of weight.
