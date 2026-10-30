@@ -67,7 +67,8 @@ realPgDescribe('AR quest flow: multi-task creation, host-scan QR pass, completio
   /** Plays steps 1–4 as the traveler; the host (`hostToken`) scans the pass for step 3. */
   async function playAllSteps(quest: { spotId: string; id: string; placardMarker: string; hostMarker: string }, hostToken: string) {
     const as = (path: string, t = travelerToken) => request(app).post(`/api/v1/quests/${quest.id}${path}`).set('Authorization', `Bearer ${t}`);
-    expect((await as('/attempts')).status).toBe(201);
+    const started = await as('/attempts');
+    expect({ status: started.status, error: started.body.error }).toEqual({ status: 201, error: undefined });
 
     const challenge = await as('/steps/1/ar-challenge').send(here);
     expect(challenge.status).toBe(200);
@@ -119,8 +120,8 @@ realPgDescribe('AR quest flow: multi-task creation, host-scan QR pass, completio
     for (const [id, role] of [[authorId, 'user'], [adminId, 'admin'], [travelerId, 'user'], [spotAdderId, 'user']] as const) {
       await fixture.pool.query(
         `INSERT INTO users (id, seed_id, display_name, email, role, demo_points, is_test, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, 0, true, $6, $7) ON CONFLICT (id) DO NOTHING`, [id, id, id, `${id}@example.com`, role, now, now]);
-      if (!db.users.find((x) => x.id === id)) db.users.push({ id, seed_id: id, display_name: id, email: `${id}@example.com`, role, demo_points: 0, is_test: true, created_at: now, updated_at: now } as any);
+         VALUES ($1, $2, $3, $4, $5, 0, false, $6, $7) ON CONFLICT (id) DO NOTHING`, [id, id, id, `${id}@example.com`, role, now, now]);
+      if (!db.users.find((x) => x.id === id)) db.users.push({ id, seed_id: id, display_name: id, email: `${id}@example.com`, role, demo_points: 0, is_test: false, created_at: now, updated_at: now } as any);
     }
     for (const [owner, spotId] of Object.entries(spotIds)) {
       await fixture.pool.query(
