@@ -4,6 +4,8 @@ import { PlazaError } from './feed.js';
 import { isCommentBlocked } from './blocklist.js';
 import { notify } from './notify.js';
 import { manilaHour } from './time.js';
+import { getPool } from '../db/pool.js';
+import { handlePlazaCheer } from '../stamps/hooks.js';
 
 export interface CommentAuthor {
   user_id: string;
@@ -124,6 +126,12 @@ export async function cheer(
       console.error('[interactions:cheer] Failed to notify cheer:', err);
     }
   }
+
+  await handlePlazaCheer(getPool(), {
+    viewerId,
+    activityOwnerId: act.actor_id,
+    activityId,
+  });
 
   return {
     cheered: true,

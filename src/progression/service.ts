@@ -1,3 +1,4 @@
+import { perkBonus } from '../juanchoice/perks.js';
 import { randomUUID } from 'crypto';
 import { PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
@@ -302,17 +303,23 @@ export class ProgressionService {
             throw visitErr;
           }
 
-          // 5. Award Explorer XP (+50 XP per verified visit, rule version explorer-v1)
+          // 5. Award Explorer XP (+50 XP per verified visit, rule version explorer-v1). Plan 65: the
+          // reigning JuanChoice perks add +X% at the Champion destination and for its category.
+          const visitedCategory = (await client.query('SELECT category FROM spots WHERE id=$1', [payload.spot_id])).rows[0]?.category;
+          const questBonus = await perkBonus(client, Boolean(currentEffectiveIsTest), perk =>
+            (perk.key === 'spot_xp_boost' && perk.spot_id === payload.spot_id)
+            || (perk.key === 'category_xp_boost' && perk.category === visitedCategory));
+          const visitXp = Math.round(50 * (1 + questBonus.value));
           const xpEvent = await progressionRepo.recordProgressionEvent(
             {
               id: randomUUID(),
               user_id: payload.user_id,
               track: 'explorer',
-              delta: 50,
+              delta: visitXp,
               source_type: 'submission_approval',
               source_id: payload.submission_id,
               award_kind: 'xp',
-              rule_version: 'explorer-v1',
+              rule_version: questBonus.keys.length ? 'explorer-v1+juanchoice' : 'explorer-v1',
               earned_at: payload.occurred_at,
               is_test: currentEffectiveIsTest,
             },
@@ -323,7 +330,7 @@ export class ProgressionService {
           if (xpEvent) {
             await progressionRepo.updateProgressionTotals(
               payload.user_id,
-              { explorerXp: 50 },
+              { explorerXp: visitXp },
               client
             );
           }

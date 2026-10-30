@@ -58,6 +58,8 @@ realPg('Shop v1 against disposable PostgreSQL (Plan 52 §7)', () => {
     const id = `shop-${suffix()}`;
     await fixture.pool.query(`INSERT INTO users(id,seed_id,display_name,email,role,demo_points,is_test) VALUES($1,$2,$3,$4,$5,$6,$7)`,
       [id,`seed-${id}`,id,`${id}@shop.test`,opts.role??'user',opts.points??1000,opts.test??false]);
+    // Plan 67: shop purchases need a bound wallet.
+    await fixture.pool.query(`UPDATE users SET wallet_address = '0x' || substr(md5(id) || md5(id || 'w'), 1, 40) WHERE id = ANY($1::text[])`,[[id]]);
     return id;
   }
   async function addItem(opts: { kind?: string; price?: number | null; active?: boolean; test?: boolean; badge?: string | null; starts?: string | null } = {}) {

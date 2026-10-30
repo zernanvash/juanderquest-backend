@@ -4,13 +4,29 @@ import { getPool } from '../db/pool.js';
 import { env } from '../config/env.js';
 import { finalizeDueCampaigns, JuanChoiceError } from './service.js';
 import { localMonth, monthlyWindow, nextMonth, selectMonthlyCandidates, themeForPeriod, MonthlyCandidate, MonthlyTheme } from './monthly-policy.js';
+import { isMonday, isoWeekKey, localWeek, nextWeek, roundTier, weeklyRoundNumber, weeklyWindow } from './weekly-policy.js';
+import { buildManifesto, markMystery, pickMysteryCandidate, unlockedPerkCount, type PerkKey } from './perks.js';
+import { effectivePerkValue, loadPerkSettings, perkEnabled } from './perk-controls.js';
+import { WEEKLY_POLICY_VERSION } from './promotion-safety.js';
 
 export interface MonthlySchedule {
   id: string; schedule_key: string; region_key: string; display_region: string; timezone: string;
   enabled: boolean; effective_period: string | Date; preparation_lead_days: number;
   minimum_candidates: number; target_candidates: number; maximum_candidates: number;
   themes: MonthlyTheme[]; policy_version: string; is_test: boolean;
+  /** Plan 65: weekly rounds (Monday to Monday, Asia/Manila) beside the original monthly cadence. */
+  cadence?: 'monthly' | 'weekly';
+  winner_cooldown_weeks?: number; minister_cooldown_weeks?: number; special_round_interval_weeks?: number;
 }
+
+const DAY_MS = 86400000;
+const WEEK_MS = 7 * DAY_MS;
+const isWeekly = (schedule: Pick<MonthlySchedule, 'cadence'>) => schedule.cadence === 'weekly';
+const periodWindow = (schedule: MonthlySchedule, period: string) =>
+  isWeekly(schedule) ? weeklyWindow(period, schedule.timezone) : monthlyWindow(period, schedule.timezone);
+/** Winner cooldown: 90 days for monthly rounds; Plan 65 D9 weeks for weekly rounds. */
+const winnerCooldownMs = (schedule: MonthlySchedule) =>
+  isWeekly(schedule) ? (schedule.winner_cooldown_weeks ?? 4) * WEEK_MS : 90 * DAY_MS;
 
 function pool(): Pool {
   const value = getPool();
@@ -36,7 +52,10 @@ export function validateMonthlyThemes(themes: MonthlyTheme[]): void {
 
 export async function createMonthlySchedule(input: Omit<MonthlySchedule, 'id'>, actorId?:string): Promise<MonthlySchedule> {
   validateMonthlyThemes(input.themes);
-  if (input.timezone !== 'Asia/Manila' || input.region_key !== 'pangasinan' || !/^\d{4}-\d{2}-01$/.test(dateOnly(input.effective_period))) {
+  const weekly = input.cadence === 'weekly';
+  if (input.timezone !== 'Asia/Manila' || input.region_key !== 'pangasinan'
+    || (weekly ? !isMonday(dateOnly(input.effective_period)) || input.policy_version !== WEEKLY_POLICY_VERSION
+      : !/^\d{4}-\d{2}-01$/.test(dateOnly(input.effective_period)))) {
     throw new JuanChoiceError('UNSUPPORTED_MONTHLY_SCHEDULE', 400);
   }
   const client=await pool().connect();
@@ -45,12 +64,12 @@ export async function createMonthlySchedule(input: Omit<MonthlySchedule, 'id'>, 
     const result = await client.query(
       `INSERT INTO juanchoice_schedules
        (id,schedule_key,region_key,display_region,timezone,enabled,effective_period,preparation_lead_days,
-        minimum_candidates,target_candidates,maximum_candidates,themes,policy_version,is_test)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14)
+        minimum_candidates,target_candidates,maximum_candidates,themes,policy_version,is_test,cadence)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15)
        ON CONFLICT(schedule_key,is_test) DO NOTHING RETURNING *`,
       [randomUUID(),input.schedule_key,input.region_key,input.display_region,input.timezone,input.enabled,dateOnly(input.effective_period),
         input.preparation_lead_days,input.minimum_candidates,input.target_candidates,input.maximum_candidates,
-        JSON.stringify(input.themes),input.policy_version,input.is_test]
+        JSON.stringify(input.themes),input.policy_version,input.is_test,weekly?'weekly':'monthly']
     );
     let row=result.rows[0] as MonthlySchedule|undefined;
     if (row) {
@@ -82,8 +101,10 @@ async function ensurePeriod(client: PoolClient, schedule: MonthlySchedule, perio
   const existing=(await client.query('SELECT * FROM juanchoice_schedule_periods WHERE schedule_id=$1 AND period_start=$2 FOR UPDATE',
     [schedule.id,period])).rows[0];
   if(existing)return existing;
-  const { opensAt, closesAt } = monthlyWindow(period,schedule.timezone);
-  const missed = now >= opensAt;
+  const { opensAt, closesAt } = periodWindow(schedule,period);
+  // A weekly booth may still open late in its own week (no empty booth after a deploy),
+  // but not in its final day.
+  const missed = isWeekly(schedule) ? now >= new Date(closesAt.getTime() - DAY_MS) : now >= opensAt;
   const result = await client.query(
     `INSERT INTO juanchoice_schedule_periods
      (id,schedule_id,period_start,opens_at,closes_at,status,reason_code,policy_snapshot)
@@ -144,11 +165,73 @@ async function eligibleCandidates(client: PoolClient, schedule: MonthlySchedule,
   });
 }
 
+interface SpotElectionState { consecutive_losses: number; last_won_at: Date | null; last_minister_at: Date | null }
+
+async function loadElectionState(client: PoolClient, isTest: boolean): Promise<Map<string, SpotElectionState>> {
+  const rows = (await client.query(
+    'SELECT spot_id,consecutive_losses,last_won_at,last_minister_at FROM juanchoice_spot_election_state WHERE is_test=$1',
+    [isTest])).rows;
+  return new Map(rows.map(row => [row.spot_id, {
+    consecutive_losses: Number(row.consecutive_losses),
+    last_won_at: row.last_won_at ? new Date(row.last_won_at) : null,
+    last_minister_at: row.last_minister_at ? new Date(row.last_minister_at) : null,
+  }]));
+}
+
+/** Plan 65 D9: a weekly Champion sits out 4 weeks and a Minister 2 (per schedule). */
+function passesWeeklyCooldown(schedule: MonthlySchedule, state: SpotElectionState | undefined, opensAt: Date): boolean {
+  if (!state) return true;
+  const won = state.last_won_at && state.last_won_at.getTime() > opensAt.getTime() - (schedule.winner_cooldown_weeks ?? 4) * WEEK_MS;
+  const minister = state.last_minister_at
+    && state.last_minister_at.getTime() > opensAt.getTime() - (schedule.minister_cooldown_weeks ?? 2) * WEEK_MS;
+  return !won && !minister;
+}
+
+/**
+ * Insert a round's candidates. Weekly rounds carry a deterministic manifesto whose size grows
+ * with the spot's losing streak (2 to 4 perks), and one mystery perk per round.
+ */
+async function insertCandidates(client: PoolClient, schedule: MonthlySchedule, campaignId: string, seed: string,
+  spotIds: string[], festival: boolean, now: Date, allowMystery = true): Promise<void> {
+  if (!isWeekly(schedule)) {
+    for (const spotId of spotIds) {
+      await client.query('INSERT INTO juanchoice_candidates(id,campaign_id,spot_id,is_test) VALUES($1,$2,$3,$4)',
+        [randomUUID(),campaignId,spotId,schedule.is_test]);
+    }
+    return;
+  }
+  if (!spotIds.length) return;
+  const spots = new Map((await client.query('SELECT id,name,municipality,category FROM spots WHERE id = ANY($1::text[])',
+    [spotIds])).rows.map(row => [row.id, row]));
+  const state = await loadElectionState(client, schedule.is_test);
+  // A safety replacement never adds a second mystery perk to a round.
+  const mysteryId = allowMystery ? pickMysteryCandidate(seed, spotIds) : null;
+  const settings = await loadPerkSettings(client);
+  const controls = { enabled: (key: PerkKey) => perkEnabled(settings, key), value: (key: PerkKey, fest: boolean) => effectivePerkValue(settings, key, fest) };
+  for (const spotId of spotIds) {
+    const spot = spots.get(spotId);
+    if (!spot) throw new JuanChoiceError('INVALID_SPOT', 422);
+    const losses = Math.min(10, state.get(spotId)?.consecutive_losses ?? 0);
+    const count = unlockedPerkCount(losses);
+    let perks = buildManifesto({ seed, spotId, spotName: spot.name, municipality: spot.municipality, category: spot.category,
+      count, festival, controls });
+    if (spotId === mysteryId) perks = markMystery(perks);
+    await client.query(
+      `INSERT INTO juanchoice_candidates(id,campaign_id,spot_id,is_test,manifesto_perks,prior_loss_streak,unlocked_perk_count)
+       VALUES($1,$2,$3,$4,$5::jsonb,$6,$7)`,
+      [randomUUID(),campaignId,spotId,schedule.is_test,JSON.stringify(perks),losses,count]);
+    await client.query(
+      `INSERT INTO juanchoice_spot_election_state(spot_id,is_test,last_nominated_at,updated_at) VALUES($1,$2,$3,NOW())
+       ON CONFLICT(spot_id,is_test) DO UPDATE SET last_nominated_at=EXCLUDED.last_nominated_at,updated_at=NOW()`,
+      [spotId,schedule.is_test,now]);
+  }
+}
+
 async function recheckPreparedPeriod(client:PoolClient,schedule:MonthlySchedule,row:any,now:Date):Promise<'unchanged'|'replaced'|'cancelled'> {
   if(!row.campaign_id || now >= new Date(row.opens_at))return 'unchanged';
   // Match ballot/moderation lock order: campaign before its candidates. A terminal
   // campaign belongs to history; reconciliation must not re-edit its roster.
-  const campaign=(await client.query('SELECT status,is_test FROM juanchoice_campaigns WHERE id=$1 FOR UPDATE',
+  const campaign=(await client.query('SELECT status,is_test,round_tier FROM juanchoice_campaigns WHERE id=$1 FOR UPDATE',
     [row.campaign_id])).rows[0];
   if(!campaign || !['scheduled','voting'].includes(campaign.status))return 'unchanged';
   if(campaign.is_test!==schedule.is_test)throw new JuanChoiceError('SCOPE_MISMATCH',409);
@@ -160,12 +243,16 @@ async function recheckPreparedPeriod(client:PoolClient,schedule:MonthlySchedule,
      WHERE c.campaign_id=$1 ORDER BY c.created_at,c.id FOR UPDATE`,[row.campaign_id])).rows;
   const poolCandidates=await eligibleCandidates(client,schedule,now);
   const eligibleById=new Map(poolCandidates.map(candidate=>[candidate.id,candidate]));
+  const opensAt=new Date(row.opens_at);
+  const state=isWeekly(schedule)?await loadElectionState(client,schedule.is_test):null;
+  const cooledDown=(candidate:MonthlyCandidate)=>
+    (!candidate.last_won_at||Date.parse(candidate.last_won_at)<opensAt.getTime()-winnerCooldownMs(schedule))
+    &&(!state||passesWeeklyCooldown(schedule,state.get(candidate.id),opensAt));
   const live=existing.filter(item=>{
     const candidate=eligibleById.get(item.spot_id);
     return candidate!==undefined&&item.candidate_is_test===schedule.is_test
       &&item.status==='eligible'&&item.spot_status==='published'&&!item.recommendation_suppressed
-      &&candidate.crowd_status!=='estimated_busy'
-      &&(!candidate.last_won_at||Date.parse(candidate.last_won_at)<new Date(row.opens_at).getTime()-90*86400000);
+      &&candidate.crowd_status!=='estimated_busy'&&cooledDown(candidate);
   });
   const invalid=existing.filter(item=>item.status==='eligible'&&!live.some(kept=>kept.id===item.id));
   if(!invalid.length&&live.length>=schedule.minimum_candidates)return 'unchanged';
@@ -179,8 +266,7 @@ async function recheckPreparedPeriod(client:PoolClient,schedule:MonthlySchedule,
   const countByMunicipality=new Map<string,number>();
   for(const item of live)countByMunicipality.set(item.municipality,(countByMunicipality.get(item.municipality)??0)+1);
   const alternatives=poolCandidates.filter(candidate=>!oldIds.has(candidate.id)&&theme.categories.includes(candidate.category)
-    &&candidate.crowd_status!=='estimated_busy'&&!candidate.recommendation_suppressed
-    &&(!candidate.last_won_at||Date.parse(candidate.last_won_at)<new Date(row.opens_at).getTime()-90*86400000));
+    &&candidate.crowd_status!=='estimated_busy'&&!candidate.recommendation_suppressed&&cooledDown(candidate));
   alternatives.sort((a,b)=>{
     const left=a.last_nominated_at?Date.parse(a.last_nominated_at):-Infinity;
     const right=b.last_nominated_at?Date.parse(b.last_nominated_at):-Infinity;
@@ -202,10 +288,8 @@ async function recheckPreparedPeriod(client:PoolClient,schedule:MonthlySchedule,
     await audit(client,schedule.id,row.id,'cancelled','CANDIDATES_WITHDRAWN');
     return 'cancelled';
   }
-  for(const item of replacements){
-    await client.query('INSERT INTO juanchoice_candidates(id,campaign_id,spot_id,is_test) VALUES($1,$2,$3,$4)',
-      [randomUUID(),row.campaign_id,item.id,schedule.is_test]);
-  }
+  await insertCandidates(client,schedule,row.campaign_id,String(row.selection_seed ?? row.id),
+    replacements.map(item=>item.id),campaign.round_tier==='special_festival',now,false);
   await audit(client,schedule.id,row.id,replacements.length?'candidates_replaced':'candidates_suspended','SAFETY_RECHECK');
   return 'replaced';
 }
@@ -222,9 +306,13 @@ async function reconcileSchedule(scheduleId: string, now: Date): Promise<{prepar
     const schedule = (await client.query('SELECT * FROM juanchoice_schedules WHERE id=$1 FOR UPDATE',[scheduleId])).rows[0] as MonthlySchedule;
     if (!schedule.enabled) { await client.query('COMMIT'); return {prepared:0,postponed:0,missed:0}; }
     validateMonthlyThemes(schedule.themes);
-    const current = localMonth(now,schedule.timezone);
+    const weekly = isWeekly(schedule);
+    const current = weekly ? localWeek(now,schedule.timezone) : localMonth(now,schedule.timezone);
     const first = dateOnly(schedule.effective_period);
-    const periods = [current,nextMonth(current)].filter(period => period >= first);
+    const periods = [current,weekly ? nextWeek(current) : nextMonth(current)].filter(period => period >= first);
+    const festivals = weekly ? (await client.query(
+      `SELECT name,to_char(starts_on,'YYYY-MM-DD') AS starts_on,to_char(ends_on,'YYYY-MM-DD') AS ends_on,boost_multiplier
+       FROM juanchoice_festivals WHERE is_test=$1`,[schedule.is_test])).rows : [];
     const outcome = {prepared:0,postponed:0,missed:0};
     for (const period of periods) {
       const row = await ensurePeriod(client,schedule,period,now);
@@ -232,16 +320,22 @@ async function reconcileSchedule(scheduleId: string, now: Date): Promise<{prepar
       if (row.status === 'prepared') { await recheckPreparedPeriod(client,schedule,row,now); continue; }
       if (row.status !== 'planned') continue;
       const opensAt = new Date(row.opens_at);
-      if (now >= opensAt) {
+      const lateWeeklyStart = weekly && now < new Date(new Date(row.closes_at).getTime() - DAY_MS);
+      if (now >= opensAt && !lateWeeklyStart) {
         await client.query("UPDATE juanchoice_schedule_periods SET status='missed',reason_code='PREPARATION_WINDOW_MISSED',updated_at=NOW() WHERE id=$1",[row.id]);
         await audit(client,schedule.id,row.id,'missed','PREPARATION_WINDOW_MISSED'); outcome.missed++; continue;
       }
       if (now.getTime() < opensAt.getTime()-schedule.preparation_lead_days*86400000) continue;
-      const primaryTheme = themeForPeriod(period,schedule.themes,first);
-      const candidates = await eligibleCandidates(client,schedule,now);
+      const round = weekly ? weeklyRoundNumber(period,first) : 0;
+      const primaryTheme = weekly ? schedule.themes[(round - 1) % schedule.themes.length] : themeForPeriod(period,schedule.themes,first);
+      let candidates = await eligibleCandidates(client,schedule,now);
+      if (weekly) {
+        const state = await loadElectionState(client,schedule.is_test);
+        candidates = candidates.filter(candidate => passesWeeklyCooldown(schedule,state.get(candidate.id),opensAt));
+      }
       const selected = selectMonthlyCandidates({candidates,themes:schedule.themes,primaryTheme,period,
         minimum:schedule.minimum_candidates,target:Math.min(schedule.target_candidates,schedule.maximum_candidates),
-        cooldownMs:90*86400000,closesAt:opensAt});
+        cooldownMs:winnerCooldownMs(schedule),closesAt:opensAt});
       if (!selected) {
         await client.query(`UPDATE juanchoice_schedule_periods SET status='postponed',reason_code='INSUFFICIENT_CANDIDATES',
           attempt_count=attempt_count+1,last_attempt_at=NOW(),updated_at=NOW() WHERE id=$1`,[row.id]);
@@ -259,17 +353,23 @@ async function reconcileSchedule(scheduleId: string, now: Date): Promise<{prepar
       const campaignId = randomUUID();
       // schedule_key is only unique within its real/test scope; campaign slugs
       // are globally unique. Include the durable schedule identity in new URLs.
-      const slug = `monthly-${period.slice(0,7)}-${schedule.id}`;
-      await client.query(
-        `INSERT INTO juanchoice_campaigns(id,slug,region,theme,status,opens_at,closes_at,is_test,policy_version)
-         VALUES($1,$2,$3,$4,'scheduled',$5,$6,$7,$8)`,
-        [campaignId,slug,schedule.display_region,selected.theme.name,row.opens_at,row.closes_at,schedule.is_test,schedule.policy_version]
-      );
-      for (const candidate of selected.selected) {
-        await client.query(`INSERT INTO juanchoice_candidates(id,campaign_id,spot_id,is_test) VALUES($1,$2,$3,$4)`,
-          [randomUUID(),campaignId,candidate.id,schedule.is_test]);
-      }
       const seed = createHash('sha256').update(`${schedule.schedule_key}:${period}:${schedule.policy_version}`).digest('hex');
+      const tier = weekly ? roundTier({ roundNumber: round, intervalWeeks: schedule.special_round_interval_weeks ?? 4, period, festivals })
+        : { tier: 'standard' as const, festivalName: null, multiplier: 1 };
+      const slug = weekly ? `weekly-${isoWeekKey(period)}-${schedule.id}` : `monthly-${period.slice(0,7)}-${schedule.id}`;
+      const theme = weekly
+        ? (tier.festivalName ? `${tier.festivalName} — Festival Election` : tier.tier === 'special_festival'
+          ? `${selected.theme.name} — Special Election` : selected.theme.name)
+        : selected.theme.name;
+      await client.query(
+        `INSERT INTO juanchoice_campaigns(id,slug,region,theme,status,opens_at,closes_at,is_test,policy_version,
+           round_tier,festival_name,blind_tally_hours)
+         VALUES($1,$2,$3,$4,'scheduled',$5,$6,$7,$8,$9,$10,$11)`,
+        [campaignId,slug,schedule.display_region,theme,row.opens_at,row.closes_at,schedule.is_test,schedule.policy_version,
+          tier.tier,tier.festivalName,weekly?24:0]
+      );
+      await insertCandidates(client,schedule,campaignId,seed,selected.selected.map(candidate=>candidate.id),
+        tier.tier==='special_festival',now);
       await client.query(
         `UPDATE juanchoice_schedule_periods SET status='prepared',campaign_id=$2,selected_theme=$3,selection_seed=$4,
          prepared_at=NOW(),attempt_count=attempt_count+1,last_attempt_at=NOW(),updated_at=NOW() WHERE id=$1`,

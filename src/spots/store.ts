@@ -103,7 +103,15 @@ export class SpotStore {
   interact(userId:string,spotId:string,type:string,enabled=true) { const key=`${spotId}:${type}`; const set=this.interactions.get(userId)||new Set<string>(); enabled?set.add(key):set.delete(key); this.interactions.set(userId,set);if(this.pg){const query=enabled?'INSERT INTO spot_interactions(user_id,spot_id,interaction_type) VALUES($1,$2,$3) ON CONFLICT DO NOTHING':'DELETE FROM spot_interactions WHERE user_id=$1 AND spot_id=$2 AND interaction_type=$3';this.pg.query(query,[userId,spotId,type]).catch(()=>{});} return enabled; }
   isSaved(userId:string|undefined,spotId:string){return !!userId&&this.interactions.get(userId)?.has(`${spotId}:save`);}
   isLiked(userId:string|undefined,spotId:string){return !!userId&&this.interactions.get(userId)?.has(`${spotId}:like`);}
-  trend(spotId:string){let score=0;for(const [userId, values] of this.interactions.entries()){if(db.findUserById(userId)?.is_test)continue;if(values.has(`${spotId}:visit`))score+=5;if(values.has(`${spotId}:directions`))score+=3;if(values.has(`${spotId}:save`))score+=2;if(values.has(`${spotId}:like`))score+=2;if(values.has(`${spotId}:helpful`))score+=2;if(values.has(`${spotId}:view`))score+=.25;}return score;}
+  trend(spotId:string){return this.trendScores().get(spotId)??0;}
+  // One pass over every traveler's interactions; list() used to rescan all travelers per spot.
+  trendScores(){
+    const weights:Record<string,number>={visit:5,directions:3,save:2,like:2,helpful:2,view:.25};const scores=new Map<string,number>();
+    for(const [userId, values] of this.interactions.entries()){if(db.findUserById(userId)?.is_test)continue;
+      for(const key of values){const at=key.lastIndexOf(':');const w=weights[key.slice(at+1)];if(w===undefined)continue;const spotId=key.slice(0,at);scores.set(spotId,(scores.get(spotId)??0)+w);}}
+    return scores;
+  }
+  eventsBySpot(){const bySpot=new Map<string,ActivityEvent[]>();for(const e of this.activityEvents){const list=bySpot.get(e.spot_id);if(list)list.push(e);else bySpot.set(e.spot_id,[e]);}return bySpot;}
 
   recordActivity(userId:string,spotId:string,type:ActivityType) {
     if(!this.spots.some(s=>s.id===spotId))return false;
@@ -116,15 +124,17 @@ export class SpotStore {
     return true;
   }
 
-  crowd(spot:Spot,now=Date.now()) {
-    return calculateCrowdMetrics(this.activityEvents.filter(e => e.spot_id === spot.id), spot.crowd_capacity_band || 'medium', now);
+  crowd(spot:Spot,now=Date.now(),bySpot?:Map<string,ActivityEvent[]>) {
+    const events=bySpot?bySpot.get(spot.id)??[]:this.activityEvents.filter(e => e.spot_id === spot.id);
+    return calculateCrowdMetrics(events, spot.crowd_capacity_band || 'medium', now);
   }
 
   alternatives(source:Spot,userId?:string,limit=3) {
     const prefs=userId?this.getPreferences(userId):undefined;
-    const candidates=this.spots.filter(s=>s.id!==source.id&&s.status==='published'&&!s.recommendation_suppressed&&this.crowd(s).crowd_status!=='estimated_busy').map(s=>{
+    const bySpot=this.eventsBySpot();const now=Date.now();
+    const candidates=this.spots.filter(s=>s.id!==source.id&&s.status==='published'&&!s.recommendation_suppressed&&this.crowd(s,now,bySpot).crowd_status!=='estimated_busy').map(s=>{
       const shared=s.tags.filter(t=>source.tags.includes(t));const tagScore=shared.length/Math.max(new Set([...source.tags,...s.tags]).size,1);const categoryScore=s.subcategory===source.subcategory?1:s.category===source.category?.65:0;if(!shared.length&&!categoryScore)return null;
-      const distance=distanceKm(source.gps_lat,source.gps_lng,s.gps_lat,s.gps_lng);const trust={lgu_verified:1,editorial:.9,open_data:.75,community:.6}[s.trust_level];const pressure=this.crowd(s);const pressureScore=pressure.crowd_status==='quiet'?1:pressure.crowd_status==='moderate'?.55:.7;const pref=prefs&&[...prefs.categories,...prefs.tags,...prefs.occasions].some(v=>v===s.category||s.tags.includes(v))?1:0;
+      const distance=distanceKm(source.gps_lat,source.gps_lng,s.gps_lat,s.gps_lng);const trust={lgu_verified:1,editorial:.9,open_data:.75,community:.6}[s.trust_level];const pressure=this.crowd(s,now,bySpot);const pressureScore=pressure.crowd_status==='quiet'?1:pressure.crowd_status==='moderate'?.55:.7;const pref=prefs&&[...prefs.categories,...prefs.tags,...prefs.occasions].some(v=>v===s.category||s.tags.includes(v))?1:0;
       const distanceScore=Math.max(0,1-distance/500);const score=tagScore*.35+categoryScore*.25+pref*.15+trust*.1+pressureScore*.1+distanceScore*.05;const reasons=[shared.length?`Similar ${shared.slice(0,2).join(' and ').replaceAll('_',' ')}`:`Similar ${s.subcategory.replaceAll('_',' ')}`,pref?'Matches your travel preferences':'Matches this destination',`${s.municipality} alternative`];
       return {...s,...pressure,distance_km:Number(distance.toFixed(2)),alternative_score:Number(score.toFixed(4)),recommendation_kind:'similar_place',sponsored:false,recommendation_reasons:reasons};
     }).filter(Boolean) as any[];
@@ -135,19 +145,21 @@ export class SpotStore {
 
   list(q:{search?:string;categories?:string[];tags?:string[];municipality?:string;lat?:number;lng?:number;radius?:number;intent?:string;sort?:string;hasQuest?:boolean;userId?:string;allowTest?:boolean}) {
     const prefs=q.userId?this.getPreferences(q.userId):undefined;
+    const trends=this.trendScores();const bySpot=this.eventsBySpot();const now=Date.now();
     return this.spots.filter(s=>s.status==='published'&&(q.allowTest||!s.is_test)).map(s=>{
+      const trendScore=trends.get(s.id)??0;
       const distance=q.lat!==undefined&&q.lng!==undefined?distanceKm(q.lat,q.lng,s.gps_lat,s.gps_lng):undefined;
       const intent=(q.intent||'').toLowerCase();
       const intentMatch=intent&&[s.category,s.subcategory,...s.tags,s.name].some(v=>v.toLowerCase().includes(intent))?1:0;
       const prefMatch=prefs&&([...prefs.categories,...prefs.tags].some(v=>v===s.category||s.tags.includes(v)))?1:0;
       const distanceScore=distance===undefined?.5:Math.max(0,1-distance/Math.max(q.radius||50,1));
       const trust={lgu_verified:1,editorial:.9,open_data:.75,community:.6}[s.trust_level];
-      const trend=Math.min(1,this.trend(s.id)/20);
+      const trend=Math.min(1,trendScore/20);
       const ageDays=(Date.now()-Date.parse(s.created_at))/86400000;
       const freshness=Math.max(0,1-ageDays/30);
       const score=intentMatch*.30+prefMatch*.20+distanceScore*.20+trust*.15+trend*.10+freshness*.05;
       const reasons:string[]=[];if(distance!==undefined)reasons.push(`${distance<1?Math.round(distance*1000)+' m':distance.toFixed(1)+' km'} away`);if(intentMatch)reasons.push(`Matches ${q.intent}`);if(s.trust_level==='lgu_verified')reasons.push('LGU verified');if(trend>.25)reasons.push(`Trending in ${s.municipality}`);
-      return {...s,...this.crowd(s),distance_km:distance,recommendation_score:Number(score.toFixed(4)),recommendation_reasons:reasons,saved:this.isSaved(q.userId,s.id),liked:this.isLiked(q.userId,s.id),trend_score:this.trend(s.id)};
+      return {...s,...this.crowd(s,now,bySpot),distance_km:distance,recommendation_score:Number(score.toFixed(4)),recommendation_reasons:reasons,saved:this.isSaved(q.userId,s.id),liked:this.isLiked(q.userId,s.id),trend_score:trendScore};
     }).filter(s=>(!q.search||`${s.name} ${s.description} ${s.tags.join(' ')}`.toLowerCase().includes(q.search.toLowerCase()))&&(!q.categories?.length||q.categories.includes(s.category))&&(!q.tags?.length||q.tags.some(t=>s.tags.includes(t)))&&(!q.municipality||s.municipality.toLowerCase()===q.municipality.toLowerCase())&&(!q.hasQuest||!!s.quest_id)&&(s.distance_km===undefined||!q.radius||s.distance_km<=q.radius)).sort((a,b)=>q.sort==='nearest'?(a.distance_km??999)-(b.distance_km??999):q.sort==='newest'?Date.parse(b.created_at)-Date.parse(a.created_at):q.sort==='trending'?b.trend_score-a.trend_score:b.recommendation_score-a.recommendation_score);
   }
 

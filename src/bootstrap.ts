@@ -15,6 +15,7 @@ import { startPushDispatcher } from './push/dispatcher.js';
 import { startWeeklyRecapJob } from './social/weeklyRecapJob.js';
 import { startChainBalanceWatch } from './chain/balanceWatch.js';
 import { startBadgeMinter } from './chain/badgeMinter.js';
+import { startWeeklyTrailTrendJob } from './trails/jobs/weeklyTrends.js';
 
 // Boot orchestration: connect PostgreSQL (when available), hydrate memory + governance, fall back to in-memory.
 export async function bootstrap() {
@@ -29,6 +30,7 @@ export async function bootstrap() {
     initFcm();
     startPushDispatcher();
     startWeeklyRecapJob();
+    startWeeklyTrailTrendJob();
     startChainBalanceWatch();
     startBadgeMinter();
   } else {

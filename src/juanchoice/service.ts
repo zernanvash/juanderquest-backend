@@ -6,6 +6,10 @@ import { evaluateFinalizedCampaignRetention } from '../progression/retention.js'
 import { evaluateCandidatePromotionEligibility } from './promotion-safety.js';
 import { env, extractDatabaseName, isPresentationDatabaseName, UUID_V4_REGEX } from '../config/env.js';
 import { recordActivity, runIsolatedProducer } from '../social/activity.js';
+import { fundingTx, publishFunding } from '../funding/transaction.js';
+import { commitGovernanceTransaction, lockGovernanceSnapshot } from '../governance/transaction.js';
+import { WEEKLY_POLICY_VERSION } from './promotion-safety.js';
+import { invalidateActiveJuanChoicePerks, ministerPerk, publicManifesto, revealAll } from './perks.js';
 
 export class JuanChoiceError extends Error {
   constructor(public readonly code: string, public readonly status: number, message = code) { super(message); }
@@ -362,14 +366,147 @@ export async function claimSupporterQuest(campaignId: string, userId: string) {
   });
 }
 
+/**
+ * Plan 65 D6/D7: raise a ballot's weight with points. Lock order matches every accounting writer:
+ * governance snapshot, then campaign, then the voter. One transaction writes the points debit,
+ * the ballot (candidate + weight), boost Civic XP, the event and the idempotency receipt.
+ */
+async function castBoostedBallot(input: {
+  campaignId: string; userId: string; candidateId: string; expectedVersion: number; idempotencyKey: string; targetWeight: number;
+}) {
+  const client = await pool().connect();
+  const tx = fundingTx(client);
+  try {
+    await client.query('BEGIN');
+    await lockGovernanceSnapshot(client);
+    const campaign = (await client.query('SELECT * FROM juanchoice_campaigns WHERE id = $1 FOR SHARE', [input.campaignId])).rows[0];
+    if (!campaign) throw new JuanChoiceError('CAMPAIGN_NOT_FOUND', 404);
+    await assertPresentationCampaignAccess(client, input.campaignId, campaign);
+    if (campaign.policy_version !== WEEKLY_POLICY_VERSION) throw new JuanChoiceError('BOOST_UNAVAILABLE', 422);
+    const actor = (await client.query('SELECT id, created_at, is_test FROM users WHERE id = $1 FOR UPDATE', [input.userId])).rows[0];
+    if (!actor || Boolean(actor.is_test) !== Boolean(campaign.is_test)) throw new JuanChoiceError('CAMPAIGN_NOT_FOUND', 404);
+    const requestHash = createHash('sha256').update(`${input.candidateId}:${input.expectedVersion}:w${input.targetWeight}`).digest('hex');
+    const checks = (await client.query(
+      `SELECT clock_timestamp() AS now,
+        EXISTS (SELECT 1 FROM verified_visits WHERE user_id = $1 AND is_test = $2 AND revoked_at IS NULL) AS has_visit,
+        EXISTS (SELECT 1 FROM juanchoice_candidates c JOIN spots s ON s.id = c.spot_id
+          WHERE c.id = $3 AND c.campaign_id = $4 AND c.status = 'eligible' AND c.is_test = $2 AND s.is_test = $2
+            AND s.status = 'published' AND s.recommendation_suppressed = FALSE) AS candidate_valid,
+        r.request_hash AS receipt_hash, r.response AS receipt_response,
+        b.candidate_id AS prior_candidate_id, b.version AS prior_version, b.vote_weight AS prior_weight
+       FROM juanchoice_campaigns round_row
+       LEFT JOIN juanchoice_receipts r ON r.campaign_id=round_row.id AND r.user_id=$1 AND r.idempotency_key=$5
+       LEFT JOIN juanchoice_ballots b ON b.campaign_id=round_row.id AND b.user_id=$1
+       WHERE round_row.id=$4`,
+      [input.userId, campaign.is_test, input.candidateId, input.campaignId, input.idempotencyKey])).rows[0];
+    if (checks.receipt_hash != null) {
+      if (checks.receipt_hash !== requestHash) throw new JuanChoiceError('IDEMPOTENCY_CONFLICT', 409);
+      await commitGovernanceTransaction(client);
+      return { ...checks.receipt_response, replayed: true };
+    }
+    const now = new Date(checks.now);
+    if (!['scheduled','voting'].includes(campaign.status) || now < new Date(campaign.opens_at) || now >= new Date(campaign.closes_at)) {
+      throw new JuanChoiceError('ROUND_CLOSED', 409);
+    }
+    const eligibility = evaluateVoterEligibility({ actorCreatedAt: new Date(actor.created_at), actorIsTest: Boolean(actor.is_test),
+      campaignId: input.campaignId, campaignIsTest: Boolean(campaign.is_test), hasVerifiedVisit: Boolean(checks.has_visit), now });
+    if (!eligibility.eligible) throw new JuanChoiceError('NOT_ELIGIBLE', 403, 'Account must be 72 hours old or have a verified visit.');
+    if (!checks.candidate_valid) throw new JuanChoiceError('INVALID_CANDIDATE', 422);
+    const currentVersion = checks.prior_version == null ? 0 : Number(checks.prior_version);
+    if (input.expectedVersion !== currentVersion) throw new JuanChoiceError('VERSION_CONFLICT', 409);
+    const currentWeight = checks.prior_version == null ? 0 : Number(checks.prior_weight ?? 1);
+    if (input.targetWeight < currentWeight) throw new JuanChoiceError('INVALID_BOOST_DOWNGRADE', 422);
+    if (input.targetWeight === currentWeight) throw new JuanChoiceError('VERSION_CONFLICT', 409);
+    const points = BOOST_COST_BY_WEIGHT[input.targetWeight] - BOOST_COST_BY_WEIGHT[Math.max(1, currentWeight)];
+    const tiers = input.targetWeight - Math.max(1, currentWeight);
+    const isTest = Boolean(campaign.is_test);
+    const sinkId = `juanchoice_sink:${isTest ? 'test' : 'live'}`;
+    await client.query(`INSERT INTO points_accounts(id,kind,is_test) VALUES($1,'treasury',$2) ON CONFLICT(id) DO NOTHING`, [sinkId, isTest]);
+    try {
+      await tx.transfer({ from: { id: input.userId, kind: 'traveler', userId: input.userId }, to: { id: sinkId, kind: 'treasury' },
+        points, type: 'juanchoice_boost_debit', referenceType: 'juanchoice_campaign', referenceId: input.campaignId, actorId: input.userId,
+        idempotencyKey: `jc_boost:${input.campaignId}:${input.userId}:w${input.targetWeight}`,
+        metadata: { campaign_id: input.campaignId, from_weight: Math.max(1, currentWeight), to_weight: input.targetWeight, is_test: isTest } });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'INSUFFICIENT_TRAVELER_POINTS') {
+        throw new JuanChoiceError('INSUFFICIENT_POINTS', 409, 'You do not have enough points for this boost.');
+      }
+      throw error;
+    }
+    const version = currentVersion + 1;
+    if (currentWeight === 0) {
+      await client.query(`INSERT INTO juanchoice_ballots(campaign_id,user_id,candidate_id,version,is_test,vote_weight,boost_spent_points)
+        VALUES($1,$2,$3,$4,$5,$6,$7)`, [input.campaignId, input.userId, input.candidateId, version, isTest, input.targetWeight, points]);
+      await client.query('INSERT INTO juanchoice_participations(campaign_id,user_id,is_test) VALUES($1,$2,$3)',
+        [input.campaignId, input.userId, isTest]);
+      await awardFirstBallotParticipation(client, input.userId, input.campaignId, isTest, now);
+    } else {
+      await client.query(`UPDATE juanchoice_ballots SET candidate_id=$3,version=$4,vote_weight=$5,
+          boost_spent_points=boost_spent_points+$6,updated_at=NOW() WHERE campaign_id=$1 AND user_id=$2`,
+        [input.campaignId, input.userId, input.candidateId, version, input.targetWeight, points]);
+    }
+    const xp = tiers * BOOST_CIVIC_XP_PER_TIER;
+    const award = await client.query(
+      `INSERT INTO progression_events (id,user_id,track,delta,source_type,source_id,award_kind,rule_version,earned_at,is_test)
+       VALUES ($1,$2,'civic',$3,'juanchoice_boost',$4,'xp','juanchoice-weekly-v1',$5,$6)
+       ON CONFLICT (user_id,source_type,source_id,award_kind) DO NOTHING RETURNING id`,
+      [randomUUID(), input.userId, xp, `${input.campaignId}:w${input.targetWeight}`, now.toISOString(), isTest]);
+    if (award.rowCount !== 1) throw new JuanChoiceError('REWARD_CONFLICT', 409);
+    const totals = await client.query(
+      `INSERT INTO progression_totals (user_id,explorer_xp,civic_xp,civic_stamps,last_event_at,updated_at)
+       VALUES ($1,0,$2,0,NOW(),NOW())
+       ON CONFLICT (user_id) DO UPDATE SET civic_xp=progression_totals.civic_xp+$2,last_event_at=NOW(),updated_at=NOW()
+       WHERE progression_totals.civic_xp <= 9007199254740991 - $2 RETURNING user_id`, [input.userId, xp]);
+    if (totals.rowCount !== 1) throw new JuanChoiceError('TOTALS_OUT_OF_BOUNDS', 409);
+    await client.query(
+      `INSERT INTO juanchoice_ballot_events(id,campaign_id,user_id,previous_candidate_id,candidate_id,version,idempotency_key,
+         previous_weight,new_weight,points_delta) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [randomUUID(), input.campaignId, input.userId, checks.prior_candidate_id ?? null, input.candidateId, version,
+        input.idempotencyKey, Math.max(1, currentWeight), input.targetWeight, points]);
+    const response = {
+      ballot: { candidate_id: input.candidateId, version, vote_weight: input.targetWeight },
+      boost: { points_spent: points, civic_xp: xp, total_points_spent: BOOST_COST_BY_WEIGHT[input.targetWeight] },
+      participation: currentWeight === 0 ? { civic_xp: 25, stamps: 1, token_grant_mjdq: '0' } : null,
+      replayed: false, policy_version: campaign.policy_version, server_time: now.toISOString(),
+    };
+    await client.query(`INSERT INTO juanchoice_receipts(campaign_id,user_id,idempotency_key,request_hash,response)
+      VALUES($1,$2,$3,$4,$5::jsonb)`, [input.campaignId, input.userId, input.idempotencyKey, requestHash, JSON.stringify(response)]);
+    await commitGovernanceTransaction(client);
+    publishFunding(tx.groups);
+    return response;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally { client.release(); }
+}
+
+/** Plan 65 D6 (§9.2): cumulative points for ballot weight 1..5 (1x is free). */
+export const BOOST_COST_BY_WEIGHT: Record<number, number> = { 1: 0, 2: 25, 3: 100, 4: 275, 5: 625 };
+export const BOOST_CIVIC_XP_PER_TIER = 10;
+
 export async function castBallot(input: {
   campaignId: string; userId: string; candidateId: string;
   expectedVersion: number; idempotencyKey: string;
+  /** Plan 65: requested ballot weight (1..5). Omitted = keep the current weight. */
+  targetWeight?: number;
 }) {
   if (!env.JUANCHOICE_WRITES_ENABLED || !env.PROGRESSION_ENABLED) throw new JuanChoiceError('WRITES_DISABLED', 503);
   if (env.JUANCHOICE_PRESENTATION_MODE &&
       input.campaignId.toLowerCase() !== env.JUANCHOICE_PRESENTATION_CAMPAIGN_ID.toLowerCase()) {
     throw new JuanChoiceError('CAMPAIGN_NOT_FOUND', 404);
+  }
+  if (input.targetWeight !== undefined && (!Number.isInteger(input.targetWeight) || input.targetWeight < 1 || input.targetWeight > 5)) {
+    throw new JuanChoiceError('INVALID_BOOST', 422);
+  }
+  // Boosts move points, so they take the governance lock first (before any user lock) like every
+  // accounting writer. A plain vote or switch keeps the original ballot path below.
+  if (input.targetWeight !== undefined && input.targetWeight > 1) {
+    if (!env.JUANCHOICE_BOOSTS_ENABLED) throw new JuanChoiceError('BOOSTS_DISABLED', 503);
+    const prior = (await pool().query('SELECT vote_weight FROM juanchoice_ballots WHERE campaign_id=$1 AND user_id=$2',
+      [input.campaignId, input.userId])).rows[0];
+    const currentWeight = prior ? Number(prior.vote_weight) : 0;
+    if (input.targetWeight < currentWeight) throw new JuanChoiceError('INVALID_BOOST_DOWNGRADE', 422);
+    if (input.targetWeight > currentWeight) return castBoostedBallot({ ...input, targetWeight: input.targetWeight });
   }
   return transaction(async client => {
     // Global ordering: campaign, user, ballot, participation. Concurrent ballots
@@ -396,7 +533,7 @@ export async function castBallot(input: {
             AND c.is_test = $2 AND s.is_test = $2 AND s.status = 'published'
             AND s.recommendation_suppressed = FALSE) AS candidate_valid,
         r.request_hash AS receipt_hash, r.response AS receipt_response,
-        b.candidate_id AS prior_candidate_id, b.version AS prior_version
+        b.candidate_id AS prior_candidate_id, b.version AS prior_version, b.vote_weight AS prior_weight
        FROM juanchoice_campaigns round_row
        LEFT JOIN juanchoice_receipts r ON r.campaign_id=round_row.id
          AND r.user_id=$1 AND r.idempotency_key=$5
@@ -429,12 +566,18 @@ export async function castBallot(input: {
 
     const prior = ballotChecks.prior_version == null ? null : {
       candidate_id: ballotChecks.prior_candidate_id, version: ballotChecks.prior_version,
+      weight: Number(ballotChecks.prior_weight ?? 1),
     };
     const currentVersion = prior?.version ?? 0;
     if (input.expectedVersion !== currentVersion) throw new JuanChoiceError('VERSION_CONFLICT', 409);
+    // Checked again under the actor lock: weight never goes down; a switch keeps the full weight.
+    if (input.targetWeight !== undefined && prior && input.targetWeight < prior.weight) {
+      throw new JuanChoiceError('INVALID_BOOST_DOWNGRADE', 422);
+    }
+    if (input.targetWeight !== undefined && input.targetWeight > (prior?.weight ?? 1)) throw new JuanChoiceError('VERSION_CONFLICT', 409);
     const version = currentVersion + 1;
     const response = {
-      ballot: { candidate_id: input.candidateId, version },
+      ballot: { candidate_id: input.candidateId, version, vote_weight: prior?.weight ?? 1 },
       participation: { civic_xp: 25, stamps: 1, token_grant_mjdq: '0' },
       replayed: false, policy_version: policyVersion, server_time: now.toISOString(),
     };
@@ -479,7 +622,7 @@ export async function getMyJuanChoiceCampaignState(campaignId: string, userId: s
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const campaign = (await client.query(
-      'SELECT is_test,status,opens_at,closes_at,series_key,round_number,counts_for_streak FROM juanchoice_campaigns WHERE id=$1', [campaignId]
+      'SELECT is_test,status,opens_at,closes_at,series_key,round_number,counts_for_streak,policy_version FROM juanchoice_campaigns WHERE id=$1', [campaignId]
     )).rows[0];
     await assertPresentationCampaignAccess(client, campaignId, campaign);
     const actor = (await client.query(
@@ -505,11 +648,22 @@ export async function getMyJuanChoiceCampaignState(campaignId: string, userId: s
     const inWindow = ['scheduled', 'voting'].includes(campaign.status)
       && now >= new Date(campaign.opens_at) && now < new Date(campaign.closes_at);
     const ballot = (await client.query(
-      'SELECT candidate_id,version FROM juanchoice_ballots WHERE campaign_id=$1 AND user_id=$2',
+      'SELECT candidate_id,version,vote_weight,boost_spent_points FROM juanchoice_ballots WHERE campaign_id=$1 AND user_id=$2',
       [campaignId, userId]
     )).rows[0] ?? null;
+    const weight = ballot ? Number(ballot.vote_weight) : 0;
+    const boostsOn = campaign.policy_version === WEEKLY_POLICY_VERSION && env.JUANCHOICE_BOOSTS_ENABLED;
     const result = {
       ballot,
+      // Plan 65: quadratic boosts. next_cost_points is the extra points for one more vote of weight.
+      boost: {
+        available: boostsOn,
+        current_weight: weight,
+        next_weight: boostsOn && weight >= 1 && weight < 5 ? weight + 1 : null,
+        next_cost_points: boostsOn && weight >= 1 && weight < 5 ? BOOST_COST_BY_WEIGHT[weight + 1] - BOOST_COST_BY_WEIGHT[weight] : null,
+        cost_by_weight: BOOST_COST_BY_WEIGHT,
+        civic_xp_per_tier: BOOST_CIVIC_XP_PER_TIER,
+      },
       eligibility: {
         eligible,
         reason: eligibility.reason,
@@ -536,11 +690,14 @@ async function queryStandings(campaignId: string, allowTest: boolean) {
     throw new JuanChoiceError('CAMPAIGN_NOT_FOUND', 404);
   }
   const campaign = (await pool().query(
-    `SELECT id,slug,region,theme,status,opens_at,closes_at,is_test,policy_version,series_key,round_number,counts_for_streak
+    `SELECT id,slug,region,theme,status,opens_at,closes_at,is_test,policy_version,series_key,round_number,counts_for_streak,
+       round_tier,festival_name,blind_tally_hours,clock_timestamp() AS server_now
      FROM juanchoice_campaigns WHERE id = $1 AND status <> 'draft' AND ($2::boolean OR is_test = FALSE)`,
     [campaignId, allowTest]
   )).rows[0];
   if (!campaign) throw new JuanChoiceError('CAMPAIGN_NOT_FOUND', 404);
+  const serverNow = new Date(campaign.server_now);
+  delete campaign.server_now;
   if (env.JUANCHOICE_PRESENTATION_MODE) {
     const client = await pool().connect();
     try { await assertPresentationCampaignAccess(client, campaignId, campaign); }
@@ -554,14 +711,24 @@ async function queryStandings(campaignId: string, allowTest: boolean) {
     if (result) return { campaign, standings: result.standings, result };
   }
   const rows = (await pool().query(
-    `SELECT c.id AS candidate_id, c.spot_id, s.slug AS spot_slug, s.name AS spot_name, COUNT(b.user_id)::int AS votes
+    `SELECT c.id AS candidate_id, c.spot_id, s.slug AS spot_slug, s.name AS spot_name, s.municipality, s.image_url,
+       COALESCE(SUM(b.vote_weight),0)::int AS votes, COUNT(b.user_id)::int AS voter_count,
+       c.manifesto_perks, c.prior_loss_streak, c.unlocked_perk_count
      FROM juanchoice_candidates c JOIN spots s ON s.id = c.spot_id
      LEFT JOIN juanchoice_ballots b ON b.campaign_id = c.campaign_id AND b.candidate_id = c.id
      WHERE c.campaign_id = $1 AND c.status = 'eligible' AND c.is_test = $2 AND s.is_test = $2 AND s.status = 'published' AND s.recommendation_suppressed = FALSE
-     GROUP BY c.id,c.spot_id,s.slug,s.name ORDER BY votes DESC,c.id`,
+     GROUP BY c.id,c.spot_id,s.slug,s.name,s.municipality,s.image_url ORDER BY votes DESC,c.id`,
     [campaignId, campaign.is_test]
   )).rows;
-  return { campaign, standings: rows, result: null };
+  // Plan 65 D8: in the final hours the tally is hidden and the order no longer leaks the leader.
+  const hideFrom = new Date(campaign.closes_at).getTime() - Number(campaign.blind_tally_hours ?? 0) * 3_600_000;
+  const tallyHidden = Number(campaign.blind_tally_hours ?? 0) > 0 && ['scheduled','voting'].includes(campaign.status)
+    && serverNow.getTime() >= hideFrom;
+  const shaped = rows.map(row => ({ ...row, manifesto_perks: publicManifesto(row.manifesto_perks),
+    ...(tallyHidden ? { votes: null, voter_count: null } : {}) }));
+  if (tallyHidden) shaped.sort((a, b) => String(a.candidate_id).localeCompare(String(b.candidate_id)));
+  return { campaign: { ...campaign, tally_hidden: tallyHidden, tally_hidden_since: tallyHidden ? new Date(hideFrom).toISOString() : null },
+    standings: shaped, result: null };
 }
 
 const standingsInFlight = new Map<string, Promise<Awaited<ReturnType<typeof queryStandings>>>>();
@@ -629,21 +796,81 @@ export async function finalizeCampaign(campaignId: string, actorId?: string) {
     if (now < new Date(campaign.closes_at) || !['scheduled','voting','closed'].includes(campaign.status)) {
       throw new JuanChoiceError('ROUND_NOT_CLOSED', 409);
     }
-    const standings = (await client.query(
-      `SELECT c.id AS candidate_id, c.spot_id, s.slug AS spot_slug, s.name AS spot_name, COUNT(b.user_id)::int AS votes
+    const weekly = campaign.policy_version === WEEKLY_POLICY_VERSION;
+    const rawStandings = (await client.query(
+      `SELECT c.id AS candidate_id, c.spot_id, s.slug AS spot_slug, s.name AS spot_name, s.municipality, s.category,
+         COALESCE(SUM(b.vote_weight),0)::int AS votes, COUNT(b.user_id)::int AS voter_count,
+         COALESCE(SUM(b.boost_spent_points),0)::int AS boost_points, c.manifesto_perks
        FROM juanchoice_candidates c JOIN spots s ON s.id = c.spot_id
        LEFT JOIN juanchoice_ballots b ON b.campaign_id = c.campaign_id AND b.candidate_id = c.id
        WHERE c.campaign_id = $1 AND c.status = 'eligible' AND c.is_test = $2 AND s.is_test = $2 AND s.status = 'published' AND s.recommendation_suppressed = FALSE
-       GROUP BY c.id,c.spot_id,s.slug,s.name ORDER BY votes DESC,c.id`, [campaignId, campaign.is_test]
+       GROUP BY c.id,c.spot_id,s.slug,s.name,s.municipality,s.category ORDER BY votes DESC,c.id`, [campaignId, campaign.is_test]
     )).rows;
-    const maximum = Number(standings[0]?.votes ?? 0);
-    const coWinners = maximum > 0 ? standings.filter(row => Number(row.votes) === maximum).map(row => row.candidate_id) : [];
-    const validBallots = standings.reduce((sum, row) => sum + Number(row.votes), 0);
+    // Weighted votes since Plan 65 (vote_weight is 1 for every pre-074 ballot, so older rounds are unchanged).
+    const maximum = Number(rawStandings[0]?.votes ?? 0);
+    const coWinners = maximum > 0 ? rawStandings.filter(row => Number(row.votes) === maximum).map(row => row.candidate_id) : [];
+    // Plan 65 D3: the Minister is the sole runner-up (a tie for #1 or for #2 elects no Minister).
+    const runnerUpVotes = Number(rawStandings.find(row => Number(row.votes) < maximum)?.votes ?? 0);
+    const runnersUp = rawStandings.filter(row => Number(row.votes) === runnerUpVotes);
+    const minister = weekly && coWinners.length === 1 && runnerUpVotes > 0 && runnersUp.length === 1 ? runnersUp[0] : null;
+    const standings = rawStandings.map(({ category: _category, boost_points: _boost, ...row }) => ({
+      ...row, manifesto_perks: revealAll(row.manifesto_perks) }));
+    const validBallots = rawStandings.reduce((sum, row) => sum + Number(row.voter_count), 0);
+    const totalWeighted = rawStandings.reduce((sum, row) => sum + Number(row.votes), 0);
+    const totalBoost = rawStandings.reduce((sum, row) => sum + Number(row.boost_points), 0);
+    let activePerks: unknown[] = [];
+    if (weekly && coWinners.length) {
+      const reignStart = new Date(campaign.closes_at);
+      const reign = { campaign_id: campaignId, reign_starts_at: reignStart.toISOString(),
+        reign_ends_at: new Date(reignStart.getTime() + 7 * 86_400_000).toISOString() };
+      const gated = async (candidateId: string) =>
+        (await evaluateCandidatePromotionEligibility(campaignId, candidateId, Boolean(campaign.is_test), client)).eligible;
+      const champions = rawStandings.filter(row => coWinners.includes(row.candidate_id));
+      // Plan 65 D10: perks go live only for winners that pass the automated safety gate.
+      if ((await Promise.all(champions.map(row => gated(row.candidate_id)))).every(Boolean)) {
+        const byKey = new Map<string, any>();
+        for (const row of champions) {
+          for (const perk of revealAll(row.manifesto_perks)) {
+            const previous = byKey.get(perk.key);
+            if (!previous || perk.value > previous.value) byKey.set(perk.key, { ...perk, role: 'champion', candidate_id: row.candidate_id,
+              spot_id: row.spot_id, municipality: row.municipality, category: row.category, ...reign });
+          }
+        }
+        activePerks = [...byKey.values()];
+        const ministerChoice = minister ? ministerPerk(minister.manifesto_perks) : null;
+        if (minister && ministerChoice && !byKey.has(ministerChoice.key) && await gated(minister.candidate_id)) {
+          activePerks.push({ ...ministerChoice, role: 'minister', candidate_id: minister.candidate_id, spot_id: minister.spot_id,
+            municipality: minister.municipality, category: minister.category, ...reign });
+        }
+      }
+    }
     const result = (await client.query(
-      `INSERT INTO juanchoice_results(campaign_id,standings,co_winner_ids,valid_ballots,policy_version)
-       VALUES($1,$2::jsonb,$3::jsonb,$4,$5) RETURNING *`,
-      [campaignId, JSON.stringify(standings), JSON.stringify(coWinners), validBallots, policyVersion]
+      `INSERT INTO juanchoice_results(campaign_id,standings,co_winner_ids,valid_ballots,policy_version,
+         minister_candidate_id,active_perks,total_weighted_votes,total_boost_points)
+       VALUES($1,$2::jsonb,$3::jsonb,$4,$5,$6,$7::jsonb,$8,$9) RETURNING *`,
+      [campaignId, JSON.stringify(standings), JSON.stringify(coWinners), validBallots, weekly ? WEEKLY_POLICY_VERSION : policyVersion,
+        minister?.candidate_id ?? null, JSON.stringify(activePerks), totalWeighted, totalBoost]
     )).rows[0];
+    if (weekly) {
+      // Plan 65 D3/D9: winners and the Minister reset their streak (and cool down); everyone else gains a perk slot.
+      for (const row of rawStandings) {
+        const won = coWinners.includes(row.candidate_id);
+        const isMinister = minister?.candidate_id === row.candidate_id;
+        await client.query(
+          `INSERT INTO juanchoice_spot_election_state(spot_id,is_test,consecutive_losses,last_won_at,last_minister_at,total_wins,total_minister_terms,updated_at)
+           VALUES($1,$2,$3,$4,$5,$6,$7,NOW())
+           ON CONFLICT(spot_id,is_test) DO UPDATE SET
+             consecutive_losses = CASE WHEN $8 THEN 0 ELSE LEAST(juanchoice_spot_election_state.consecutive_losses + 1, 10) END,
+             last_won_at = COALESCE($4, juanchoice_spot_election_state.last_won_at),
+             last_minister_at = COALESCE($5, juanchoice_spot_election_state.last_minister_at),
+             total_wins = juanchoice_spot_election_state.total_wins + $6,
+             total_minister_terms = juanchoice_spot_election_state.total_minister_terms + $7,
+             updated_at = NOW()`,
+          [row.spot_id, Boolean(campaign.is_test), won || isMinister ? 0 : 1, won ? campaign.closes_at : null,
+            isMinister ? campaign.closes_at : null, won ? 1 : 0, isMinister ? 1 : 0, won || isMinister]);
+      }
+      invalidateActiveJuanChoicePerks();
+    }
     await client.query("UPDATE juanchoice_campaigns SET status = 'finalized', finalized_at = NOW() WHERE id = $1", [campaignId]);
     await evaluateFinalizedCampaignRetention(campaignId, coWinners, client);
     await client.query(

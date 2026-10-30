@@ -1,3 +1,4 @@
+import { perkBonus } from '../juanchoice/perks.js';
 import { randomUUID } from 'crypto';
 import { getPool } from '../db/pool.js';
 import { lockGovernanceSnapshot, commitGovernanceTransaction } from '../governance/transaction.js';
@@ -66,11 +67,15 @@ export async function purchaseCosmetic(userId:string,itemId:string,key:string) {
     if(item.price_points==null) throw new Error('NOT_FOR_SALE');
     if(item.is_test && !u.is_test) throw new Error('NOT_AVAILABLE');
     if((await c.query('SELECT 1 FROM user_cosmetics WHERE user_id=$1 AND item_id=$2',[userId,itemId])).rowCount) throw new Error('ALREADY_OWNED');
-    if(Number(u.demo_points)<Number(item.price_points)) throw new Error('INSUFFICIENT_POINTS');
-    const group=await movePoints(c,{from:{id:userId,userId,kind:'traveler'},to:{id:u.is_test?'treasury:test':'treasury',kind:'treasury'},points:Number(item.price_points),type:'shop_cosmetic_purchase',referenceType:'cosmetic_purchase',referenceId:itemId,actorId:userId,idempotencyKey:key,metadata:{item_id:itemId}});
+    // Plan 65: a reigning shop_cosmetic_discount lowers banner and frame prices (never below 1 point).
+    const discount=item.kind==='banner'||item.kind==='frame'
+      ? await perkBonus(c,Boolean(u.is_test),perk=>perk.key==='shop_cosmetic_discount') : {value:0,keys:[]};
+    const price=discount.value>0?Math.max(1,Math.round(Number(item.price_points)*(1-Math.min(discount.value,0.9)))):Number(item.price_points);
+    if(Number(u.demo_points)<price) throw new Error('INSUFFICIENT_POINTS');
+    const group=await movePoints(c,{from:{id:userId,userId,kind:'traveler'},to:{id:u.is_test?'treasury:test':'treasury',kind:'treasury'},points:price,type:'shop_cosmetic_purchase',referenceType:'cosmetic_purchase',referenceId:itemId,actorId:userId,idempotencyKey:key,metadata:{item_id:itemId,...(discount.keys.length?{juanchoice_perks:discount.keys,list_price:Number(item.price_points)}:{})}});
     const groupId=group.entries[0].transaction_group_id;
-    await c.query(`INSERT INTO user_cosmetics(user_id,item_id,source,points_spent,idempotency_key,ledger_group_id) VALUES($1,$2,'purchase',$3,$4,$5)`,[userId,itemId,item.price_points,key,groupId]);
-    await c.query(`INSERT INTO cosmetic_audit(id,actor_user_id,action,item_id,target_user_id,details) VALUES($1,$2,'purchase',$3,$2,$4::jsonb)`,[randomUUID(),userId,itemId,JSON.stringify({points:item.price_points,ledger_group_id:groupId})]);
+    await c.query(`INSERT INTO user_cosmetics(user_id,item_id,source,points_spent,idempotency_key,ledger_group_id) VALUES($1,$2,'purchase',$3,$4,$5)`,[userId,itemId,price,key,groupId]);
+    await c.query(`INSERT INTO cosmetic_audit(id,actor_user_id,action,item_id,target_user_id,details) VALUES($1,$2,'purchase',$3,$2,$4::jsonb)`,[randomUUID(),userId,itemId,JSON.stringify({points:price,list_price:Number(item.price_points),ledger_group_id:groupId,...(discount.keys.length?{juanchoice_perks:discount.keys}:{})})]);
     await commitGovernanceTransaction(c);
     return {item:{id:item.id,name:item.name,kind:item.kind,asset:item.asset},pointsBalance:Number(group.userBalanceUpdate?.demoPoints),replayed:false,statusCode:201};
   } catch(e) { await c.query('ROLLBACK').catch(()=>{}); throw e; } finally { c.release(); }

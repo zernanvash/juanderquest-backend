@@ -14,11 +14,13 @@ import { getSpotPhotoStorageProvider } from '../storage/spot-photos.js';
 import { detectValidatedMediaMime } from '../utils/media-mime.js';
 import { fieldLogStore, FieldLogTag, SpotReportReason } from '../spots/field-logs.js';
 import { hiddenGemHighlights } from '../spots/highlights.js';
+import { recognizeSpotLocation } from '../spots/recognize.js';
 import { sanitizeQuestForViewer } from '../quests/sanitize.js';
 import { recordActivity } from '../social/activity.js';
 import { normalizeTasks } from '../quests/taskNormalize.js';
 import { questTaskInputSchema, validateTasksWithinDistance } from '../quests/taskValidation.js';
 import { assertInScope, requireAreaAdmin, writeAdminAudit } from '../admin/scope.js';
+import { handleSpotInteraction } from '../stamps/hooks.js';
 
 const router = Router();
 const csv = (value: unknown) => typeof value === 'string' && value ? value.split(',').map(v => v.trim()).filter(Boolean) : [];
@@ -75,6 +77,24 @@ router.get('/spots/trending', optionalAuthenticateToken, checkQAAuthorization, (
   res.json({ success: true, data: spotStore.list({ municipality: req.query.municipality as string | undefined, sort: 'trending', userId: actorId, allowTest }).slice(0, 10) });
 });
 
+// Plan 66: recognize a map pin (town/barangay, POI name, suggested category/details, story starters,
+// nearby duplicates). Registered before /spots/:slug so "recognize" is never read as a slug.
+const recognizeQuery = z.object({ lat: z.coerce.number().min(4.5).max(21.5), lng: z.coerce.number().min(116).max(127) });
+const recognizeRateLimiter = rateLimit({ policyId: 'spots:recognize', windowMs: 60 * 1000, max: env.NODE_ENV === 'test' ? 1000 : 60, keyStrategy: 'actor_or_ip' });
+router.get('/spots/recognize', optionalAuthenticateToken, recognizeRateLimiter, async (req: AuthRequest, res) => {
+  const parsed = recognizeQuery.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'lat and lng must be inside the Philippines.' } });
+  }
+  try {
+    res.set('Cache-Control', 'private, max-age=300');
+    return res.json({ success: true, data: await recognizeSpotLocation(parsed.data.lat, parsed.data.lng, getPool()) });
+  } catch (error) {
+    console.error('[spots] recognize failed:', error instanceof Error ? error.message : error);
+    return res.status(503).json({ success: false, error: { code: 'RECOGNIZE_UNAVAILABLE', message: 'Place recognition is unavailable right now.' } });
+  }
+});
+
 router.get('/spots/:slug/alternatives', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
   const allowTest = isAuthorizedQA(req);
   if (allowTest) res.set('X-Robots-Tag', 'noindex, nofollow');
@@ -119,11 +139,13 @@ router.delete('/spots/:id/like', optionalAuthenticateToken, (req: AuthRequest, r
   spotStore.interact(String(actorId), spot.id, 'like', false);
   return res.json({ success: true, data: { liked: false, spot_id: spot.id } });
 });
-router.post('/spots/:id/interactions', authenticateToken, validateRequest(z.object({ body: z.object({ type: z.enum(['view', 'directions', 'helpful', 'visit']), captured_lat:z.number().min(-90).max(90).optional(), captured_lng:z.number().min(-180).max(180).optional() }) })), (req: AuthRequest, res) => {
+router.post('/spots/:id/interactions', authenticateToken, validateRequest(z.object({ body: z.object({ type: z.enum(['view', 'directions', 'helpful', 'visit']), captured_lat:z.number().min(-90).max(90).optional(), captured_lng:z.number().min(-180).max(180).optional() }) })), async (req: AuthRequest, res) => {
   const spot=spotStore.spots.find(item=>item.id===req.params.id);if(!spot)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
   const actor=db.findUserById(req.user!.id);if(!actor)return res.status(403).json({success:false,error:{code:'FORBIDDEN',message:'Account is unavailable.'}});if(Boolean(spot.is_test)!==Boolean(actor.is_test))return res.status(403).json({success:false,error:{code:'SCOPE_MISMATCH',message:'Fictional alpha posts are read-only for real accounts.'}});
   if(req.body.type==='visit'&&(req.body.captured_lat===undefined||req.body.captured_lng===undefined||distanceKm(req.body.captured_lat,req.body.captured_lng,spot.gps_lat,spot.gps_lng)>.25))return res.status(422).json({success:false,error:{code:'VISIT_NOT_VERIFIED',message:'A visit must include coordinates within 250 meters of the destination.'}});
-  const recorded=spotStore.interact(req.user!.id,req.params.id,req.body.type,true);if(req.body.type!=='helpful')spotStore.recordActivity(req.user!.id,req.params.id,req.body.type);return res.status(201).json({success:true,data:{recorded}});
+  const recorded=spotStore.interact(req.user!.id,req.params.id,req.body.type,true);if(req.body.type!=='helpful')spotStore.recordActivity(req.user!.id,req.params.id,req.body.type);
+  await handleSpotInteraction(getPool(), { userId: req.user!.id, spotId: spot.id, type: req.body.type });
+  return res.status(201).json({success:true,data:{recorded}});
 });
 
 const spotReviewSchema=z.object({body:z.object({status:z.enum(['published','needs_review','unpublished']),crowd_capacity_band:z.enum(['low','medium','high']),recommendation_suppressed:z.boolean().default(false)})});

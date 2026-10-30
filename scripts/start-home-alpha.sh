@@ -67,14 +67,22 @@ export GUEST_LOGIN_ENABLED=true
 export MARKETPLACE_ENABLED=false
 export WALLET_AUTH_MODE=signature
 export ALLOW_INSECURE_LOCAL_WALLET_AUTH=false
+# Owner 2026-10-29: sign everyone out once Plan 67 is live, so every wallet account finishes with email + password.
+export SESSIONS_VALID_AFTER=2026-10-29T07:57:00Z
 export JUANCHOICE_ENABLED=true
 export ALPHA_WALLET_SIMULATION_ENABLED=true
-export JUANCHOICE_WRITES_ENABLED=false
+export JUANCHOICE_WRITES_ENABLED=true
 export JUANCHOICE_BATCH_WRITES_ENABLED=false
-export JUANCHOICE_PROMOTION_ENABLED=false
+export JUANCHOICE_PROMOTION_ENABLED=true
 export JUANCHOICE_ECONOMY_ENABLED=false
-export JUANCHOICE_FINALIZER_WORKER_ENABLED=false
-export JUANCHOICE_SCHEDULER_ENABLED=false
+# Plan 65 weekly elections (owner-approved 2026-10-29): free votes, point boosts (in-app only),
+# automated promotion gate, weekly scheduler and finalizer. The budget economy stays off.
+export JUANCHOICE_BOOSTS_ENABLED=true
+export JUANCHOICE_FINALIZER_WORKER_ENABLED=true
+export JUANCHOICE_SCHEDULER_ENABLED=true
+# Deliver progression outbox events: approved quest proofs become verified
+# visits and explorer XP. Off (the env default), approvals only queued them.
+export PROGRESSION_OUTBOX_WORKER_ENABLED=true
 
 # Optional non-secret runtime overrides (release runbook Part B.3), e.g. after the
 # Valhalla Philippines rebuild. The file is parsed, never executed, and only the

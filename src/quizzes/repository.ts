@@ -90,6 +90,8 @@ export class CulturalQuizRepository {
       cooldown_hours: Number(r.cooldown_hours),
       created_by: r.created_by,
       published_at: r.published_at ? new Date(r.published_at).toISOString() : null,
+      host_lines: r.host_lines ?? null,
+      theme: r.theme ?? 'crt',
       created_at: new Date(r.created_at).toISOString(),
     };
   }
@@ -117,6 +119,8 @@ export class CulturalQuizRepository {
       cooldown_hours: Number(r.cooldown_hours),
       created_by: r.created_by,
       published_at: r.published_at ? new Date(r.published_at).toISOString() : null,
+      host_lines: r.host_lines ?? null,
+      theme: r.theme ?? 'crt',
       created_at: new Date(r.created_at).toISOString(),
     };
   }
@@ -159,6 +163,11 @@ export class CulturalQuizRepository {
       question_text: q.question_text,
       explanation: q.explanation,
       source_url: q.source_url,
+      question_type: q.question_type || 'multiple_choice',
+      media_url: q.media_url || null,
+      hint: q.hint || null,
+      round: q.round || 'main',
+      answer_payload: q.answer_payload || null,
       created_at: new Date(q.created_at).toISOString(),
       options: optionsByQ.get(q.id) ?? [],
     }));
@@ -356,6 +365,9 @@ export class CulturalQuizRepository {
       xp_awarded: Number(r.xp_awarded || 0),
       location_validated: Boolean(r.location_validated),
       distance_meters: r.distance_meters !== null ? Number(r.distance_meters) : null,
+      lifelines_used: Array.isArray(r.lifelines_used) ? r.lifelines_used : [],
+      style_score: Number(r.style_score || 0),
+      streak_max: Number(r.streak_max || 0),
       idempotency_key: r.idempotency_key,
       created_at: new Date(r.created_at).toISOString(),
       updated_at: new Date(r.updated_at).toISOString(),

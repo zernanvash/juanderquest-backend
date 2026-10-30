@@ -27,10 +27,25 @@ const submitAttemptSchema = z.object({
   answers: z.array(
     z.object({
       question_id: z.string().min(1),
-      selected_option_id: z.string().min(1),
+      selected_option_id: z.string().optional(),
+      selected_order: z.array(z.string()).optional(),
+      selected_location: z
+        .object({
+          lat: z.number().min(-90).max(90),
+          lng: z.number().min(-180).max(180),
+        })
+        .optional(),
+      skipped: z.boolean().optional(),
     })
   ).length(5),
+  style_score: z.number().int().min(0).max(100000).optional(),
+  streak_max: z.number().int().min(0).max(5).optional(),
   idempotency_key: z.string().max(100).optional(),
+});
+
+const lifelineSchema = z.object({
+  lifeline: z.enum(['fifty_fifty', 'ask_local', 'skip']),
+  question_id: z.string().optional(),
 });
 
 // POST /api/v1/quizzes/nearby - Discover active quizzes within radius of current location
@@ -90,6 +105,8 @@ router.get('/quizzes/:id', optionalAuthenticateToken, async (req: AuthRequest, r
         xp_reward: detail.version.xp_reward,
         time_limit_minutes: detail.version.time_limit_minutes,
         cooldown_hours: detail.version.cooldown_hours,
+        host_lines: detail.version.host_lines || null,
+        theme: detail.version.theme || 'crt',
         status: detail.quiz.status,
         version: detail.quiz.current_version,
         is_completed: detail.is_completed ?? false,
@@ -155,6 +172,53 @@ router.post('/quizzes/:id/attempts', authenticateToken, async (req: AuthRequest,
   }
 });
 
+// POST /api/v1/quizzes/:id/attempts/:attemptId/lifeline - Use a single-use lifeline
+router.post('/quizzes/:id/attempts/:attemptId/lifeline', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const parsed = lifelineSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'Invalid lifeline payload.' },
+    });
+  }
+
+  try {
+    const result = await service.useLifeline({
+      quizId: req.params.id,
+      attemptId: req.params.attemptId,
+      userId: req.user!.id,
+      lifeline: parsed.data.lifeline,
+      questionId: parsed.data.question_id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.startsWith('LIFELINE_ALREADY_USED')) {
+      return res.status(400).json({ success: false, error: { code: 'LIFELINE_ALREADY_USED', message: msg } });
+    }
+    if (msg.startsWith('MISSING_QUESTION_ID') || msg.startsWith('INVALID_QUESTION_ID') || msg.startsWith('LIFELINE_NOT_AVAILABLE')) {
+      return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: msg } });
+    }
+    if (msg.startsWith('ATTEMPT_NOT_FOUND')) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: msg } });
+    }
+    if (msg.startsWith('UNAUTHORIZED_ATTEMPT')) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: msg } });
+    }
+    if (msg.startsWith('ATTEMPT_EXPIRED') || msg.startsWith('ATTEMPT_NOT_ACTIVE')) {
+      return res.status(410).json({ success: false, error: { code: 'ATTEMPT_EXPIRED', message: msg } });
+    }
+    return res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: msg || 'Failed to use lifeline.' },
+    });
+  }
+});
+
 // GET /api/v1/quiz-attempts/:id - Resumable active attempt questions (owner only)
 router.get('/quiz-attempts/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
@@ -192,12 +256,17 @@ router.put('/quiz-attempts/:id/submission', authenticateToken, async (req: AuthR
     const mappedAnswers = parsed.data.answers.map((a) => ({
       questionId: a.question_id,
       selectedOptionId: a.selected_option_id,
+      selectedOrder: a.selected_order,
+      selectedLocation: a.selected_location,
+      skipped: a.skipped,
     }));
 
     const result = await service.submitAttempt({
       attemptId: req.params.id,
       userId: req.user!.id,
       answers: mappedAnswers,
+      styleScore: parsed.data.style_score,
+      streakMax: parsed.data.streak_max,
       idempotencyKey: parsed.data.idempotency_key,
     });
 
@@ -217,7 +286,7 @@ router.put('/quiz-attempts/:id/submission', authenticateToken, async (req: AuthR
     if (msg.startsWith('UNAUTHORIZED_ATTEMPT')) {
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: msg } });
     }
-    if (msg.startsWith('MISSING_ANSWERS') || msg.startsWith('DUPLICATE_ANSWERS') || msg.startsWith('INVALID_OPTION_ID')) {
+    if (msg.startsWith('MISSING_ANSWERS') || msg.startsWith('DUPLICATE_ANSWERS') || msg.startsWith('INVALID_OPTION_ID') || msg.startsWith('INVALID_SKIP')) {
       return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: msg } });
     }
 

@@ -188,11 +188,13 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
       const withinWeek = new Date('2026-10-14T08:00:00.000Z');
       const outsideWeek = new Date('2026-10-01T08:00:00.000Z');
 
-      // Alpha: 100 JDQ (1,000,000 mJDQ) + 50 JDQ (500,000 mJDQ) = 150 score, 2 quests
+      // Alpha: two quest rewards plus a 200-point trail reward. Trail points
+      // contribute to the score, but a trail is not counted as a quest.
       await testDb.pool.query(
         `INSERT INTO governance_ledger (id, transaction_group_id, type, account, amount_mjdq, reference_type, reference_id, actor_id, created_at)
          VALUES ('led-a1', 'txg-1', 'quest_reward_credit', $1, 1000000, 'submission', 'sub-a1', $1, $2),
-                ('led-a2', 'txg-2', 'quest_reward_paid', $1, 500000, 'quest_funding_hold', 'hold-a2', $1, $2)`,
+                ('led-a2', 'txg-2', 'quest_reward_paid', $1, 500000, 'quest_funding_hold', 'hold-a2', $1, $2),
+                ('led-a3', 'txg-8', 'trail_reward_credit', $1, 200000, 'trail', 'trail-standings-a', $1, $2)`,
         [userAlpha.id, withinWeek],
       );
 
@@ -225,12 +227,12 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
       );
     });
 
-    it('sums reward credits and divides by MJDQ_PER_JDQ, excluding admins and dates outside the week', async () => {
+    it('sums quest and trail reward credits but counts only quests in the quest tiebreaker', async () => {
       const scores = await computeWeeklyScores(testDb.pool, ws, we, false);
 
       const alphaScore = scores.find((s) => s.user_id === userAlpha.id);
       expect(alphaScore).toBeDefined();
-      expect(alphaScore?.score).toBe(1500);
+      expect(alphaScore?.score).toBe(1700);
       expect(alphaScore?.quests).toBe(2);
 
       const betaScore = scores.find((s) => s.user_id === userBeta.id);
@@ -282,7 +284,7 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
 
       expect(rows[0].user_id).toBe(userAlpha.id);
       expect(rows[0].rank).toBe(1);
-      expect(rows[0].score).toBe(1500);
+      expect(rows[0].score).toBe(1700);
       expect(rows[0].home_town).toBe('Alaminos City');
 
       expect(rows[1].user_id).toBe(userBeta.id);

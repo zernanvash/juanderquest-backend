@@ -68,6 +68,7 @@ export const MIGRATIONS = [
   '052_plaza_social.sql',
   '053_plaza_push.sql',
   '054_quest_builder.sql',
+  '055_trail_engine.sql',
   '056_admin_areas.sql',
   '057_admin_area_boundaries.sql',
   '059_push_account_category.sql',
@@ -77,6 +78,11 @@ export const MIGRATIONS = [
   '064_procedural_banners.sql',
   '065_quest_marker_urls.sql',
   '066_area_admins.sql',
+  '068_quiz_arcade.sql',
+  '071_passport_stamps.sql',
+  '074_juanchoice_weekly_elections.sql',
+  '075_juanchoice_perk_controls.sql',
+  '076_developer_roles.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
@@ -174,7 +180,11 @@ export async function applyMigrations(pg: Pool) {
         // UPDATE form used to reconcile historical submissions. Exercise the
         // production JSON backfill on PostgreSQL; keep the safety index active
         // in pg-mem so uniqueness behavior remains covered by unit tests.
-        if (file === '045_quest_step_marker_codes.sql' && pgMemMigrationAdapters.has(pg as object)) {
+        if ((file === '074_juanchoice_weekly_elections.sql' || file === '075_juanchoice_perk_controls.sql' || file === '076_developer_roles.sql') && pgMemMigrationAdapters.has(pg as object)) {
+          // pg-mem cannot replace CHECK constraints (ISODOW expressions). In-memory tests keep the
+          // monthly-only constraints and get the new columns/tables; PostgreSQL runs everything.
+          await client.query(sql.replace(/ALTER TABLE \w+ (DROP|ADD) CONSTRAINT[^;]*;/g, ''));
+        } else if (file === '045_quest_step_marker_codes.sql' && pgMemMigrationAdapters.has(pg as object)) {
           // Backfill uses PostgreSQL-only JSONB array operators.
         } else if (file === '046_submissions_single_pending.sql' && pgMemMigrationAdapters.has(pg as object)) {
           await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_submissions_unique_pending
@@ -422,6 +432,13 @@ export async function applyMigrations(pg: Pool) {
           // pg-mem does not implement PostgreSQL's regular-expression match
           // operator. The API validates cosmetic IDs with the same pattern.
           await client.query(sql.replace(/CHECK\s*\(id\s*~\s*'\^\[a-z0-9-\]\{3,60\}\$'\)/, ''));
+        } else if (file === '055_trail_engine.sql' && pgMemMigrationAdapters.has(pg as object)) {
+          // pg-mem cannot faithfully type the curated-trail INSERT ... SELECT
+          // into TEXT[]/JSONB columns. Real PostgreSQL exercises the complete
+          // additive migration and starter-trail upgrade; in-memory tests need
+          // the schema only, not its historical data migration.
+          const schemaSql = sql.split('-- Idempotent upgrade of available curated trails.')[0];
+          await client.query(schemaSql);
         } else if (file === '054_quest_builder.sql' && pgMemMigrationAdapters.has(pg as object)) {
           await client.query(`
             ALTER TABLE quests ADD COLUMN IF NOT EXISTS step_order_mode TEXT NOT NULL DEFAULT 'sequential';

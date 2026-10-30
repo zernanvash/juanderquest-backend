@@ -8,6 +8,7 @@ import { stopPushDispatcher } from './push/dispatcher.js';
 import { stopWeeklyRecapJob } from './social/weeklyRecapJob.js';
 import { stopChainBalanceWatch } from './chain/balanceWatch.js';
 import { stopBadgeMinter } from './chain/badgeMinter.js';
+import { stopWeeklyTrailTrendJob } from './trails/jobs/weeklyTrends.js';
 
 const startedAt = Date.now();
 
@@ -41,6 +42,7 @@ function shutdown(signal: NodeJS.Signals): void {
   stopStandingsJob();
   stopPushDispatcher();
   stopWeeklyRecapJob();
+  stopWeeklyTrailTrendJob();
   stopChainBalanceWatch();
   stopBadgeMinter();
   beginServiceShutdown();

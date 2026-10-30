@@ -33,7 +33,11 @@ export interface CandidatePromotionEligibility {
   crowd_confidence: CrowdConfidence;
   spot_published: boolean;
   spot_suppressed: boolean;
+  /** Weekly rounds (Plan 65 D10) pass the automated gate without a manual clearance. */
+  gate?: 'assessment' | 'automated';
 }
+
+export const WEEKLY_POLICY_VERSION = 'juanchoice-weekly-v1';
 
 export interface CreateAssessmentInput {
   campaignId: string;
@@ -279,7 +283,7 @@ export async function evaluateCandidatePromotionEligibility(
   const candidateRow = (
     await client.query(
       `SELECT c.id AS candidate_id, c.campaign_id, c.spot_id, c.status AS candidate_status, c.is_test AS candidate_is_test,
-              cmp.is_test AS campaign_is_test,
+              cmp.is_test AS campaign_is_test, cmp.policy_version AS campaign_policy_version,
               s.status AS spot_status, s.recommendation_suppressed, s.crowd_capacity_band, s.is_test AS spot_is_test
        FROM juanchoice_candidates c
        JOIN juanchoice_campaigns cmp ON cmp.id = c.campaign_id
@@ -391,6 +395,19 @@ export async function evaluateCandidatePromotionEligibility(
       spot_published: true,
       spot_suppressed: false,
     };
+  }
+
+  // Plan 65 D10: weekly rounds use an automated safety gate. A latest 'restricted' assessment
+  // blocks; an unexpired 'cleared' assessment overrides an automated crowd hold; no assessment
+  // is fine. Monthly/pilot rounds keep the mandatory clearance below.
+  if (candidateRow.campaign_policy_version === WEEKLY_POLICY_VERSION) {
+    const scoped = latestAssessment && Boolean(latestAssessment.is_test) === isScopeTest ? latestAssessment : null;
+    const clearedNow = scoped?.decision === 'cleared' && new Date(scoped.assessed_at) <= dbNow && new Date(scoped.valid_until) > dbNow;
+    const base = { latest_assessment: latestAssessment, crowd_status: crowd.crowd_status, crowd_confidence: crowd.crowd_confidence,
+      spot_published: true, spot_suppressed: false };
+    if (scoped?.decision === 'restricted') return { ...base, eligible: false, reason: 'ASSESSMENT_RESTRICTED', gate: 'assessment' };
+    if (crowd.crowd_status === 'estimated_busy' && !clearedNow) return { ...base, eligible: false, reason: 'ESTIMATED_BUSY', gate: 'automated' };
+    return { ...base, eligible: true, reason: null, gate: clearedNow ? 'assessment' : 'automated' };
   }
 
   // 3. Busy overrides any clearance

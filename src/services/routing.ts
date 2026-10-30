@@ -10,6 +10,8 @@ export interface RouteRequest {
   endLng: number;
   costing?: TravelCosting;
   avoidCongested?: boolean;
+  /** Optional pass-through points (detours), in travel order. */
+  via?: { lat: number; lng: number }[];
 }
 
 export interface RouteManeuver {
@@ -143,7 +145,9 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
   const [minLng, minLat, maxLng, maxLat] = coverage.bbox;
   const startCovered = req.startLng >= minLng && req.startLng <= maxLng && req.startLat >= minLat && req.startLat <= maxLat;
   const endCovered = req.endLng >= minLng && req.endLng <= maxLng && req.endLat >= minLat && req.endLat <= maxLat;
-  if (!startCovered || !endCovered) {
+  const via = req.via ?? [];
+  const viaCovered = via.every((p) => p.lng >= minLng && p.lng <= maxLng && p.lat >= minLat && p.lat <= maxLat);
+  if (!startCovered || !endCovered || !viaCovered) {
     return straightLineFallback(req, costing, {
       code: 'OUTSIDE_ROUTING_COVERAGE',
       coverageLabel: coverage.region,
@@ -197,6 +201,7 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
   const valhallaPayload: Record<string, unknown> = {
     locations: [
       { lat: req.startLat, lon: req.startLng, type: 'break' },
+      ...via.map((p) => ({ lat: p.lat, lon: p.lng, type: 'through' })),
       { lat: req.endLat, lon: req.endLng, type: 'break' },
     ],
     costing: costing === 'motorcycle' ? 'motorcycle' : costing,
@@ -229,10 +234,14 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
       throw new Error('No valid trip leg returned by Valhalla');
     }
 
-    const leg = trip.legs[0];
-    const decodedCoords = decodePolyline6(leg.shape);
+    // `through` points keep a single leg; join every leg anyway so any split stays one line.
+    const legs: any[] = trip.legs;
+    const decodedCoords = legs.flatMap((leg, i) => {
+      const coords = decodePolyline6(leg.shape);
+      return i === 0 ? coords : coords.slice(1);
+    });
 
-    const maneuvers: RouteManeuver[] = (leg.maneuvers || []).map((m: any) => ({
+    const maneuvers: RouteManeuver[] = legs.flatMap((leg) => leg.maneuvers || []).map((m: any) => ({
       instruction: m.instruction || 'Continue on route',
       streetName: m.street_names ? m.street_names.join(', ') : undefined,
       distanceMeters: Math.round((m.length || 0) * 1000),
@@ -271,7 +280,8 @@ function straightLineFallback(
   costing: TravelCosting,
   warning: NonNullable<RouteResponse['warning']>,
 ): RouteResponse {
-  const directDistance = computeHaversineDistanceKm(req.startLat, req.startLng, req.endLat, req.endLng);
+  const points: [number, number][] = [[req.startLat, req.startLng], ...(req.via ?? []).map((p): [number, number] => [p.lat, p.lng]), [req.endLat, req.endLng]];
+  const directDistance = Number(points.slice(1).reduce((sum, p, i) => sum + computeHaversineDistanceKm(points[i][0], points[i][1], p[0], p[1]), 0).toFixed(2));
   // Retain the legacy estimate for API compatibility; clients must not present it as travel time.
   const speedKmh = costing === 'pedestrian' ? 4.5 : costing === 'bicycle' ? 15 : 45;
   const estimatedSeconds = Math.round((directDistance / speedKmh) * 3600);
@@ -287,7 +297,7 @@ function straightLineFallback(
       hasCrowdDiversion: false,
       engine: 'fallback_straight_line',
     },
-    coordinates: [[req.startLat, req.startLng], [req.endLat, req.endLng]],
+    coordinates: points,
     maneuvers: [],
   };
 }

@@ -114,8 +114,16 @@ it('filters spots by category and optional quest availability', async () => {
     expect(res.status).toBe(200);
     expect(res.body.data.auth_method).toBe('local_bypass');
     expect(res.body.data.wallet_address).toBe(address);
-    expect(res.body.data.token).toBeDefined();
-    expect(res.body.data.user.seed_id).toBe(`wallet:${address}`);
+    // Plan 67: a new wallet finishes the account with email + password before a session exists.
+    expect(res.body.data.status).toBe('requires_account_completion');
+    expect(res.body.data.token).toBeUndefined();
+    const done = await request(app).post('/api/v1/auth/wallet/complete-registration').send({
+      wallet_onboarding_grant: res.body.data.wallet_onboarding_grant, wallet_address: address,
+      email: 'dev-wallet-42@example.com', password: 'DevWallet123', age_eligibility_declared: true, terms_accepted: true,
+    });
+    expect(done.status).toBe(200);
+    expect(done.body.data.token).toBeDefined();
+    expect(done.body.data.user.seed_id).toBe(`wallet:${address}`);
   });
 
   it('does not expose signature challenges while local bypass mode is active', async () => {
@@ -381,6 +389,8 @@ it('filters spots by category and optional quest availability', async () => {
   it('voucher redemption deducts points, replays idempotently, and blocks repeat with a new key', async () => {
     const before = await request(app).get('/api/v1/auth/me').set('Authorization', `Bearer ${userToken}`);
     const pointsBefore = before.body.data.demo_points;
+    // Plan 67: redemptions need a bound wallet.
+    await db.bindWalletAddress(before.body.data.id, '0x00000000000000000000000000000000000000a1');
 
     const first = await request(app)
       .post(`/api/v1/vouchers/${liveVoucherId}/redeem`)

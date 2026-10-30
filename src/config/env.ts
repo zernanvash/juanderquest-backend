@@ -57,6 +57,10 @@ const rawEnv = cleanEnv(process.env, {
   // Demo accounts include an admin fixture; never enable them by default in development.
   ALLOW_DEMO_LOGIN: bool({ default: process.env.NODE_ENV === 'test' }),
   GUEST_LOGIN_ENABLED: bool({ default: false }),
+  // Plan 67: OAuth web client ID for Google Identity Services. Empty keeps Google sign-in unavailable.
+  GOOGLE_CLIENT_ID: str({ default: '' }),
+  // Sign everyone out: session tokens issued before this ISO time are rejected. Empty = no cutoff.
+  SESSIONS_VALID_AFTER: str({ default: '' }),
   ALPHA_WALLET_SIMULATION_ENABLED: bool({ default: false }),
   // Merchant offers in the prototype migrations are fixtures, not live deals.
   MARKETPLACE_ENABLED: bool({ default: isLocalRuntime }),
@@ -71,6 +75,11 @@ const rawEnv = cleanEnv(process.env, {
   VALHALLA_URL: str({ default: 'http://127.0.0.1:8002' }),
   VALHALLA_COVERAGE_BBOX: str({ default: '119.70,15.65,121.05,16.55' }),
   VALHALLA_COVERAGE_LABEL: str({ default: 'Pangasinan' }),
+  // Trail NIM is optional; credentials are read only from the private key file.
+  NIM_BASE_URL: str({ default: 'https://integrate.api.nvidia.com/v1' }),
+  NIM_MODEL: str({ default: 'nvidia/nemotron-3.5-lightning-30b-a3b' }),
+  // Hosted cuOpt is evaluation-only; an owner must opt in explicitly.
+  TRAILS_CUOPT_ENABLED: bool({ default: false }),
   PROGRESSION_ENABLED: bool({ default: true }),
   PROGRESSION_EMIT_OUTBOX_ENABLED: bool({ default: true }),
   PROGRESSION_OUTBOX_WORKER_ENABLED: bool({ default: false }),
@@ -81,6 +90,8 @@ const rawEnv = cleanEnv(process.env, {
   JUANCHOICE_BATCH_WRITES_ENABLED: bool({ default: false }),
   JUANCHOICE_PROMOTION_ENABLED: bool({ default: false }),
   JUANCHOICE_ECONOMY_ENABLED: bool({ default: false }),
+  // Plan 65 quadratic vote boosts (in-app points only); separate from the quarantined budget economy.
+  JUANCHOICE_BOOSTS_ENABLED: bool({ default: false }),
   JUANCHOICE_FINALIZER_WORKER_ENABLED: bool({ default: false }),
   JUANCHOICE_FINALIZER_INTERVAL_MS: num({ default: 30000 }),
   JUANCHOICE_SCHEDULER_ENABLED: bool({ default: false }),

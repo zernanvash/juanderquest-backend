@@ -28,6 +28,8 @@ realDescribe('disposable real-PostgreSQL economy HTTP flow', () => {
       ($3, $4, 'Economic Traveler', 'economy-http-traveler@test.invalid', 'user'),
       ($5, $6, 'Other Traveler', 'economy-http-other@test.invalid', 'user')
     `, [adminId, adminId, travelerId, travelerId, otherId, otherId]);
+    // Plan 67: shop purchases need a bound wallet.
+    await fixture.pool.query(`UPDATE users SET wallet_address = '0x' || substr(md5(id) || md5(id || 'w'), 1, 40) WHERE id = ANY($1::text[])`, [[travelerId, otherId]]);
     await fixture.pool.query(`
       INSERT INTO quests(id, title, description, category, location_name, gps_lat, gps_lng,
         radius_meters, reward_points, marker_code, marker_image_url, status, is_active)
