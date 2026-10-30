@@ -43,8 +43,8 @@ WITH candidates AS (
          COUNT(*) OVER (PARTITION BY m.id) AS match_count
   FROM merchants m
   JOIN admin_areas town ON town.level = 'town'
-    AND lower(regexp_replace(trim(town.name), '\\s+', ' ', 'g')) =
-        lower(regexp_replace(trim(m.municipality), '\\s+', ' ', 'g'))
+    AND lower(regexp_replace(trim(town.name), '\s+', ' ', 'g')) =
+        lower(regexp_replace(trim(m.municipality), '\s+', ' ', 'g'))
   JOIN admin_areas province ON province.level = 'province' AND town.parent_id = province.id
     AND position(lower(trim(province.name)) IN lower(m.location)) > 0
   JOIN admin_areas a ON a.id = town.id

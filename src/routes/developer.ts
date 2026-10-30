@@ -21,7 +21,7 @@ export async function isDeveloper(userId: string): Promise<boolean> {
   return row?.role === 'admin' && row?.admin_scope === 'developer';
 }
 
-const requireDeveloper = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const requireDeveloper = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     if (req.user && await isDeveloper(req.user.id)) return next();
     return res.status(403).json({ success: false, error: { code: 'DEVELOPER_ONLY', message: 'Only developers can manage account roles.' } });

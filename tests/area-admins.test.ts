@@ -12,6 +12,8 @@ describe('Plan 59 area administrator access (real PostgreSQL when JDQ_REAL_PG_UR
   const platformId = 'area-admin-platform';
   const areaUserId = 'area-admin-user';
   const platformToken = jwt.sign({ id: platformId, seed_id: 'area-admin-platform-seed', role: 'admin' }, env.JWT_SECRET);
+  const plainAdminId = 'area-admin-plain-platform';
+  const plainAdminToken = jwt.sign({ id: plainAdminId, seed_id: 'area-admin-plain-seed', role: 'admin' }, env.JWT_SECRET);
   const areaToken = jwt.sign({ id: areaUserId, seed_id: 'area-admin-user-seed', role: 'area_admin' }, env.JWT_SECRET);
   const spotIds = ['spot-area-test-dagupan', 'spot-area-test-other', 'spot-area-test-null'];
   const savedAreaFields = new Map<string, { town_area_id?: string | null; created_by?: string }>();
@@ -21,9 +23,11 @@ describe('Plan 59 area administrator access (real PostgreSQL when JDQ_REAL_PG_UR
     fixture = await createTestDb();
     setPool(fixture.pool);
     await db.hydrateFromPg(fixture.pool);
-    await fixture.pool.query(`INSERT INTO users(id,seed_id,display_name,email,role) VALUES
-      ($1,'area-admin-platform-seed','Platform Admin','area-platform@test.local','admin'),
-      ($2,'area-admin-user-seed','Area Admin','area-user@test.local','user')`, [platformId, areaUserId]);
+    // Granting/revoking changes users.role, which is developer-only since migration 076.
+    await fixture.pool.query(`INSERT INTO users(id,seed_id,display_name,email,role,admin_scope) VALUES
+      ($1,'area-admin-platform-seed','Platform Developer','area-platform@test.local','admin','developer'),
+      ($2,'area-admin-user-seed','Area Admin','area-user@test.local','user',NULL),
+      ($3,'area-admin-plain-seed','Platform Admin','area-plain@test.local','admin','platform')`, [platformId, areaUserId, plainAdminId]);
     originalFindById = db.usersRepo.findById.bind(db.usersRepo);
     jest.spyOn(db.usersRepo, 'findById').mockImplementation(async (id: string) => {
       const user = await originalFindById(id);
@@ -92,6 +96,15 @@ describe('Plan 59 area administrator access (real PostgreSQL when JDQ_REAL_PG_UR
     expect(response.body.error.code).toBe('SELF_MODERATION_FORBIDDEN');
   });
 
+  it('lets only developers grant or revoke area admins (role changes, migration 076)', async () => {
+    const grant = await request(app).post('/api/v1/admin/area-admins').set('Authorization', `Bearer ${plainAdminToken}`)
+      .send({ user_id: areaUserId, area_id: 'pangasinan', powers: ['destinations'] });
+    expect(grant.status).toBe(403);
+    expect(grant.body.error.code).toBe('DEVELOPER_ONLY');
+    const revoke = await request(app).delete('/api/v1/admin/area-admins/area-admin-grant').set('Authorization', `Bearer ${plainAdminToken}`);
+    expect(revoke.status).toBe(403);
+  });
+
   it('requires the requested power and applies grant revocation on the next request', async () => {
     const noMerchantPower = await request(app).get('/api/v1/admin/merchants').set('Authorization', `Bearer ${areaToken}`);
     expect(noMerchantPower.status).toBe(403);
@@ -114,5 +127,7 @@ describe('Plan 59 area administrator access (real PostgreSQL when JDQ_REAL_PG_UR
     expect(revoked.status).toBe(200);
     const actions = await fixture.pool.query("SELECT action FROM admin_audit_log WHERE subject_type IN ('area_admin_assignment','spot') ORDER BY created_at");
     expect(actions.rows.map((row) => row.action)).toEqual(expect.arrayContaining(['area_admin.granted', 'destination.reviewed', 'area_admin.revoked']));
+    const roleAudit = await fixture.pool.query('SELECT old_role, new_role FROM user_role_audit WHERE target_id=$1 ORDER BY created_at', [areaUserId]);
+    expect(roleAudit.rows.map((row) => `${row.old_role}->${row.new_role}`)).toEqual(expect.arrayContaining(['user->area_admin', 'area_admin->user']));
   });
 });
