@@ -51,20 +51,13 @@ realPgDescribe('AR quest flow: multi-task creation, host-scan QR pass, completio
     ],
   });
 
-  /** Creates the quest through the API as `asToken`, mirrors it into PostgreSQL, and returns id + QR markers. */
+  /** Creates the quest through the API as `asToken` and returns its id and QR marker codes. */
   async function createQuest(asToken: string, ownerId: string, title: string) {
     const spotId = spotIds[ownerId];
     const res = await request(app).post(`/api/v1/spots/${spotId}/quests`).set('Authorization', `Bearer ${asToken}`).send(questBody(title, spotId));
     expect(res.status).toBe(201);
-    const q = db.findQuestById(res.body.data.id, true)!;
-    await fixture.pool.query(
-      `INSERT INTO quests (id, title, description, category, location_name, gps_lat, gps_lng, radius_meters,
-         base_reward_php, difficulty_factor, geo_multiplier, reward_points, marker_code, marker_image_url,
-         is_active, is_test, author_id, status, version, steps, step_order_mode)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) ON CONFLICT (id) DO NOTHING`,
-      [q.id, q.title, q.description, q.category, q.location_name, q.gps_lat, q.gps_lng, q.radius_meters,
-        q.base_reward_php, q.difficulty_factor, q.geo_multiplier, q.reward_points, q.marker_code, q.marker_image_url,
-        true, true, ownerId, 'published', 1, JSON.stringify(q.steps), 'sequential']);
+    // The route persists the quest (and its destination binding) in PostgreSQL itself.
+    const q = { id: res.body.data.id as string };
     const sheet = await request(app).get(`/api/v1/quests/${q.id}/qr-sheet`).set('Authorization', `Bearer ${asToken}`);
     expect(sheet.status).toBe(200);
     expect(sheet.body.data.qr_tasks.map((t: { scan_mode: string }) => t.scan_mode)).toEqual(['traveler_scans', 'host_scans_traveler']);
