@@ -169,7 +169,6 @@ realPgDescribe('AR quest flow: multi-task creation, host-scan QR pass, completio
   it('pays an official (admin-authored) quest at once when every step was server-verified', async () => {
     const quest = await createQuest(adminToken, adminId, 'Official AR trail');
     const as = await playAllSteps(quest, adminToken);
-    // Older clients that submit for review are never paid instantly, even with the old claim flag.
     const done = await as('/complete');
     expect(done.status).toBe(200);
     expect(done.body.data.status).toBe('completed');
