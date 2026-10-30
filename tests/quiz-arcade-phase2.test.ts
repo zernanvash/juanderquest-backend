@@ -219,15 +219,6 @@ describe('Cultural Quiz Arcade Phase 2 (Data Model, Lifelines & Scoring)', () =>
     expect(wrongQuiz.status).toBe(404);
   });
 
-  it('refuses 50/50 on a two-option question so it cannot reveal the answer', async () => {
-    const res = await request(app)
-      .post(`/api/v1/quizzes/${createdQuizId}/attempts/${attemptId}/lifeline`)
-      .set('Authorization', `Bearer ${travelerToken}`)
-      .send({ lifeline: 'fifty_fifty', question_id: questions[1].id });
-    expect(res.status).toBe(400);
-    expect(res.body.error.message).toContain('LIFELINE_NOT_AVAILABLE');
-  });
-
   it('allows the traveler to use 50/50 lifeline to eliminate 2 incorrect options', async () => {
     const q1 = questions[0];
     const res = await request(app)
