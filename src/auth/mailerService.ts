@@ -20,6 +20,26 @@ type FetchLike = (url: string, init: { method: string; headers: Record<string, s
 const RESEND_URL = 'https://api.resend.com/emails';
 const DEFAULT_FROM = 'JuanDerQuest <noreply@juanderquest.app>';
 
+// Resend's free plan allows 100 emails a day. Per-recipient limits stop one address being
+// flooded; the daily cap stays below the plan so a flood cannot block everyone's codes.
+export const RECIPIENT_COOLDOWN_SECONDS = 60;
+export const RECIPIENT_HOURLY_LIMIT = 5;
+const DEFAULT_DAILY_CAP = 90;
+
+export type SendRefusal = 'RECIPIENT_COOLDOWN' | 'RECIPIENT_HOURLY_LIMIT' | 'DAILY_CAP';
+export type SendAllowance = { allowed: true } | { allowed: false; reason: SendRefusal; retryAfterSeconds: number };
+
+const dailyCap = () => {
+  const value = Number(process.env.AUTH_MAIL_DAILY_CAP);
+  return Number.isInteger(value) && value > 0 ? value : DEFAULT_DAILY_CAP;
+};
+
+const secondsUntilUtcMidnight = (nowMs: number) => {
+  const next = new Date(nowMs);
+  next.setUTCHours(24, 0, 0, 0);
+  return Math.max(1, Math.ceil((next.getTime() - nowMs) / 1000));
+};
+
 const escapeHtml = (value: string) =>
   value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
@@ -60,10 +80,50 @@ export class AuthMailerService {
   constructor(
     private pool: Pool | null,
     private fetchImpl: FetchLike = (url, init) => fetch(url, init),
+    private now: () => number = () => Date.now(),
   ) {}
 
   setPool(pool: Pool | null) {
     this.pool = pool;
+  }
+
+  /**
+   * Whether an email to this recipient may be sent now. Limits apply only when real delivery is
+   * on (RESEND_API_KEY set). Routes call this before creating a code: a new code cancels the
+   * previous one, so a refused send must not issue one.
+   */
+  async checkSendAllowance(recipientEmail: string): Promise<SendAllowance> {
+    if (!process.env.RESEND_API_KEY?.trim()) return { allowed: true };
+    const email = recipientEmail.trim().toLowerCase();
+    const nowMs = this.now();
+    let recent: number, hourly: number, daily: number;
+
+    if (this.pool) {
+      const { rows } = await this.pool.query(
+        `SELECT
+           count(*) FILTER (WHERE recipient_email = $1 AND sent_at > now() - make_interval(secs => $2))::int AS recent,
+           count(*) FILTER (WHERE recipient_email = $1 AND sent_at > now() - interval '1 hour')::int AS hourly,
+           count(*) FILTER (WHERE sent_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')::int AS daily
+         FROM auth_mail_outbox
+         WHERE status = 'sent' AND sent_at > now() - interval '1 day'`,
+        [email, RECIPIENT_COOLDOWN_SECONDS]
+      );
+      ({ recent, hourly, daily } = rows[0]);
+    } else {
+      const midnight = new Date(nowMs);
+      midnight.setUTCHours(0, 0, 0, 0);
+      const sent = this.inMemoryOutbox
+        .filter((row) => row.status === 'sent' && row.sent_at)
+        .map((row) => ({ email: row.recipient_email, at: Date.parse(row.sent_at) }));
+      recent = sent.filter((r) => r.email === email && r.at > nowMs - RECIPIENT_COOLDOWN_SECONDS * 1000).length;
+      hourly = sent.filter((r) => r.email === email && r.at > nowMs - 3_600_000).length;
+      daily = sent.filter((r) => r.at >= midnight.getTime()).length;
+    }
+
+    if (daily >= dailyCap()) return { allowed: false, reason: 'DAILY_CAP', retryAfterSeconds: secondsUntilUtcMidnight(nowMs) };
+    if (recent > 0) return { allowed: false, reason: 'RECIPIENT_COOLDOWN', retryAfterSeconds: RECIPIENT_COOLDOWN_SECONDS };
+    if (hourly >= RECIPIENT_HOURLY_LIMIT) return { allowed: false, reason: 'RECIPIENT_HOURLY_LIMIT', retryAfterSeconds: 3600 };
+    return { allowed: true };
   }
 
   /**
@@ -84,7 +144,11 @@ export class AuthMailerService {
     let status: 'sent' | 'failed' = 'sent';
     let lastError: string | null = null;
     const apiKey = process.env.RESEND_API_KEY?.trim();
-    if (apiKey) {
+    const allowance = apiKey ? await this.checkSendAllowance(cleanEmail) : { allowed: true as const };
+    if (!allowance.allowed) {
+      status = 'failed';
+      lastError = allowance.reason;
+    } else if (apiKey) {
       lastError = await this.sendWithResend(apiKey, cleanEmail, renderAuthEmail(job));
       if (lastError) status = 'failed';
     } else if (isProduction) {
@@ -107,7 +171,7 @@ export class AuthMailerService {
         template_type: job.templateType,
         status,
         last_error: lastError,
-        sent_at: status === 'sent' ? new Date().toISOString() : null,
+        sent_at: status === 'sent' ? new Date(this.now()).toISOString() : null,
       });
     }
 

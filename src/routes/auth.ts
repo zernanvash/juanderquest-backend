@@ -123,6 +123,16 @@ router.get('/auth/wallet/config', (_req, res) => res.status(200).json({
   },
 }));
 
+// The email budget for the day is used up (see AuthMailerService.checkSendAllowance). This says
+// nothing about any account, so every route may answer it the same way.
+const mailUnavailable = (res: Response, retryAfterSeconds: number) => {
+  res.setHeader('Retry-After', String(retryAfterSeconds));
+  return res.status(503).json({
+    success: false,
+    error: { code: 'EMAIL_TEMPORARILY_UNAVAILABLE', message: 'We cannot send email codes right now. Please try again later.' },
+  });
+};
+
 // Unified authentication routes: email/password, Google verification, password recovery,
 // durable challenge resolution, and guest retirement.
 
@@ -158,6 +168,10 @@ router.post(
           error: { code: 'EMAIL_ALREADY_EXISTS', message: 'An account with this email address already exists. Please sign in.' },
         });
       }
+
+      // Check the email budget before creating anything, so a refused sign-up can simply be retried.
+      const allowance = await db.mailerService.checkSendAllowance(normalizedEmail);
+      if (!allowance.allowed && allowance.reason === 'DAILY_CAP') return mailUnavailable(res, allowance.retryAfterSeconds);
 
       // 2. Create the user record
       const seedId = `usr-${randomUUID().slice(0, 12)}`;
@@ -281,9 +295,12 @@ router.post(
     const normalizedEmail = db.identityService.normalizeEmail(email);
 
     try {
-      const identity = await db.identityService.findIdentity('email', normalizedEmail);
+      // Checked before the account lookup and before a new code replaces the current one.
+      const allowance = await db.mailerService.checkSendAllowance(normalizedEmail);
+      if (!allowance.allowed && allowance.reason === 'DAILY_CAP') return mailUnavailable(res, allowance.retryAfterSeconds);
+      const identity = allowance.allowed ? await db.identityService.findIdentity('email', normalizedEmail) : null;
       if (!identity) {
-        // Uniform response to prevent enumeration
+        // Uniform response to prevent enumeration (also when this address was sent a code moments ago)
         return res.status(200).json({
           success: true,
           data: { message: 'If an account exists, a new verification code has been dispatched.' },
@@ -382,7 +399,10 @@ router.post(
     const normalizedEmail = db.identityService.normalizeEmail(email);
 
     try {
-      const identity = await db.identityService.findIdentity('email', normalizedEmail);
+      // Checked before the account lookup and before a new code replaces the current one.
+      const allowance = await db.mailerService.checkSendAllowance(normalizedEmail);
+      if (!allowance.allowed && allowance.reason === 'DAILY_CAP') return mailUnavailable(res, allowance.retryAfterSeconds);
+      const identity = allowance.allowed ? await db.identityService.findIdentity('email', normalizedEmail) : null;
       if (identity) {
         const challenge = await db.challengeService.createChallenge({
           purpose: 'password_reset',
