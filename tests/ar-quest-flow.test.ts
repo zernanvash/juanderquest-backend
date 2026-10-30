@@ -70,6 +70,15 @@ realPgDescribe('AR quest flow: multi-task creation, host-scan QR pass, completio
     const started = await as('/attempts');
     expect({ status: started.status, error: started.body.error }).toEqual({ status: 201, error: undefined });
 
+    // The app draws steps from /progress once a quest is accepted: it must carry the scan mode, never markers.
+    const progress = await request(app).get(`/api/v1/quests/${quest.id}/progress`).set('Authorization', `Bearer ${travelerToken}`);
+    expect(progress.status).toBe(200);
+    const liveSteps = progress.body.data.active_attempt.steps as Array<{ step_order?: number; order?: number; verification?: Record<string, unknown> }>;
+    const hostStep = liveSteps.find((step) => (step.step_order ?? step.order) === 3);
+    expect(hostStep?.verification?.scan_mode).toBe('host_scans_traveler');
+    expect(JSON.stringify(progress.body)).not.toContain(quest.hostMarker);
+    expect(JSON.stringify(progress.body)).not.toContain(quest.placardMarker);
+
     const challenge = await as('/steps/1/ar-challenge').send(here);
     expect(challenge.status).toBe(200);
     const ar = await as('/steps/1/evidence').send({ challenge_token: challenge.body.data.challenge_token, ...here });
