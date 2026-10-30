@@ -15,7 +15,9 @@ export async function loadAdminScope(userId: string): Promise<AdminScope> {
   if (!pool) {
     const user = db.findUserById(userId);
     if (user?.role === 'admin') return { platform: true };
-    throw new Error('Durable area-admin scope is unavailable.');
+    // Area grants live only in PostgreSQL; anyone else is simply not an administrator.
+    if (user?.role === 'area_admin') throw new Error('Durable area-admin scope is unavailable.');
+    throw new Error('Administrative privileges are required.');
   }
   const user = await db.usersRepo.findById(userId);
   if (!user) throw new Error('Account no longer exists.');
