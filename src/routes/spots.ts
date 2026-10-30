@@ -19,7 +19,7 @@ import { sanitizeQuestForViewer } from '../quests/sanitize.js';
 import { recordActivity } from '../social/activity.js';
 import { normalizeTasks } from '../quests/taskNormalize.js';
 import { questTaskInputSchema, validateTasksWithinDistance } from '../quests/taskValidation.js';
-import { assertInScope, requireAreaAdmin, writeAdminAudit } from '../admin/scope.js';
+import { assertInScope, requireAreaAdmin, spotInScope, writeAdminAudit } from '../admin/scope.js';
 import { handleSpotInteraction } from '../stamps/hooks.js';
 
 const router = Router();
@@ -149,9 +149,10 @@ router.post('/spots/:id/interactions', authenticateToken, validateRequest(z.obje
 });
 
 const spotReviewSchema=z.object({body:z.object({status:z.enum(['published','needs_review','unpublished']),crowd_capacity_band:z.enum(['low','medium','high']),recommendation_suppressed:z.boolean().default(false)})});
-router.get('/admin/spots',authenticateToken,requireAreaAdmin('destinations'),(req:AuthRequest,res)=>{
+// Read-only list: quiz authors (quests_quizzes) also need their area's destinations for the quiz destination picker.
+router.get('/admin/spots',authenticateToken,requireAreaAdmin(['destinations','quests_quizzes']),(req:AuthRequest,res)=>{
   const scope=req.adminScope!;
-  const spots=spotStore.spots.filter(s=>spotInAdminScope(scope,s));
+  const spots=spotStore.spots.filter(s=>spotInAdminScope(scope,s)||spotInScope(scope,'quests_quizzes',s.id));
   return res.json({success:true,data:spots.map(s=>({...s,...spotStore.crowd(s)}))});
 });
 router.get('/admin/spots/:id',authenticateToken,requireAreaAdmin('destinations'),(req:AuthRequest,res)=>{

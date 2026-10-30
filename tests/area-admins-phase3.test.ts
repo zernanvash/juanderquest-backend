@@ -96,6 +96,12 @@ realPgDescribe('Plan 59 phase 3 area administrator scope (real PostgreSQL)', () 
     expect(listed).not.toContain(quizIds[outside.spot]);
     expect((await asArea('get', `/admin/quizzes/${quizIds[outside.spot]}`)).status).toBe(404);
     expect((await asArea('get', `/admin/quizzes/${quizIds[inside.spot]}`)).status).toBe(200);
+    // The quiz editor's destination picker: quests_quizzes alone lists the area's destinations (read-only).
+    const spots = await asArea('get', '/admin/spots');
+    expect(spots.status).toBe(200);
+    expect(spots.body.data.map((spot: { id: string }) => spot.id)).toContain(inside.spot);
+    expect(spots.body.data.map((spot: { id: string }) => spot.id)).not.toContain(outside.spot);
+    expect((await asArea('patch', `/admin/spots/${inside.spot}`).send({ status: 'unpublished', crowd_capacity_band: 'medium' })).status).toBe(403);
 
     const outsideDraft = await asArea('post', '/admin/quizzes').send(quizPayload(outside.spot, 'Outside quiz'));
     expect(outsideDraft.status).toBe(403);

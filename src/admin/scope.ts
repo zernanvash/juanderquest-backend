@@ -75,12 +75,14 @@ export async function writeAdminAudit(input: {
       input.after === undefined ? null : JSON.stringify(input.after)]);
 }
 
-export function requireAreaAdmin(power: AdminPower) {
+/** Allows platform admins, or area admins holding the power (or any of the listed powers). */
+export function requireAreaAdmin(power: AdminPower | AdminPower[]) {
+  const powers = Array.isArray(power) ? power : [power];
   return async (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Sign in is required.' } });
     try {
       const scope = await loadAdminScope(req.user.id);
-      if (!hasAdminPower(scope, power)) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: `The ${power} permission is required.` } });
+      if (!powers.some((item) => hasAdminPower(scope, item))) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: `The ${powers.join(' or ')} permission is required.` } });
       req.adminScope = scope;
       next();
     } catch (error) {
