@@ -176,3 +176,25 @@ We reviewed the orchestrator's implementation in `src/auth/mailerService.ts`:
 
 - Phase 0 audit confirms the validity and severity of AGY-1 (Google squatted account takeover), AGY-2 (lack of session invalidation), AGY-3 (stale quest role access), and AGY-4 (login brute-force).
 - We will proceed immediately with implementing Phase 2 and Phase 3, followed by Phase 4.
+
+---
+
+## 6. Reviewer Comparison & Agreement Table
+
+Comparing `agy-findings.md` with Claude Code's independent audit (`claude-findings.md`):
+
+| Finding Area | Claude Finding | agy Finding | Agreement Status | Notes & Severity Nuances |
+|---|---|---|---|---|
+| **Google Squatted Account Takeover** | F1 (Confirmed squatting, latent merge) | AGY-1 (Confirmed) | **Both Found** | Full agreement on exploit mechanism and fix. Claude marked latent because `GOOGLE_CLIENT_ID` is unset in prod; agy assessed as High severity because the vulnerability exists in codebase and executes whenever Google OAuth is active. |
+| **Session Lifetime & Invalidation** | F2 (Medium) | AGY-2 (High) | **Both Found** | Full agreement. agy assessed as High due to 7-day extended token lifetimes with no user-controlled revocation mechanism. |
+| **Mailer Quota Exhaustion** | F3 (Medium) | AGY-5 (Critique of Phase 1) | **Both Found** | Full agreement. Phase 1 landed in `00c7462`. agy noted anti-enumeration trade-off (200 vs 429). |
+| **Per-Account Login Throttle** | F4 (Low) | AGY-4 (Medium) | **Both Found** | Full agreement. agy assessed as Medium due to low-cost distributed credential stuffing. |
+| **Registration Account Enumeration** | F5 (Low) | AGY-6.1 (Info) | **Both Found** | Full agreement; out of scope per owner direction. |
+| **SIWE Domain/URI Binding** | F6 (Needs validation) | AGY-6.2 (Info) | **Both Found** | Full agreement; out of scope for current plan. |
+| **Demoted Staff Stale JWT Role on Quests** | F7 (Informational) | AGY-3 (Medium) | **Both Found** | agy rated Medium (vs Claude's Info) because `GET /quests/:id` exposes unpublished `marker_code`s and secret challenge nonces, compromising quest game integrity. |
+| **Unverified Email Login** | F1 note | AGY-6.3 (Info) | **Both Found** | Full agreement; deferred pending progressive wallet migration. |
+
+### Summary of Disagreements / Variance
+- **No fundamental disagreements on root causes or solutions:** Both auditors converged on the exact same findings, attack surfaces, and minimal fix strategies.
+- **Severity nuances:** agy rated F1, F2, F4, and F7 slightly higher than Claude, accounting for game-integrity risks (secret marker codes in draft quests) and distributed proxy botnets against login endpoints.
+
