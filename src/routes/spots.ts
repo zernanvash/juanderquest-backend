@@ -18,6 +18,7 @@ import { sanitizeQuestForViewer } from '../quests/sanitize.js';
 import { recordActivity } from '../social/activity.js';
 import { normalizeTasks } from '../quests/taskNormalize.js';
 import { questTaskInputSchema, validateTasksWithinDistance } from '../quests/taskValidation.js';
+import { assertInScope, requireAreaAdmin, writeAdminAudit } from '../admin/scope.js';
 
 const router = Router();
 const csv = (value: unknown) => typeof value === 'string' && value ? value.split(',').map(v => v.trim()).filter(Boolean) : [];
@@ -39,6 +40,8 @@ const uploadRateLimiter = rateLimit({
   max: env.NODE_ENV === 'test' ? 1000 : 20,
   keyStrategy: 'actor_or_ip',
 });
+const spotInAdminScope = (scope: NonNullable<AuthRequest['adminScope']>, spot: { town_area_id?: string | null; barangay_area_id?: string | null }) =>
+  assertInScope(scope, 'destinations', spot.town_area_id) || assertInScope(scope, 'destinations', spot.barangay_area_id);
 
 
 router.get('/spot-taxonomy', (_req, res) => res.json({ success: true, data: {
@@ -124,8 +127,25 @@ router.post('/spots/:id/interactions', authenticateToken, validateRequest(z.obje
 });
 
 const spotReviewSchema=z.object({body:z.object({status:z.enum(['published','needs_review','unpublished']),crowd_capacity_band:z.enum(['low','medium','high']),recommendation_suppressed:z.boolean().default(false)})});
-router.get('/admin/spots',authenticateToken,requireAdmin,(_req,res)=>res.json({success:true,data:spotStore.spots.map(s=>({...s,...spotStore.crowd(s)}))}));
-router.patch('/admin/spots/:id',authenticateToken,requireAdmin,validateRequest(spotReviewSchema),(req:AuthRequest,res)=>{const spot=spotStore.review(req.params.id,req.user!.id,req.body.status,req.body.crowd_capacity_band,req.body.recommendation_suppressed);if(!spot)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});return res.json({success:true,data:{...spot,...spotStore.crowd(spot)}});});
+router.get('/admin/spots',authenticateToken,requireAreaAdmin('destinations'),(req:AuthRequest,res)=>{
+  const scope=req.adminScope!;
+  const spots=spotStore.spots.filter(s=>spotInAdminScope(scope,s));
+  return res.json({success:true,data:spots.map(s=>({...s,...spotStore.crowd(s)}))});
+});
+router.get('/admin/spots/:id',authenticateToken,requireAreaAdmin('destinations'),(req:AuthRequest,res)=>{
+  const spot=spotStore.spots.find(s=>s.id===req.params.id || s.slug===req.params.id);
+  if(!spot || !spotInAdminScope(req.adminScope!,spot))return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
+  return res.json({success:true,data:{...spot,...spotStore.crowd(spot)}});
+});
+router.patch('/admin/spots/:id',authenticateToken,requireAreaAdmin('destinations'),validateRequest(spotReviewSchema),async(req:AuthRequest,res)=>{
+  const before=spotStore.spots.find(s=>s.id===req.params.id);
+  if(!before || !spotInAdminScope(req.adminScope!,before))return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
+  if(!req.adminScope!.platform && before.created_by===req.user!.id)return res.status(403).json({success:false,error:{code:'SELF_MODERATION_FORBIDDEN',message:'Platform administrator review is required for a destination you created.'}});
+  const spot=spotStore.review(req.params.id,req.user!.id,req.body.status,req.body.crowd_capacity_band,req.body.recommendation_suppressed);
+  if(!spot)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
+  await writeAdminAudit({actorId:req.user!.id,actorRole:req.user!.role,areaId:spot.town_area_id,action:'destination.reviewed',subjectType:'spot',subjectId:spot.id,before,after:spot});
+  return res.json({success:true,data:{...spot,...spotStore.crowd(spot)}});
+});
 
 // Shared handler for photo & rich video media uploads
 const handleMediaUpload = (req: AuthRequest, res: any) => {
@@ -764,10 +784,11 @@ router.post('/spots/:id/reports', optionalAuthenticateToken, validateRequest(cre
 });
 
 // GET /admin/spot-reports
-router.get('/admin/spot-reports', authenticateToken, requireAdmin, (_req: AuthRequest, res) => {
+router.get('/admin/spot-reports', authenticateToken, requireAreaAdmin('destinations'), (req: AuthRequest, res) => {
+  const scopedSpotIds=new Set(spotStore.spots.filter(spot=>spotInAdminScope(req.adminScope!,spot)).map(spot=>spot.id));
   return res.json({
     success: true,
-    data: fieldLogStore.listReports(),
+    data: fieldLogStore.listReports().filter(report=>scopedSpotIds.has(report.spot_id)),
   });
 });
 

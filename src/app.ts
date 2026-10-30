@@ -41,6 +41,7 @@ import { chainAdminRouter } from './routes/chainAdmin.js';
 import { chainBadgesRouter } from './routes/chainBadges.js';
 import { shopRouter } from './routes/shop.js';
 import { adminShopRouter } from './routes/adminShop.js';
+import adminAreaAdminsRouter from './routes/adminAreaAdmins.js';
 import { errorHandler } from './middleware/error.js';
 import { readinessGate } from './middleware/readiness.js';
 import { appVersionGate } from './middleware/appVersionGate.js';
@@ -100,6 +101,11 @@ app.use('/api/v1', healthRouter);
 app.use('/api/v1', authRouter);
 app.use('/api/v1', questsRouter);
 app.use('/api/v1', submissionsRouter);
+// These explicitly area-scoped admin endpoints must run before adminRouter's
+// platform-only /admin guard. Unmatched requests continue to that guard below.
+app.use('/api/v1', spotsRouter);
+app.use('/api/v1', analyticsRouter);
+app.use('/api/v1', adminAreaAdminsRouter);
 // Internal economy profile gate must run before the broad /admin middleware.
 app.use('/api/v1', economyReadsRouter);
 app.use('/api/v1', adminRouter);
@@ -109,13 +115,11 @@ app.use('/api/v1', communityQuestsRouter);
 app.use('/api/v1', walletRouter);
 app.use('/api/v1', vouchersRouter);
 app.use('/api/v1', campaignsRouter);
-app.use('/api/v1', spotsRouter);
 app.use('/api/v1', feedRouter);
 app.use('/api/v1', searchRouter);
 app.use('/api/v1', usersRouter);
 app.use('/api/v1', appVersionRouter);
 app.use('/api/v1', routesRouter);
-app.use('/api/v1', analyticsRouter);
 app.use('/api/v1', progressionRouter);
 app.use('/api/v1', juanChoiceRouter);
 app.use('/api/v1', affiliatesRouter);

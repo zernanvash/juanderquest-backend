@@ -142,6 +142,25 @@ export async function createTestDb(options: { poolMax?: number } = {}): Promise<
     // pg-mem cannot ALTER TYPE ... ADD VALUE. Additive enum values guarded by
     // IF NOT EXISTS are treated as no-ops; pg-mem stores enum columns as text.
     if (/^\s*ALTER\s+TYPE\s+["\w.]+\s+ADD\s+VALUE\s+IF\s+NOT\s+EXISTS/i.test(sql)) return [];
+    if (sql.includes('WITH RECURSIVE area_tree(id, path)')) {
+      const root = /FROM admin_areas WHERE id = '([^']+)'/.exec(sql)?.[1];
+      if (!root) return [];
+      const rows = memDb.public.query('SELECT id, parent_id FROM admin_areas').rows as Array<{ id: string; parent_id: string | null }>;
+      const found = new Set<string>();
+      const frontier = [root];
+      while (frontier.length) {
+        const current = frontier.pop()!;
+        if (found.has(current)) continue;
+        found.add(current);
+        for (const row of rows) if (row.parent_id === current && !found.has(row.id)) frontier.push(row.id);
+      }
+      return [...found].map((id) => ({ id }));
+    }
+    const demoteAreaAdmin = /^UPDATE users SET role='user' WHERE id='([^']+)' AND role='area_admin'$/i.exec(sql.trim());
+    if (demoteAreaAdmin) {
+      memDb.public.query(`UPDATE users SET role='user' WHERE id='${demoteAreaAdmin[1]}'`);
+      return [];
+    }
     // pg-mem's ANY(ARRAY[...]::text[]) silently returns no rows for this
     // PostgreSQL-valid batched identity query. Keep the production query intact
     // and translate only its exact test-harness shape to an equivalent IN list.

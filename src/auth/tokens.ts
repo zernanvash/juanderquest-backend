@@ -8,7 +8,7 @@ export const AR_CHALLENGE_TYP = 'quest_ar_challenge';
 export interface SessionClaims {
   id: string;
   seed_id: string;
-  role: 'user' | 'admin' | 'qa';
+  role: 'user' | 'admin' | 'area_admin' | 'qa';
 }
 
 export interface QuestChallengeClaims {
@@ -30,7 +30,7 @@ export interface QuestArChallengeClaims {
 }
 
 const validRole = (role: unknown): role is SessionClaims['role'] =>
-  role === 'user' || role === 'admin' || role === 'qa';
+  role === 'user' || role === 'admin' || role === 'area_admin' || role === 'qa';
 
 export function signSessionToken(
   user: { id: string; seed_id: string; role: string },

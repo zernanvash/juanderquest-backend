@@ -76,6 +76,7 @@ export const MIGRATIONS = [
   '062_shop_v1.sql',
   '064_procedural_banners.sql',
   '065_quest_marker_urls.sql',
+  '066_area_admins.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
@@ -460,6 +461,24 @@ export async function applyMigrations(pg: Pool) {
 
             CREATE INDEX IF NOT EXISTS idx_spots_town_area ON spots (town_area_id) WHERE status = 'published';
             CREATE INDEX IF NOT EXISTS idx_spots_barangay_area ON spots (barangay_area_id) WHERE status = 'published';
+          `);
+        } else if (file === '066_area_admins.sql' && pgMemMigrationAdapters.has(pg as object)) {
+          // pg-mem cannot parse the recursive/ambiguous-name merchant backfill.
+          // Its enum implementation cannot parse the PostgreSQL backfill. The
+          // harness adds the new enum label; the migration is covered by real PG.
+          await client.query(`
+            CREATE TABLE IF NOT EXISTS admin_area_assignments (
+              id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              area_id TEXT NOT NULL REFERENCES admin_areas(id), powers TEXT[] NOT NULL,
+              granted_by TEXT NOT NULL REFERENCES users(id), granted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              revoked_at TIMESTAMPTZ, UNIQUE(user_id, area_id)
+            );
+            CREATE TABLE IF NOT EXISTS admin_audit_log (
+              id TEXT PRIMARY KEY, actor_id TEXT NOT NULL REFERENCES users(id), actor_role TEXT NOT NULL,
+              area_id TEXT REFERENCES admin_areas(id), action TEXT NOT NULL, subject_type TEXT NOT NULL,
+              subject_id TEXT NOT NULL, before JSONB, after JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            ALTER TABLE merchants ADD COLUMN IF NOT EXISTS town_area_id TEXT REFERENCES admin_areas(id);
           `);
         } else {
           await client.query(sql);

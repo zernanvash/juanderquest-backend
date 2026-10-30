@@ -6,12 +6,13 @@ import { verifySessionToken } from '../auth/tokens.js';
 export interface AuthenticatedUser {
   id: string;
   seed_id: string;
-  role: 'user' | 'admin' | 'qa';
+  role: 'user' | 'admin' | 'area_admin' | 'qa';
 }
 
 export interface AuthRequest extends Request {
   user?: AuthenticatedUser;
   isQAAuthorized?: boolean;
+  adminScope?: import('../admin/scope.js').AdminScope;
 }
 
 export const optionalAuthenticateToken = (req: AuthRequest, _res: Response, next: NextFunction) => {

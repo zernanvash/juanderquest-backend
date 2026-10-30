@@ -19,7 +19,7 @@ export interface UserRow {
   display_name: string;
   email: string;
   avatar_url: string;
-  role: 'user' | 'admin' | 'qa';
+  role: 'user' | 'admin' | 'area_admin' | 'qa';
   demo_points: number;            // Backwards-compatible formatted value (100 JDQ)
   mjdq_balance: number;           // Integer milli-JDQ balance (100,000 mJDQ = 100 JDQ)
   jdq_governance_balance: number; // JDQ Governance Token count (15 JDQ)
