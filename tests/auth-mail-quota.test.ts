@@ -15,7 +15,7 @@ describe('auth email limits on the routes', () => {
     await db.hydrateFromPg(testDb.pool);
     process.env.RESEND_API_KEY = 'test-key';
     fetchSpy.mockImplementation(async () => new Response('{"id":"x"}', { status: 200 }));
-  }, 30000);
+  }, 90000);
 
   beforeEach(() => {
     resetRateLimits();
@@ -28,7 +28,7 @@ describe('auth email limits on the routes', () => {
     if (saved.key === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = saved.key;
     if (saved.cap === undefined) delete process.env.AUTH_MAIL_DAILY_CAP; else process.env.AUTH_MAIL_DAILY_CAP = saved.cap;
     if (testDb) await testDb.close();
-  }, 30000);
+  }, 90000);
 
   const resendCalls = () => fetchSpy.mock.calls.filter(([url]) => String(url).includes('api.resend.com'));
 

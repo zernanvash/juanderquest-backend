@@ -563,14 +563,16 @@ router.post(
       let user: UserRecord | undefined;
       let created = false;
       const byGoogle = await db.identityService.findIdentity('google', profile.sub);
+      const emailAccount = await db.identityService.findAccountEmail(email);
       const userId = byGoogle?.user_id ?? (await db.identityService.findIdentity('email', email))?.user_id;
       if (userId) {
         user = db.usersRepo.getPool() ? await db.usersRepo.findById(userId) : db.findUserById(userId);
         if (!user) return res.status(401).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'Account no longer exists.' } });
         if (!byGoogle) {
-          // Google verified this email, so linking it to the account that owns the email is safe.
-          await db.identityService.linkIdentity(user.id, 'google', profile.sub);
-          await db.identityService.markEmailVerified(email);
+          // Plan 72 Phase 2: If the account's email is not verified, delete that user's password_credentials row
+          // before linking Google and marking the email verified. Whoever created the password never proved they own the email.
+          const isUnverified = emailAccount ? !emailAccount.is_verified : true;
+          await db.identityService.linkGoogleToAccount(user.id, profile.sub, email, isUnverified);
         }
       } else {
         if (req.body.terms_accepted !== true || req.body.age_eligibility_declared !== true) {

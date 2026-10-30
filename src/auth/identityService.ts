@@ -98,6 +98,49 @@ export class UnifiedIdentityService {
   }
 
   /**
+   * Links a Google OAuth identity to an existing email account.
+   * If the email is unverified, any existing password credential is deleted in the same transaction
+   * to prevent squatted password backdoor retainment (Plan 72 Phase 2).
+   */
+  async linkGoogleToAccount(userId: string, googleSubject: string, normalizedEmail: string, removePasswordIfUnverified: boolean): Promise<void> {
+    const cleanEmail = this.normalizeEmail(normalizedEmail);
+    const cleanSubject = googleSubject.trim();
+    if (this.pool) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        if (removePasswordIfUnverified) {
+          await client.query('DELETE FROM password_credentials WHERE user_id = $1', [userId]);
+        }
+        await client.query(
+          `INSERT INTO auth_identities (id, user_id, provider, provider_subject, created_at, updated_at)
+           VALUES ($1, $2, 'google', $3, NOW(), NOW())
+           ON CONFLICT (provider, provider_subject) DO NOTHING`,
+          [randomUUID(), userId, cleanSubject]
+        );
+        await client.query(
+          `UPDATE account_emails 
+           SET is_verified = TRUE, verified_at = NOW(), updated_at = NOW() 
+           WHERE normalized_email = $1`,
+          [cleanEmail]
+        );
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    } else {
+      if (removePasswordIfUnverified) {
+        this.inMemoryPasswords.delete(userId);
+      }
+      await this.linkIdentity(userId, 'google', cleanSubject);
+      await this.markEmailVerified(cleanEmail);
+    }
+  }
+
+  /**
    * Sets or updates a password credential for a user.
    */
   async setPassword(userId: string, plainTextPassword: string): Promise<void> {
@@ -114,6 +157,17 @@ export class UnifiedIdentityService {
       );
     } else {
       this.inMemoryPasswords.set(userId, { hash, salt, algorithm: 'scrypt' });
+    }
+  }
+
+  /**
+   * Removes any password credential for a user.
+   */
+  async removePassword(userId: string): Promise<void> {
+    if (this.pool) {
+      await this.pool.query('DELETE FROM password_credentials WHERE user_id = $1', [userId]);
+    } else {
+      this.inMemoryPasswords.delete(userId);
     }
   }
 
