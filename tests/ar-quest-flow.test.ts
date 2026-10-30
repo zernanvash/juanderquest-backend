@@ -126,6 +126,10 @@ realPgDescribe('AR quest flow: multi-task creation, host-scan QR pass, completio
       if (!db.users.find((x) => x.id === id)) db.users.push({ id, seed_id: id, display_name: id, email: `${id}@example.com`, role, demo_points: 0, is_test: true, created_at: now, updated_at: now } as any);
     }
     for (const [owner, spotId] of Object.entries(spotIds)) {
+      await fixture.pool.query(
+        `INSERT INTO spots(id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,price_level,source_type,source_name,trust_level,status,created_by,is_test)
+         VALUES ($1,$2,'Bolinao Lighthouse','Test destination.','nature_outdoors','beach','Bolinao','',$3,$4,1,'community','test','community','published',$5,TRUE)`,
+        [spotId, spotId, LAT, LNG, owner]);
       spotStore.spots.push({
         id: spotId, slug: spotId, name: 'Bolinao Lighthouse', municipality: 'Bolinao', description: 'Test destination.', category: 'nature',
         gps_lat: LAT, gps_lng: LNG, image_url: '', quest_id: null, created_by: owner, is_test: true, created_at: now, updated_at: now,
