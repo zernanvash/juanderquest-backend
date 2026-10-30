@@ -123,7 +123,7 @@ realPgDescribe('AR quest flow: multi-task creation, host-scan QR pass, completio
     for (const [id, role] of [[authorId, 'user'], [adminId, 'admin'], [travelerId, 'user'], [spotAdderId, 'user']] as const) {
       await fixture.pool.query(
         `INSERT INTO users (id, seed_id, display_name, email, role, demo_points, is_test, created_at, updated_at)
-         VALUES ($1, $1, $1, $2, $3, 0, true, $4, $4) ON CONFLICT (id) DO NOTHING`, [id, `${id}@example.com`, role, now]);
+         VALUES ($1, $2, $3, $4, $5, 0, true, $6, $7) ON CONFLICT (id) DO NOTHING`, [id, id, id, `${id}@example.com`, role, now, now]);
       if (!db.users.find((x) => x.id === id)) db.users.push({ id, seed_id: id, display_name: id, email: `${id}@example.com`, role, demo_points: 0, is_test: true, created_at: now, updated_at: now } as any);
     }
     spotStore.spots.push({
