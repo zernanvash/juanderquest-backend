@@ -4,7 +4,7 @@ import multer from 'multer';
 import { z } from 'zod';
 import path from 'path';
 import fs from 'fs';
-import { db, QuestAttemptRow, QuestStepEvidenceRow, QuestStep, withinRadius } from '../db/index.js';
+import { db, QuestAttemptRow, QuestRow, QuestStepEvidenceRow, QuestStep, withinRadius } from '../db/index.js';
 import { getPool } from '../db/pool.js';
 import { EconomyError, EconomyService } from '../economy/service.js';
 import { isLocalEconomyProfile } from '../economy/profile.js';
@@ -32,6 +32,10 @@ import { progressionService } from '../progression/service.js';
 import { governanceStore } from './proposals.js';
 
 const router = Router();
+
+/** A QR task's scan mode: the traveler scans a printed code, or a host scans the traveler's pass. */
+const qrScanModeOf = (task: QuestTask | undefined) =>
+  ((task?.verification as any)?.scan_mode || task?.qr_scan_mode || 'traveler_scans') as 'traveler_scans' | 'host_scans_traveler';
 
 function secureCodeEquals(expected: unknown, supplied: unknown): boolean {
   if (typeof expected !== 'string' || typeof supplied !== 'string') return false;
@@ -1148,6 +1152,10 @@ router.post(
       };
       newStatus = 'verified';
     } else if (checkpointType === 'qr') {
+      // A host-scan task is verified only by the host scanning the traveler's pass (host-verify-qr).
+      if (qrScanModeOf(stepDef) === 'host_scans_traveler') {
+        return recordFailure(400, 'HOST_SCAN_REQUIRED', 'Show your quest pass to the host; they scan it to verify this task.');
+      }
       if (capturedLat === undefined || capturedLng === undefined) {
         return recordFailure(400, 'MISSING_GPS_COORDINATES', 'QR verification requires a fresh GPS reading.');
       }
@@ -1520,7 +1528,20 @@ router.post(
   }
 );
 
-// Helper for submit-for-review and instant completion when all required steps are server-verified
+// Owner decision 2026-10-30: a reward is paid at once only for an official quest (no author, an admin author,
+// or a sponsor funding plan) when every step was verified by the server (no photo waiting for review) and the
+// traveler is not the author. Everything else goes to independent review, as before.
+async function instantRewardEligible(quest: QuestRow, userId: string, steps: QuestStepEvidenceRow[]): Promise<boolean> {
+  if (steps.some((step) => step.status === 'pending_review')) return false;
+  if (!quest.author_id) return true;
+  if (quest.author_id === userId) return false;
+  const pool = getPool();
+  const author = pool ? await db.usersRepo.findById(quest.author_id).catch(() => undefined) : db.findUserById(quest.author_id);
+  if (author?.role === 'admin') return true;
+  return pool ? hasFundingPlan(pool, quest.id) : false;
+}
+
+// Submit a finished attempt: settles the reward at once when instantRewardEligible, otherwise sends it to review.
 async function handleSubmitOrCompleteAttempt(
   req: AuthRequest,
   res: Response,
@@ -1581,8 +1602,7 @@ async function handleSubmitOrCompleteAttempt(
     });
   }
 
-  const hasPendingReview = steps.some((s) => s.required && s.status === 'pending_review');
-  const canSettleImmediately = options.allowInstantReward && !hasPendingReview && Boolean(quest);
+  const canSettleImmediately = options.allowInstantReward && Boolean(quest) && await instantRewardEligible(quest!, userId, steps);
 
   if (canSettleImmediately && quest) {
     const awardedPoints = quest.reward_points || 0;
@@ -1732,13 +1752,12 @@ async function handleSubmitOrCompleteAttempt(
   });
 }
 
-// POST /quests/:id/submit-for-review - Submit quest for final independent review (or claim reward if claim_reward=true and all steps verified)
+// POST /quests/:id/submit-for-review - Submit quest for final independent review (unchanged for older clients)
 router.post('/quests/:id/submit-for-review', authenticateToken, async (req: AuthRequest, res: Response, next: NextFunction) => {
-  const claimReward = req.body?.claim_reward === true || req.body?.claim_reward === 'true';
-  return handleSubmitOrCompleteAttempt(req, res, next, { allowInstantReward: claimReward });
+  return handleSubmitOrCompleteAttempt(req, res, next, { allowInstantReward: false });
 });
 
-// POST /quests/:id/complete - Complete quest & settle rewards immediately if all required tasks are verified (or submit for review if photo tasks pending)
+// POST /quests/:id/complete - Finish the quest: instant reward when eligible (see instantRewardEligible), otherwise review
 router.post('/quests/:id/complete', authenticateToken, async (req: AuthRequest, res: Response, next: NextFunction) => {
   return handleSubmitOrCompleteAttempt(req, res, next, { allowInstantReward: true });
 });
@@ -2072,6 +2091,12 @@ router.post(
         error: { code: 'NOT_QR_TASK', message: `Step ${stepOrder} is not a QR task.` },
       });
     }
+    if (qrScanModeOf(stepDef) !== 'host_scans_traveler') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'NOT_HOST_SCAN_TASK', message: `Step ${stepOrder} is verified by scanning the printed QR code, not with a pass.` },
+      });
+    }
 
     const nonce = randomUUID();
     const expiresInSec = 600; // 10 minutes
@@ -2134,9 +2159,10 @@ router.post(
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Quest not found.' } });
     }
 
-    const spot = spotStore.spots.find((s) => s.quest_id === quest.id);
-    const isAuthor = Boolean(hostUserId && (quest.author_id === hostUserId || spot?.created_by === hostUserId));
-    const isAdminOrQA = Boolean(req.user?.role === 'admin' || req.user?.role === 'qa');
+    // The host is the quest's author, or an admin. Adding the destination does not make someone its host.
+    const isAuthor = Boolean(hostUserId && quest.author_id === hostUserId);
+    const hostRow = getPool() ? await db.usersRepo.findById(hostUserId).catch(() => undefined) : db.findUserById(hostUserId);
+    const isAdminOrQA = hostRow?.role === 'admin' || hostRow?.role === 'qa';
 
     if (!isAuthor && !isAdminOrQA) {
       return res.status(403).json({
@@ -2242,7 +2268,20 @@ router.post(
       : normalizeTasks(quest.steps, quest, { allowClientMarkerCode: true });
     const stepDef = snapshotTasks.find((s) => s.step_order === stepOrder);
 
-    if (captured_lat !== undefined && captured_lng !== undefined) {
+    if (!stepDef || stepDef.checkpoint_type !== 'qr' || qrScanModeOf(stepDef) !== 'host_scans_traveler') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'NOT_HOST_SCAN_TASK', message: `Step ${stepOrder} is not verified by a host scan.` },
+      });
+    }
+    // The host verifies on site: a fresh host GPS reading inside the task fence is required.
+    if (typeof captured_lat !== 'number' || typeof captured_lng !== 'number') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'MISSING_GPS_COORDINATES', message: 'Host verification needs your current location.' },
+      });
+    }
+    {
       const fence = (stepDef?.verification as any)?.fence || (stepDef?.gps_lat != null && stepDef?.gps_lng != null ? { lat: stepDef.gps_lat, lng: stepDef.gps_lng, radius_meters: stepDef.radius_meters } : null);
       const targetLat = fence?.lat ?? quest.gps_lat;
       const targetLng = fence?.lng ?? quest.gps_lng;
