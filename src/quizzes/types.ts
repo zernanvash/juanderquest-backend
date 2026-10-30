@@ -1,6 +1,9 @@
 export type CulturalQuizStatus = 'draft' | 'published' | 'paused' | 'archived';
 export type CulturalQuizAttemptStatus = 'in_progress' | 'passed' | 'failed' | 'abandoned' | 'expired';
 export type CulturalQuizLanguage = 'en' | 'fil' | 'ilo' | 'pag';
+export type CulturalQuizQuestionType = 'multiple_choice' | 'true_false' | 'picture' | 'order' | 'map_drop';
+export type CulturalQuizRound = 'main' | 'special' | 'lightning';
+export type CulturalQuizLifeline = 'fifty_fifty' | 'ask_local' | 'skip';
 
 export interface CulturalQuiz {
   id: string;
@@ -27,6 +30,8 @@ export interface CulturalQuizVersion {
   cooldown_hours: number;
   created_by?: string | null;
   published_at?: string | null;
+  host_lines?: any | null;
+  theme?: string;
   created_at: string;
 }
 
@@ -46,6 +51,11 @@ export interface CulturalQuizQuestion {
   question_text: string;
   explanation: string;
   source_url?: string | null;
+  question_type?: CulturalQuizQuestionType;
+  media_url?: string | null;
+  hint?: string | null;
+  round?: CulturalQuizRound;
+  answer_payload?: any | null;
   created_at: string;
   options: CulturalQuizOption[];
 }
@@ -81,6 +91,9 @@ export interface CulturalQuizAttempt {
   xp_awarded: number;
   location_validated: boolean;
   distance_meters?: number | null;
+  lifelines_used?: string[];
+  style_score?: number;
+  streak_max?: number;
   idempotency_key?: string | null;
   created_at: string;
   updated_at: string;

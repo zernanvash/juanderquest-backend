@@ -30,7 +30,15 @@ export interface StartAttemptParams {
 export interface SubmitAttemptParams {
   attemptId: string;
   userId: string;
-  answers: Array<{ questionId: string; selectedOptionId: string }>;
+  answers: Array<{
+    questionId: string;
+    selectedOptionId?: string;
+    selectedOrder?: string[];
+    selectedLocation?: { lat: number; lng: number };
+    skipped?: boolean;
+  }>;
+  styleScore?: number;
+  streakMax?: number;
   idempotencyKey?: string;
 }
 
@@ -43,11 +51,18 @@ export interface CreateQuizDraftParams {
   xpReward?: number;
   timeLimitMinutes?: number;
   cooldownHours?: number;
+  hostLines?: any;
+  theme?: string;
   questions: Array<{
     ordinal: number;
     questionText: string;
     explanation: string;
     sourceUrl?: string;
+    questionType?: 'multiple_choice' | 'true_false' | 'picture' | 'order' | 'map_drop';
+    mediaUrl?: string | null;
+    hint?: string | null;
+    round?: 'main' | 'special' | 'lightning';
+    answerPayload?: any | null;
     options: Array<{
       ordinal: number;
       optionText: string;
@@ -236,10 +251,19 @@ export class CulturalQuizService {
       // Check if there is still an unexpired active attempt
       const active = await this.repo.findActiveAttempt(quiz.id, params.userId, client);
       if (active) {
-        // Return existing active attempt questions without is_correct
+        // Return existing active attempt questions without is_correct or secret answer keys
         const questions = await this.repo.findQuestionsWithOptions(active.version_id, client);
         const sanitized = questions.map((q) => ({
-          ...q,
+          id: q.id,
+          version_id: q.version_id,
+          ordinal: q.ordinal,
+          question_text: q.question_text,
+          explanation: '',
+          source_url: q.source_url,
+          question_type: q.question_type || 'multiple_choice',
+          media_url: q.media_url || null,
+          round: q.round || 'main',
+          created_at: q.created_at,
           options: q.options.map((opt) => ({
             id: opt.id,
             question_id: opt.question_id,
@@ -287,9 +311,18 @@ export class CulturalQuizService {
       const createdAttempt = (this.repo as any).mapAttempt(attemptRows[0]);
       const questions = await this.repo.findQuestionsWithOptions(version.id, client);
 
-      // Sanitize: never reveal is_correct to traveler
+      // Sanitize: never reveal is_correct or answer_payload to traveler
       const sanitized = questions.map((q) => ({
-        ...q,
+        id: q.id,
+        version_id: q.version_id,
+        ordinal: q.ordinal,
+        question_text: q.question_text,
+        explanation: '',
+        source_url: q.source_url,
+        question_type: q.question_type || 'multiple_choice',
+        media_url: q.media_url || null,
+        round: q.round || 'main',
+        created_at: q.created_at,
         options: q.options.map((opt) => ({
           id: opt.id,
           question_id: opt.question_id,
@@ -317,7 +350,16 @@ export class CulturalQuizService {
     const isFinished = attempt.status !== 'in_progress';
 
     const mappedQuestions = questions.map((q) => ({
-      ...q,
+      id: q.id,
+      version_id: q.version_id,
+      ordinal: q.ordinal,
+      question_text: q.question_text,
+      explanation: isFinished ? q.explanation : '',
+      source_url: q.source_url,
+      question_type: q.question_type || 'multiple_choice',
+      media_url: q.media_url || null,
+      round: q.round || 'main',
+      created_at: q.created_at,
       options: q.options.map((opt) => ({
         id: opt.id,
         question_id: opt.question_id,
@@ -329,6 +371,102 @@ export class CulturalQuizService {
     }));
 
     return { attempt, questions: mappedQuestions };
+  }
+
+  async useLifeline(params: {
+    quizId: string;
+    attemptId: string;
+    userId: string;
+    lifeline: 'fifty_fifty' | 'ask_local' | 'skip';
+    questionId?: string;
+  }): Promise<{
+    lifeline: string;
+    question_id?: string;
+    eliminated_option_ids?: string[];
+    hint?: string;
+    skipped?: boolean;
+    remaining_lifelines: string[];
+  }> {
+    const pool = this.getPool();
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const { rows: attemptRows } = await client.query(
+        'SELECT * FROM cultural_quiz_attempts WHERE id = $1 FOR UPDATE',
+        [params.attemptId]
+      );
+      if (!attemptRows.length) {
+        throw new Error('ATTEMPT_NOT_FOUND: Attempt does not exist.');
+      }
+      const attempt = attemptRows[0];
+      if (attempt.user_id !== params.userId) {
+        throw new Error('UNAUTHORIZED_ATTEMPT: You do not own this quiz attempt.');
+      }
+      if (attempt.status !== 'in_progress') {
+        throw new Error(`ATTEMPT_NOT_ACTIVE: Attempt is already ${attempt.status}.`);
+      }
+      if (new Date(attempt.expires_at).getTime() < Date.now()) {
+        throw new Error('ATTEMPT_EXPIRED: The time limit for this attempt has passed.');
+      }
+
+      const usedLifelines: string[] = Array.isArray(attempt.lifelines_used) ? attempt.lifelines_used : [];
+      if (usedLifelines.includes(params.lifeline)) {
+        throw new Error(`LIFELINE_ALREADY_USED: Lifeline '${params.lifeline}' has already been used in this attempt.`);
+      }
+
+      const updatedLifelines = [...usedLifelines, params.lifeline];
+      await client.query(
+        `UPDATE cultural_quiz_attempts SET lifelines_used = $1, updated_at = NOW() WHERE id = $2`,
+        [updatedLifelines, attempt.id]
+      );
+
+      const result: {
+        lifeline: string;
+        question_id?: string;
+        eliminated_option_ids?: string[];
+        hint?: string;
+        skipped?: boolean;
+        remaining_lifelines: string[];
+      } = {
+        lifeline: params.lifeline,
+        question_id: params.questionId,
+        remaining_lifelines: ['fifty_fifty', 'ask_local', 'skip'].filter((l) => !updatedLifelines.includes(l)),
+      };
+
+      if (params.lifeline === 'fifty_fifty') {
+        if (!params.questionId) {
+          throw new Error('MISSING_QUESTION_ID: Question ID is required for fifty_fifty lifeline.');
+        }
+        const { rows: optRows } = await client.query(
+          `SELECT id, is_correct FROM cultural_quiz_options WHERE question_id = $1 ORDER BY ordinal ASC`,
+          [params.questionId]
+        );
+        const incorrectOpts = optRows.filter((opt) => !opt.is_correct).map((opt) => String(opt.id));
+        result.eliminated_option_ids = incorrectOpts.slice(0, 2);
+      } else if (params.lifeline === 'ask_local') {
+        if (!params.questionId) {
+          throw new Error('MISSING_QUESTION_ID: Question ID is required for ask_local lifeline.');
+        }
+        const { rows: qRows } = await client.query(
+          `SELECT hint, explanation FROM cultural_quiz_questions WHERE id = $1`,
+          [params.questionId]
+        );
+        const q = qRows[0];
+        result.hint = q?.hint || 'Local Elder tip: Look closely at Pangasinan coastal traditions and history!';
+      } else if (params.lifeline === 'skip') {
+        result.skipped = true;
+      }
+
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   async submitAttempt(params: SubmitAttemptParams): Promise<CulturalQuizGradedResult> {
@@ -419,25 +557,62 @@ export class CulturalQuizService {
         if (!submitted) {
           throw new Error(`MISSING_QUESTION_ANSWER: Question ${q.ordinal} was not answered.`);
         }
-        const selectedOpt = q.options.find((opt) => opt.id === submitted.selectedOptionId);
-        if (!selectedOpt) {
-          throw new Error(`INVALID_OPTION_ID: Option '${submitted.selectedOptionId}' is not valid for question ${q.ordinal}.`);
-        }
+
+        let isCorrect = false;
+        let selectedOptId = submitted.selectedOptionId || '';
         const correctOpt = q.options.find((opt) => opt.is_correct);
-        const isCorrect = Boolean(selectedOpt.is_correct);
+
+        if (submitted.skipped || (Array.isArray(attemptRow.lifelines_used) && attemptRow.lifelines_used.includes('skip') && !submitted.selectedOptionId)) {
+          isCorrect = true;
+          if (!selectedOptId && q.options.length > 0) {
+            selectedOptId = q.options[0].id;
+          }
+        } else if (q.question_type === 'order' && q.answer_payload?.order) {
+          const expectedOrder = q.answer_payload.order;
+          isCorrect = Array.isArray(submitted.selectedOrder) &&
+            submitted.selectedOrder.length === expectedOrder.length &&
+            submitted.selectedOrder.every((val, idx) => val === expectedOrder[idx]);
+          if (!selectedOptId && q.options.length > 0) {
+            selectedOptId = q.options[0].id;
+          }
+        } else if (q.question_type === 'map_drop' && q.answer_payload?.lat !== undefined) {
+          if (submitted.selectedLocation) {
+            const dist = computeHaversineMeters(
+              submitted.selectedLocation.lat,
+              submitted.selectedLocation.lng,
+              Number(q.answer_payload.lat),
+              Number(q.answer_payload.lng)
+            );
+            const radius = Number(q.answer_payload.radius_meters || (Number(q.answer_payload.radius_km || 5) * 1000));
+            isCorrect = dist <= radius;
+          }
+          if (!selectedOptId && q.options.length > 0) {
+            selectedOptId = q.options[0].id;
+          }
+        } else {
+          const selectedOpt = q.options.find((opt) => opt.id === submitted.selectedOptionId);
+          if (!selectedOpt) {
+            throw new Error(`INVALID_OPTION_ID: Option '${submitted.selectedOptionId}' is not valid for question ${q.ordinal}.`);
+          }
+          selectedOptId = selectedOpt.id;
+          isCorrect = Boolean(selectedOpt.is_correct);
+        }
+
         if (isCorrect) score += 1;
 
         // Save answer record
-        await client.query(
-          `INSERT INTO cultural_quiz_attempt_answers (attempt_id, question_id, selected_option_id, is_correct, answered_at)
-           VALUES ($1, $2, $3, $4, NOW())`,
-          [attemptRow.id, q.id, selectedOpt.id, isCorrect]
-        );
+        if (selectedOptId) {
+          await client.query(
+            `INSERT INTO cultural_quiz_attempt_answers (attempt_id, question_id, selected_option_id, is_correct, answered_at)
+             VALUES ($1, $2, $3, $4, NOW())`,
+            [attemptRow.id, q.id, selectedOptId, isCorrect]
+          );
+        }
 
         breakdown.push({
           question_id: q.id,
           question_text: q.question_text,
-          selected_option_id: selectedOpt.id,
+          selected_option_id: selectedOptId,
           correct_option_id: correctOpt?.id || '',
           is_correct: isCorrect,
           explanation: q.explanation,
@@ -525,13 +700,14 @@ export class CulturalQuizService {
         }
       }
 
-      // 5. Update attempt row with final grade
+      // 5. Update attempt row with final grade and arcade style score
       const { rows: updatedAttemptRows } = await client.query(
         `UPDATE cultural_quiz_attempts
-         SET status = $1, score = $2, xp_awarded = $3, completed_at = NOW(), updated_at = NOW()
+         SET status = $1, score = $2, xp_awarded = $3, completed_at = NOW(), updated_at = NOW(),
+             style_score = $5, streak_max = $6
          WHERE id = $4
          RETURNING *`,
-        [finalStatus, score, xpToAward, attemptRow.id]
+        [finalStatus, score, xpToAward, attemptRow.id, Number(params.styleScore || 0), Number(params.streakMax || 0)]
       );
 
       const finalAttempt = (this.repo as any).mapAttempt(updatedAttemptRows[0]);
@@ -599,8 +775,9 @@ export class CulturalQuizService {
       const { rows: vRows } = await client.query(
         `INSERT INTO cultural_quiz_versions (
            id, quiz_id, version, title, description, language, radius_meters,
-           xp_reward, time_limit_minutes, cooldown_hours, created_by, published_at
-         ) VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, NULL)
+           xp_reward, time_limit_minutes, cooldown_hours, created_by, published_at,
+           host_lines, theme
+         ) VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11, $12)
          RETURNING *`,
         [
           versionId,
@@ -613,15 +790,32 @@ export class CulturalQuizService {
           params.timeLimitMinutes || 30,
           params.cooldownHours || 24,
           params.adminUserId,
+          params.hostLines ? JSON.stringify(params.hostLines) : null,
+          params.theme || 'crt',
         ]
       );
 
       for (const q of params.questions) {
         const qId = randomUUID();
         await client.query(
-          `INSERT INTO cultural_quiz_questions (id, version_id, ordinal, question_text, explanation, source_url)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [qId, versionId, q.ordinal, q.questionText, q.explanation, q.sourceUrl || null]
+          `INSERT INTO cultural_quiz_questions (
+             id, version_id, ordinal, question_text, explanation, source_url,
+             question_type, media_url, hint, round, answer_payload
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [
+            qId,
+            versionId,
+            q.ordinal,
+            q.questionText,
+            q.explanation,
+            q.sourceUrl || null,
+            q.questionType || 'multiple_choice',
+            q.mediaUrl || null,
+            q.hint || null,
+            q.round || 'main',
+            q.answerPayload ? JSON.stringify(q.answerPayload) : null,
+          ]
         );
 
         for (const opt of q.options) {
@@ -737,7 +931,8 @@ export class CulturalQuizService {
       await client.query(
         `UPDATE cultural_quiz_versions
          SET title = $1, description = $2, language = $3, radius_meters = $4,
-             xp_reward = $5, time_limit_minutes = $6, cooldown_hours = $7, created_by = $8
+             xp_reward = $5, time_limit_minutes = $6, cooldown_hours = $7, created_by = $8,
+             host_lines = $10, theme = $11
          WHERE id = $9`,
         [
           params.title,
@@ -749,6 +944,8 @@ export class CulturalQuizService {
           params.cooldownHours || version.cooldown_hours,
           params.adminUserId,
           version.id,
+          params.hostLines !== undefined ? JSON.stringify(params.hostLines) : (version.host_lines ? JSON.stringify(version.host_lines) : null),
+          params.theme || version.theme || 'crt',
         ]
       );
 
@@ -758,9 +955,24 @@ export class CulturalQuizService {
       for (const q of params.questions) {
         const qId = randomUUID();
         await client.query(
-          `INSERT INTO cultural_quiz_questions (id, version_id, ordinal, question_text, explanation, source_url)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [qId, version.id, q.ordinal, q.questionText, q.explanation, q.sourceUrl || null]
+          `INSERT INTO cultural_quiz_questions (
+             id, version_id, ordinal, question_text, explanation, source_url,
+             question_type, media_url, hint, round, answer_payload
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [
+            qId,
+            version.id,
+            q.ordinal,
+            q.questionText,
+            q.explanation,
+            q.sourceUrl || null,
+            q.questionType || 'multiple_choice',
+            q.mediaUrl || null,
+            q.hint || null,
+            q.round || 'main',
+            q.answerPayload ? JSON.stringify(q.answerPayload) : null,
+          ]
         );
 
         for (const opt of q.options) {

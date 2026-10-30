@@ -77,6 +77,7 @@ export const MIGRATIONS = [
   '062_shop_v1.sql',
   '064_procedural_banners.sql',
   '065_quest_marker_urls.sql',
+  '068_quiz_arcade.sql',
   '071_passport_stamps.sql',
   '074_juanchoice_weekly_elections.sql',
   '075_juanchoice_perk_controls.sql',

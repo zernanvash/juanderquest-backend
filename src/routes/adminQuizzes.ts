@@ -19,12 +19,19 @@ const createDraftSchema = z.object({
   xp_reward: z.number().int().positive().default(25),
   time_limit_minutes: z.number().int().min(5).max(120).default(30),
   cooldown_hours: z.number().int().min(1).max(168).default(24),
+  host_lines: z.any().optional(),
+  theme: z.string().max(50).default('crt'),
   questions: z.array(
     z.object({
       ordinal: z.number().int().min(1).max(5),
       question_text: z.string().min(3),
       explanation: z.string().min(3),
       source_url: z.string().url().optional(),
+      question_type: z.enum(['multiple_choice', 'true_false', 'picture', 'order', 'map_drop']).default('multiple_choice'),
+      media_url: z.string().url().optional().nullable(),
+      hint: z.string().max(500).optional().nullable(),
+      round: z.enum(['main', 'special', 'lightning']).default('main'),
+      answer_payload: z.any().optional().nullable(),
       options: z.array(
         z.object({
           ordinal: z.number().int().min(1).max(4),
@@ -73,6 +80,8 @@ router.post('/admin/quizzes', authenticateToken, requireAdmin, async (req: AuthR
       xpReward: parsed.data.xp_reward,
       timeLimitMinutes: parsed.data.time_limit_minutes,
       cooldownHours: parsed.data.cooldown_hours,
+      hostLines: parsed.data.host_lines,
+      theme: parsed.data.theme,
       adminUserId: req.user!.id,
       isTest: parsed.data.is_test,
       questions: parsed.data.questions.map((q) => ({
@@ -80,6 +89,11 @@ router.post('/admin/quizzes', authenticateToken, requireAdmin, async (req: AuthR
         questionText: q.question_text,
         explanation: q.explanation,
         sourceUrl: q.source_url,
+        questionType: q.question_type,
+        mediaUrl: q.media_url,
+        hint: q.hint,
+        round: q.round,
+        answerPayload: q.answer_payload,
         options: q.options.map((opt) => ({
           ordinal: opt.ordinal,
           optionText: opt.option_text,
@@ -139,6 +153,8 @@ router.patch('/admin/quizzes/:id', authenticateToken, requireAdmin, async (req: 
       xpReward: parsed.data.xp_reward,
       timeLimitMinutes: parsed.data.time_limit_minutes,
       cooldownHours: parsed.data.cooldown_hours,
+      hostLines: parsed.data.host_lines,
+      theme: parsed.data.theme,
       adminUserId: req.user!.id,
       isTest: parsed.data.is_test,
       questions: parsed.data.questions.map((q) => ({
@@ -146,6 +162,11 @@ router.patch('/admin/quizzes/:id', authenticateToken, requireAdmin, async (req: 
         questionText: q.question_text,
         explanation: q.explanation,
         sourceUrl: q.source_url,
+        questionType: q.question_type,
+        mediaUrl: q.media_url,
+        hint: q.hint,
+        round: q.round,
+        answerPayload: q.answer_payload,
         options: q.options.map((opt) => ({
           ordinal: opt.ordinal,
           optionText: opt.option_text,
