@@ -96,18 +96,6 @@ else
   echo 'RESEND_API_KEY not set: sign-up and password reset emails will not be delivered.' >&2
 fi
 
-# Auth emails (sign-up / password reset codes) through Resend. Without this private file the
-# codes are not delivered and the outbox records them as failed.
-resend_key_file="${JDQ_ALPHA_RESEND_KEY_FILE:-$HOME/.config/juanderquest-alpha/resend-api-key}"
-if [ -z "${RESEND_API_KEY:-}" ] && [ -f "$resend_key_file" ]; then
-  RESEND_API_KEY=$(sed -n '1p' "$resend_key_file" | tr -d '[:space:]')
-fi
-if [ -n "${RESEND_API_KEY:-}" ]; then
-  export RESEND_API_KEY
-else
-  echo 'RESEND_API_KEY not set: sign-up and password reset emails will not be delivered.' >&2
-fi
-
 # Optional non-secret runtime overrides (release runbook Part B.3), e.g. after the
 # Valhalla Philippines rebuild. The file is parsed, never executed, and only the
 # allow-listed keys below are applied. Secrets never belong in this file.
