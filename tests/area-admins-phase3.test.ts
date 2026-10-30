@@ -53,21 +53,21 @@ realPgDescribe('Plan 59 phase 3 area administrator scope (real PostgreSQL)', () 
 
     for (const [id, town, municipality] of [[inside.spot, 'p3-dagupan', 'Dagupan City'], [outside.spot, 'p3-san-fernando', 'San Fernando']]) {
       await q(`INSERT INTO spots(id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,price_level,source_type,source_name,trust_level,status,town_area_id)
-               VALUES ($1,$1,$1,'Area scope test spot','culture_heritage','heritage_site',$2,'',16,120,1,'lgu','test','lgu_verified','published',$3)`, [id, municipality, town]);
+               VALUES ($1,$2,$3,'Area scope test spot','culture_heritage','heritage_site',$4,'',16,120,1,'lgu','test','lgu_verified','published',$5)`, [id, id, id, municipality, town]);
       spotStore.spots.push({ id, slug: id, name: id, description: '', category: 'culture_heritage', subcategory: 'heritage_site', tags: [], municipality, address: '', gps_lat: 16, gps_lng: 120, price_level: 1, hours: {}, amenities: [], image_url: '', source_type: 'lgu', source_name: 'test', trust_level: 'lgu_verified', status: 'published', town_area_id: town, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
     }
     for (const [id, town] of [[inside.merchant, 'p3-dagupan'], [outside.merchant, 'p3-san-fernando'], ['m-p3-unassigned', null]]) {
-      await q('INSERT INTO merchants(id,name,location,description,town_area_id) VALUES ($1,$1,$2,$3,$4)', [id, 'Test location', 'Area scope test merchant', town]);
+      await q('INSERT INTO merchants(id,name,location,description,town_area_id) VALUES ($1,$2,$3,$4,$5)', [id, id, 'Test location', 'Area scope test merchant', town]);
     }
     for (const [id, merchant] of [[inside.voucher, inside.merchant], [outside.voucher, outside.merchant]]) {
-      await q('INSERT INTO vouchers(id,merchant_id,title,description,cost_points,is_active) VALUES ($1,$2,$1,$3,100,TRUE)', [id, merchant, 'Area scope test voucher']);
+      await q('INSERT INTO vouchers(id,merchant_id,title,description,cost_points,is_active) VALUES ($1,$2,$3,$4,100,TRUE)', [id, merchant, id, 'Area scope test voucher']);
     }
     for (const [id, user, municipality, province] of [
       [inside.application, 'p3-applicant-a', 'Dagupan City', 'Pangasinan'],
       [outside.application, 'p3-applicant-b', 'San Fernando', 'La Union'],
     ]) {
       await q(`INSERT INTO merchant_affiliate_applications(id,user_id,business_name,category,municipality,contact_name,contact_email,contact_phone,business_province)
-               VALUES ($1,$2,$1,'food',$3,'Contact','contact@test.local','09170000000',$4)`, [id, user, municipality, province]);
+               VALUES ($1,$2,$3,'food',$4,'Contact','contact@test.local','09170000000',$5)`, [id, user, id, municipality, province]);
     }
     await db.hydrateFromPg(fixture.pool);
 
