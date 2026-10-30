@@ -404,11 +404,26 @@ export class CulturalQuizService {
       if (attempt.user_id !== params.userId) {
         throw new Error('UNAUTHORIZED_ATTEMPT: You do not own this quiz attempt.');
       }
+      if (attempt.quiz_id !== params.quizId) {
+        throw new Error('ATTEMPT_NOT_FOUND: Attempt does not belong to this quiz.');
+      }
       if (attempt.status !== 'in_progress') {
         throw new Error(`ATTEMPT_NOT_ACTIVE: Attempt is already ${attempt.status}.`);
       }
       if (new Date(attempt.expires_at).getTime() < Date.now()) {
         throw new Error('ATTEMPT_EXPIRED: The time limit for this attempt has passed.');
+      }
+
+      // Lifelines only ever act on a question of this attempt's own quiz version.
+      if (!params.questionId) {
+        throw new Error(`MISSING_QUESTION_ID: Question ID is required for the ${params.lifeline} lifeline.`);
+      }
+      const { rows: questionRows } = await client.query(
+        'SELECT id, hint FROM cultural_quiz_questions WHERE id = $1 AND version_id = $2',
+        [params.questionId, attempt.version_id]
+      );
+      if (!questionRows.length) {
+        throw new Error('INVALID_QUESTION_ID: Question is not part of this attempt.');
       }
 
       const usedLifelines: string[] = Array.isArray(attempt.lifelines_used) ? attempt.lifelines_used : [];
@@ -436,25 +451,19 @@ export class CulturalQuizService {
       };
 
       if (params.lifeline === 'fifty_fifty') {
-        if (!params.questionId) {
-          throw new Error('MISSING_QUESTION_ID: Question ID is required for fifty_fifty lifeline.');
-        }
         const { rows: optRows } = await client.query(
           `SELECT id, is_correct FROM cultural_quiz_options WHERE question_id = $1 ORDER BY ordinal ASC`,
           [params.questionId]
         );
-        const incorrectOpts = optRows.filter((opt) => !opt.is_correct).map((opt) => String(opt.id));
-        result.eliminated_option_ids = incorrectOpts.slice(0, 2);
-      } else if (params.lifeline === 'ask_local') {
-        if (!params.questionId) {
-          throw new Error('MISSING_QUESTION_ID: Question ID is required for ask_local lifeline.');
+        // Always leave at least two options so 50:50 never reveals the answer (e.g. on true/false).
+        const removable = Math.min(2, optRows.length - 2);
+        if (removable < 1) {
+          throw new Error('LIFELINE_NOT_AVAILABLE: 50:50 needs at least three options.');
         }
-        const { rows: qRows } = await client.query(
-          `SELECT hint, explanation FROM cultural_quiz_questions WHERE id = $1`,
-          [params.questionId]
-        );
-        const q = qRows[0];
-        result.hint = q?.hint || 'Local Elder tip: Look closely at Pangasinan coastal traditions and history!';
+        const incorrectOpts = optRows.filter((opt) => !opt.is_correct).map((opt) => String(opt.id));
+        result.eliminated_option_ids = incorrectOpts.slice(0, removable);
+      } else if (params.lifeline === 'ask_local') {
+        result.hint = questionRows[0].hint || 'Local Elder tip: Look closely at Pangasinan coastal traditions and history!';
       } else if (params.lifeline === 'skip') {
         result.skipped = true;
       }
@@ -549,6 +558,13 @@ export class CulturalQuizService {
         throw new Error('DUPLICATE_ANSWERS: Duplicate question answers provided.');
       }
 
+      // A skip is honoured only after the Skip lifeline was used, for one question, and never scores.
+      const skippedCount = params.answers.filter((a) => a.skipped).length;
+      const skipUsed = Array.isArray(attemptRow.lifelines_used) && attemptRow.lifelines_used.includes('skip');
+      if (skippedCount > 1 || (skippedCount === 1 && !skipUsed)) {
+        throw new Error('INVALID_SKIP: Only one question can be skipped, and only with the Skip lifeline.');
+      }
+
       let score = 0;
       const breakdown = [];
 
@@ -559,20 +575,17 @@ export class CulturalQuizService {
         }
 
         let isCorrect = false;
-        let selectedOptId = submitted.selectedOptionId || '';
+        let selectedOptId = '';
         const correctOpt = q.options.find((opt) => opt.is_correct);
 
-        if (submitted.skipped || (Array.isArray(attemptRow.lifelines_used) && attemptRow.lifelines_used.includes('skip') && !submitted.selectedOptionId)) {
-          isCorrect = true;
-          if (!selectedOptId && q.options.length > 0) {
-            selectedOptId = q.options[0].id;
-          }
+        if (submitted.skipped) {
+          // Skipped: no answer row (selected_option_id is NOT NULL) and no point.
         } else if (q.question_type === 'order' && q.answer_payload?.order) {
           const expectedOrder = q.answer_payload.order;
           isCorrect = Array.isArray(submitted.selectedOrder) &&
             submitted.selectedOrder.length === expectedOrder.length &&
             submitted.selectedOrder.every((val, idx) => val === expectedOrder[idx]);
-          if (!selectedOptId && q.options.length > 0) {
+          if (q.options.length > 0) {
             selectedOptId = q.options[0].id;
           }
         } else if (q.question_type === 'map_drop' && q.answer_payload?.lat !== undefined) {
@@ -586,7 +599,7 @@ export class CulturalQuizService {
             const radius = Number(q.answer_payload.radius_meters || (Number(q.answer_payload.radius_km || 5) * 1000));
             isCorrect = dist <= radius;
           }
-          if (!selectedOptId && q.options.length > 0) {
+          if (q.options.length > 0) {
             selectedOptId = q.options[0].id;
           }
         } else {

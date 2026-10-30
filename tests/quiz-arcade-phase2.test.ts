@@ -204,6 +204,30 @@ describe('Cultural Quiz Arcade Phase 2 (Data Model, Lifelines & Scoring)', () =>
     }
   });
 
+  it('rejects lifelines on a question outside the attempt without using them up', async () => {
+    const res = await request(app)
+      .post(`/api/v1/quizzes/${createdQuizId}/attempts/${attemptId}/lifeline`)
+      .set('Authorization', `Bearer ${travelerToken}`)
+      .send({ lifeline: 'ask_local', question_id: 'question-from-another-quiz' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toContain('INVALID_QUESTION_ID');
+
+    const wrongQuiz = await request(app)
+      .post(`/api/v1/quizzes/another-quiz/attempts/${attemptId}/lifeline`)
+      .set('Authorization', `Bearer ${travelerToken}`)
+      .send({ lifeline: 'ask_local', question_id: questions[0].id });
+    expect(wrongQuiz.status).toBe(404);
+  });
+
+  it('refuses 50/50 on a two-option question so it cannot reveal the answer', async () => {
+    const res = await request(app)
+      .post(`/api/v1/quizzes/${createdQuizId}/attempts/${attemptId}/lifeline`)
+      .set('Authorization', `Bearer ${travelerToken}`)
+      .send({ lifeline: 'fifty_fifty', question_id: questions[1].id });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toContain('LIFELINE_NOT_AVAILABLE');
+  });
+
   it('allows the traveler to use 50/50 lifeline to eliminate 2 incorrect options', async () => {
     const q1 = questions[0];
     const res = await request(app)
@@ -292,6 +316,14 @@ describe('Cultural Quiz Arcade Phase 2 (Data Model, Lifelines & Scoring)', () =>
       streak_max: 5,
     };
 
+    // Skipping more than the one question the Skip lifeline allows is refused, and the attempt stays open.
+    const twoSkips = await request(app)
+      .put(`/api/v1/quiz-attempts/${attemptId}/submission`)
+      .set('Authorization', `Bearer ${travelerToken}`)
+      .send({ ...submissionPayload, answers: submissionPayload.answers.map((a, i) => (i < 2 ? { question_id: a.question_id, skipped: true } : a)) });
+    expect(twoSkips.status).toBe(400);
+    expect(twoSkips.body.error.message).toContain('INVALID_SKIP');
+
     const res = await request(app)
       .put(`/api/v1/quiz-attempts/${attemptId}/submission`)
       .set('Authorization', `Bearer ${travelerToken}`)
@@ -300,7 +332,9 @@ describe('Cultural Quiz Arcade Phase 2 (Data Model, Lifelines & Scoring)', () =>
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data.passed).toBe(true);
-    expect(res.body.data.score).toBe(5);
+    // The skipped question earns no point: 4 of 5 still passes.
+    expect(res.body.data.score).toBe(4);
+    expect(res.body.data.breakdown[2].is_correct).toBe(false);
     expect(res.body.data.attempt.style_score).toBe(850);
     expect(res.body.data.attempt.streak_max).toBe(5);
     expect(res.body.data.attempt.lifelines_used).toEqual(

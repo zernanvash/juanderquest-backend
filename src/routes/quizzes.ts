@@ -200,6 +200,9 @@ router.post('/quizzes/:id/attempts/:attemptId/lifeline', authenticateToken, asyn
     if (msg.startsWith('LIFELINE_ALREADY_USED')) {
       return res.status(400).json({ success: false, error: { code: 'LIFELINE_ALREADY_USED', message: msg } });
     }
+    if (msg.startsWith('MISSING_QUESTION_ID') || msg.startsWith('INVALID_QUESTION_ID') || msg.startsWith('LIFELINE_NOT_AVAILABLE')) {
+      return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: msg } });
+    }
     if (msg.startsWith('ATTEMPT_NOT_FOUND')) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: msg } });
     }
@@ -283,7 +286,7 @@ router.put('/quiz-attempts/:id/submission', authenticateToken, async (req: AuthR
     if (msg.startsWith('UNAUTHORIZED_ATTEMPT')) {
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: msg } });
     }
-    if (msg.startsWith('MISSING_ANSWERS') || msg.startsWith('DUPLICATE_ANSWERS') || msg.startsWith('INVALID_OPTION_ID')) {
+    if (msg.startsWith('MISSING_ANSWERS') || msg.startsWith('DUPLICATE_ANSWERS') || msg.startsWith('INVALID_OPTION_ID') || msg.startsWith('INVALID_SKIP')) {
       return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: msg } });
     }
 
