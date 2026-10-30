@@ -57,6 +57,8 @@ router.post('/admin/area-admins', requireDeveloper, async (req: AuthRequest, res
     const target = userResult.rows[0];
     if (target.role === 'admin' || target.role === 'qa') { await client.query('ROLLBACK'); return res.status(409).json({ success: false, error: { code: 'ROLE_CONFLICT', message: 'Platform administrators and QA users cannot be converted to area admins.' } }); }
     const before = await client.query('SELECT * FROM admin_area_assignments WHERE user_id=$1 AND area_id=$2 FOR UPDATE', [parsed.data.user_id, parsed.data.area_id]);
+    // A revoked assignment being granted again is a new grant, not an update.
+    const isUpdate = Boolean(before.rowCount && !before.rows[0].revoked_at);
     const assignment = await client.query(
       `INSERT INTO admin_area_assignments(id,user_id,area_id,powers,granted_by,revoked_at)
        VALUES ($1,$2,$3,$4,$5,NULL)
@@ -72,12 +74,12 @@ router.post('/admin/area-admins', requireDeveloper, async (req: AuthRequest, res
     }
     await client.query(`INSERT INTO admin_audit_log(id,actor_id,actor_role,area_id,action,subject_type,subject_id,before,after)
       VALUES($1,$2,'admin',$3,$4,'area_admin_assignment',$5,$6::jsonb,$7::jsonb)`,
-      [randomUUID(), req.user!.id, parsed.data.area_id, before.rowCount ? 'area_admin.assignment_updated' : 'area_admin.granted', assignment.rows[0].id,
+      [randomUUID(), req.user!.id, parsed.data.area_id, isUpdate ? 'area_admin.assignment_updated' : 'area_admin.granted', assignment.rows[0].id,
         before.rowCount ? JSON.stringify(before.rows[0]) : null, JSON.stringify(assignment.rows[0])]);
     await client.query('COMMIT');
     const mirror = db.findUserById(parsed.data.user_id);
     if (mirror) mirror.role = 'area_admin' as typeof mirror.role;
-    return res.status(before.rowCount ? 200 : 201).json({ success: true, data: assignment.rows[0] });
+    return res.status(isUpdate ? 200 : 201).json({ success: true, data: assignment.rows[0] });
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
     const message = error instanceof Error ? error.message : 'Grant failed.';

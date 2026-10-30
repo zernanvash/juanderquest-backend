@@ -26,7 +26,7 @@ describe('Plan 59 area administrator access (real PostgreSQL when JDQ_REAL_PG_UR
     // Granting/revoking changes users.role, which is developer-only since migration 076.
     await fixture.pool.query(`INSERT INTO users(id,seed_id,display_name,email,role,admin_scope) VALUES
       ($1,'area-admin-platform-seed','Platform Developer','area-platform@test.local','admin','developer'),
-      ($2,'area-admin-user-seed','Area Admin','area-user@test.local','user',NULL),
+      ($2,'area-admin-user-seed','Area Admin','area-user@test.local','area_admin',NULL),
       ($3,'area-admin-plain-seed','Platform Admin','area-plain@test.local','admin','platform')`, [platformId, areaUserId, plainAdminId]);
     originalFindById = db.usersRepo.findById.bind(db.usersRepo);
     jest.spyOn(db.usersRepo, 'findById').mockImplementation(async (id: string) => {
