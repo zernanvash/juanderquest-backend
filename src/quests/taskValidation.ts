@@ -22,6 +22,7 @@ export const locationCfgSchema = z.object({
 export const qrCfgSchema = z.object({
   type: z.literal('qr'),
   fence: geoFenceSchema,
+  scan_mode: z.enum(['traveler_scans', 'host_scans_traveler']).default('traveler_scans').optional(),
   // Note: marker_code is server-assigned; if supplied by client it will be ignored/stripped
 });
 
@@ -87,6 +88,7 @@ export const questTaskInputSchema = z.object({
   gps_lng: z.number().finite().min(PHILIPPINES_BOUNDS.minLng).max(PHILIPPINES_BOUNDS.maxLng).optional(),
   radius_meters: z.number().int().min(30).max(500).optional(),
   hint: z.string().max(200).optional(),
+  qr_scan_mode: z.enum(['traveler_scans', 'host_scans_traveler']).optional(),
   action_kind: z.string().optional(),
   action_target_id: z.string().optional(),
 });

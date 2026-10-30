@@ -5,6 +5,7 @@ import type {
   VerificationMethod,
   GeoFence,
   InAppTask,
+  QrScanMode,
 } from './taskTypes.js';
 
 export interface SpotContext {
@@ -91,12 +92,18 @@ export function normalizeTasks(
       }
     }
 
+    const qrScanMode: QrScanMode =
+      raw?.verification?.scan_mode === 'host_scans_traveler' || raw?.qr_scan_mode === 'host_scans_traveler'
+        ? 'host_scans_traveler'
+        : 'traveler_scans';
+
     // Build verification object
     let verification: TaskVerificationConfig;
     if (raw?.verification && typeof raw.verification === 'object' && raw.verification.type === checkpointType) {
       verification = { ...raw.verification };
       if (checkpointType === 'qr') {
         (verification as any).marker_code = markerCode;
+        (verification as any).scan_mode = qrScanMode;
       }
     } else {
       // Build from legacy fields
@@ -105,7 +112,7 @@ export function normalizeTasks(
           verification = { type: 'location', fence };
           break;
         case 'qr':
-          verification = { type: 'qr', fence, marker_code: markerCode };
+          verification = { type: 'qr', fence, marker_code: markerCode, scan_mode: qrScanMode };
           break;
         case 'photo':
           verification = {
@@ -162,6 +169,7 @@ export function normalizeTasks(
       radius_meters: fence.radius_meters,
       hint: raw?.hint || (checkpointType === 'photo' && verification.type === 'photo' ? verification.prompt : undefined),
       marker_code: checkpointType === 'qr' ? markerCode : undefined,
+      qr_scan_mode: checkpointType === 'qr' ? qrScanMode : undefined,
     };
 
     return task;

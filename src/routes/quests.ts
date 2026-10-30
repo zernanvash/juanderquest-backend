@@ -9,7 +9,7 @@ import { getPool } from '../db/pool.js';
 import { EconomyError, EconomyService } from '../economy/service.js';
 import { isLocalEconomyProfile } from '../economy/profile.js';
 import { env } from '../config/env.js';
-import { signQuestChallenge, verifyQuestChallengeToken, signQuestArChallenge, verifyQuestArChallengeToken, AR_CHALLENGE_TYP } from '../auth/tokens.js';
+import { signQuestChallenge, verifyQuestChallengeToken, signQuestArChallenge, verifyQuestArChallengeToken, signQuestQrPass, verifyQuestQrPassToken, AR_CHALLENGE_TYP } from '../auth/tokens.js';
 import { spotStore } from '../spots/store.js';
 import { optionalAuthenticateToken, authenticateToken, checkQAAuthorization, isAuthorizedQA, AuthRequest } from '../middleware/auth.js';
 import { claimChallengeNonce, releaseChallengeNonce } from '../services/submissions.js';
@@ -22,11 +22,14 @@ import type { QuestTask } from '../quests/taskTypes.js';
 import { questTaskInputSchema, validateTasksWithinDistance } from '../quests/taskValidation.js';
 import { hasCompletedQuest } from '../services/quest-completion.js';
 import { hasFundingPlan, requireFundingHold, startFundedAttempt } from '../funding/holds.js';
-import { FundingError } from '../funding/transaction.js';
+import { FundingError, publishFunding } from '../funding/transaction.js';
 import { fundingErrorResponse } from './fundingPlans.js';
-import { lockGovernanceSnapshot } from '../governance/transaction.js';
+import { lockGovernanceSnapshot, commitGovernanceTransaction } from '../governance/transaction.js';
 import { publicFundingSummaries } from '../funding/readModel.js';
 import { handleQuestStepVerified } from '../stamps/hooks.js';
+import { settleReward } from '../funding/rewardSettlement.js';
+import { progressionService } from '../progression/service.js';
+import { governanceStore } from './proposals.js';
 
 const router = Router();
 
@@ -484,12 +487,14 @@ router.get('/quests/:id/qr-sheet', authenticateToken, async (req: AuthRequest, r
 
   const sheet = qrTasks.map((t) => {
     const marker = (t.verification as any)?.marker_code || t.marker_code;
+    const scanMode = (t.verification as any)?.scan_mode || t.qr_scan_mode || 'traveler_scans';
     return {
       task_key: t.key,
       step_order: t.step_order,
       title: t.title,
       marker_code: marker,
       qr_payload: marker,
+      scan_mode: scanMode,
       fence: (t.verification as any)?.fence || { lat: t.gps_lat, lng: t.gps_lng, radius_meters: t.radius_meters },
     };
   });
@@ -1515,11 +1520,17 @@ router.post(
   }
 );
 
-// POST /quests/:id/submit-for-review - Submit quest for final independent review
-router.post('/quests/:id/submit-for-review', authenticateToken, async (req: AuthRequest, res: Response, next: NextFunction) => {
+// Helper for submit-for-review and instant completion when all required steps are server-verified
+async function handleSubmitOrCompleteAttempt(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+  options: { allowInstantReward: boolean }
+) {
   const { id } = req.params;
   const userId = req.user!.id;
   const pool = getPool();
+  const quest = db.findQuestById(id, true);
 
   let activeAttempt: QuestAttemptRow | null = null;
   let steps: QuestStepEvidenceRow[] = [];
@@ -1570,6 +1581,125 @@ router.post('/quests/:id/submit-for-review', authenticateToken, async (req: Auth
     });
   }
 
+  const hasPendingReview = steps.some((s) => s.required && s.status === 'pending_review');
+  const canSettleImmediately = options.allowInstantReward && !hasPendingReview && Boolean(quest);
+
+  if (canSettleImmediately && quest) {
+    const awardedPoints = quest.reward_points || 0;
+    if (pool) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await lockGovernanceSnapshot(client);
+        await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [userId]);
+        if (await hasCompletedQuest(db, userId, id, client)) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({
+            success: false,
+            error: { code: 'ALREADY_COMPLETED', message: 'You have already completed this quest.' },
+          });
+        }
+        await requireFundingHold(client, userId, id);
+        const rewardSettlement = await settleReward({
+          client,
+          userId,
+          questId: id,
+          referenceId: activeAttempt.id,
+          actorId: userId,
+          rewardPoints: awardedPoints,
+        });
+        const updatedAttemptRes = await client.query(
+          "UPDATE quest_attempts SET status = 'completed', completed_at = NOW(), updated_at = NOW() WHERE id = $1 RETURNING *",
+          [activeAttempt.id]
+        );
+        if (env.PROGRESSION_ENABLED && env.PROGRESSION_EMIT_OUTBOX_ENABLED) {
+          await progressionService.recordApprovalOutboxEvent(
+            {
+              id: activeAttempt.id,
+              user_id: userId,
+              quest_id: id,
+              created_at: activeAttempt.created_at,
+              reviewed_at: new Date().toISOString(),
+              is_test: Boolean(quest.is_test),
+            },
+            client
+          );
+        }
+        await commitGovernanceTransaction(client);
+        if (rewardSettlement.fundedGroups) publishFunding(rewardSettlement.fundedGroups);
+        const gov = rewardSettlement.governanceResult;
+        if (gov) {
+          governanceStore.publishCommittedTransaction({
+            entries: gov.entries,
+            audit: [gov.audit],
+            userBalanceUpdate: { userId, demoPoints: rewardSettlement.newPoints },
+          });
+        }
+
+        const completedAttempt = updatedAttemptRes.rows[0] ? mapAttempt(updatedAttemptRes.rows[0]) : activeAttempt;
+        completedAttempt.status = 'completed';
+        completedAttempt.completed_at = completedAttempt.completed_at || new Date().toISOString();
+        const memAttempt = db.quest_attempts.find((a) => a.id === activeAttempt!.id);
+        if (memAttempt) {
+          memAttempt.status = 'completed';
+          memAttempt.completed_at = completedAttempt.completed_at;
+          memAttempt.updated_at = completedAttempt.updated_at;
+        }
+        const traveler = db.users.find((u) => u.id === userId);
+        if (traveler) traveler.demo_points = rewardSettlement.newPoints;
+
+        return res.status(200).json({
+          success: true,
+          data: {
+            ...sanitizeAttemptSnapshot(completedAttempt),
+            attempt: sanitizeAttemptSnapshot(completedAttempt),
+            reward_awarded: true,
+            awarded_points: rewardSettlement.awardedPoints,
+            new_points: rewardSettlement.newPoints,
+            ...(rewardSettlement.voucherPerk ? { voucher_perk: rewardSettlement.voucherPerk } : {}),
+          },
+          message: `Quest completed! You earned +${rewardSettlement.awardedPoints} points.`,
+        });
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        if (err instanceof FundingError) return fundingErrorResponse(res, err);
+        return next(err);
+      } finally {
+        client.release();
+      }
+    }
+
+    // In-memory immediate completion fallback
+    if (await hasCompletedQuest(db, userId, id)) {
+      return res.status(409).json({
+        success: false,
+        error: { code: 'ALREADY_COMPLETED', message: 'You have already completed this quest.' },
+      });
+    }
+    const nowIso = new Date().toISOString();
+    activeAttempt.status = 'completed';
+    activeAttempt.completed_at = nowIso;
+    activeAttempt.updated_at = nowIso;
+    const rewardSettlement = await settleReward({
+      userId,
+      questId: id,
+      referenceId: activeAttempt.id,
+      actorId: userId,
+      rewardPoints: awardedPoints,
+    });
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...sanitizeAttemptSnapshot(activeAttempt),
+        attempt: sanitizeAttemptSnapshot(activeAttempt),
+        reward_awarded: true,
+        awarded_points: rewardSettlement.awardedPoints,
+        new_points: rewardSettlement.newPoints,
+      },
+      message: `Quest completed! You earned +${rewardSettlement.awardedPoints} points.`,
+    });
+  }
+
   if (pool) {
     const client = await pool.connect();
     try {
@@ -1592,9 +1722,25 @@ router.post('/quests/:id/submit-for-review', authenticateToken, async (req: Auth
 
   return res.status(200).json({
     success: true,
-    data: sanitizeAttemptSnapshot(activeAttempt),
+    data: {
+      ...sanitizeAttemptSnapshot(activeAttempt),
+      attempt: sanitizeAttemptSnapshot(activeAttempt),
+      reward_awarded: false,
+      awarded_points: 0,
+    },
     message: 'Quest attempt submitted for independent review. Rewards will be granted upon review approval.',
   });
+}
+
+// POST /quests/:id/submit-for-review - Submit quest for final independent review (or claim reward if claim_reward=true and all steps verified)
+router.post('/quests/:id/submit-for-review', authenticateToken, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  const claimReward = req.body?.claim_reward === true || req.body?.claim_reward === 'true';
+  return handleSubmitOrCompleteAttempt(req, res, next, { allowInstantReward: claimReward });
+});
+
+// POST /quests/:id/complete - Complete quest & settle rewards immediately if all required tasks are verified (or submit for review if photo tasks pending)
+router.post('/quests/:id/complete', authenticateToken, async (req: AuthRequest, res: Response, next: NextFunction) => {
+  return handleSubmitOrCompleteAttempt(req, res, next, { allowInstantReward: true });
 });
 
 // GET /quests/evidence/:evidenceId/file - Private evidence secure access
@@ -1843,6 +1989,379 @@ router.post(
         task_key: taskKey,
         expires_at: new Date(Date.now() + expiresInSec * 1000).toISOString(),
       },
+    });
+  }
+);
+
+// POST /quests/:id/steps/:stepOrder/qr-pass - Issue signed traveler QR pass for reverse host-scan QR tasks
+router.post(
+  '/quests/:id/steps/:stepOrder/qr-pass',
+  authenticateToken,
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    const { id, stepOrder: stepOrderStr } = req.params;
+    const stepOrder = Number(stepOrderStr);
+    const userId = req.user!.id;
+
+    const quest = db.findQuestById(id, true);
+    if (!quest) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Quest not found.' } });
+    }
+
+    const pool = getPool();
+    let activeAttempt: QuestAttemptRow | null = null;
+    let stepEvidence: QuestStepEvidenceRow | null = null;
+
+    if (pool) {
+      try {
+        const attemptRes = await pool.query(
+          "SELECT * FROM quest_attempts WHERE user_id = $1 AND quest_id = $2 AND status = 'in_progress' ORDER BY created_at DESC LIMIT 1",
+          [userId, id]
+        );
+        if (attemptRes.rows[0]) {
+          activeAttempt = mapAttempt(attemptRes.rows[0]);
+          const stepRes = await pool.query(
+            "SELECT * FROM quest_step_evidence WHERE attempt_id = $1 AND step_order = $2",
+            [activeAttempt.id, stepOrder]
+          );
+          if (stepRes.rows[0]) {
+            stepEvidence = mapStepEvidence(stepRes.rows[0]);
+          }
+        }
+      } catch (err) {
+        return next(err);
+      }
+    }
+
+    if (!activeAttempt) {
+      const memAttempt = db.getActiveAttempt(userId, id);
+      if (memAttempt) {
+        activeAttempt = memAttempt;
+        stepEvidence = db.findStepEvidence(memAttempt.id, stepOrder) ?? null;
+      }
+    }
+
+    if (!activeAttempt) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'NO_ACTIVE_ATTEMPT', message: 'You have not started an active attempt for this quest.' },
+      });
+    }
+
+    if (!stepEvidence) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'STEP_NOT_FOUND', message: `Step ${stepOrder} not found for this attempt.` },
+      });
+    }
+
+    if (stepEvidence.status === 'not_started') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'STEP_NOT_READY', message: `Step ${stepOrder} is locked. Complete previous steps first.` },
+      });
+    }
+
+    const snapshotTasks: QuestTask[] = Array.isArray(activeAttempt.steps_snapshot) && activeAttempt.steps_snapshot.length > 0
+      ? normalizeTasks(activeAttempt.steps_snapshot, quest)
+      : normalizeTasks(quest.steps, quest);
+
+    const stepDef = snapshotTasks.find((s) => s.step_order === stepOrder);
+    if (!stepDef || stepDef.checkpoint_type !== 'qr') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'NOT_QR_TASK', message: `Step ${stepOrder} is not a QR task.` },
+      });
+    }
+
+    const nonce = randomUUID();
+    const expiresInSec = 600; // 10 minutes
+    const taskKey = stepEvidence.task_key || stepDef.key;
+    const token = signQuestQrPass(
+      {
+        user_id: userId,
+        quest_id: quest.id,
+        attempt_id: activeAttempt.id,
+        step_order: stepOrder,
+        task_key: taskKey,
+        nonce,
+      },
+      expiresInSec
+    );
+
+    const travelerUser = db.users.find((u) => u.id === userId);
+    const travelerDisplayName = (travelerUser as any)?.display_name || (travelerUser as any)?.name || travelerUser?.seed_id || userId;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        qr_pass_token: token,
+        qr_payload: `JDQPASS:${token}`,
+        quest_id: quest.id,
+        attempt_id: activeAttempt.id,
+        step_order: stepOrder,
+        task_key: taskKey,
+        status: stepEvidence.status,
+        traveler_name: travelerDisplayName,
+        expires_at: new Date(Date.now() + expiresInSec * 1000).toISOString(),
+      },
+    });
+  }
+);
+
+// POST /quests/:id/steps/:stepOrder/host-verify-qr - Quest author/host or admin scans traveler's QR pass to verify step
+const hostVerifyQrSchema = z.object({
+  params: z.object({ id: z.string().min(1), stepOrder: z.string().regex(/^[1-9]\d{0,2}$/) }),
+  body: z.object({
+    qr_pass_token: z.string().trim().min(1).max(4096),
+    captured_lat: optionalLat,
+    captured_lng: optionalLng,
+    captured_accuracy: optionalAccuracy,
+  }),
+});
+
+router.post(
+  '/quests/:id/steps/:stepOrder/host-verify-qr',
+  authenticateToken,
+  validateRequest(hostVerifyQrSchema),
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    const { id, stepOrder: stepOrderStr } = req.params;
+    const stepOrder = Number(stepOrderStr);
+    const hostUserId = req.user!.id;
+    const { qr_pass_token, captured_lat, captured_lng, captured_accuracy } = req.body;
+
+    const quest = db.findQuestById(id, true);
+    if (!quest) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Quest not found.' } });
+    }
+
+    const spot = spotStore.spots.find((s) => s.quest_id === quest.id);
+    const isAuthor = Boolean(hostUserId && (quest.author_id === hostUserId || spot?.created_by === hostUserId));
+    const isAdminOrQA = Boolean(req.user?.role === 'admin' || req.user?.role === 'qa');
+
+    if (!isAuthor && !isAdminOrQA) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN_NOT_QUEST_HOST', message: 'Only the quest host/author or an administrator can scan and verify traveler QR passes.' },
+      });
+    }
+
+    let claims: ReturnType<typeof verifyQuestQrPassToken> = null;
+    try {
+      claims = verifyQuestQrPassToken(qr_pass_token);
+    } catch (err: any) {
+      if (err?.name === 'TokenExpiredError') {
+        return res.status(401).json({
+          success: false,
+          error: { code: 'QR_PASS_EXPIRED', message: "The traveler's QR pass has expired. Ask them to refresh their pass." },
+        });
+      }
+    }
+
+    if (!claims || claims.quest_id !== quest.id || claims.step_order !== stepOrder) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_QR_PASS', message: 'This QR pass is invalid or belongs to a different quest or task step.' },
+      });
+    }
+
+    if (claims.user_id === hostUserId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'SELF_VERIFY_FORBIDDEN', message: 'Hosts cannot scan and verify their own quest attempt.' },
+      });
+    }
+
+    const pool = getPool();
+    let activeAttempt: QuestAttemptRow | null = null;
+    let stepEvidence: QuestStepEvidenceRow | null = null;
+
+    if (pool) {
+      try {
+        const attemptRes = await pool.query(
+          "SELECT * FROM quest_attempts WHERE id = $1 AND user_id = $2 AND quest_id = $3 LIMIT 1",
+          [claims.attempt_id, claims.user_id, id]
+        );
+        if (attemptRes.rows[0]) {
+          activeAttempt = mapAttempt(attemptRes.rows[0]);
+          const stepRes = await pool.query(
+            "SELECT * FROM quest_step_evidence WHERE attempt_id = $1 AND step_order = $2",
+            [activeAttempt.id, stepOrder]
+          );
+          if (stepRes.rows[0]) {
+            stepEvidence = mapStepEvidence(stepRes.rows[0]);
+          }
+        }
+      } catch (err) {
+        return next(err);
+      }
+    }
+
+    if (!activeAttempt) {
+      const memAttempt = db.quest_attempts.find((a) => a.id === claims!.attempt_id && a.user_id === claims!.user_id && a.quest_id === id);
+      if (memAttempt) {
+        activeAttempt = memAttempt;
+        stepEvidence = db.findStepEvidence(memAttempt.id, stepOrder) ?? null;
+      }
+    }
+
+    if (!activeAttempt || activeAttempt.status !== 'in_progress') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'NO_ACTIVE_ATTEMPT', message: 'The traveler does not have an active in-progress attempt for this quest.' },
+      });
+    }
+
+    if (!stepEvidence) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'STEP_NOT_FOUND', message: `Step ${stepOrder} not found on traveler's attempt.` },
+      });
+    }
+
+    if (stepEvidence.status === 'verified') {
+      return res.status(200).json({
+        success: true,
+        data: {
+          step: stepEvidence,
+          attempt: sanitizeAttemptSnapshot(activeAttempt),
+          traveler_id: activeAttempt.user_id,
+        },
+        message: "Traveler's step is already verified.",
+      });
+    }
+
+    if (stepEvidence.status === 'not_started') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'STEP_NOT_READY', message: `Step ${stepOrder} is still locked for this traveler.` },
+      });
+    }
+
+    const snapshotTasks: QuestTask[] = Array.isArray(activeAttempt.steps_snapshot) && activeAttempt.steps_snapshot.length > 0
+      ? normalizeTasks(activeAttempt.steps_snapshot, quest, { allowClientMarkerCode: true })
+      : normalizeTasks(quest.steps, quest, { allowClientMarkerCode: true });
+    const stepDef = snapshotTasks.find((s) => s.step_order === stepOrder);
+
+    if (captured_lat !== undefined && captured_lng !== undefined) {
+      const fence = (stepDef?.verification as any)?.fence || (stepDef?.gps_lat != null && stepDef?.gps_lng != null ? { lat: stepDef.gps_lat, lng: stepDef.gps_lng, radius_meters: stepDef.radius_meters } : null);
+      const targetLat = fence?.lat ?? quest.gps_lat;
+      const targetLng = fence?.lng ?? quest.gps_lng;
+      const allowedRadius = fence?.radius_meters ?? quest.radius_meters ?? 150;
+      const distance = withinRadius(captured_lat, captured_lng, targetLat, targetLng, allowedRadius, captured_accuracy || 0);
+      if (!distance.ok) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'GPS_RADIUS_EXCEEDED',
+            message: Number.isFinite(distance.distance)
+              ? `Host GPS reading (${Math.round(distance.distance)}m) exceeds allowed radius of ${allowedRadius}m.`
+              : 'The captured GPS coordinates are invalid.',
+          },
+        });
+      }
+    }
+
+    const claimed = claimChallengeNonce(claims.nonce);
+    if (!claimed) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'CHALLENGE_NONCE_REUSED', message: 'This QR pass has already been scanned and used.' },
+      });
+    }
+
+    const nowIso = new Date().toISOString();
+    const evidencePayload = {
+      scan_mode: 'host_scans_traveler',
+      verified_by_host: hostUserId,
+      challenge_nonce: claims.nonce,
+      gps: captured_lat !== undefined && captured_lng !== undefined
+        ? { lat: captured_lat, lng: captured_lng, accuracy: captured_accuracy ?? 5 }
+        : null,
+      verified_at: nowIso,
+    };
+
+    stepEvidence.status = 'verified';
+    stepEvidence.evidence_payload = evidencePayload;
+    stepEvidence.verified_at = nowIso;
+    stepEvidence.first_try_at = stepEvidence.first_try_at || nowIso;
+    stepEvidence.updated_at = nowIso;
+
+    const nextStepOrder = stepOrder + 1;
+    const isSequential = (activeAttempt.step_order_mode ?? 'sequential') === 'sequential';
+
+    if (pool) {
+      try {
+        await pool.query(
+          `UPDATE quest_step_evidence
+           SET status = 'verified', evidence_payload = $1, verified_at = $2,
+               first_try_at = COALESCE(first_try_at, $3), updated_at = NOW()
+           WHERE id = $4`,
+          [JSON.stringify(evidencePayload), nowIso, stepEvidence.first_try_at, stepEvidence.id]
+        );
+
+        if (isSequential) {
+          await pool.query(
+            `UPDATE quest_step_evidence
+             SET status = 'ready', updated_at = NOW()
+             WHERE attempt_id = $1 AND step_order = $2 AND status = 'not_started'`,
+            [activeAttempt.id, nextStepOrder]
+          );
+        }
+
+        const countRes = await pool.query(
+          "SELECT COUNT(*) FROM quest_step_evidence WHERE attempt_id = $1 AND status = 'verified'",
+          [activeAttempt.id]
+        );
+        const verifiedCount = parseInt(countRes.rows[0].count, 10);
+        await pool.query(
+          `UPDATE quest_attempts
+           SET verified_steps = $1, current_step = GREATEST(current_step, $2), updated_at = NOW()
+           WHERE id = $3`,
+          [verifiedCount, isSequential ? nextStepOrder : activeAttempt.current_step, activeAttempt.id]
+        );
+        activeAttempt.verified_steps = verifiedCount;
+        if (isSequential) {
+          activeAttempt.current_step = Math.max(activeAttempt.current_step, nextStepOrder);
+        }
+      } catch (err) {
+        releaseChallengeNonce(claims.nonce);
+        return next(err);
+      }
+    }
+
+    db.saveStepEvidence(stepEvidence);
+    if (isSequential) {
+      const nextStepMem = db.findStepEvidence(activeAttempt.id, nextStepOrder);
+      if (nextStepMem && nextStepMem.status === 'not_started') {
+        nextStepMem.status = 'ready';
+        nextStepMem.updated_at = nowIso;
+        db.saveStepEvidence(nextStepMem);
+      }
+      activeAttempt.current_step = Math.max(activeAttempt.current_step, nextStepOrder);
+    }
+    const memSteps = db.getStepEvidence(activeAttempt.id);
+    activeAttempt.verified_steps = memSteps.filter((s) => s.status === 'verified').length;
+
+    if (pool) {
+      await handleQuestStepVerified(pool, {
+        userId: activeAttempt.user_id,
+        questId: activeAttempt.quest_id ?? quest.id,
+        evidenceId: stepEvidence.id,
+      });
+    }
+
+    const travelerUser = db.users.find((u) => u.id === activeAttempt!.user_id);
+    const travelerDisplayName = (travelerUser as any)?.display_name || (travelerUser as any)?.name || travelerUser?.seed_id || activeAttempt.user_id;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        step: stepEvidence,
+        attempt: sanitizeAttemptSnapshot(activeAttempt),
+        traveler_id: activeAttempt.user_id,
+        traveler_name: travelerDisplayName,
+      },
+      message: `Verified step ${stepOrder} for traveler ${travelerDisplayName}.`,
     });
   }
 );
