@@ -21,7 +21,8 @@ realPgDescribe('AR quest flow: multi-task creation, host-scan QR pass, completio
   const adminId = `ar-admin-${suffix}`;
   const travelerId = `ar-traveler-${suffix}`;
   const spotAdderId = `ar-spot-adder-${suffix}`;
-  const spotId = `spot-ar-test-${suffix}`;
+  // Only a destination's creator may attach quests to it, so each author gets their own destination.
+  const spotIds: Record<string, string> = { [authorId]: `spot-ar-author-${suffix}`, [adminId]: `spot-ar-admin-${suffix}` };
   const LAT = 16.3068;
   const LNG = 119.7824;
   const here = { captured_lat: LAT, captured_lng: LNG, captured_accuracy: 5 };
@@ -29,9 +30,8 @@ realPgDescribe('AR quest flow: multi-task creation, host-scan QR pass, completio
   const authorToken = token(authorId, 'user');
   const adminToken = token(adminId, 'admin');
   const travelerToken = token(travelerId, 'user');
-  const spotAdderToken = token(spotAdderId, 'user');
 
-  const questBody = (title: string) => ({
+  const questBody = (title: string, spotId: string) => ({
     title,
     description: 'Collect the gem in AR, scan the placard, show your pass to the host, and bookmark the spot.',
     category: 'cultural',
@@ -53,7 +53,8 @@ realPgDescribe('AR quest flow: multi-task creation, host-scan QR pass, completio
 
   /** Creates the quest through the API as `asToken`, mirrors it into PostgreSQL, and returns id + QR markers. */
   async function createQuest(asToken: string, ownerId: string, title: string) {
-    const res = await request(app).post(`/api/v1/spots/${spotId}/quests`).set('Authorization', `Bearer ${asToken}`).send(questBody(title));
+    const spotId = spotIds[ownerId];
+    const res = await request(app).post(`/api/v1/spots/${spotId}/quests`).set('Authorization', `Bearer ${asToken}`).send(questBody(title, spotId));
     expect(res.status).toBe(201);
     const q = db.findQuestById(res.body.data.id, true)!;
     await fixture.pool.query(
@@ -67,11 +68,11 @@ realPgDescribe('AR quest flow: multi-task creation, host-scan QR pass, completio
     const sheet = await request(app).get(`/api/v1/quests/${q.id}/qr-sheet`).set('Authorization', `Bearer ${asToken}`);
     expect(sheet.status).toBe(200);
     expect(sheet.body.data.qr_tasks.map((t: { scan_mode: string }) => t.scan_mode)).toEqual(['traveler_scans', 'host_scans_traveler']);
-    return { id: q.id as string, placardMarker: sheet.body.data.qr_tasks[0].marker_code as string, hostMarker: sheet.body.data.qr_tasks[1].marker_code as string };
+    return { spotId, id: q.id as string, placardMarker: sheet.body.data.qr_tasks[0].marker_code as string, hostMarker: sheet.body.data.qr_tasks[1].marker_code as string };
   }
 
   /** Plays steps 1–4 as the traveler; the host (`hostToken`) scans the pass for step 3. */
-  async function playAllSteps(quest: { id: string; placardMarker: string; hostMarker: string }, hostToken: string) {
+  async function playAllSteps(quest: { spotId: string; id: string; placardMarker: string; hostMarker: string }, hostToken: string) {
     const as = (path: string, t = travelerToken) => request(app).post(`/api/v1/quests/${quest.id}${path}`).set('Authorization', `Bearer ${t}`);
     expect((await as('/attempts')).status).toBe(201);
 
@@ -96,17 +97,15 @@ realPgDescribe('AR quest flow: multi-task creation, host-scan QR pass, completio
     expect(pass.status).toBe(200);
     expect(pass.body.data.qr_payload).toMatch(/^JDQPASS:/);
     const passToken = pass.body.data.qr_payload;
-    // Strangers and whoever merely added the destination cannot host-verify; the host must be on site.
-    for (const t of [token('ar-stranger', 'user'), spotAdderToken]) {
-      expect((await as('/steps/3/host-verify-qr', t).send({ qr_pass_token: passToken, ...here })).status).toBe(403);
-    }
+    // A stranger cannot host-verify; the host must be on site.
+    expect((await as('/steps/3/host-verify-qr', token(spotAdderId, 'user')).send({ qr_pass_token: passToken, ...here })).status).toBe(403);
     expect((await as('/steps/3/host-verify-qr', hostToken).send({ qr_pass_token: passToken })).body.error?.code).toBe('MISSING_GPS_COORDINATES');
     const hostScan = await as('/steps/3/host-verify-qr', hostToken).send({ qr_pass_token: passToken, ...here });
     expect(hostScan.status).toBe(200);
     expect(hostScan.body.data.step.status).toBe('verified');
     expect(hostScan.body.data.traveler_id).toBe(travelerId);
 
-    await fixture.pool.query(`INSERT INTO spot_interactions (user_id, spot_id, interaction_type) VALUES ($1, $2, 'save') ON CONFLICT DO NOTHING`, [travelerId, spotId]);
+    await fixture.pool.query(`INSERT INTO spot_interactions (user_id, spot_id, interaction_type) VALUES ($1, $2, 'save') ON CONFLICT DO NOTHING`, [travelerId, quest.spotId]);
     const action = await as('/steps/4/evidence').send({ action_name: 'save_spot' });
     expect(action.status).toBe(200);
     expect(action.body.data.step.status).toBe('verified');
@@ -126,14 +125,16 @@ realPgDescribe('AR quest flow: multi-task creation, host-scan QR pass, completio
          VALUES ($1, $2, $3, $4, $5, 0, true, $6, $7) ON CONFLICT (id) DO NOTHING`, [id, id, id, `${id}@example.com`, role, now, now]);
       if (!db.users.find((x) => x.id === id)) db.users.push({ id, seed_id: id, display_name: id, email: `${id}@example.com`, role, demo_points: 0, is_test: true, created_at: now, updated_at: now } as any);
     }
-    spotStore.spots.push({
-      id: spotId, slug: spotId, name: 'Bolinao Lighthouse', municipality: 'Bolinao', description: 'Test destination.', category: 'nature',
-      gps_lat: LAT, gps_lng: LNG, image_url: '', quest_id: null, created_by: spotAdderId, is_test: true, created_at: now, updated_at: now,
-    } as any);
+    for (const [owner, spotId] of Object.entries(spotIds)) {
+      spotStore.spots.push({
+        id: spotId, slug: spotId, name: 'Bolinao Lighthouse', municipality: 'Bolinao', description: 'Test destination.', category: 'nature',
+        gps_lat: LAT, gps_lng: LNG, image_url: '', quest_id: null, created_by: owner, is_test: true, created_at: now, updated_at: now,
+      } as any);
+    }
   });
 
   afterAll(async () => {
-    spotStore.spots = spotStore.spots.filter((spot) => spot.id !== spotId);
+    spotStore.spots = spotStore.spots.filter((spot) => !Object.values(spotIds).includes(spot.id));
     setPool(null);
     db.usersRepo.setPool(null);
     if (fixture) await fixture.close();
