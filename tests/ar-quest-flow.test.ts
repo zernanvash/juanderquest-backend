@@ -107,7 +107,11 @@ realPgDescribe('AR quest flow: multi-task creation, host-scan QR pass, completio
 
   const balance = async () => Number((await fixture.pool.query('SELECT demo_points FROM users WHERE id = $1', [travelerId])).rows[0].demo_points);
 
+  // Production runs with quest funding off (quests publish at once); tests default it on.
+  const fundingWasEnabled = env.QUEST_FUNDING_ENABLED;
+
   beforeAll(async () => {
+    (env as { QUEST_FUNDING_ENABLED: boolean }).QUEST_FUNDING_ENABLED = false;
     fixture = await createTestDb();
     setPool(fixture.pool);
     db.usersRepo.setPool(fixture.pool);
@@ -131,6 +135,7 @@ realPgDescribe('AR quest flow: multi-task creation, host-scan QR pass, completio
   });
 
   afterAll(async () => {
+    (env as { QUEST_FUNDING_ENABLED: boolean }).QUEST_FUNDING_ENABLED = fundingWasEnabled;
     spotStore.spots = spotStore.spots.filter((spot) => !Object.values(spotIds).includes(spot.id));
     setPool(null);
     db.usersRepo.setPool(null);
