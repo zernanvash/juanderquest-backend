@@ -1,6 +1,7 @@
-import { Router, Response } from 'express';
+import { NextFunction, Router, Response } from 'express';
 import { z } from 'zod';
-import { authenticateToken, requireAdmin, AuthRequest } from '../middleware/auth.js';
+import { authenticateToken, AuthRequest } from '../middleware/auth.js';
+import { auditOnSuccess, requireAreaAdmin, spotAreaIds, spotInScope } from '../admin/scope.js';
 import { CulturalQuizRepository } from '../quizzes/repository.js';
 import { ProgressionRepository } from '../progression/repository.js';
 import { CulturalQuizService } from '../quizzes/service.js';
@@ -9,6 +10,43 @@ const router = Router();
 const repo = new CulturalQuizRepository();
 const progressionRepo = new ProgressionRepository();
 const service = new CulturalQuizService(repo, progressionRepo);
+
+// Plan 59: platform admins keep every quiz; area admins with the quests_quizzes power work only on quizzes
+// whose destination is in their area (a quiz is out of scope when its destination has no area).
+// Every quiz write is audited.
+const requireQuizPower = requireAreaAdmin('quests_quizzes');
+const outOfArea = (res: Response) =>
+  res.status(403).json({ success: false, error: { code: 'OUT_OF_AREA', message: 'This destination is outside your assigned area.' } });
+
+const quizInScope = (action?: string) => async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const scope = req.adminScope!;
+    const quiz = await repo.findQuizById(req.params.id);
+    if (!quiz) {
+      if (scope.platform) return next();
+      return res.status(404).json({ success: false, error: { code: 'QUIZ_NOT_FOUND', message: 'Cultural quiz not found.' } });
+    }
+    if (!spotInScope(scope, 'quests_quizzes', quiz.destination_id)) {
+      return res.status(404).json({ success: false, error: { code: 'QUIZ_NOT_FOUND', message: 'Cultural quiz not found.' } });
+    }
+    // Moving a draft to another destination needs both the old and the new area.
+    if (req.method === 'PATCH' && req.body?.destination_id && !spotInScope(scope, 'quests_quizzes', req.body.destination_id)) return outOfArea(res);
+    if (action) {
+      auditOnSuccess(req, res, { action, subjectType: 'cultural_quiz', subjectId: quiz.id, areaId: spotAreaIds(quiz.destination_id)[0] ?? null,
+        before: { status: quiz.status, destination_id: quiz.destination_id } });
+    }
+    return next();
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: err?.message || 'Failed to check quiz scope.' } });
+  }
+};
+
+const quizDraftInScope = (req: AuthRequest, res: Response, next: NextFunction) => {
+  const destinationId = typeof req.body?.destination_id === 'string' ? req.body.destination_id : null;
+  if (!req.adminScope!.platform && !spotInScope(req.adminScope!, 'quests_quizzes', destinationId)) return outOfArea(res);
+  if (destinationId) auditOnSuccess(req, res, { action: 'quiz.created', subjectType: 'spot', subjectId: destinationId, areaId: spotAreaIds(destinationId)[0] ?? null });
+  return next();
+};
 
 const createDraftSchema = z.object({
   destination_id: z.string().min(1),
@@ -45,9 +83,10 @@ const createDraftSchema = z.object({
 });
 
 // GET /api/v1/admin/quizzes - List all quizzes
-router.get('/admin/quizzes', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+router.get('/admin/quizzes', authenticateToken, requireQuizPower, async (req: AuthRequest, res: Response) => {
   try {
-    const list = await repo.listAllQuizzesForAdmin();
+    const list = (await repo.listAllQuizzesForAdmin())
+      .filter((item) => spotInScope(req.adminScope!, 'quests_quizzes', item.quiz.destination_id));
     return res.status(200).json({
       success: true,
       data: list,
@@ -61,7 +100,7 @@ router.get('/admin/quizzes', authenticateToken, requireAdmin, async (req: AuthRe
 });
 
 // POST /api/v1/admin/quizzes - Create draft quiz
-router.post('/admin/quizzes', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+router.post('/admin/quizzes', authenticateToken, requireQuizPower, quizDraftInScope, async (req: AuthRequest, res: Response) => {
   const parsed = createDraftSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({
@@ -115,7 +154,7 @@ router.post('/admin/quizzes', authenticateToken, requireAdmin, async (req: AuthR
 });
 
 // GET /api/v1/admin/quizzes/:id - Admin quiz detail (current version + questions with correctness)
-router.get('/admin/quizzes/:id', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+router.get('/admin/quizzes/:id', authenticateToken, requireQuizPower, quizInScope(), async (req: AuthRequest, res: Response) => {
   try {
     const detail = await service.getQuizForAdmin(req.params.id);
     if (!detail) {
@@ -134,7 +173,7 @@ router.get('/admin/quizzes/:id', authenticateToken, requireAdmin, async (req: Au
 });
 
 // PATCH /api/v1/admin/quizzes/:id - Replace an unpublished draft (published versions are immutable)
-router.patch('/admin/quizzes/:id', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+router.patch('/admin/quizzes/:id', authenticateToken, requireQuizPower, quizInScope('quiz.draft_updated'), async (req: AuthRequest, res: Response) => {
   const parsed = createDraftSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({
@@ -201,7 +240,7 @@ router.patch('/admin/quizzes/:id', authenticateToken, requireAdmin, async (req: 
 });
 
 // POST /api/v1/admin/quizzes/:id/publish - Publish quiz
-router.post('/admin/quizzes/:id/publish', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+router.post('/admin/quizzes/:id/publish', authenticateToken, requireQuizPower, quizInScope('quiz.published'), async (req: AuthRequest, res: Response) => {
   try {
     const updated = await service.publishQuiz(req.params.id);
     return res.status(200).json({
@@ -217,7 +256,7 @@ router.post('/admin/quizzes/:id/publish', authenticateToken, requireAdmin, async
 });
 
 // POST /api/v1/admin/quizzes/:id/pause - Pause quiz
-router.post('/admin/quizzes/:id/pause', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+router.post('/admin/quizzes/:id/pause', authenticateToken, requireQuizPower, quizInScope('quiz.paused'), async (req: AuthRequest, res: Response) => {
   try {
     const updated = await service.setQuizStatus(req.params.id, 'paused');
     return res.status(200).json({
@@ -233,7 +272,7 @@ router.post('/admin/quizzes/:id/pause', authenticateToken, requireAdmin, async (
 });
 
 // POST /api/v1/admin/quizzes/:id/archive - Archive quiz
-router.post('/admin/quizzes/:id/archive', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+router.post('/admin/quizzes/:id/archive', authenticateToken, requireQuizPower, quizInScope('quiz.archived'), async (req: AuthRequest, res: Response) => {
   try {
     const updated = await service.setQuizStatus(req.params.id, 'archived');
     return res.status(200).json({
@@ -249,7 +288,7 @@ router.post('/admin/quizzes/:id/archive', authenticateToken, requireAdmin, async
 });
 
 // POST /api/v1/admin/quizzes/:id/revoke - Revoke quiz and active attempts
-router.post('/admin/quizzes/:id/revoke', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+router.post('/admin/quizzes/:id/revoke', authenticateToken, requireQuizPower, quizInScope('quiz.revoked'), async (req: AuthRequest, res: Response) => {
   try {
     await service.revokeQuiz(req.params.id, req.body.reason || 'Admin safety revocation');
     return res.status(200).json({

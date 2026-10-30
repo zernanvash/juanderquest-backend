@@ -15,10 +15,14 @@ import { settleReward } from '../funding/rewardSettlement.js';
 import { hasFundingPlan } from '../funding/holds.js';
 import { publishFunding, FundingError } from '../funding/transaction.js';
 import { governanceStore } from './proposals.js';
+import { isAreaScopedAdminRoute } from '../admin/scope.js';
 
 const router = Router();
 
-router.use('/admin', authenticateToken, requireAdmin);
+// Platform admins only, except the area-scoped routes listed in admin/scope.ts (Plan 59): those continue to
+// their own routers, which apply requireAreaAdmin and the area check. Anything not listed stays platform-only.
+router.use('/admin', authenticateToken, (req: AuthRequest, res: Response, next) =>
+  isAreaScopedAdminRoute(req.method, req.path) ? next('router') : requireAdmin(req, res, next));
 
 router.get('/admin/submissions', (req: AuthRequest, res: Response) => {
   const statusFilter = req.query.status as string | undefined;

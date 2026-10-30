@@ -2,6 +2,8 @@ import { Router, Response } from 'express';
 import { z } from 'zod';
 import { db, AffiliateApplicationStatus } from '../db/index.js';
 import { authenticateToken, requireAdmin, AuthRequest } from '../middleware/auth.js';
+import { assertInScope, auditOnSuccess, requireAreaAdmin, resolveTownAreaId } from '../admin/scope.js';
+import { getPool } from '../db/pool.js';
 import { validateRequest } from '../middleware/validate.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 
@@ -316,14 +318,28 @@ affiliatesRouter.get(
   }
 );
 
+// Plan 59: area admins with merchants_vouchers review applications from their area only. An application's
+// town comes from its municipality + province (exactly one match); unmatched applications stay platform-only.
+const requireMerchantPower = requireAreaAdmin('merchants_vouchers');
+const applicationArea = (application: { municipality?: string | null; business_province?: string | null }) =>
+  resolveTownAreaId(application.municipality, application.business_province);
+const applicationNotFound = (res: Response) =>
+  res.status(404).json({ success: false, error: { code: 'APPLICATION_NOT_FOUND', message: 'Application not found' } });
+
 // GET /api/v1/admin/affiliate/applications (Admin review queue)
 affiliatesRouter.get(
   '/admin/affiliate/applications',
   authenticateToken,
-  requireAdmin,
+  requireMerchantPower,
   async (req: AuthRequest, res: Response) => {
     const status = req.query.status as AffiliateApplicationStatus | undefined;
-    const applications = db.listAffiliateApplications(status);
+    const all = db.listAffiliateApplications(status);
+    const scope = req.adminScope!;
+    const applications = scope.platform
+      ? all
+      : (await Promise.all(all.map(async (application) =>
+          assertInScope(scope, 'merchants_vouchers', await applicationArea(application)) ? application : null)))
+          .filter((application): application is NonNullable<typeof application> => application !== null);
 
     return res.status(200).json({
       success: true,
@@ -336,10 +352,13 @@ affiliatesRouter.get(
 affiliatesRouter.get(
   '/admin/affiliate/applications/:id',
   authenticateToken,
-  requireAdmin,
+  requireMerchantPower,
   async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const application = db.findAffiliateApplicationById(id);
+    if (application && !req.adminScope!.platform && !assertInScope(req.adminScope!, 'merchants_vouchers', await applicationArea(application))) {
+      return applicationNotFound(res);
+    }
     if (!application) {
       return res.status(404).json({
         success: false,
@@ -372,7 +391,7 @@ const updateApplicationSchema = z.object({
 affiliatesRouter.patch(
   '/admin/affiliate/applications/:id',
   authenticateToken,
-  requireAdmin,
+  requireMerchantPower,
   validateRequest(updateApplicationSchema),
   async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
@@ -380,6 +399,14 @@ affiliatesRouter.patch(
     const adminId = req.user!.id;
 
     const existing = db.findAffiliateApplicationById(id);
+    const areaId = existing ? await applicationArea(existing) : null;
+    if (existing && !req.adminScope!.platform && !assertInScope(req.adminScope!, 'merchants_vouchers', areaId)) {
+      return applicationNotFound(res);
+    }
+    if (existing) {
+      auditOnSuccess(req, res, { action: `merchant_application.${status}`, subjectType: 'affiliate_application', subjectId: existing.id,
+        areaId, before: { status: existing.status } });
+    }
     if (!existing) {
       return res.status(404).json({
         success: false,
@@ -409,6 +436,12 @@ affiliatesRouter.patch(
         applicant_feedback,
         expected_version,
       });
+
+      // A merchant provisioned on approval belongs to the application's town (Plan 59), so its area admins can see it.
+      const pool = getPool();
+      if (status === 'approved' && areaId && pool) {
+        await pool.query('UPDATE merchants SET town_area_id = $1 WHERE source_application_id = $2 AND town_area_id IS NULL', [areaId, id]);
+      }
 
       return res.status(200).json({
         success: true,

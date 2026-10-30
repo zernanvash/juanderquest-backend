@@ -3,6 +3,7 @@ import type { NextFunction, Response } from 'express';
 import { db } from '../db/index.js';
 import { getPool } from '../db/pool.js';
 import type { AuthRequest } from '../middleware/auth.js';
+import { spotStore } from '../spots/store.js';
 
 export const ADMIN_POWERS = ['destinations', 'quests_quizzes', 'merchants_vouchers', 'analytics'] as const;
 export type AdminPower = typeof ADMIN_POWERS[number];
@@ -87,3 +88,73 @@ export function requireAreaAdmin(power: AdminPower) {
     }
   };
 }
+
+// ---- Plan 59 phase 3: area lookups for quizzes, merchants, applications and vouchers ----
+
+/** A destination's areas for scope checks: its town and, when known, its barangay. */
+export const spotAreaIds = (spotId: string | null | undefined): string[] => {
+  const spot = spotId ? spotStore.spots.find((item) => item.id === spotId) : undefined;
+  return spot ? [spot.town_area_id, spot.barangay_area_id].filter((id): id is string => Boolean(id)) : [];
+};
+
+export const spotInScope = (scope: AdminScope, power: AdminPower, spotId: string | null | undefined) =>
+  scope.platform || spotAreaIds(spotId).some((areaId) => assertInScope(scope, power, areaId));
+
+/** merchants.town_area_id by merchant id (the in-memory merchant mirror does not carry it). */
+export async function merchantTownAreas(merchantIds?: string[]): Promise<Map<string, string | null>> {
+  const pool = getPool();
+  if (!pool) throw new Error('Merchant area storage is unavailable.');
+  const result = merchantIds
+    ? await pool.query('SELECT id, town_area_id FROM merchants WHERE id = ANY($1::text[])', [merchantIds])
+    : await pool.query('SELECT id, town_area_id FROM merchants');
+  return new Map(result.rows.map((row) => [String(row.id), row.town_area_id ? String(row.town_area_id) : null]));
+}
+
+/**
+ * The town an application or merchant belongs to, by the migration 066 rule: the municipality and the
+ * province together must name exactly one town. Anything else is unassigned (platform admins only).
+ */
+export async function resolveTownAreaId(municipality: string | null | undefined, province: string | null | undefined): Promise<string | null> {
+  const pool = getPool();
+  if (!pool || !municipality?.trim() || !province?.trim()) return null;
+  const result = await pool.query(
+    `SELECT town.id
+       FROM admin_areas town
+       JOIN admin_areas province ON province.id = town.parent_id AND province.level = 'province'
+      WHERE town.level = 'town'
+        AND lower(regexp_replace(trim(town.name), '\s+', ' ', 'g')) = lower(regexp_replace(trim($1), '\s+', ' ', 'g'))
+        AND lower(regexp_replace(trim(province.name), '\s+', ' ', 'g')) = lower(regexp_replace(trim($2), '\s+', ' ', 'g'))
+      LIMIT 2`,
+    [municipality, province]);
+  return result.rowCount === 1 ? String(result.rows[0].id) : null;
+}
+
+/** Writes an audit row once a scoped write succeeds (status < 400); a failed audit is logged, not thrown. */
+export function auditOnSuccess(req: AuthRequest, res: Response, entry: {
+  action: string; subjectType: string; subjectId: string; areaId?: string | null; before?: unknown;
+}) {
+  res.on('finish', () => {
+    if (res.statusCode >= 400) return;
+    void writeAdminAudit({ actorId: req.user!.id, actorRole: req.user!.role, ...entry })
+      .catch((error) => console.error('[admin-audit] write failed:', error instanceof Error ? error.message : error));
+  });
+}
+
+/**
+ * Paths under /admin that area admins may reach. Everything else under /admin stays platform-only through
+ * the blanket guard in routes/admin.ts; each listed route enforces requireAreaAdmin and its own area check.
+ */
+export const AREA_SCOPED_ADMIN_ROUTES: Array<{ methods: string[]; path: RegExp }> = [
+  { methods: ['GET', 'POST'], path: /^\/quizzes\/?$/ },
+  { methods: ['GET', 'PATCH'], path: /^\/quizzes\/[^/]+\/?$/ },
+  { methods: ['POST'], path: /^\/quizzes\/[^/]+\/(publish|pause|archive|revoke)\/?$/ },
+  { methods: ['GET'], path: /^\/merchants\/?$/ },
+  { methods: ['GET'], path: /^\/merchants\/[^/]+\/?$/ },
+  { methods: ['GET'], path: /^\/affiliate\/applications\/?$/ },
+  { methods: ['GET', 'PATCH'], path: /^\/affiliate\/applications\/[^/]+\/?$/ },
+  { methods: ['GET'], path: /^\/vouchers\/?$/ },
+  { methods: ['PATCH'], path: /^\/vouchers\/[^/]+\/availability\/?$/ },
+];
+
+export const isAreaScopedAdminRoute = (method: string, pathUnderAdmin: string) =>
+  AREA_SCOPED_ADMIN_ROUTES.some((route) => route.methods.includes(method) && route.path.test(pathUnderAdmin));
