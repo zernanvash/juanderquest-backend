@@ -12,6 +12,7 @@ import { signSessionToken } from '../auth/tokens.js';
 import { safeCosmeticsFor } from '../shop/render.js';
 import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
 import { devGoogleCredentialsEnabled, verifyGoogleCredential } from '../auth/google.js';
+import { accountLoginThrottle } from '../auth/loginThrottle.js';
 
 const router = Router();
 
@@ -352,9 +353,17 @@ router.post(
     const { email, password, remember_me } = req.body;
     const normalizedEmail = db.identityService.normalizeEmail(email);
 
+    if (accountLoginThrottle.isThrottled(normalizedEmail)) {
+      return res.status(401).json({
+        success: false,
+        error: { code: 'INVALID_CREDENTIALS', message: 'Invalid email or password.' },
+      });
+    }
+
     try {
       const identity = await db.identityService.findIdentity('email', normalizedEmail);
       if (!identity) {
+        accountLoginThrottle.recordFailure(normalizedEmail);
         return res.status(401).json({
           success: false,
           error: { code: 'INVALID_CREDENTIALS', message: 'Invalid email or password.' },
@@ -363,6 +372,7 @@ router.post(
 
       const valid = await db.identityService.verifyUserPassword(identity.user_id, password);
       if (!valid) {
+        accountLoginThrottle.recordFailure(normalizedEmail);
         return res.status(401).json({
           success: false,
           error: { code: 'INVALID_CREDENTIALS', message: 'Invalid email or password.' },
@@ -371,8 +381,11 @@ router.post(
 
       const user = db.usersRepo.getPool() ? await db.usersRepo.findById(identity.user_id) : db.findUserById(identity.user_id);
       if (!user) {
+        accountLoginThrottle.recordFailure(normalizedEmail);
         return res.status(401).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'Account no longer exists.' } });
       }
+
+      accountLoginThrottle.recordSuccess(normalizedEmail);
 
       const remember = remember_me === true;
       const token = issueToken(user, remember);
