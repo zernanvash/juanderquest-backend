@@ -37,6 +37,16 @@ function secureCodeEquals(expected: unknown, supplied: unknown): boolean {
   return expectedBytes.length === suppliedBytes.length && timingSafeEqual(expectedBytes, suppliedBytes);
 }
 
+async function isDurableAdminOrQA(userId?: string): Promise<boolean> {
+  if (!userId) return false;
+  try {
+    const durableUser = db.usersRepo.getPool() ? await db.usersRepo.findById(userId) : db.findUserById(userId);
+    return Boolean(durableUser?.role === 'admin' || durableUser?.role === 'qa');
+  } catch {
+    return false;
+  }
+}
+
 const evidenceUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024 + 1024 }, // 8 MB limit for photo evidence
@@ -174,7 +184,7 @@ router.get('/quests/:id', optionalAuthenticateToken, checkQAAuthorization, async
 
   const spot = spotStore.spots.find((s) => s.quest_id === quest.id);
   const isAuthor = Boolean(req.user?.id && (quest.author_id === req.user.id || spot?.created_by === req.user.id));
-  const isAdminOrQA = Boolean(req.user?.role === 'admin' || req.user?.role === 'qa');
+  const isAdminOrQA = await isDurableAdminOrQA(req.user?.id);
 
   // Draft quests are private to author, admin, and QA
   if (quest.status === 'draft' && !isAuthor && !isAdminOrQA) {
@@ -285,7 +295,7 @@ router.get('/quests/:id/edit', authenticateToken, async (req: AuthRequest, res: 
 
   const spot = spotStore.spots.find((s) => s.quest_id === quest.id);
   const isAuthor = Boolean(req.user?.id && (quest.author_id === req.user.id || spot?.created_by === req.user.id));
-  const isAdminOrQA = Boolean(req.user?.role === 'admin' || req.user?.role === 'qa');
+  const isAdminOrQA = await isDurableAdminOrQA(req.user?.id);
 
   if (!isAuthor && !isAdminOrQA) {
     return res.status(403).json({
@@ -470,7 +480,7 @@ router.get('/quests/:id/qr-sheet', authenticateToken, async (req: AuthRequest, r
 
   const spot = spotStore.spots.find((s) => s.quest_id === quest.id);
   const isAuthor = Boolean(req.user?.id && (quest.author_id === req.user.id || spot?.created_by === req.user.id));
-  const isAdminOrQA = Boolean(req.user?.role === 'admin' || req.user?.role === 'qa');
+  const isAdminOrQA = await isDurableAdminOrQA(req.user?.id);
 
   if (!isAuthor && !isAdminOrQA) {
     return res.status(403).json({
@@ -516,7 +526,7 @@ router.get('/quests/:id/analytics', authenticateToken, async (req: AuthRequest, 
 
   const spot = spotStore.spots.find((s) => s.quest_id === quest.id);
   const isAuthor = Boolean(req.user?.id && (quest.author_id === req.user.id || spot?.created_by === req.user.id));
-  const isAdminOrQA = Boolean(req.user?.role === 'admin' || req.user?.role === 'qa');
+  const isAdminOrQA = await isDurableAdminOrQA(req.user?.id);
 
   if (!isAuthor && !isAdminOrQA) {
     return res.status(403).json({

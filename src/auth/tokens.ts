@@ -9,6 +9,7 @@ export interface SessionClaims {
   id: string;
   seed_id: string;
   role: 'user' | 'admin' | 'qa';
+  sep?: number;
 }
 
 export interface QuestChallengeClaims {
@@ -33,12 +34,12 @@ const validRole = (role: unknown): role is SessionClaims['role'] =>
   role === 'user' || role === 'admin' || role === 'qa';
 
 export function signSessionToken(
-  user: { id: string; seed_id: string; role: string },
+  user: { id: string; seed_id: string; role: string; session_epoch?: number },
   rememberMe = false,
 ): string {
   if (!validRole(user.role)) throw new Error('Cannot issue session token for unsupported role.');
   return jwt.sign(
-    { id: user.id, seed_id: user.seed_id, role: user.role, typ: SESSION_TYP },
+    { id: user.id, seed_id: user.seed_id, role: user.role, typ: SESSION_TYP, sep: user.session_epoch ?? 0 },
     env.JWT_SECRET,
     { algorithm: 'HS256', expiresIn: rememberMe ? '7d' : '24h' },
   );
@@ -78,7 +79,8 @@ export function verifySessionToken(token: string): SessionClaims | null {
     if (typeof claims.id !== 'string' || claims.id.length === 0) return null;
     if (typeof claims.seed_id !== 'string' || !validRole(claims.role)) return null;
     if (issuedBeforeCutoff(claims.iat)) return null;
-    return { id: claims.id, seed_id: claims.seed_id, role: claims.role };
+    const sep = typeof claims.sep === 'number' && Number.isInteger(claims.sep) && claims.sep >= 0 ? claims.sep : 0;
+    return { id: claims.id, seed_id: claims.seed_id, role: claims.role, sep };
   } catch {
     return null;
   }

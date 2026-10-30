@@ -32,6 +32,7 @@ export interface UserRow {
   /** Admins only (075/076): platform staff, area admin, or developer. */
   admin_scope?: 'platform' | 'area' | 'developer' | null;
   is_test?: boolean;
+  session_epoch?: number;
   created_at: string;
   updated_at: string;
 }
@@ -1349,6 +1350,21 @@ export class MemoryDb {
       return row;
     }
     return this.findUserById(id);
+  }
+
+  async bumpSessionEpoch(userId: string): Promise<number> {
+    if (this.pg) {
+      const epoch = await this.usersRepo.bumpSessionEpoch(userId);
+      const user = this.users.find((u) => u.id === userId);
+      if (user) user.session_epoch = epoch;
+      return epoch;
+    }
+    const user = this.findUserById(userId);
+    if (user) {
+      user.session_epoch = (user.session_epoch ?? 0) + 1;
+      return user.session_epoch;
+    }
+    return 0;
   }
 
   async findUserBySeedDurable(seedId: string): Promise<UserRow | undefined> {

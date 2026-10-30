@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { db } from '../db/index.js';
 import { env } from '../config/env.js';
 import { validateRequest } from '../middleware/validate.js';
-import { authenticateToken, optionalAuthenticateToken, AuthRequest } from '../middleware/auth.js';
+import { authenticateToken, optionalAuthenticateToken, AuthRequest, invalidateSessionScopeCache } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { randomUUID } from 'crypto';
 import { getAddress, verifyMessage } from 'ethers';
@@ -520,6 +520,8 @@ router.post(
       }
 
       await db.identityService.setPassword(result.boundUserId, new_password);
+      await db.bumpSessionEpoch(result.boundUserId);
+      invalidateSessionScopeCache(result.boundUserId);
 
       return res.status(200).json({
         success: true,
@@ -1203,6 +1205,30 @@ router.post('/auth/logout', (_req, res) => {
   clearSessionCookie(res);
   return res.json({ success: true });
 });
+
+router.post(
+  ['/auth/sessions/revoke-all', '/sessions/revoke-all'],
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    try {
+      const userId = req.user!.id;
+      await db.bumpSessionEpoch(userId);
+      invalidateSessionScopeCache(userId);
+      clearSessionCookie(res);
+      return res.status(200).json({
+        success: true,
+        data: { message: 'All active sessions have been revoked.' },
+      });
+    } catch (err) {
+      console.error('[auth] revoke-all sessions error:', err);
+      return res.status(503).json({
+        success: false,
+        error: { code: 'DATABASE_UNAVAILABLE', message: 'Failed to revoke sessions. Please try again.' },
+      });
+    }
+  }
+);
 
 router.get('/auth/me', authenticateToken, async (req: AuthRequest, res: Response) => {
   const userId = req.user?.id;

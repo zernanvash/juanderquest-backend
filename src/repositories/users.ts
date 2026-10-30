@@ -24,6 +24,8 @@ export interface AlphaSessionScope {
   id: string;
   seed_id: string;
   is_test: boolean;
+  session_epoch: number;
+  role: 'user' | 'admin' | 'qa';
 }
 
 export class UsersRepository {
@@ -61,8 +63,8 @@ export class UsersRepository {
       }
     }
 
-    const { rows } = await this.pool.query<{ id: string; seed_id: string; is_test: boolean }>(
-      'SELECT id, seed_id, is_test FROM users WHERE id = ANY($1::text[])',
+    const { rows } = await this.pool.query<{ id: string; seed_id: string; is_test: boolean; session_epoch: number; role: 'user' | 'admin' | 'qa' }>(
+      'SELECT id, seed_id, is_test, COALESCE(session_epoch, 0)::int AS session_epoch, role FROM users WHERE id = ANY($1::text[])',
       [uniqueIds]
     );
 
@@ -72,10 +74,23 @@ export class UsersRepository {
         id: row.id,
         seed_id: row.seed_id,
         is_test: Boolean(row.is_test),
+        session_epoch: row.session_epoch ?? 0,
+        role: row.role ?? 'user',
       });
     }
 
     return resultMap;
+  }
+
+  async bumpSessionEpoch(userId: string): Promise<number> {
+    if (!this.pool) {
+      throw new Error('Database pool not available');
+    }
+    const { rows } = await this.pool.query<{ session_epoch: number }>(
+      'UPDATE users SET session_epoch = COALESCE(session_epoch, 0) + 1, updated_at = NOW() WHERE id = $1 RETURNING session_epoch',
+      [userId]
+    );
+    return rows[0]?.session_epoch ?? 0;
   }
 
   async findById(id: string): Promise<UserRow | undefined> {
@@ -814,6 +829,7 @@ export class UsersRepository {
       wallet_address: row.wallet_address || null,
       admin_scope: row.admin_scope ?? null,
       is_test: Boolean(row.is_test),
+      session_epoch: row.session_epoch !== undefined && row.session_epoch !== null ? Number(row.session_epoch) : 0,
       created_at: new Date(row.created_at).toISOString(),
       updated_at: new Date(row.updated_at).toISOString(),
     };

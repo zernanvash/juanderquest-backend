@@ -2,11 +2,16 @@ import { Request, Response, NextFunction } from 'express';
 import { env } from '../config/env.js';
 import { readSessionCookie } from '../auth/sessionCookie.js';
 import { verifySessionToken } from '../auth/tokens.js';
+import { db, UserRow } from '../db/index.js';
+import { AlphaSessionScopeBatcher } from '../auth/alphaSessionScopeBatcher.js';
+import { UsersRepository } from '../repositories/users.js';
+import type { Pool } from 'pg';
 
 export interface AuthenticatedUser {
   id: string;
   seed_id: string;
   role: 'user' | 'admin' | 'qa';
+  sep?: number;
 }
 
 export interface AuthRequest extends Request {
@@ -14,14 +19,84 @@ export interface AuthRequest extends Request {
   isQAAuthorized?: boolean;
 }
 
-export const optionalAuthenticateToken = (req: AuthRequest, _res: Response, next: NextFunction) => {
-  const token = req.headers.authorization?.split(' ')[1] || readSessionCookie(req);
-  if (!token) return next();
-  req.user = verifySessionToken(token) ?? undefined;
-  next();
+interface CachedSessionScope {
+  session_epoch: number;
+  role: 'user' | 'admin' | 'qa';
+  expiresAt: number;
+}
+
+const sessionScopeCache = new Map<string, CachedSessionScope>();
+const SESSION_CACHE_TTL_MS = 30_000;
+
+export const invalidateSessionScopeCache = (userId?: string): void => {
+  if (userId) {
+    sessionScopeCache.delete(userId);
+  } else {
+    sessionScopeCache.clear();
+  }
 };
 
-export const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) => {
+const batcherRegistry = new WeakMap<Pool, AlphaSessionScopeBatcher>();
+
+export const getAlphaSessionScopeBatcher = (pool: Pool): AlphaSessionScopeBatcher => {
+  let batcher = batcherRegistry.get(pool);
+  if (!batcher) {
+    const scopedRepo = new UsersRepository(pool);
+    batcher = new AlphaSessionScopeBatcher(ids => scopedRepo.findAlphaSessionScopesByIds(ids));
+    batcherRegistry.set(pool, batcher);
+  }
+  return batcher;
+};
+
+export const getSessionScope = async (userId: string): Promise<{ session_epoch: number; role: 'user' | 'admin' | 'qa' } | null> => {
+  const cached = sessionScopeCache.get(userId);
+  if (cached && Date.now() < cached.expiresAt) {
+    return { session_epoch: cached.session_epoch, role: cached.role };
+  }
+
+  const pool = db.usersRepo.getPool();
+  if (pool) {
+    const batcher = getAlphaSessionScopeBatcher(pool);
+    const scope = await batcher.lookup(userId);
+    if (!scope) return null;
+    const result = { session_epoch: scope.session_epoch ?? 0, role: scope.role ?? 'user' };
+    sessionScopeCache.set(userId, { ...result, expiresAt: Date.now() + SESSION_CACHE_TTL_MS });
+    return result;
+  }
+
+  const user = db.findUserById(userId);
+  if (!user) return null;
+  const result = { session_epoch: user.session_epoch ?? 0, role: user.role };
+  sessionScopeCache.set(userId, { ...result, expiresAt: Date.now() + SESSION_CACHE_TTL_MS });
+  return result;
+};
+
+export const optionalAuthenticateToken = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  const token = req.headers.authorization?.split(' ')[1] || readSessionCookie(req);
+  if (!token) return next();
+  const user = verifySessionToken(token);
+  if (!user) return next();
+
+  try {
+    const scope = await getSessionScope(user.id);
+    if (!scope) return next();
+    const tokenSep = user.sep ?? 0;
+    if (tokenSep !== scope.session_epoch) {
+      return next();
+    }
+    user.role = scope.role;
+    req.user = user;
+    next();
+  } catch (err) {
+    console.error('[auth] optionalAuthenticateToken database error:', err);
+    return res.status(503).json({
+      success: false,
+      error: { code: 'DATABASE_UNAVAILABLE', message: 'Authentication service temporarily unavailable. Please try again.' },
+    });
+  }
+};
+
+export const authenticateToken = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader ? authHeader.split(' ')[1] : readSessionCookie(req);
 
@@ -39,25 +114,26 @@ export const authenticateToken = (req: AuthRequest, res: Response, next: NextFun
   if (!user) {
     return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid or expired JWT authentication token.' } });
   }
-  req.user = user;
-  next();
-};
 
-import { db, UserRow } from '../db/index.js';
-import { AlphaSessionScopeBatcher } from '../auth/alphaSessionScopeBatcher.js';
-import { UsersRepository } from '../repositories/users.js';
-import type { Pool } from 'pg';
-
-const batcherRegistry = new WeakMap<Pool, AlphaSessionScopeBatcher>();
-
-export const getAlphaSessionScopeBatcher = (pool: Pool): AlphaSessionScopeBatcher => {
-  let batcher = batcherRegistry.get(pool);
-  if (!batcher) {
-    const scopedRepo = new UsersRepository(pool);
-    batcher = new AlphaSessionScopeBatcher(ids => scopedRepo.findAlphaSessionScopesByIds(ids));
-    batcherRegistry.set(pool, batcher);
+  try {
+    const scope = await getSessionScope(user.id);
+    if (!scope) {
+      return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'User account no longer exists.' } });
+    }
+    const tokenSep = user.sep ?? 0;
+    if (tokenSep !== scope.session_epoch) {
+      return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Session has been revoked or expired. Please sign in again.' } });
+    }
+    user.role = scope.role;
+    req.user = user;
+    next();
+  } catch (err) {
+    console.error('[auth] session scope verification database error:', err);
+    return res.status(503).json({
+      success: false,
+      error: { code: 'DATABASE_UNAVAILABLE', message: 'Authentication service temporarily unavailable. Please try again.' },
+    });
   }
-  return batcher;
 };
 
 export const requireAdmin = async (req: AuthRequest, res: Response, next: NextFunction) => {
