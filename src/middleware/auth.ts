@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { env } from '../config/env.js';
-import { readSessionCookie } from '../auth/sessionCookie.js';
+import { clearSessionCookie, readSessionCookie } from '../auth/sessionCookie.js';
 import { verifySessionToken } from '../auth/tokens.js';
 import { db, UserRow } from '../db/index.js';
 import { AlphaSessionScopeBatcher } from '../auth/alphaSessionScopeBatcher.js';
@@ -118,10 +118,12 @@ export const authenticateToken = async (req: AuthRequest, res: Response, next: N
   try {
     const scope = await getSessionScope(user.id);
     if (!scope) {
+      clearSessionCookie(res);
       return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'User account no longer exists.' } });
     }
     const tokenSep = user.sep ?? 0;
     if (tokenSep !== scope.session_epoch) {
+      clearSessionCookie(res);
       return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Session has been revoked or expired. Please sign in again.' } });
     }
     user.role = scope.role;
