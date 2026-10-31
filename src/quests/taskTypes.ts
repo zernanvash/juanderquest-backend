@@ -14,10 +14,13 @@ export interface LocationCfg {
   fence: GeoFence;
 }
 
+export type QrScanMode = 'traveler_scans' | 'host_scans_traveler';
+
 export interface QrCfg {
   type: 'qr';
   fence: GeoFence;
   marker_code: string; // server-generated, never from client
+  scan_mode?: QrScanMode;
 }
 
 export interface PhotoCfg {
@@ -61,6 +64,7 @@ export interface QuestTask {
   radius_meters?: number;
   hint?: string;
   marker_code?: string;
+  qr_scan_mode?: QrScanMode;
 }
 
 export type StepOrderMode = 'sequential' | 'any';
@@ -77,6 +81,7 @@ export interface QuestTaskInput {
   gps_lng?: number;
   radius_meters?: number;
   hint?: string;
+  qr_scan_mode?: QrScanMode;
   action_kind?: string;
   action_target_id?: string;
 }
