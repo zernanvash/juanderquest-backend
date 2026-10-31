@@ -4,6 +4,7 @@ import { app } from '../src/app.js';
 import { db } from '../src/db/index.js';
 import { env } from '../src/config/env.js';
 import { spotStore } from '../src/spots/store.js';
+import { invalidateSessionScopeCache } from '../src/middleware/auth.js';
 
 describe('Durable Quest Step Evidence & Attempt State Contract (Phase 1-3)', () => {
   const authorUserId = 'author-scout-991';
@@ -364,7 +365,7 @@ describe('Durable Quest Step Evidence & Attempt State Contract (Phase 1-3)', () 
     const strangerFileRes = await request(app)
       .get(`/api/v1/quests/evidence/${evidenceId}/file`)
       .set('Authorization', `Bearer ${strangerToken}`);
-    expect(strangerFileRes.status).toBe(403);
+    expect(strangerFileRes.status).toBe(401);
   });
 
   it('submits quest attempt for independent review', async () => {
@@ -389,7 +390,10 @@ describe('Durable Quest Step Evidence & Attempt State Contract (Phase 1-3)', () 
 
   it('rejects traveler self-approval even if granted admin role', async () => {
     const traveler = db.users.find((u) => u.id === travelerUserId);
-    if (traveler) traveler.role = 'admin';
+    if (traveler) {
+      traveler.role = 'admin';
+      invalidateSessionScopeCache(travelerUserId);
+    }
 
     const travelerAdminToken = jwt.sign(
       { id: travelerUserId, seed_id: 'traveler-01', role: 'admin' },
@@ -401,7 +405,10 @@ describe('Durable Quest Step Evidence & Attempt State Contract (Phase 1-3)', () 
       .set('Authorization', `Bearer ${travelerAdminToken}`)
       .send({ action: 'approve' });
 
-    if (traveler) traveler.role = 'user';
+    if (traveler) {
+      traveler.role = 'user';
+      invalidateSessionScopeCache(travelerUserId);
+    }
 
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('CANNOT_REVIEW_OWN_ATTEMPT');

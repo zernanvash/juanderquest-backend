@@ -51,6 +51,7 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
       seed_id: 'proof-security-traveler-2', display_name: 'Proof Security Traveler',
       email: 'proof-security-traveler@example.invalid', handle: 'proofsecuritytraveler',
       is_test: false });
+    db.users.push({ id: qaUserId, seed_id: 'qa-evaluator-1', role: 'qa', display_name: 'QA Evaluator', email: 'qa@example.invalid', is_test: true } as any);
     // Register spot authored by Juan Dela Cruz
     spotStore.spots.push({
       id: testSpotId,
@@ -515,6 +516,11 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
       const rejected = results.find((r) => r.status === 409);
       expect(rejected?.body.error.code).toBe('SUBMISSION_PENDING');
     });
+  });
+
+  afterAll(() => {
+    db.users = db.users.filter((u) => u.id !== otherTravelerUserId && u.id !== qaUserId);
+    spotStore.spots = spotStore.spots.filter((s) => s.id !== testSpotId);
   });
 
   describe('4. Concurrency & Review Double-Award Defense', () => {

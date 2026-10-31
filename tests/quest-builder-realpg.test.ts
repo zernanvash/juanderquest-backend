@@ -12,6 +12,7 @@ import { MIGRATIONS } from '../src/db/migrations.js';
 import { spotStore } from '../src/spots/store.js';
 import { createTestDb, type TestDbInstance } from '../src/db/testHarness.js';
 import { signQuestChallenge } from '../src/auth/tokens.js';
+import { invalidateSessionScopeCache } from '../src/middleware/auth.js';
 
 const realPg = process.env.JDQ_REAL_PG_URL ? describe : describe.skip;
 
@@ -438,6 +439,7 @@ realPg('Plan 43 Quest Builder & Multi-Task Verification Suite (Real PostgreSQL)'
 
       // Make author an admin in DB as well so requireAdmin passes
       await fixture.pool.query("UPDATE users SET role = 'admin' WHERE id = $1", [authorId]);
+      invalidateSessionScopeCache(authorId);
       const authorAdminToken = jwt.sign({ id: authorId, seed_id: authorId, role: 'admin', typ: 'session' }, env.JWT_SECRET);
       const res = await request(app)
         .patch(`/api/v1/admin/quest-attempts/${attemptId}/steps/3`)
@@ -449,6 +451,7 @@ realPg('Plan 43 Quest Builder & Multi-Task Verification Suite (Real PostgreSQL)'
 
       // Revert author role
       await fixture.pool.query("UPDATE users SET role = 'user' WHERE id = $1", [authorId]);
+      invalidateSessionScopeCache(authorId);
     });
 
     it('admin approves Task 3 via PATCH /admin/quest-attempts/:id/steps/3', async () => {

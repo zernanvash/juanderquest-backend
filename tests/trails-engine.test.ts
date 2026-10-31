@@ -180,12 +180,18 @@ describe('Plan 44 trail engine phase 0–2', () => {
       ['post','/api/v1/admin/trails/example/review'], ['post','/api/v1/admin/trails/example/publish'],
       ['post','/api/v1/admin/trails/example/reject'], ['post','/api/v1/admin/trails/example/retire'],
     ];
+    const travelerUser = { id: 'test-user', seed_id: 'seed-test-user', role: 'user', is_test: false } as any;
+    db.users.push(travelerUser);
     const traveler = signSessionToken({ id:'test-user',seed_id:'seed-test-user',role:'user' });
-    for (const [method,path] of routes) {
-      const response = method==='get' ? await request(app).get(path) : await request(app).post(path).send({});
-      expect(response.status).toBe(401);
-      const forbidden = method==='get' ? await request(app).get(path).set('Authorization',`Bearer ${traveler}`) : await request(app).post(path).set('Authorization',`Bearer ${traveler}`).send({});
-      expect(forbidden.status).toBe(403);
+    try {
+      for (const [method,path] of routes) {
+        const response = method==='get' ? await request(app).get(path) : await request(app).post(path).send({});
+        expect(response.status).toBe(401);
+        const forbidden = method==='get' ? await request(app).get(path).set('Authorization',`Bearer ${traveler}`) : await request(app).post(path).set('Authorization',`Bearer ${traveler}`).send({});
+        expect(forbidden.status).toBe(403);
+      }
+    } finally {
+      db.users = db.users.filter(u => u.id !== travelerUser.id);
     }
   });
 

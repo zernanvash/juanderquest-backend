@@ -93,7 +93,7 @@ realDescribe('local economy browser read contracts on disposable PostgreSQL', ()
     expect(forgedRole.status).toBe(403);
     const deleted = await request(app).get('/api/v1/admin/economy/queue')
       .set('Authorization', bearer(`deleted-${randomUUID()}`, 'admin'));
-    expect(deleted.status).toBe(403);
+    expect(deleted.status).toBe(401);
     const deletedTraveler = await request(app).get('/api/v1/economy/me')
       .set('Authorization', bearer(`deleted-${randomUUID()}`, 'user'));
     expect(deletedTraveler.status).toBe(401);
