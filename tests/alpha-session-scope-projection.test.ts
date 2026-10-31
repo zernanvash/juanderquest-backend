@@ -2,16 +2,17 @@ import { Pool } from 'pg';
 import { UsersRepository } from '../src/repositories/users.js';
 
 describe('UsersRepository - findAlphaSessionScopesByIds (Iteration 20a)', () => {
-  it('projects only id, seed_id, and is_test, excluding private or extraneous fields', async () => {
+  it('projects only id, seed_id, is_test, session_epoch, and role, excluding private or extraneous fields', async () => {
     const mockQuery = jest.fn().mockResolvedValue({
       rows: [
         {
           id: 'user-uuid-1',
           seed_id: 'wallet:0x123',
           is_test: false,
+          session_epoch: 0,
+          role: 'admin',
           // Intentionally simulate DB or mock returning extraneous fields to verify projection exclusion
           email: 'secret@example.com',
-          role: 'admin',
           demo_points: 1000,
           mjdq_balance: 50000,
         },
@@ -31,9 +32,10 @@ describe('UsersRepository - findAlphaSessionScopesByIds (Iteration 20a)', () => 
       id: 'user-uuid-1',
       seed_id: 'wallet:0x123',
       is_test: false,
+      session_epoch: 0,
+      role: 'admin',
     });
     expect((projected as any).email).toBeUndefined();
-    expect((projected as any).role).toBeUndefined();
     expect((projected as any).demo_points).toBeUndefined();
     expect((projected as any).mjdq_balance).toBeUndefined();
   });
@@ -41,8 +43,8 @@ describe('UsersRepository - findAlphaSessionScopesByIds (Iteration 20a)', () => 
   it('uses exact parameterized query and binds exact array parameter', async () => {
     const mockQuery = jest.fn().mockResolvedValue({
       rows: [
-        { id: 'user-1', seed_id: 'seed-1', is_test: false },
-        { id: 'user-2', seed_id: 'seed-2', is_test: true },
+        { id: 'user-1', seed_id: 'seed-1', is_test: false, session_epoch: 0, role: 'user' },
+        { id: 'user-2', seed_id: 'seed-2', is_test: true, session_epoch: 0, role: 'user' },
       ],
     });
     const fakePool = { query: mockQuery } as unknown as Pool;
@@ -53,7 +55,7 @@ describe('UsersRepository - findAlphaSessionScopesByIds (Iteration 20a)', () => 
 
     expect(mockQuery).toHaveBeenCalledTimes(1);
     const [sql, params] = mockQuery.mock.calls[0];
-    expect(sql).toBe('SELECT id, seed_id, is_test FROM users WHERE id = ANY($1::text[])');
+    expect(sql).toBe('SELECT id, seed_id, is_test, COALESCE(session_epoch, 0)::int AS session_epoch, role FROM users WHERE id = ANY($1::text[])');
     expect(params).toEqual([['user-1', 'user-2']]);
   });
 
