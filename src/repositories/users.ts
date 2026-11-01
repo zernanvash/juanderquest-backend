@@ -8,7 +8,7 @@ export interface CreateUserData {
   display_name: string;
   email: string;
   avatar_url?: string;
-  role?: 'user' | 'admin' | 'qa';
+  role?: 'user' | 'admin' | 'area_admin' | 'qa';
   demo_points?: number;
   mjdq_balance?: number;
   jdq_governance_balance?: number;
@@ -25,7 +25,7 @@ export interface AlphaSessionScope {
   seed_id: string;
   is_test: boolean;
   session_epoch: number;
-  role: 'user' | 'admin' | 'qa';
+  role: 'user' | 'admin' | 'area_admin' | 'qa';
 }
 
 export class UsersRepository {
@@ -63,7 +63,7 @@ export class UsersRepository {
       }
     }
 
-    const { rows } = await this.pool.query<{ id: string; seed_id: string; is_test: boolean; session_epoch: number; role: 'user' | 'admin' | 'qa' }>(
+    const { rows } = await this.pool.query<{ id: string; seed_id: string; is_test: boolean; session_epoch: number; role: 'user' | 'admin' | 'area_admin' | 'qa' }>(
       'SELECT id, seed_id, is_test, COALESCE(session_epoch, 0)::int AS session_epoch, role FROM users WHERE id = ANY($1::text[])',
       [uniqueIds]
     );

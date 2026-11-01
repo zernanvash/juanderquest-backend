@@ -10,18 +10,19 @@ import type { Pool } from 'pg';
 export interface AuthenticatedUser {
   id: string;
   seed_id: string;
-  role: 'user' | 'admin' | 'qa';
+  role: 'user' | 'admin' | 'area_admin' | 'qa';
   sep?: number;
 }
 
 export interface AuthRequest extends Request {
   user?: AuthenticatedUser;
   isQAAuthorized?: boolean;
+  adminScope?: import('../admin/scope.js').AdminScope;
 }
 
 interface CachedSessionScope {
   session_epoch: number;
-  role: 'user' | 'admin' | 'qa';
+  role: 'user' | 'admin' | 'area_admin' | 'qa';
   expiresAt: number;
 }
 
@@ -48,7 +49,7 @@ export const getAlphaSessionScopeBatcher = (pool: Pool): AlphaSessionScopeBatche
   return batcher;
 };
 
-export const getSessionScope = async (userId: string): Promise<{ session_epoch: number; role: 'user' | 'admin' | 'qa' } | null> => {
+export const getSessionScope = async (userId: string): Promise<{ session_epoch: number; role: 'user' | 'admin' | 'area_admin' | 'qa' } | null> => {
   const cached = sessionScopeCache.get(userId);
   if (cached && Date.now() < cached.expiresAt) {
     return { session_epoch: cached.session_epoch, role: cached.role };

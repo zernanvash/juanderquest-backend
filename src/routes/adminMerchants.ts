@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
-import { authenticateToken, requireAdmin, AuthRequest } from '../middleware/auth.js';
+import { authenticateToken, AuthRequest } from '../middleware/auth.js';
+import { assertInScope, merchantTownAreas, requireAreaAdmin } from '../admin/scope.js';
 import { db } from '../db/index.js';
 
 // Admin merchant directory and inspection.
@@ -10,11 +11,24 @@ import { db } from '../db/index.js';
 // actions continue to live under /merchant/*.
 export const adminMerchantsRouter = Router();
 
+// Plan 59: area admins with merchants_vouchers see only merchants whose town is in their area
+// (merchants.town_area_id; unassigned merchants stay platform-only).
+const requireMerchantPower = requireAreaAdmin('merchants_vouchers');
+const storageUnavailable = (res: Response) =>
+  res.status(503).json({ success: false, error: { code: 'DATABASE_OUTAGE', message: 'Merchant area data is unavailable.' } });
+
 const displayNameFor = (userId: string): string | null =>
   db.findUserById(userId)?.display_name ?? null;
 
-adminMerchantsRouter.get('/admin/merchants', authenticateToken, requireAdmin, (_req: AuthRequest, res: Response) => {
-  const data = db.listMerchants().map((merchant) => {
+adminMerchantsRouter.get('/admin/merchants', authenticateToken, requireMerchantPower, async (req: AuthRequest, res: Response) => {
+  const scope = req.adminScope!;
+  let areas: Map<string, string | null> | null = null;
+  if (!scope.platform) {
+    try { areas = await merchantTownAreas(); } catch { return storageUnavailable(res); }
+  }
+  const data = db.listMerchants()
+    .filter((merchant) => !areas || assertInScope(scope, 'merchants_vouchers', areas.get(merchant.id) ?? null))
+    .map((merchant) => {
     const memberships = db.listMerchantMemberships(merchant.id);
     const products = db.listMerchantProducts(merchant.id, true);
     const owner = memberships.find((membership) => membership.role === 'owner');
@@ -39,9 +53,15 @@ adminMerchantsRouter.get('/admin/merchants', authenticateToken, requireAdmin, (_
   return res.status(200).json({ success: true, data });
 });
 
-adminMerchantsRouter.get('/admin/merchants/:id', authenticateToken, requireAdmin, (req: AuthRequest, res: Response) => {
+adminMerchantsRouter.get('/admin/merchants/:id', authenticateToken, requireMerchantPower, async (req: AuthRequest, res: Response) => {
   const merchant = db.findMerchantById(req.params.id);
-  if (!merchant) {
+  let inScope = true;
+  if (merchant && !req.adminScope!.platform) {
+    try {
+      inScope = assertInScope(req.adminScope!, 'merchants_vouchers', (await merchantTownAreas([merchant.id])).get(merchant.id) ?? null);
+    } catch { return storageUnavailable(res); }
+  }
+  if (!merchant || !inScope) {
     return res.status(404).json({
       success: false,
       error: { code: 'MERCHANT_NOT_FOUND', message: 'Merchant not found.' },

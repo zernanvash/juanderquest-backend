@@ -9,7 +9,7 @@ export const QR_PASS_TYP = 'quest_qr_pass';
 export interface SessionClaims {
   id: string;
   seed_id: string;
-  role: 'user' | 'admin' | 'qa';
+  role: 'user' | 'admin' | 'area_admin' | 'qa';
   sep?: number;
 }
 
@@ -43,7 +43,7 @@ export interface QuestQrPassClaims {
 }
 
 const validRole = (role: unknown): role is SessionClaims['role'] =>
-  role === 'user' || role === 'admin' || role === 'qa';
+  role === 'user' || role === 'admin' || role === 'area_admin' || role === 'qa';
 
 export function signSessionToken(
   user: { id: string; seed_id: string; role: string; session_epoch?: number },
