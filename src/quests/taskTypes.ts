@@ -35,6 +35,8 @@ export interface ArCfg {
   fence: GeoFence; // radius 30–150
   object: 'token' | 'gem' | 'beacon' | 'box';
   color: '#FFB703' | '#2D6A4F' | '#3B82F6' | '#E11D48';
+  /** Plan 76. Missing = map (approximate). */
+  placement?: { mode: 'ar_live' | 'map'; gps_accuracy_m?: number };
 }
 
 export type InAppTask =

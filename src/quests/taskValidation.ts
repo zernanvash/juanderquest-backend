@@ -42,6 +42,13 @@ export const arCfgSchema = z.object({
   }),
   object: z.enum(['token', 'gem', 'beacon', 'box']).default('token'),
   color: z.enum(['#FFB703', '#2D6A4F', '#3B82F6', '#E11D48']).default('#FFB703'),
+  // Plan 76: how the creator placed the object. ar_live = with the camera, so
+  // fence.lat/lng is the object's own point; map = a map pin (approximate).
+  // Missing means map, so existing quests are unchanged.
+  placement: z.object({
+    mode: z.enum(['ar_live', 'map']),
+    gps_accuracy_m: z.number().finite().min(0).max(100).optional(),
+  }).optional(),
 });
 
 export const inAppTaskSchema = z.discriminatedUnion('kind', [
