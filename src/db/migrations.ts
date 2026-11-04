@@ -84,6 +84,7 @@ export const MIGRATIONS = [
   '075_juanchoice_perk_controls.sql',
   '076_developer_roles.sql',
   '077_session_epoch.sql',
+  '079_user_tutorials.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so

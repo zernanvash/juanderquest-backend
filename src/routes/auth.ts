@@ -11,6 +11,7 @@ import { clearSessionCookie, setSessionCookie } from '../auth/sessionCookie.js';
 import { signSessionToken } from '../auth/tokens.js';
 import { safeCosmeticsFor } from '../shop/render.js';
 import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
+import { getPool } from '../db/pool.js';
 import { devGoogleCredentialsEnabled, verifyGoogleCredential } from '../auth/google.js';
 import { accountLoginThrottle } from '../auth/loginThrottle.js';
 
@@ -1266,6 +1267,46 @@ router.get('/auth/me', authenticateToken, async (req: AuthRequest, res: Response
     success: true,
     data: { ...user, cosmetics: cosmetics ?? {banner:null,frame:null,title:null,nameColor:null} },
   });
+});
+
+// First-run tutorials (owner 2026-11-04): which ones this account has seen, so
+// each shows once per account, even after clearing app data or on a new phone.
+const TUTORIAL_KEY = /^[a-z0-9_]{1,40}$/;
+const memoryTutorials = new Map<string, Record<string, string>>();
+
+async function tutorialsSeen(userId: string): Promise<Record<string, string>> {
+  const pool = getPool();
+  if (!pool) return { ...(memoryTutorials.get(userId) ?? {}) };
+  const { rows } = await pool.query<{ tutorials_seen: Record<string, string> | null }>(
+    'SELECT tutorials_seen FROM users WHERE id = $1',
+    [userId],
+  );
+  return rows[0]?.tutorials_seen ?? {};
+}
+
+router.get('/me/tutorials', authenticateToken, async (req: AuthRequest, res: Response) => {
+  res.setHeader('Cache-Control', 'private, no-store');
+  return res.json({ success: true, data: { seen: await tutorialsSeen(req.user!.id) } });
+});
+
+router.post('/me/tutorials/:key/seen', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const key = req.params.key;
+  if (!TUTORIAL_KEY.test(key)) {
+    return res.status(400).json({ success: false, error: { code: 'INVALID_TUTORIAL_KEY', message: 'Unknown tutorial.' } });
+  }
+  const userId = req.user!.id;
+  const seen = await tutorialsSeen(userId);
+  // The first time counts; seeing it again keeps the original time.
+  if (!seen[key]) {
+    seen[key] = new Date().toISOString();
+    const pool = getPool();
+    if (pool) {
+      await pool.query('UPDATE users SET tutorials_seen = $2::jsonb WHERE id = $1', [userId, JSON.stringify(seen)]);
+    } else {
+      memoryTutorials.set(userId, seen);
+    }
+  }
+  return res.json({ success: true, data: { seen } });
 });
 
 forwardAsyncRouteErrors(router);
