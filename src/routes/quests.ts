@@ -20,6 +20,7 @@ import { sanitizeAttemptSnapshot, sanitizeQuestForViewer, sanitizeQuestSteps } f
 import { normalizeTasks, publicTask, publicTasks } from '../quests/taskNormalize.js';
 import type { QuestTask } from '../quests/taskTypes.js';
 import { questTaskInputSchema, validateTasksWithinDistance } from '../quests/taskValidation.js';
+import { RELIC_REACH_M, relicSpot } from '../quests/relicSpot.js';
 import { hasCompletedQuest } from '../services/quest-completion.js';
 import { hasFundingPlan, requireFundingHold, startFundedAttempt } from '../funding/holds.js';
 import { FundingError, publishFunding } from '../funding/transaction.js';
@@ -74,6 +75,8 @@ const stepEvidenceSchema = z.object({
     photo_url: z.string().url().max(2048).optional(),
     photo_sha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
     gallery_opt_in: z.union([z.boolean(), z.enum(['true', 'false'])]).optional(),
+    // AR: the app hunted the hidden relic spot (new apps); older apps omit it.
+    relic_mode: z.literal('hidden_spot').optional(),
   }).passthrough(),
 });
 
@@ -1340,6 +1343,27 @@ router.post(
         return recordFailure(400, 'INVALID_CHALLENGE_TOKEN', 'Challenge token was issued for a different task.');
       }
 
+      let relicDistance: number | undefined;
+      if (body.relic_mode === 'hidden_spot') {
+        // Same area values as the ar-challenge route, so it is the same spot.
+        const relic = relicSpot(activeAttempt.id, taskKey || '', {
+          lat: fence?.lat ?? quest.gps_lat,
+          lng: fence?.lng ?? quest.gps_lng,
+          radius_meters: fence?.radius_meters ?? 50,
+        });
+        const near = withinRadius(capturedLat, capturedLng, relic.lat, relic.lng, RELIC_REACH_M, Math.min(capturedAccuracy || 0, 10));
+        if (!near.ok) {
+          return recordFailure(
+            400,
+            'RELIC_NOT_HERE',
+            Number.isFinite(near.distance)
+              ? `The relic is not here. It is about ${Math.round(near.distance)} m away; keep looking.`
+              : 'The captured GPS coordinates are invalid.'
+          );
+        }
+        relicDistance = Math.round(near.distance);
+      }
+
       const claimed = claimChallengeNonce(arClaims.nonce);
       if (!claimed) {
         return recordFailure(400, 'CHALLENGE_NONCE_REUSED', 'Challenge token has already been used.');
@@ -1347,6 +1371,7 @@ router.post(
       claimedChallengeNonce = arClaims.nonce;
 
       evidencePayload = {
+        ...(relicDistance !== undefined ? { relic_mode: 'hidden_spot', relic_distance_meters: relicDistance } : {}),
         challenge_nonce: arClaims.nonce,
         gps: {
           lat: capturedLat,
@@ -2009,6 +2034,9 @@ router.post(
       expiresInSec
     );
 
+    // The relic hides at a random spot inside the area, its own for this attempt.
+    const relic = relicSpot(activeAttempt.id, taskKey, { lat: targetLat, lng: targetLng, radius_meters: allowedRadius });
+
     return res.status(200).json({
       success: true,
       data: {
@@ -2017,6 +2045,8 @@ router.post(
         attempt_id: activeAttempt.id,
         task_key: taskKey,
         expires_at: new Date(Date.now() + expiresInSec * 1000).toISOString(),
+        relic,
+        relic_reach_meters: RELIC_REACH_M,
       },
     });
   }

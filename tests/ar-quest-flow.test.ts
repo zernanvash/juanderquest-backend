@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
+import { calculateHaversineDistance } from '../src/db/index.js';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { randomUUID } from 'node:crypto';
@@ -81,8 +82,20 @@ realPgDescribe('AR quest flow: multi-task creation, host-scan QR pass, completio
 
     const challenge = await as('/steps/1/ar-challenge').send(here);
     expect(challenge.status).toBe(200);
-    const ar = await as('/steps/1/evidence').send({ challenge_token: challenge.body.data.challenge_token, ...here });
-    expect(ar.status).toBe(200);
+    // The relic hides at its own spot inside the 80 m area (20-80% out from the centre).
+    const relic = challenge.body.data.relic as { lat: number; lng: number };
+    expect(relic).toBeDefined();
+    const out = calculateHaversineDistance(LAT, LNG, relic.lat, relic.lng);
+    expect(out).toBeGreaterThan(15);
+    expect(out).toBeLessThan(65);
+    // A hidden-spot collect on the far side of the centre is refused (the token stays usable)...
+    const far = { captured_lat: 2 * LAT - relic.lat, captured_lng: 2 * LNG - relic.lng, captured_accuracy: 5 };
+    const wrong = await as('/steps/1/evidence').send({ challenge_token: challenge.body.data.challenge_token, relic_mode: 'hidden_spot', ...far });
+    expect(wrong.body.error?.code).toBe('RELIC_NOT_HERE');
+    // ...and accepted at the spot.
+    const atRelic = { captured_lat: relic.lat, captured_lng: relic.lng, captured_accuracy: 5 };
+    const ar = await as('/steps/1/evidence').send({ challenge_token: challenge.body.data.challenge_token, relic_mode: 'hidden_spot', ...atRelic });
+    expect({ status: ar.status, error: ar.body.error }).toEqual({ status: 200, error: undefined });
     expect(ar.body.data.step.status).toBe('verified');
 
     // A pass is only for host-scan tasks.
