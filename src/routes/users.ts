@@ -9,6 +9,7 @@ import { notify } from '../social/notify.js';
 import { manilaHour } from '../social/time.js';
 import { safeCosmeticsFor } from '../shop/render.js';
 import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
+import { spotStore, Spot } from '../spots/store.js';
 
 export const usersRouter = Router();
 
@@ -215,6 +216,204 @@ usersRouter.get(
 // ==========================================
 // 2. Parameterized Routes (/users/:id/...)
 // ==========================================
+
+// GET /users/:handle/spots — Published destinations created by a traveler
+usersRouter.get(
+  '/users/:handle/spots',
+  publicProfileLimiter,
+  optionalAuthenticateToken,
+  checkQAAuthorization,
+  async (req: AuthRequest, res: Response) => {
+    res.set('Cache-Control', 'no-store');
+    const allowTest = isAuthorizedQA(req);
+    if (allowTest) res.set('X-Robots-Tag', 'noindex, nofollow');
+
+    const rawHandle = req.params.handle;
+    if (!rawHandle || rawHandle.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Handle is required.' },
+      });
+    }
+
+    const trimmed = rawHandle.trim();
+    const clean = trimmed.replace(/^@/, '').toLowerCase();
+
+    // Allow user to view their own spots if authenticated
+    let user = req.user
+      ? ((await db.findUserByIdDurable(req.user.id)) || db.findUserById(req.user.id))
+      : undefined;
+    if (user && user.id !== trimmed && user.handle?.toLowerCase() !== clean) {
+      user = undefined;
+    }
+
+    if (!user) {
+      user = await db.findPublicUserByHandle(clean, allowTest);
+    }
+    if (!user && (trimmed.includes('-') || trimmed.length === 36)) {
+      user = await db.findPublicUserById(trimmed, allowTest);
+    }
+    if (!user) {
+      user = await db.findUserByIdDurable(trimmed);
+      if (user && !user.is_public && (!req.user || req.user.id !== user.id)) {
+        user = undefined;
+      }
+      if (user && user.is_test && !allowTest) {
+        user = undefined;
+      }
+    }
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'USER_NOT_FOUND', message: 'User not found.' },
+      });
+    }
+
+    let limit = 20;
+    if (req.query.limit !== undefined) {
+      const parsedLimit = parseInt(req.query.limit as string, 10);
+      if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 50) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'Limit must be an integer between 1 and 50.' },
+        });
+      }
+      limit = parsedLimit;
+    }
+
+    let offset = 0;
+    if (req.query.offset !== undefined) {
+      const parsedOffset = parseInt(req.query.offset as string, 10);
+      if (!Number.isInteger(parsedOffset) || parsedOffset < 0) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'Offset must be a non-negative integer.' },
+        });
+      }
+      offset = parsedOffset;
+    } else if (req.query.cursor !== undefined && typeof req.query.cursor === 'string') {
+      const rawCursor = req.query.cursor.trim();
+      const direct = parseInt(rawCursor, 10);
+      if (!isNaN(direct) && direct >= 0) {
+        offset = direct;
+      } else {
+        try {
+          const decoded = Buffer.from(rawCursor, 'base64').toString('utf8');
+          const decodedNum = parseInt(decoded, 10);
+          if (!isNaN(decodedNum) && decodedNum >= 0) {
+            offset = decodedNum;
+          }
+        } catch {
+          // ignore invalid cursor format, default to offset 0
+        }
+      }
+    }
+
+    const pool = getPool();
+    let allSpots: Spot[] = [];
+    if (pool) {
+      try {
+        const { rows } = await pool.query(
+          `SELECT * FROM spots
+           WHERE created_by = $1
+             AND status = 'published'
+             AND ($2 = TRUE OR COALESCE(is_test, FALSE) = FALSE)
+           ORDER BY created_at DESC, id DESC`,
+          [user.id, allowTest]
+        );
+        const rowIds = new Set(rows.map((r: any) => r.id));
+        const memSpots = spotStore.spots.filter(
+          (s) => s.created_by === user.id && s.status === 'published' && (allowTest || !s.is_test) && !rowIds.has(s.id)
+        );
+        const mappedRows: Spot[] = rows.map((r: any) => ({
+          ...r,
+          tags: Array.isArray(r.tags) ? r.tags : (typeof r.tags === 'string' ? JSON.parse(r.tags) : []),
+          amenities: Array.isArray(r.amenities) ? r.amenities : (typeof r.amenities === 'string' ? JSON.parse(r.amenities) : []),
+          good_for: Array.isArray(r.good_for) ? r.good_for : (typeof r.good_for === 'string' ? JSON.parse(r.good_for) : []),
+          best_time: Array.isArray(r.best_time) ? r.best_time : (typeof r.best_time === 'string' ? JSON.parse(r.best_time) : []),
+          hours: typeof r.hours === 'object' && r.hours ? r.hours : (typeof r.hours === 'string' ? JSON.parse(r.hours) : {}),
+          is_test: Boolean(r.is_test),
+          created_at: new Date(r.created_at).toISOString(),
+          updated_at: new Date(r.updated_at).toISOString(),
+        }));
+        allSpots = [...mappedRows, ...memSpots].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+      } catch (err) {
+        console.error('[users] Error querying user spots from pool:', err);
+        allSpots = spotStore.spots
+          .filter((s) => s.created_by === user.id && s.status === 'published' && (allowTest || !s.is_test))
+          .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+      }
+    } else {
+      allSpots = spotStore.spots
+        .filter((s) => s.created_by === user.id && s.status === 'published' && (allowTest || !s.is_test))
+        .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+    }
+
+    const total = allSpots.length;
+    const paged = allSpots.slice(offset, offset + limit);
+    const next = (offset + limit < total) ? String(offset + limit) : null;
+    const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
+
+    const spots = paged.map((spot) => {
+      const crowd = spotStore.crowd(spot);
+      let sourceName = spot.source_name;
+      if (
+        !sourceName ||
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sourceName) ||
+        /^USR-[0-9a-f]{6,}/i.test(sourceName) ||
+        sourceName === spot.created_by
+      ) {
+        sourceName = user!.display_name || 'JuanDerQuest Community';
+      }
+      return {
+        id: spot.id,
+        slug: spot.slug,
+        name: spot.name,
+        description: spot.description,
+        category: spot.category,
+        subcategory: spot.subcategory,
+        tags: spot.tags || [],
+        municipality: spot.municipality,
+        address: spot.address,
+        gps_lat: spot.gps_lat,
+        gps_lng: spot.gps_lng,
+        price_level: spot.price_level,
+        hours: spot.hours || {},
+        amenities: spot.amenities || [],
+        good_for: spot.good_for || [],
+        best_time: spot.best_time || [],
+        image_url: spot.image_url || '',
+        source_type: spot.source_type,
+        source_name: sourceName,
+        source_url: spot.source_url || null,
+        trust_level: spot.trust_level,
+        status: spot.status,
+        quest_id: spot.quest_id || null,
+        created_at: spot.created_at,
+        updated_at: spot.updated_at,
+        is_test: Boolean(spot.is_test),
+        crowd_status: crowd.crowd_status,
+        crowd_confidence: crowd.crowd_confidence,
+        crowd_updated_at: crowd.crowd_updated_at,
+        pressure_score: crowd.pressure_score,
+        saved: Boolean(spotStore.isSaved(actorId, spot.id)),
+        liked: Boolean(spotStore.isLiked(actorId, spot.id)),
+        trend_score: spotStore.trend(spot.id),
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        spots,
+        next,
+      },
+      spots,
+      next,
+    });
+  }
+);
 
 // GET /users/:id/profile â€” Public Profile Lookup by User ID or Handle
 usersRouter.get(
