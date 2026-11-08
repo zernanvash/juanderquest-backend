@@ -262,7 +262,7 @@ export function buildUserTasteProfile(
   for (const friendId of followedIds) {
     const friend = db.findUserById(friendId);
     if (!friend) continue;
-    if (friend.is_public !== true) continue;
+    if (friend.is_public !== true || friend.share_activity !== true) continue;
     if (friend.is_test) continue;
     const rawHandle = typeof friend.handle === 'string' ? friend.handle.trim().replace(/^@+/, '') : '';
     if (!rawHandle) continue;
@@ -564,7 +564,7 @@ function computeStateFingerprint(store: SpotStore, userId: string | undefined, h
         .filter((f) => f.follower_id === userId)
         .map((f) => {
           const u = db.findUserById(f.following_id);
-          return `${f.following_id}:${u?.is_public ? 1 : 0}:${u?.handle || ''}:${store.interactions.get(f.following_id)?.size ?? 0}`;
+          return `${f.following_id}:${u?.is_public ? 1 : 0}:${u?.share_activity ? 1 : 0}:${u?.handle || ''}:${store.interactions.get(f.following_id)?.size ?? 0}`;
         })
         .join(',')
     : '';

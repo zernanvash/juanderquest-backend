@@ -25,6 +25,8 @@ export interface UserRow {
   jdq_governance_balance: number; // JDQ Governance Token count (15 JDQ)
   scout_reputation: number;       // Non-inflationary reputation for casual spot discovery
   is_public: boolean;
+  share_activity?: boolean;
+  home_municipality?: string | null;
   handle?: string | null;
   bio?: string | null;
   status_text?: string | null;

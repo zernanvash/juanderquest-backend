@@ -21,6 +21,7 @@ describe('Plan 80: ExploreRanker v2 Personalization, Home Town, Privacy & Divers
   const friendPrivateId = 'u8000005-0000-4000-8000-000000000005';
   const friendTestId = 'u8000006-0000-4000-8000-000000000006';
   const friendNoHandleId = 'u8000007-0000-4000-8000-000000000007';
+  const friendNoShareId = 'u8000008-0000-4000-8000-000000000008';
 
   const tokenBeach = jwt.sign({ id: userBeachId, seed_id: 'seed_beach', role: 'user' }, env.JWT_SECRET);
   const tokenCafe = jwt.sign({ id: userCafeId, seed_id: 'seed_cafe', role: 'user' }, env.JWT_SECRET);
@@ -37,12 +38,14 @@ describe('Plan 80: ExploreRanker v2 Personalization, Home Town, Privacy & Divers
       display_name: string;
       handle: string | null;
       is_public: boolean;
+      share_activity?: boolean;
       is_test?: boolean;
     }) => {
       const existing = db.users.find((x) => x.id === u.id);
       if (existing) {
         existing.handle = u.handle;
         existing.is_public = u.is_public;
+        existing.share_activity = u.share_activity ?? true;
         existing.is_test = Boolean(u.is_test);
       } else {
         db.users.push({
@@ -57,6 +60,7 @@ describe('Plan 80: ExploreRanker v2 Personalization, Home Town, Privacy & Divers
           jdq_governance_balance: 0,
           scout_reputation: 0,
           is_public: u.is_public,
+          share_activity: u.share_activity ?? true,
           handle: u.handle,
           is_test: Boolean(u.is_test),
           created_at: now,
@@ -72,6 +76,7 @@ describe('Plan 80: ExploreRanker v2 Personalization, Home Town, Privacy & Divers
     ensureUser({ id: friendPrivateId, seed_id: 'seed_priv', display_name: 'Private Friend', handle: 'secret_handle', is_public: false });
     ensureUser({ id: friendTestId, seed_id: 'seed_qa_friend', display_name: 'QA Bot', handle: 'qa_bot', is_public: true, is_test: true });
     ensureUser({ id: friendNoHandleId, seed_id: 'seed_nohandle', display_name: 'No Handle Friend', handle: null, is_public: true });
+    ensureUser({ id: friendNoShareId, seed_id: 'seed_noshare', display_name: 'No Share Friend', handle: 'noshare_friend', is_public: true, share_activity: false });
 
     spotStore.preferences.delete(userBeachId);
     spotStore.preferences.delete(userCafeId);
@@ -83,6 +88,7 @@ describe('Plan 80: ExploreRanker v2 Personalization, Home Town, Privacy & Divers
     spotStore.interactions.delete(friendPrivateId);
     spotStore.interactions.delete(friendTestId);
     spotStore.interactions.delete(friendNoHandleId);
+    spotStore.interactions.delete(friendNoShareId);
 
     await setHomeTown(userBeachId, null);
     await setHomeTown(userCafeId, null);
@@ -243,6 +249,24 @@ describe('Plan 80: ExploreRanker v2 Personalization, Home Town, Privacy & Divers
         expect(reason).not.toContain(friendNoHandleId);
       }
     }
+  });
+
+  it('a public friend with share_activity=false gives no friend reason', () => {
+    db.follows = db.follows.filter((f) => f.follower_id !== userBeachId);
+    const now = new Date().toISOString();
+    db.follows.push({
+      follower_id: userBeachId,
+      following_id: friendNoShareId,
+      created_at: now,
+    });
+    spotStore.interact(friendNoShareId, 'spot-patar', 'visit', true);
+
+    const taste = buildUserTasteProfile(spotStore, userBeachId);
+    expect(taste.friendHandlesBySpotId.has('spot-patar')).toBe(false);
+
+    const ranked = spotStore.list({ userId: userBeachId });
+    const patar = ranked.find((s) => s.id === 'spot-patar')!;
+    expect(patar.recommendation_reasons).not.toContain('Visited by @noshare_friend');
   });
 
   it('5. Tier 3 Home Town & Fallback: uses users.home_municipality when set, and falls back to top-affinity town when NULL', () => {

@@ -8,6 +8,7 @@ import { env } from '../src/config/env.js';
 import { recordActivity } from '../src/social/activity.js';
 import { clearPlazaFeedCache } from '../src/social/feed.js';
 import { setHomeTown } from '../src/social/homeTown.js';
+import { weekStartDate } from '../src/social/time.js';
 
 describe('Plan 80: PlazaRanker v2 Feed Ranking, Home Town Scope & Author Diversity', () => {
   let testDb: TestDbInstance;
@@ -77,6 +78,32 @@ describe('Plan 80: PlazaRanker v2 Feed Ranking, Home Town Scope & Author Diversi
     role: 'user',
   };
 
+  const userRival6 = {
+    id: 'u8066666-6666-4666-8666-666666666666',
+    seed_id: 'seed_plaza_rival6',
+    display_name: 'Rival Six',
+    handle: 'rival_six',
+    email: 'rival6@plaza.test',
+    home_municipality: 'Alaminos City',
+    is_public: true,
+    share_activity: true,
+    is_test: false,
+    role: 'user',
+  };
+
+  const userActor10 = {
+    id: 'u8077777-7777-4777-8777-777777777777',
+    seed_id: 'seed_plaza_actor10',
+    display_name: 'Actor Ten',
+    handle: 'actor_ten',
+    email: 'actor10@plaza.test',
+    home_municipality: 'Alaminos City',
+    is_public: true,
+    share_activity: true,
+    is_test: false,
+    role: 'user',
+  };
+
   const tokenViewer = jwt.sign(
     { id: userViewer.id, seed_id: userViewer.seed_id, role: 'user' },
     env.JWT_SECRET,
@@ -91,7 +118,7 @@ describe('Plan 80: PlazaRanker v2 Feed Ranking, Home Town Scope & Author Diversi
     setPool(testDb.pool);
     db.usersRepo.setPool(testDb.pool);
 
-    for (const u of [userViewer, userFriend, userSpammer, userTownie, userNoHome]) {
+    for (const u of [userViewer, userFriend, userSpammer, userTownie, userNoHome, userRival6, userActor10]) {
       await testDb.pool.query(
         `INSERT INTO users (id, seed_id, display_name, email, handle, is_public, share_activity, is_test, role, home_municipality)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -145,6 +172,7 @@ describe('Plan 80: PlazaRanker v2 Feed Ranking, Home Town Scope & Author Diversi
   beforeEach(async () => {
     clearPlazaFeedCache();
     await testDb.pool.query('DELETE FROM social_activities');
+    await testDb.pool.query('DELETE FROM plaza_weekly_scores');
   });
 
   it('1. Plaza Mixed Feed Bug Fix: user with approved submission in Dagupan still sees municipality=null milestones and other towns in scope=mixed', async () => {
@@ -308,4 +336,113 @@ describe('Plan 80: PlazaRanker v2 Feed Ranking, Home Town Scope & Author Diversi
     // Reset userNoHome back to NULL
     await setHomeTown(userNoHome.id, null);
   });
+
+  it('4. Plaza Rivals: viewer ranked #5, actor ranked #6 gets reason rival and reason_label Rival · #6 This Week, actor ranked #10 does not', async () => {
+    const wStart = weekStartDate(new Date());
+
+    await testDb.pool.query(
+      `INSERT INTO plaza_weekly_scores (week_start, user_id, rank, score, is_test)
+       VALUES ($1, $2, 5, 500, false),
+              ($1, $3, 6, 450, false),
+              ($1, $4, 10, 200, false)`,
+      [wStart, userViewer.id, userRival6.id, userActor10.id],
+    );
+
+    // Record activity for Rival 6 and Actor 10
+    await recordActivity(testDb.pool, {
+      eventKey: 'p80:rival:6',
+      actorId: userRival6.id,
+      verb: 'quest_completed',
+      subjectType: 'quest',
+      subjectId: 'q-rival-6',
+      subjectTitle: 'Rival 6 Quest',
+      subjectHref: '/quests/q-rival-6',
+      municipality: 'Alaminos City',
+      payload: { points: 50 },
+      isTest: false,
+    });
+
+    await recordActivity(testDb.pool, {
+      eventKey: 'p80:actor:10',
+      actorId: userActor10.id,
+      verb: 'quest_completed',
+      subjectType: 'quest',
+      subjectId: 'q-actor-10',
+      subjectTitle: 'Actor 10 Quest',
+      subjectHref: '/quests/q-actor-10',
+      municipality: 'Alaminos City',
+      payload: { points: 50 },
+      isTest: false,
+    });
+
+    const res = await request(app)
+      .get('/api/v1/plaza/feed?scope=mixed')
+      .set('Authorization', `Bearer ${tokenViewer}`);
+
+    expect(res.status).toBe(200);
+    const items = res.body.data.items;
+
+    const itemRival6 = items.find((i: any) => i.actor.user_id === userRival6.id);
+    expect(itemRival6).toBeDefined();
+    expect(itemRival6.reason).toBe('rival');
+    expect(itemRival6.reason_label).toBe('Rival · #6 This Week');
+
+    const itemActor10 = items.find((i: any) => i.actor.user_id === userActor10.id);
+    expect(itemActor10).toBeDefined();
+    expect(itemActor10.reason).not.toBe('rival');
+    expect(itemActor10.reason_label).not.toContain('Rival');
+  });
+
+  it('5. Plaza Mixed Feed Paging: 170 activities paging with next_cursor returns all 170, no duplicates', async () => {
+    // Clear feed cache & activities
+    clearPlazaFeedCache();
+    await testDb.pool.query('DELETE FROM social_activities');
+
+    // Insert 170 activities with ordered timestamps
+    const baseTimeMs = Date.now() - 3600 * 1000;
+    const values: any[] = [];
+    const placeholders: string[] = [];
+    for (let i = 0; i < 170; i++) {
+      const idx = String(i).padStart(3, '0');
+      const actId = `act-p80-170-${idx}`;
+      const eventKey = `p80:act170:${idx}`;
+      const dt = new Date(baseTimeMs + i * 1000).toISOString();
+      const p = placeholders.length * 5;
+      placeholders.push(`($${p + 1}, $${p + 2}, $${p + 3}, $${p + 4}, $${p + 5})`);
+      values.push(actId, eventKey, userTownie.id, `Title ${idx}`, dt);
+    }
+
+    await testDb.pool.query(
+      `INSERT INTO social_activities (id, event_key, actor_id, verb, subject_type, subject_id, subject_title, subject_href, municipality, is_test, created_at)
+       SELECT v.id, v.event_key, v.actor_id, 'quest_completed', 'quest', 'q-dag-1', v.title, '/quests/q-dag-1', 'Dagupan City', false, v.created_at::timestamptz
+       FROM (VALUES ${placeholders.join(', ')}) AS v(id, event_key, actor_id, title, created_at)`,
+      values,
+    );
+
+    let nextCursor: string | null = null;
+    const collectedIds: string[] = [];
+    let pageCount = 0;
+
+    do {
+      const query = nextCursor
+        ? `?scope=mixed&limit=50&cursor=${encodeURIComponent(nextCursor)}`
+        : '?scope=mixed&limit=50';
+      const res = await request(app)
+        .get(`/api/v1/plaza/feed${query}`)
+        .set('Authorization', `Bearer ${tokenViewer}`);
+
+      expect(res.status).toBe(200);
+      const items = res.body.data.items;
+      expect(items.length).toBeGreaterThan(0);
+      for (const item of items) {
+        collectedIds.push(item.id);
+      }
+      nextCursor = res.body.data.next_cursor;
+      pageCount++;
+      if (pageCount > 10) break;
+    } while (nextCursor);
+
+    expect(collectedIds.length).toBe(170);
+    expect(new Set(collectedIds).size).toBe(170);
+  }, 30000);
 });

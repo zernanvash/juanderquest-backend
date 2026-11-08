@@ -1,9 +1,7 @@
 import { getPool } from '../db/pool.js';
 import { spotStore } from '../spots/store.js';
 import type { ActivityVerb, Queryable } from './activity.js';
-import { getHomeTown } from './homeTown.js';
-import { computeHomeTowns } from './standings.js';
-import { MANILA_OFFSET_MS, weekId } from './time.js';
+import { MANILA_OFFSET_MS, weekStartDate } from './time.js';
 
 export { Queryable };
 
@@ -188,21 +186,7 @@ function mapActivityRow(
 async function resolveViewerHomeTown(
   queryable: Queryable,
   viewerId: string,
-  isTest: boolean,
 ): Promise<string | null> {
-  try {
-    const homeTowns = await computeHomeTowns(queryable, isTest);
-    const fromBoard = homeTowns.get(viewerId);
-    if (fromBoard) return fromBoard;
-  } catch {
-    // Fallback to direct lookup
-  }
-  try {
-    const direct = await getHomeTown(viewerId);
-    if (direct) return direct;
-  } catch {
-    // Ignore
-  }
   try {
     const { rows } = await queryable.query(
       'SELECT home_municipality FROM users WHERE id = $1',
@@ -235,7 +219,7 @@ async function buildViewerPlazaContext(
     };
   }
 
-  const viewerHomeTown = await resolveViewerHomeTown(queryable, viewerId, isTest);
+  const viewerHomeTown = await resolveViewerHomeTown(queryable, viewerId);
 
   // In-memory spotStore interactions & preferences
   const memInteractions = spotStore.interactions.get(viewerId);
@@ -325,27 +309,30 @@ async function buildViewerPlazaContext(
     .map(([c]) => c);
   for (const c of sortedCats) topCategories.add(c);
 
-  // Weekly Leaderboard Rivals (+/- 3 ranks of viewer on weekly everyone board)
+  // Weekly Leaderboard Rivals (+/- 3 ranks of viewer on weekly scores)
   try {
-    const currentWeekId = weekId(now);
-    const snapRes = await queryable.query(
+    const wDate = weekStartDate(now);
+    const scoreRes = await queryable.query(
       `SELECT user_id, rank
-         FROM standings_snapshots
-        WHERE period = $1
-          AND board = 'everyone'
-          AND is_test = $2`,
-      [currentWeekId, isTest],
+         FROM plaza_weekly_scores
+        WHERE week_start = $1 AND is_test = $2
+        ORDER BY rank ASC`,
+      [wDate, isTest],
     );
-    const mySnap = snapRes.rows.find((r: any) => r.user_id === viewerId);
-    if (mySnap) {
-      for (const r of snapRes.rows) {
-        if (r.user_id !== viewerId && Math.abs(Number(r.rank) - Number(mySnap.rank)) <= 3) {
-          rivalRanksByUserId.set(r.user_id, Number(r.rank));
+    const myScore = scoreRes.rows.find((r: any) => r.user_id === viewerId);
+    if (myScore && myScore.rank != null) {
+      const myRank = Number(myScore.rank);
+      for (const r of scoreRes.rows) {
+        if (r.user_id !== viewerId && r.rank != null) {
+          const rRank = Number(r.rank);
+          if (Math.abs(rRank - myRank) <= 3) {
+            rivalRanksByUserId.set(r.user_id, rRank);
+          }
         }
       }
     }
   } catch {
-    // Ignore if snapshot not populated
+    // Ignore if table query fails
   }
 
   return {
@@ -531,6 +518,7 @@ export async function getFeed(
   if (!queryable) {
     return { items: [], next_cursor: null };
   }
+  const activeQueryable = queryable;
 
   const viewerId = input.viewerId ?? null;
   const isTest = Boolean(input.isTest);
@@ -547,7 +535,7 @@ export async function getFeed(
     if (!viewerId) {
       return { items: [], next_cursor: null, reason: 'NO_HOME_TOWN' };
     }
-    const viewerHomeTown = await resolveViewerHomeTown(queryable, viewerId, isTest);
+    const viewerHomeTown = await resolveViewerHomeTown(queryable, viewerId);
     if (!viewerHomeTown) {
       return { items: [], next_cursor: null, reason: 'NO_HOME_TOWN' };
     }
@@ -686,6 +674,48 @@ export async function getFeed(
 
   const candidateRes = await queryable.query(candidateSql, [isTest, viewerId]);
   const candidateRows = candidateRes.rows;
+  const oldestCandidate =
+    candidateRows.length > 0 ? candidateRows[candidateRows.length - 1] : null;
+
+  async function fetchOlderActivities(
+    olderThanDate: Date,
+    olderThanId: string,
+    fetchLimit: number,
+  ): Promise<{ rows: any[]; hasMore: boolean }> {
+    const olderSql = `
+      SELECT a.id, a.event_key, a.actor_id, a.verb, a.subject_type, a.subject_id,
+             a.subject_title, a.subject_href, a.municipality, a.payload,
+             a.cheer_count, a.comment_count, a.created_at,
+             u.display_name, u.handle, u.avatar_url, u.home_municipality AS actor_home_municipality,
+             (f.follower_id IS NOT NULL) AS via_follow,
+             (mf.follower_id IS NOT NULL AND f.follower_id IS NOT NULL) AS is_mutual_follow,
+             (c.user_id IS NOT NULL) AS cheered_by_me
+        FROM social_activities a
+        JOIN users u ON u.id = a.actor_id AND u.is_test = a.is_test
+        LEFT JOIN user_follows f ON $2::text IS NOT NULL AND f.follower_id = $2 AND f.following_id = a.actor_id
+        LEFT JOIN user_follows mf ON $2::text IS NOT NULL AND mf.follower_id = a.actor_id AND mf.following_id = $2
+        LEFT JOIN social_cheers c ON $2::text IS NOT NULL AND c.activity_id = a.id AND c.user_id = $2
+       WHERE a.is_test = $1
+         AND a.hidden_at IS NULL
+         AND u.is_public = TRUE
+         AND u.share_activity = TRUE
+         AND (a.created_at < $3 OR (a.created_at = $3 AND a.id < $4))
+       ORDER BY a.created_at DESC, a.id DESC
+       LIMIT $5
+    `;
+    const res = await activeQueryable.query(olderSql, [
+      isTest,
+      viewerId,
+      olderThanDate,
+      olderThanId,
+      fetchLimit + 1,
+    ]);
+    const more = res.rows.length > fetchLimit;
+    return {
+      rows: more ? res.rows.slice(0, fetchLimit) : res.rows,
+      hasMore: more,
+    };
+  }
 
   const cacheKey = `${viewerId || 'anon'}|${isTest ? 'test' : 'prod'}|${manilaDay}|mixed`;
   const rowsSig = candidateRows
@@ -701,10 +731,10 @@ export async function getFeed(
 
   let rankedItems: ActivityItem[];
   const cached = plazaFeedCache.get(cacheKey);
+  const ctx = await buildViewerPlazaContext(queryable, viewerId, isTest, now);
   if (cached && cached.expiresAt > nowMs && cached.stateFingerprint === rowsSig) {
     rankedItems = cached.items;
   } else {
-    const ctx = await buildViewerPlazaContext(queryable, viewerId, isTest, now);
     rankedItems = rankPlazaCandidateRows(candidateRows, viewerId, ctx, nowMs);
     if (plazaFeedCache.size >= 250) {
       const oldest = plazaFeedCache.keys().next().value;
@@ -717,32 +747,80 @@ export async function getFeed(
     });
   }
 
+  const isTailCursor = Boolean(
+    cursorData &&
+      (cursorData.id.startsWith('tail:') ||
+        !candidateRows.some((r: any) => r.id === cursorData.id)),
+  );
+
+  if (isTailCursor && cursorData) {
+    const realId = cursorData.id.startsWith('tail:') ? cursorData.id.slice(5) : cursorData.id;
+    const { rows: olderRows, hasMore } = await fetchOlderActivities(
+      cursorData.createdAt,
+      realId,
+      limit,
+    );
+    const items = olderRows.map((r: any) => mapActivityRow(r, viewerId, ctx));
+    let next_cursor: string | null = null;
+    if (hasMore && items.length > 0) {
+      const last = items[items.length - 1];
+      next_cursor = Buffer.from(`${last.created_at}|tail:${last.id}`).toString('base64url');
+    }
+    return { items, next_cursor };
+  }
+
   let startIndex = 0;
-  let sliceSource = rankedItems;
   if (cursorData) {
     const idx = rankedItems.findIndex((item) => item.id === cursorData.id);
     if (idx !== -1) {
       startIndex = idx + 1;
-    } else {
-      const cursorTimeMs = cursorData.createdAt.getTime();
-      sliceSource = rankedItems.filter((item) => {
-        const t = new Date(item.created_at).getTime();
-        return t < cursorTimeMs || (t === cursorTimeMs && item.id < cursorData.id);
-      });
-      startIndex = 0;
     }
   }
 
-  const items = sliceSource.slice(startIndex, startIndex + limit);
-  const hasMore = startIndex + limit < sliceSource.length;
+  const sliceFromRanked = rankedItems.slice(startIndex, startIndex + limit);
+  const reachedRankedEnd = startIndex + sliceFromRanked.length >= rankedItems.length;
 
-  let next_cursor: string | null = null;
-  if (hasMore && items.length > 0) {
-    const lastItem = items[items.length - 1];
-    next_cursor = Buffer.from(`${lastItem.created_at}|${lastItem.id}`).toString('base64url');
+  if (!reachedRankedEnd) {
+    const lastItem = sliceFromRanked[sliceFromRanked.length - 1];
+    const next_cursor = Buffer.from(`${lastItem.created_at}|${lastItem.id}`).toString('base64url');
+    return { items: sliceFromRanked, next_cursor };
   }
 
-  return { items, next_cursor };
+  const needed = limit - sliceFromRanked.length;
+  if (needed > 0 && oldestCandidate && candidateRows.length === 150) {
+    const { rows: olderRows, hasMore } = await fetchOlderActivities(
+      new Date(oldestCandidate.created_at),
+      oldestCandidate.id,
+      needed,
+    );
+    const olderMapped = olderRows.map((r: any) => mapActivityRow(r, viewerId, ctx));
+    const combined = [...sliceFromRanked, ...olderMapped];
+    let next_cursor: string | null = null;
+    if (hasMore && combined.length > 0) {
+      const last = combined[combined.length - 1];
+      next_cursor = Buffer.from(`${last.created_at}|tail:${last.id}`).toString('base64url');
+    }
+    return { items: combined, next_cursor };
+  }
+
+  if (oldestCandidate && candidateRows.length === 150) {
+    const peek = await activeQueryable.query(
+      `SELECT 1 FROM social_activities a
+         JOIN users u ON u.id = a.actor_id AND u.is_test = a.is_test
+        WHERE a.is_test = $1 AND a.hidden_at IS NULL AND u.is_public = TRUE AND u.share_activity = TRUE
+          AND (a.created_at < $2 OR (a.created_at = $2 AND a.id < $3))
+        LIMIT 1`,
+      [isTest, new Date(oldestCandidate.created_at), oldestCandidate.id],
+    );
+    if (peek.rows.length > 0) {
+      const next_cursor = Buffer.from(
+        `${new Date(oldestCandidate.created_at).toISOString()}|tail:${oldestCandidate.id}`,
+      ).toString('base64url');
+      return { items: sliceFromRanked, next_cursor };
+    }
+  }
+
+  return { items: sliceFromRanked, next_cursor: null };
 }
 
 export async function getActivityById(
