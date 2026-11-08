@@ -12,6 +12,7 @@ export type SpotSource = 'lgu' | 'editorial' | 'open_data' | 'community';
 export type { CrowdCapacityBand, CrowdStatus, CrowdConfidence, ActivityType, CrowdMetrics } from './crowd.js';
 import type { CrowdCapacityBand, CrowdStatus, ActivityType } from './crowd.js';
 import { calculateCrowdMetrics } from './crowd.js';
+import { rankExploreSpots, type ExploreListQuery } from './recommender.js';
 interface ActivityEvent { id:string; user_id:string; spot_id:string; activity_type:ActivityType; created_at:string; is_test?: boolean; }
 
 export interface Spot {
@@ -72,6 +73,7 @@ export class SpotStore {
   spots = developmentFixturesEnabled ? [...seeds] : [];
   preferences = new Map<string, DiscoveryPreferences>();
   interactions = new Map<string, Set<string>>();
+  interactionTimestamps = new Map<string, number>();
   activityEvents: ActivityEvent[] = [];
   private pg: Pool | null = null;
 
@@ -83,7 +85,7 @@ export class SpotStore {
     const { rows: preferences } = await pool.query('SELECT * FROM discovery_preferences');
     for (const p of preferences) this.preferences.set(p.user_id, { categories:p.categories||[],tags:p.tags||[],occasions:p.occasions||[],price_levels:p.price_levels||[],radius_km:p.radius_km,onboarding_state:p.onboarding_state });
     const { rows: interactions } = await pool.query('SELECT * FROM spot_interactions');
-    for (const item of interactions) { const values=this.interactions.get(item.user_id)||new Set<string>();values.add(`${item.spot_id}:${item.interaction_type}`);this.interactions.set(item.user_id,values); }
+    for (const item of interactions) { const values=this.interactions.get(item.user_id)||new Set<string>();values.add(`${item.spot_id}:${item.interaction_type}`);this.interactions.set(item.user_id,values); if(item.created_at)this.interactionTimestamps.set(`${item.user_id}:${item.spot_id}:${item.interaction_type}`,new Date(item.created_at).getTime()); }
     const { rows: activity } = await pool.query("SELECT id,user_id,spot_id,activity_type,created_at,COALESCE(is_test, FALSE) AS is_test FROM spot_activity_events WHERE created_at >= NOW() - INTERVAL '24 hours'");
     this.activityEvents = activity.map((item:any)=>({...item,is_test:Boolean(item.is_test),created_at:new Date(item.created_at).toISOString()}));
   }
@@ -100,7 +102,7 @@ export class SpotStore {
 
   getPreferences(userId:string): DiscoveryPreferences { return this.preferences.get(userId) || {categories:[],tags:[],occasions:[],price_levels:[],radius_km:25,onboarding_state:'pending'}; }
   setPreferences(userId:string,p:DiscoveryPreferences) { this.preferences.set(userId,p); if(this.pg)this.pg.query(`INSERT INTO discovery_preferences(user_id,categories,tags,occasions,price_levels,radius_km,onboarding_state) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(user_id) DO UPDATE SET categories=$2,tags=$3,occasions=$4,price_levels=$5,radius_km=$6,onboarding_state=$7,updated_at=NOW()`,[userId,JSON.stringify(p.categories),JSON.stringify(p.tags),JSON.stringify(p.occasions),JSON.stringify(p.price_levels),p.radius_km,p.onboarding_state]).catch(()=>{}); return p; }
-  interact(userId:string,spotId:string,type:string,enabled=true) { const key=`${spotId}:${type}`; const set=this.interactions.get(userId)||new Set<string>(); enabled?set.add(key):set.delete(key); this.interactions.set(userId,set);if(this.pg){const query=enabled?'INSERT INTO spot_interactions(user_id,spot_id,interaction_type) VALUES($1,$2,$3) ON CONFLICT DO NOTHING':'DELETE FROM spot_interactions WHERE user_id=$1 AND spot_id=$2 AND interaction_type=$3';this.pg.query(query,[userId,spotId,type]).catch(()=>{});} return enabled; }
+  interact(userId:string,spotId:string,type:string,enabled=true,createdAtMs=Date.now()) { const key=`${spotId}:${type}`; const tsKey=`${userId}:${spotId}:${type}`; const set=this.interactions.get(userId)||new Set<string>(); if(enabled){set.add(key);this.interactionTimestamps.set(tsKey,createdAtMs);}else{set.delete(key);this.interactionTimestamps.delete(tsKey);} this.interactions.set(userId,set);if(this.pg){const query=enabled?'INSERT INTO spot_interactions(user_id,spot_id,interaction_type) VALUES($1,$2,$3) ON CONFLICT DO NOTHING':'DELETE FROM spot_interactions WHERE user_id=$1 AND spot_id=$2 AND interaction_type=$3';this.pg.query(query,[userId,spotId,type]).catch(()=>{});} return enabled; }
   isSaved(userId:string|undefined,spotId:string){return !!userId&&this.interactions.get(userId)?.has(`${spotId}:save`);}
   isLiked(userId:string|undefined,spotId:string){return !!userId&&this.interactions.get(userId)?.has(`${spotId}:like`);}
   trend(spotId:string){return this.trendScores().get(spotId)??0;}
@@ -143,24 +145,8 @@ export class SpotStore {
 
   review(spotId:string,adminId:string,status:'published'|'needs_review'|'unpublished',band:CrowdCapacityBand,suppressed=false){const spot=this.spots.find(s=>s.id===spotId);if(!spot)return undefined;spot.status=status;spot.crowd_capacity_band=band;spot.recommendation_suppressed=suppressed;spot.reviewed_by=adminId;spot.reviewed_at=new Date().toISOString();spot.updated_at=spot.reviewed_at;if(this.pg)this.pg.query('UPDATE spots SET status=$1,crowd_capacity_band=$2,recommendation_suppressed=$3,reviewed_by=$4,reviewed_at=$5,updated_at=$5 WHERE id=$6',[status,band,suppressed,adminId,spot.reviewed_at,spot.id]).catch(()=>{});return spot;}
 
-  list(q:{search?:string;categories?:string[];tags?:string[];municipality?:string;lat?:number;lng?:number;radius?:number;intent?:string;sort?:string;hasQuest?:boolean;userId?:string;allowTest?:boolean}) {
-    const prefs=q.userId?this.getPreferences(q.userId):undefined;
-    const trends=this.trendScores();const bySpot=this.eventsBySpot();const now=Date.now();
-    return this.spots.filter(s=>s.status==='published'&&(q.allowTest||!s.is_test)).map(s=>{
-      const trendScore=trends.get(s.id)??0;
-      const distance=q.lat!==undefined&&q.lng!==undefined?distanceKm(q.lat,q.lng,s.gps_lat,s.gps_lng):undefined;
-      const intent=(q.intent||'').toLowerCase();
-      const intentMatch=intent&&[s.category,s.subcategory,...s.tags,s.name].some(v=>v.toLowerCase().includes(intent))?1:0;
-      const prefMatch=prefs&&([...prefs.categories,...prefs.tags].some(v=>v===s.category||s.tags.includes(v)))?1:0;
-      const distanceScore=distance===undefined?.5:Math.max(0,1-distance/Math.max(q.radius||50,1));
-      const trust={lgu_verified:1,editorial:.9,open_data:.75,community:.6}[s.trust_level];
-      const trend=Math.min(1,trendScore/20);
-      const ageDays=(Date.now()-Date.parse(s.created_at))/86400000;
-      const freshness=Math.max(0,1-ageDays/30);
-      const score=intentMatch*.30+prefMatch*.20+distanceScore*.20+trust*.15+trend*.10+freshness*.05;
-      const reasons:string[]=[];if(distance!==undefined)reasons.push(`${distance<1?Math.round(distance*1000)+' m':distance.toFixed(1)+' km'} away`);if(intentMatch)reasons.push(`Matches ${q.intent}`);if(s.trust_level==='lgu_verified')reasons.push('LGU verified');if(trend>.25)reasons.push(`Trending in ${s.municipality}`);
-      return {...s,...this.crowd(s,now,bySpot),distance_km:distance,recommendation_score:Number(score.toFixed(4)),recommendation_reasons:reasons,saved:this.isSaved(q.userId,s.id),liked:this.isLiked(q.userId,s.id),trend_score:trendScore};
-    }).filter(s=>(!q.search||`${s.name} ${s.description} ${s.tags.join(' ')}`.toLowerCase().includes(q.search.toLowerCase()))&&(!q.categories?.length||q.categories.includes(s.category))&&(!q.tags?.length||q.tags.some(t=>s.tags.includes(t)))&&(!q.municipality||s.municipality.toLowerCase()===q.municipality.toLowerCase())&&(!q.hasQuest||!!s.quest_id)&&(s.distance_km===undefined||!q.radius||s.distance_km<=q.radius)).sort((a,b)=>q.sort==='nearest'?(a.distance_km??999)-(b.distance_km??999):q.sort==='newest'?Date.parse(b.created_at)-Date.parse(a.created_at):q.sort==='trending'?b.trend_score-a.trend_score:b.recommendation_score-a.recommendation_score);
+  list(q: ExploreListQuery) {
+    return rankExploreSpots(this, q);
   }
 
   async create(input:Omit<Spot,'id'|'slug'|'source_type'|'source_name'|'trust_level'|'status'|'created_at'|'updated_at'>,userId:string){

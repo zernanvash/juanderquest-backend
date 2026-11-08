@@ -21,6 +21,7 @@ import { normalizeTasks } from '../quests/taskNormalize.js';
 import { questTaskInputSchema, validateTasksWithinDistance } from '../quests/taskValidation.js';
 import { assertInScope, requireAreaAdmin, spotInScope, writeAdminAudit } from '../admin/scope.js';
 import { handleSpotInteraction } from '../stamps/hooks.js';
+import { getHomeTown } from '../social/homeTown.js';
 
 const router = Router();
 const csv = (value: unknown) => typeof value === 'string' && value ? value.split(',').map(v => v.trim()).filter(Boolean) : [];
@@ -52,15 +53,17 @@ router.get('/spot-taxonomy', (_req, res) => res.json({ success: true, data: {
   amenities: ['parking', 'restroom', 'wifi', 'wheelchair_accessible', 'pet_friendly', 'child_friendly'],
 } }));
 
-router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
+router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res) => {
   const allowTest = isAuthorizedQA(req);
   if (allowTest) res.set('X-Robots-Tag', 'noindex, nofollow');
   const lat = numeric(req.query.lat), lng = numeric(req.query.lng), radius = numeric(req.query.radius_km);
-  if ((lat !== undefined) !== (lng !== undefined) || [lat, lng, radius].some(v => v !== undefined && !Number.isFinite(v))) {
+  const limit = numeric(req.query.limit), offset = numeric(req.query.offset);
+  if ((lat !== undefined) !== (lng !== undefined) || [lat, lng, radius, limit, offset].some(v => v !== undefined && !Number.isFinite(v))) {
     return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Valid lat/lng and radius values are required.' } });
   }
   const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
-  const data = spotStore.list({ search: req.query.q as string | undefined, categories: csv(req.query.categories), tags: csv(req.query.tags), municipality: req.query.municipality as string | undefined, lat, lng, radius, intent: req.query.intent as string | undefined, sort: req.query.sort as string | undefined, hasQuest: req.query.has_quest === 'true', userId: actorId, allowTest });
+  const homeTown = req.user?.id ? await getHomeTown(req.user.id) : null;
+  const data = spotStore.list({ search: req.query.q as string | undefined, categories: csv(req.query.categories), tags: csv(req.query.tags), municipality: req.query.municipality as string | undefined, lat, lng, radius, intent: req.query.intent as string | undefined, sort: req.query.sort as string | undefined, hasQuest: req.query.has_quest === 'true', userId: req.user?.id || actorId, actorId, homeTown, allowTest, limit: limit !== undefined ? Math.max(1, Math.min(100, Math.floor(limit))) : undefined, offset: offset !== undefined ? Math.max(0, Math.floor(offset)) : undefined });
   return res.json({ success: true, data, meta: { count: data.length, sort: req.query.sort || 'recommended' } });
 });
 
