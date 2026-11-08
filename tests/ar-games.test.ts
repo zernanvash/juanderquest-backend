@@ -150,6 +150,10 @@ realPgDescribe('AR mini-game tasks (Plan 77, real PostgreSQL)', () => {
     await startedAgo(r1.body.data.session_id, 40);
     expect((await finish(r1.body.data.session_id, { score: 90, passed: true, stats: {} }, rivalId)).body.data.rank_place).toBe(1);
     const keyRes = await fixture.pool.query('SELECT DISTINCT task_key FROM ar_game_sessions WHERE quest_id = $1', [questId]);
+    // The app finds this board from the quest page's step key: they must match.
+    const pub = await request(app).get(`/api/v1/quests/${questId}`).set('Authorization', `Bearer ${token(travelerId)}`);
+    expect(keyRes.rows).toHaveLength(1);
+    expect(pub.body.data.steps[0].key).toBe(keyRes.rows[0].task_key);
     const board = await request(app).get('/api/v1/ar-games/leaderboard')
       .query({ quest_id: questId, task_key: keyRes.rows[0].task_key }).set('Authorization', `Bearer ${token(travelerId)}`);
     expect(board.status).toBe(200);
