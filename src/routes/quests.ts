@@ -21,6 +21,8 @@ import { normalizeTasks, publicTask, publicTasks } from '../quests/taskNormalize
 import type { QuestTask } from '../quests/taskTypes.js';
 import { questTaskInputSchema, validateTasksWithinDistance } from '../quests/taskValidation.js';
 import { RELIC_REACH_M, relicSpot } from '../quests/relicSpot.js';
+import { AR_GAMES, ArGame, passedSessionFor, startSession } from '../services/arGames.js';
+import { rateLimit } from '../middleware/rateLimit.js';
 import { hasCompletedQuest } from '../services/quest-completion.js';
 import { hasFundingPlan, requireFundingHold, startFundedAttempt } from '../funding/holds.js';
 import { FundingError, publishFunding } from '../funding/transaction.js';
@@ -77,6 +79,9 @@ const stepEvidenceSchema = z.object({
     gallery_opt_in: z.union([z.boolean(), z.enum(['true', 'false'])]).optional(),
     // AR: the app hunted the hidden relic spot (new apps); older apps omit it.
     relic_mode: z.literal('hidden_spot').optional(),
+    // Plan 77: a game task needs a passed session, or the no-ARCore fallback.
+    ar_game_session_id: z.string().min(1).max(64).optional(),
+    fallback: z.literal('no_arcore').optional(),
   }).passthrough(),
 });
 
@@ -1343,6 +1348,24 @@ router.post(
         return recordFailure(400, 'INVALID_CHALLENGE_TOKEN', 'Challenge token was issued for a different task.');
       }
 
+      // Plan 77: a game task needs a passed session (or the no-ARCore relic
+      // hunt). Checked before the relic so an old app is told to update.
+      const game = (stepDef?.verification as any)?.game;
+      let gamePayload: Record<string, unknown> = {};
+      if (typeof game === 'string' && game !== 'collect') {
+        if (body.ar_game_session_id) {
+          const session = await passedSessionFor(body.ar_game_session_id, userId, quest.id, taskKey || '', game);
+          if (!session) {
+            return recordFailure(400, 'GAME_NOT_PASSED', 'Win the game first, then collect.');
+          }
+          gamePayload = { ar_game: { session_id: session.id, game, score: session.score } };
+        } else if (body.fallback === 'no_arcore') {
+          gamePayload = { ar_game: { game, fallback: 'no_arcore' } };
+        } else {
+          return recordFailure(400, 'GAME_NOT_PASSED', 'Update the app to play this game.');
+        }
+      }
+
       let relicDistance: number | undefined;
       if (body.relic_mode === 'hidden_spot') {
         // Same area values as the ar-challenge route, so it is the same spot.
@@ -1372,6 +1395,7 @@ router.post(
 
       evidencePayload = {
         ...(relicDistance !== undefined ? { relic_mode: 'hidden_spot', relic_distance_meters: relicDistance } : {}),
+        ...gamePayload,
         challenge_nonce: arClaims.nonce,
         gps: {
           lat: capturedLat,
@@ -2049,6 +2073,88 @@ router.post(
         relic_reach_meters: RELIC_REACH_M,
       },
     });
+  }
+);
+
+// POST /quests/:id/steps/:stepOrder/ar-game - Plan 77: start a mini-game session
+// for an AR task whose game is not 'collect'. Needs the active attempt and the
+// player inside the task's area, like the AR challenge.
+router.post(
+  '/quests/:id/steps/:stepOrder/ar-game',
+  authenticateToken,
+  rateLimit({ policyId: 'ar-games:start', windowMs: 60 * 60_000, max: 30, keyStrategy: 'actor' }),
+  validateRequest(arChallengeSchema),
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    const { id } = req.params;
+    const stepOrder = Number(req.params.stepOrder);
+    const userId = req.user!.id;
+    const { captured_lat, captured_lng, captured_accuracy } = req.body;
+    const fail = (status: number, code: string, message: string) =>
+      res.status(status).json({ success: false, error: { code, message } });
+
+    const quest = db.findQuestById(id, true);
+    if (!quest) return fail(404, 'NOT_FOUND', 'Quest not found.');
+    if (captured_lat === undefined || captured_lng === undefined) {
+      return fail(400, 'MISSING_GPS_COORDINATES', 'A game needs a fresh GPS reading.');
+    }
+
+    let activeAttempt: QuestAttemptRow | null = null;
+    let stepEvidence: QuestStepEvidenceRow | null = null;
+    const pool = getPool();
+    try {
+      if (pool) {
+        const a = await pool.query(
+          "SELECT * FROM quest_attempts WHERE user_id = $1 AND quest_id = $2 AND status = 'in_progress' ORDER BY created_at DESC LIMIT 1",
+          [userId, id]
+        );
+        if (a.rows[0]) {
+          activeAttempt = mapAttempt(a.rows[0]);
+          const st = await pool.query('SELECT * FROM quest_step_evidence WHERE attempt_id = $1 AND step_order = $2', [activeAttempt.id, stepOrder]);
+          if (st.rows[0]) stepEvidence = mapStepEvidence(st.rows[0]);
+        }
+      }
+      if (!activeAttempt) {
+        const mem = db.getActiveAttempt(userId, id);
+        if (mem) {
+          activeAttempt = mem;
+          stepEvidence = db.findStepEvidence(mem.id, stepOrder) ?? null;
+        }
+      }
+      if (!activeAttempt) return fail(400, 'NO_ACTIVE_ATTEMPT', 'You have not started an active attempt for this quest.');
+      if (!stepEvidence) return fail(404, 'STEP_NOT_FOUND', `Step ${stepOrder} not found for this attempt.`);
+
+      const tasks: QuestTask[] = Array.isArray(activeAttempt.steps_snapshot) && activeAttempt.steps_snapshot.length > 0
+        ? normalizeTasks(activeAttempt.steps_snapshot, quest)
+        : normalizeTasks(quest.steps, quest);
+      const stepDef = tasks.find((t) => t.step_order === stepOrder);
+      const game = (stepDef?.verification as any)?.game as string | undefined;
+      if (!stepDef || stepDef.checkpoint_type !== 'ar' || !game || !(AR_GAMES as readonly string[]).includes(game)) {
+        return fail(400, 'NOT_A_GAME_TASK', `Step ${stepOrder} is not an AR game task.`);
+      }
+
+      const fence = (stepDef.verification as any)?.fence;
+      const radius = fence?.radius_meters ?? 50;
+      const distance = withinRadius(captured_lat, captured_lng, fence?.lat ?? quest.gps_lat, fence?.lng ?? quest.gps_lng, radius, captured_accuracy || 0);
+      if (!distance.ok) {
+        return fail(422, 'GPS_RADIUS_EXCEEDED', Number.isFinite(distance.distance)
+          ? `Get closer — you're ${Math.round(distance.distance)} m away from this AR checkpoint.`
+          : 'The captured GPS coordinates are invalid.');
+      }
+
+      const session = await startSession({
+        userId,
+        questId: quest.id,
+        taskKey: stepEvidence.task_key || stepDef.key,
+        game: game as ArGame,
+        isTest: Boolean(quest.is_test),
+      });
+      return res.status(201).json({
+        success: true,
+        data: { session_id: session.id, game, seed: session.seed, started_at: session.started_at.toISOString() },
+      });
+    } catch (err) {
+      return next(err);
+    }
   }
 );
 

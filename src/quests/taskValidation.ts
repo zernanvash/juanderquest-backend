@@ -42,6 +42,8 @@ export const arCfgSchema = z.object({
   }),
   object: z.enum(['token', 'gem', 'beacon', 'box']).default('token'),
   color: z.enum(['#FFB703', '#2D6A4F', '#3B82F6', '#E11D48']).default('#FFB703'),
+  // Plan 77: an AR mini-game instead of collecting the relic (rules are fixed in the app).
+  game: z.enum(['collect', 'tumbang_preso', 'shooting_hoop', 'pana', 'pabitin_palayok', 'sipa']).default('collect'),
 });
 
 export const inAppTaskSchema = z.discriminatedUnion('kind', [
