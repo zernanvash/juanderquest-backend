@@ -12,6 +12,7 @@ export type SpotSource = 'lgu' | 'editorial' | 'open_data' | 'community';
 export type { CrowdCapacityBand, CrowdStatus, CrowdConfidence, ActivityType, CrowdMetrics } from './crowd.js';
 import type { CrowdCapacityBand, CrowdStatus, ActivityType } from './crowd.js';
 import { calculateCrowdMetrics } from './crowd.js';
+import { rankExploreSpots, type ExploreListQuery } from './recommender.js';
 interface ActivityEvent { id:string; user_id:string; spot_id:string; activity_type:ActivityType; created_at:string; is_test?: boolean; }
 
 export interface Spot {
@@ -143,24 +144,8 @@ export class SpotStore {
 
   review(spotId:string,adminId:string,status:'published'|'needs_review'|'unpublished',band:CrowdCapacityBand,suppressed=false){const spot=this.spots.find(s=>s.id===spotId);if(!spot)return undefined;spot.status=status;spot.crowd_capacity_band=band;spot.recommendation_suppressed=suppressed;spot.reviewed_by=adminId;spot.reviewed_at=new Date().toISOString();spot.updated_at=spot.reviewed_at;if(this.pg)this.pg.query('UPDATE spots SET status=$1,crowd_capacity_band=$2,recommendation_suppressed=$3,reviewed_by=$4,reviewed_at=$5,updated_at=$5 WHERE id=$6',[status,band,suppressed,adminId,spot.reviewed_at,spot.id]).catch(()=>{});return spot;}
 
-  list(q:{search?:string;categories?:string[];tags?:string[];municipality?:string;lat?:number;lng?:number;radius?:number;intent?:string;sort?:string;hasQuest?:boolean;userId?:string;allowTest?:boolean}) {
-    const prefs=q.userId?this.getPreferences(q.userId):undefined;
-    const trends=this.trendScores();const bySpot=this.eventsBySpot();const now=Date.now();
-    return this.spots.filter(s=>s.status==='published'&&(q.allowTest||!s.is_test)).map(s=>{
-      const trendScore=trends.get(s.id)??0;
-      const distance=q.lat!==undefined&&q.lng!==undefined?distanceKm(q.lat,q.lng,s.gps_lat,s.gps_lng):undefined;
-      const intent=(q.intent||'').toLowerCase();
-      const intentMatch=intent&&[s.category,s.subcategory,...s.tags,s.name].some(v=>v.toLowerCase().includes(intent))?1:0;
-      const prefMatch=prefs&&([...prefs.categories,...prefs.tags].some(v=>v===s.category||s.tags.includes(v)))?1:0;
-      const distanceScore=distance===undefined?.5:Math.max(0,1-distance/Math.max(q.radius||50,1));
-      const trust={lgu_verified:1,editorial:.9,open_data:.75,community:.6}[s.trust_level];
-      const trend=Math.min(1,trendScore/20);
-      const ageDays=(Date.now()-Date.parse(s.created_at))/86400000;
-      const freshness=Math.max(0,1-ageDays/30);
-      const score=intentMatch*.30+prefMatch*.20+distanceScore*.20+trust*.15+trend*.10+freshness*.05;
-      const reasons:string[]=[];if(distance!==undefined)reasons.push(`${distance<1?Math.round(distance*1000)+' m':distance.toFixed(1)+' km'} away`);if(intentMatch)reasons.push(`Matches ${q.intent}`);if(s.trust_level==='lgu_verified')reasons.push('LGU verified');if(trend>.25)reasons.push(`Trending in ${s.municipality}`);
-      return {...s,...this.crowd(s,now,bySpot),distance_km:distance,recommendation_score:Number(score.toFixed(4)),recommendation_reasons:reasons,saved:this.isSaved(q.userId,s.id),liked:this.isLiked(q.userId,s.id),trend_score:trendScore};
-    }).filter(s=>(!q.search||`${s.name} ${s.description} ${s.tags.join(' ')}`.toLowerCase().includes(q.search.toLowerCase()))&&(!q.categories?.length||q.categories.includes(s.category))&&(!q.tags?.length||q.tags.some(t=>s.tags.includes(t)))&&(!q.municipality||s.municipality.toLowerCase()===q.municipality.toLowerCase())&&(!q.hasQuest||!!s.quest_id)&&(s.distance_km===undefined||!q.radius||s.distance_km<=q.radius)).sort((a,b)=>q.sort==='nearest'?(a.distance_km??999)-(b.distance_km??999):q.sort==='newest'?Date.parse(b.created_at)-Date.parse(a.created_at):q.sort==='trending'?b.trend_score-a.trend_score:b.recommendation_score-a.recommendation_score);
+  list(q: ExploreListQuery) {
+    return rankExploreSpots(this, q);
   }
 
   async create(input:Omit<Spot,'id'|'slug'|'source_type'|'source_name'|'trust_level'|'status'|'created_at'|'updated_at'>,userId:string){

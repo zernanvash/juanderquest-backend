@@ -132,7 +132,7 @@ const privacyLimiter = rateLimit({
 
 const feedQuerySchema = z.object({
   query: z.object({
-    scope: z.enum(['mixed', 'following']).default('mixed'),
+    scope: z.enum(['mixed', 'following', 'town']).default('mixed'),
     cursor: z.string().optional(),
     limit: z.coerce.number().int().min(1).max(50).default(20),
   }),
@@ -274,7 +274,7 @@ plazaRouter.get(
 
     try {
       const validatedQuery = res.locals.validatedRequest?.query ?? req.query;
-      const scope = (validatedQuery.scope as 'mixed' | 'following') || 'mixed';
+      const scope = (validatedQuery.scope as 'mixed' | 'following' | 'town') || 'mixed';
       const cursor = typeof validatedQuery.cursor === 'string' ? validatedQuery.cursor : undefined;
       const rawLimit = validatedQuery.limit ?? req.query.limit;
       const limit = rawLimit !== undefined ? Number(rawLimit) : 20;
