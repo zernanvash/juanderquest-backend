@@ -113,10 +113,10 @@ realPgDescribe('AR mini-game tasks (Plan 77, real PostgreSQL)', () => {
     const rejectedUse = await as(questId, '/steps/1/evidence').send({ challenge_token: ch2.body.data.challenge_token, ar_game_session_id: s1.body.data.session_id, ...atLine });
     expect(rejectedUse.body.error?.code).toBe('GAME_NOT_PASSED');
 
-    // A lost game (score under 40) finishes but does not pass.
+    // A lost game (score under 28) finishes but does not pass.
     const s2 = await as(questId, '/steps/1/ar-game').send(atLine);
     await startedAgo(s2.body.data.session_id, 30);
-    const lost = await finish(s2.body.data.session_id, { score: 22, passed: false, stats: { arrows: 9 } });
+    const lost = await finish(s2.body.data.session_id, { score: 22, passed: false, stats: { arrows: 6 } });
     expect(lost.status).toBe(200);
     expect(lost.body.data.passed).toBe(false);
     // `passed` must agree with the score.
@@ -127,7 +127,7 @@ realPgDescribe('AR mini-game tasks (Plan 77, real PostgreSQL)', () => {
     // A win: the evidence is accepted at the player's line (no relic_mode), and records the game.
     const s4 = await as(questId, '/steps/1/ar-game').send(atLine);
     await startedAgo(s4.body.data.session_id, 40);
-    const won = await finish(s4.body.data.session_id, { score: 64, passed: true, stats: { arrows: 9 } });
+    const won = await finish(s4.body.data.session_id, { score: 64, passed: true, stats: { arrows: 6 } });
     expect({ status: won.status, error: won.body.error }).toEqual({ status: 200, error: undefined });
     expect(won.body.data.best).toBe(64);
     expect(won.body.data.rank_place).toBe(1);

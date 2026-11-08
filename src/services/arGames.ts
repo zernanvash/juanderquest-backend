@@ -61,9 +61,10 @@ export function implausibleReason(
       return passed === baskets >= 4 ? null : 'passed_mismatch';
     }
     case 'pana':
-      if (elapsedMs < 9000) return 'too_fast';
-      if (score > 135) return 'score_cap';
-      return passed === score >= 40 ? null : 'passed_mismatch';
+      // Plan 77b: 6 arrows, at most 15 each (the golden bangus); 28 passes.
+      if (elapsedMs < 6000) return 'too_fast';
+      if (score > 90) return 'score_cap';
+      return passed === score >= 28 ? null : 'passed_mismatch';
     case 'pabitin_palayok':
       if (!passed) return 'passed_mismatch';
       if (score < 1500) return 'too_fast';
