@@ -28,6 +28,7 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
     seed_id: 'seed_alpha',
     display_name: 'Alpha Explorer',
     handle: 'alpha',
+    home_municipality: 'Alaminos City',
     email: 'alpha@traveler.test',
     is_public: true,
     share_activity: true,
@@ -40,6 +41,7 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
     seed_id: 'seed_beta',
     display_name: 'Beta Wanderer',
     handle: 'beta',
+    home_municipality: 'Bolinao',
     email: 'beta@traveler.test',
     is_public: true,
     share_activity: true,
@@ -52,6 +54,7 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
     seed_id: 'seed_gamma',
     display_name: 'Gamma Scout',
     handle: 'gamma',
+    home_municipality: 'Dagupan City',
     email: 'gamma@traveler.test',
     is_public: true,
     share_activity: true,
@@ -64,6 +67,7 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
     seed_id: 'seed_private',
     display_name: 'Private Ghost',
     handle: 'ghost',
+    home_municipality: null,
     email: 'ghost@traveler.test',
     is_public: false,
     share_activity: true,
@@ -76,6 +80,7 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
     seed_id: 'seed_admin',
     display_name: 'Super Admin',
     handle: 'admin',
+    home_municipality: null,
     email: 'admin@traveler.test',
     is_public: true,
     share_activity: true,
@@ -85,6 +90,11 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
 
   const tokenAlpha = jwt.sign(
     { id: userAlpha.id, seed_id: userAlpha.seed_id, role: 'user' },
+    env.JWT_SECRET,
+  );
+
+  const tokenPrivate = jwt.sign(
+    { id: userPrivate.id, seed_id: userPrivate.seed_id, role: 'user' },
     env.JWT_SECRET,
   );
 
@@ -105,10 +115,10 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
     // Insert users
     for (const u of [userAlpha, userBeta, userGamma, userPrivate, userAdmin]) {
       await testDb.pool.query(
-        `INSERT INTO users (id, seed_id, display_name, email, handle, is_public, share_activity, is_test, role)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `INSERT INTO users (id, seed_id, display_name, email, handle, is_public, share_activity, is_test, role, home_municipality)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (id) DO NOTHING`,
-        [u.id, u.seed_id, u.display_name, u.email, u.handle, u.is_public, u.share_activity, u.is_test, u.role],
+        [u.id, u.seed_id, u.display_name, u.email, u.handle, u.is_public, u.share_activity, u.is_test, u.role, u.home_municipality],
       );
     }
 
@@ -172,11 +182,14 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
   });
 
   describe('1. computeHomeTowns', () => {
-    it('accurately resolves each explorer’s home town with ties resolved alphabetically', async () => {
+    // Owner 2026-11-08: the home town is the one the traveler chose, never
+    // the town where they played most (travelers quest away from home).
+    it('uses the chosen home town, not the town where they played', async () => {
       const towns = await computeHomeTowns(testDb.pool, false);
       expect(towns.get(userAlpha.id)).toBe('Alaminos City');
       expect(towns.get(userBeta.id)).toBe('Bolinao');
-      expect(towns.get(userGamma.id)).toBe('Alaminos City');
+      expect(towns.get(userGamma.id)).toBe('Dagupan City'); // played only in Alaminos
+      expect(towns.has(userPrivate.id)).toBe(false); // not chosen
     });
   });
 
@@ -429,6 +442,26 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
       const userIds = data.podium.map((p: any) => p.user_id);
       expect(userIds).toContain(userAlpha.id);
       expect(userIds).not.toContain(userBeta.id);
+    });
+
+    it('board=town follows the chosen town and says NO_HOME_TOWN when none is set', async () => {
+      const none = await request(app)
+        .get('/api/v1/plaza/standings?board=town&period=weekly')
+        .set('Authorization', `Bearer ${tokenPrivate}`);
+      expect(none.status).toBe(200);
+      expect(none.body.data.reason).toBe('NO_HOME_TOWN');
+
+      // A town chosen just now counts at once, before the weekly job runs again.
+      await testDb.pool.query('UPDATE users SET home_municipality = $2 WHERE id = $1', [userGamma.id, 'Alaminos City']);
+      try {
+        const res = await request(app)
+          .get('/api/v1/plaza/standings?board=town&period=weekly')
+          .set('Authorization', `Bearer ${tokenAlpha}`);
+        const ids = res.body.data.podium.map((p: any) => p.user_id);
+        expect(ids).toContain(userGamma.id);
+      } finally {
+        await testDb.pool.query('UPDATE users SET home_municipality = $2 WHERE id = $1', [userGamma.id, 'Dagupan City']);
+      }
     });
 
     it('GET /api/v1/plaza/towns returns town scores and top public explorer', async () => {

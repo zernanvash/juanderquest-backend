@@ -85,6 +85,7 @@ export const MIGRATIONS = [
   '076_developer_roles.sql',
   '077_session_epoch.sql',
   '079_user_tutorials.sql',
+  '081_user_home_municipality.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so

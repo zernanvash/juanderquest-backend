@@ -131,33 +131,23 @@ export async function computeWeeklyScores(
 }
 
 /**
- * Computes each user's primary home town (the municipality with the most approved completions all-time).
- * Ties: alphabetical.
+ * Each user's home town: the town they chose (users.home_municipality).
+ * Owner 2026-11-08: travelers do most quests away from home, so the town is
+ * never guessed from where they played. Users without one have no entry.
  */
 export async function computeHomeTowns(
   client: Queryable,
   isTest?: boolean,
 ): Promise<Map<string, string>> {
-  const sql = `
-    SELECT sub.user_id,
-           COALESCE(s.municipality, q.location_name) AS municipality,
-           COUNT(*)::int AS count
-      FROM submissions sub
-      JOIN quests q ON q.id = sub.quest_id
-      LEFT JOIN reviewed_quest_spot_bindings b ON b.quest_id = q.id AND b.status = 'active'
-      LEFT JOIN spots s ON s.id = b.spot_id
-     WHERE sub.status = 'approved'
-       AND ($1::boolean IS NULL OR sub.is_test = $1)
-     GROUP BY sub.user_id, COALESCE(s.municipality, q.location_name)
-     ORDER BY sub.user_id ASC, count DESC, municipality ASC
-  `;
-  const res = await client.query(sql, [isTest ?? null]);
+  const res = await client.query(
+    `SELECT id, home_municipality
+       FROM users
+      WHERE home_municipality IS NOT NULL
+        AND ($1::boolean IS NULL OR is_test = $1)`,
+    [isTest ?? null],
+  );
   const map = new Map<string, string>();
-  for (const r of res.rows) {
-    if (r.municipality && !map.has(r.user_id)) {
-      map.set(r.user_id, r.municipality);
-    }
-  }
+  for (const r of res.rows) map.set(r.id, r.home_municipality);
   return map;
 }
 
@@ -316,7 +306,6 @@ export async function getBoard(input: GetBoardInput): Promise<GetBoardResult> {
     } else {
       // On-the-fly calculation for fresh deploy / pre-job run
       const rawScores = await computeWeeklyScores(client, ws, we, isTest);
-      const towns = await computeHomeTowns(client, isTest);
       const uIds = rawScores.map((s) => s.user_id);
       userInfos = await fetchUserInfos(client, uIds);
 
@@ -324,7 +313,7 @@ export async function getBoard(input: GetBoardInput): Promise<GetBoardResult> {
         user_id: s.user_id,
         score: s.score,
         quests: s.quests,
-        home_town: towns.get(s.user_id) ?? null,
+        home_town: null,
         created_at: userInfos.get(s.user_id)?.created_at,
       }));
 
@@ -359,17 +348,13 @@ export async function getBoard(input: GetBoardInput): Promise<GetBoardResult> {
     rankedAll = rankRows(items);
   }
 
+  // Home towns are read live, so a town chosen a minute ago counts now (the
+  // weekly snapshot and the all-time leaderboard may still hold an older one).
+  const homeTowns = await computeHomeTowns(client, isTest);
+  rankedAll = rankedAll.map((r) => ({ ...r, home_town: homeTowns.get(r.user_id) ?? null }));
+
   // Filter according to requested board
-  let viewerHomeTown: string | null = null;
-  if (viewerId) {
-    const viewerRow = rankedAll.find((r) => r.user_id === viewerId);
-    if (viewerRow?.home_town) {
-      viewerHomeTown = viewerRow.home_town;
-    } else {
-      const towns = await computeHomeTowns(client, isTest);
-      viewerHomeTown = towns.get(viewerId) ?? null;
-    }
-  }
+  const viewerHomeTown: string | null = viewerId ? homeTowns.get(viewerId) ?? null : null;
 
   let filteredRanked: (UserRankInput & { rank: number })[] = [];
   let townMeta: { name: string } | null = null;

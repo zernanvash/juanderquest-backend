@@ -14,6 +14,8 @@ import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
 import { getPool } from '../db/pool.js';
 import { devGoogleCredentialsEnabled, verifyGoogleCredential } from '../auth/google.js';
 import { accountLoginThrottle } from '../auth/loginThrottle.js';
+import { canonicalTown, getHomeTown, setHomeTown } from '../social/homeTown.js';
+import { PANGASINAN_MUNICIPALITIES } from './affiliates.js';
 
 const router = Router();
 
@@ -1265,8 +1267,37 @@ router.get('/auth/me', authenticateToken, async (req: AuthRequest, res: Response
   const cosmetics=(await safeCosmeticsFor([user.id])).get(user.id);
   return res.status(200).json({
     success: true,
-    data: { ...user, cosmetics: cosmetics ?? {banner:null,frame:null,title:null,nameColor:null} },
+    data: {
+      ...user,
+      home_municipality: await getHomeTown(user.id),
+      cosmetics: cosmetics ?? {banner:null,frame:null,title:null,nameColor:null},
+    },
   });
+});
+
+// Home town (owner 2026-11-08): chosen by the traveler; decides My Town.
+router.get('/me/home-town', authenticateToken, async (req: AuthRequest, res: Response) => {
+  res.setHeader('Cache-Control', 'private, no-store');
+  return res.json({
+    success: true,
+    data: { home_municipality: await getHomeTown(req.user!.id), options: PANGASINAN_MUNICIPALITIES },
+  });
+});
+
+const homeTownSchema = z.object({ municipality: z.string().max(80).nullable() });
+
+router.put('/me/home-town', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const parsed = homeTownSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'municipality must be a town name or null.' } });
+  }
+  const raw = parsed.data.municipality;
+  const town = raw === null || raw.trim() === '' ? null : canonicalTown(raw);
+  if (town === undefined) {
+    return res.status(400).json({ success: false, error: { code: 'UNKNOWN_TOWN', message: 'Choose a town in Pangasinan.' } });
+  }
+  await setHomeTown(req.user!.id, town);
+  return res.json({ success: true, data: { home_municipality: town } });
 });
 
 // First-run tutorials (owner 2026-11-04): which ones this account has seen, so
