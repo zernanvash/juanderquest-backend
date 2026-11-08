@@ -572,8 +572,65 @@ function computeStateFingerprint(store: SpotStore, userId: string | undefined, h
     ? db.submissions.filter((s) => s.user_id === userId && s.status === 'approved').length +
       db.quest_attempts.filter((a) => a.user_id === userId && a.status === 'completed').length
     : 0;
+  let globalInteractionsCount = 0;
+  for (const [, set] of store.interactions.entries()) {
+    globalInteractionsCount += set.size;
+  }
   const spotsSig = `${store.spots.length}:${store.spots.map((s) => `${s.id}:${s.status}:${s.recommendation_suppressed ? 1 : 0}`).join(',')}`;
-  return `${homeTown ?? ''}|${userInteractionsSig}|${prefsSig}|${followsSig}|${subsCount}|${store.activityEvents.length}|${spotsSig}`;
+  return `${homeTown ?? ''}|${userInteractionsSig}|${prefsSig}|${followsSig}|${subsCount}|${globalInteractionsCount}|${store.activityEvents.length}|${spotsSig}`;
+}
+
+interface SpotMeritInfo {
+  activeLikes: number;
+  activeMeritPoints: number;
+}
+
+/**
+ * Computes time-decayed popularity merit per spot with a 14-day exhaustion duration:
+ * - 0..3 days: 100% merit power (peak breakout window)
+ * - 3..14 days: linear decay to 0 (cooldown window)
+ * - >14 days: 0% breakout power (exhausted — prevents old popular spots from dominating forever)
+ */
+function computeSpotMeritMap(store: SpotStore, nowMs: number): Map<string, SpotMeritInfo> {
+  const weights: Record<string, number> = {
+    visit: 4.5,
+    directions: 2.5,
+    save: 2.5,
+    like: 2.5,
+    helpful: 2.0,
+  };
+  const result = new Map<string, SpotMeritInfo>();
+
+  for (const [userId, values] of store.interactions.entries()) {
+    if (db.findUserById(userId)?.is_test) continue;
+    for (const key of values) {
+      const at = key.lastIndexOf(':');
+      if (at <= 0) continue;
+      const spotId = key.slice(0, at);
+      const type = key.slice(at + 1);
+      const baseWeight = weights[type];
+      if (baseWeight === undefined) continue;
+
+      const tsKey = `${userId}:${spotId}:${type}`;
+      const createdAtMs = store.interactionTimestamps.get(tsKey) ?? nowMs;
+      const ageDays = Math.max(0, (nowMs - createdAtMs) / 86_400_000);
+
+      // Exhaustion cutoff at 14 days
+      if (ageDays > 14) continue;
+
+      const freshness = ageDays <= 3 ? 1.0 : Math.max(0, 1 - (ageDays - 3) / 11);
+      if (freshness <= 0) continue;
+
+      const info = result.get(spotId) ?? { activeLikes: 0, activeMeritPoints: 0 };
+      info.activeMeritPoints += baseWeight * freshness;
+      if (type === 'like' || type === 'helpful') {
+        info.activeLikes += 1;
+      }
+      result.set(spotId, info);
+    }
+  }
+
+  return result;
 }
 
 export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedSpotItem[] {
@@ -635,6 +692,7 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
   const taste = buildUserTasteProfile(store, profileUserId, nowMs);
   const prefs = profileUserId ? store.getPreferences(profileUserId) : undefined;
   const trends = store.trendScores();
+  const spotMerits = computeSpotMeritMap(store, nowMs);
   const bySpot = store.eventsBySpot();
   const centroids = computeTownCentroids(store.spots);
   const currentHour = manilaHour(new Date(nowMs));
@@ -653,6 +711,7 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
   const scored = eligibleSpots
     .map((s): RankedSpotItem => {
       const trendScore = trends.get(s.id) ?? 0;
+      const merit = spotMerits.get(s.id) ?? { activeLikes: 0, activeMeritPoints: 0 };
       const crowd = store.crowd(s, nowMs, bySpot);
       const liveDistance =
         q.lat !== undefined && q.lng !== undefined
@@ -762,13 +821,24 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
         baseScore += 0.5;
       }
 
-      // 7. Novelty & Completion Multiplier
+      // 7. Novelty, Merit Breakout & Completion Multiplier
       const isVisited =
         taste.visitedSpotIds.has(s.id) ||
         Boolean(s.quest_id && taste.completedQuestIds.has(s.quest_id));
       const isSaved = store.isSaved(q.userId || actorKey, s.id) || taste.savedSpotIds.has(s.id);
       const isLiked = store.isLiked(q.userId || actorKey, s.id) || taste.likedSpotIds.has(s.id);
       const views24h = taste.recentViewCounts24h.get(s.id) ?? 0;
+
+      // Community Merit Audience Expansion (subject to 14-day global exhaustion and <2 views viewer exhaustion)
+      const isViewerExhaustedForMerit = isVisited || (views24h >= 2 && !isSaved && !isLiked);
+      const hasActivePopularMerit =
+        !isViewerExhaustedForMerit &&
+        crowd.crowd_status !== 'estimated_busy' &&
+        merit.activeMeritPoints >= 4.0;
+      if (hasActivePopularMerit) {
+        const meritBreakoutBoost = Math.min(0.24, 0.08 * Math.log(1 + merit.activeMeritPoints));
+        baseScore += meritBreakoutBoost;
+      }
 
       let noveltyMultiplier = 1.0;
       if (isVisited && !q.search) {
@@ -804,6 +874,9 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
       } else if (profileUserId && maxTagWeight >= 0.5 && bestMatchedTag) {
         pushReason(`Matches your #${bestMatchedTag} interest`);
       }
+      if (hasActivePopularMerit && merit.activeLikes >= 2) {
+        pushReason(`Popular · ${merit.activeLikes} likes`);
+      }
       if (hasUnclaimedQuest) {
         if (liveDistance !== undefined && liveDistance <= 15) {
           pushReason('Unclaimed Quest nearby');
@@ -824,7 +897,7 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
           `${liveDistance < 1 ? Math.round(liveDistance * 1000) + ' m' : liveDistance.toFixed(1) + ' km'} away`,
         );
       }
-      if (trendScore >= 2) {
+      if (hasActivePopularMerit || (trendScore >= 2 && merit.activeMeritPoints > 0)) {
         pushReason(`Trending in ${s.municipality}`);
       }
       if (reasons.length === 0) {

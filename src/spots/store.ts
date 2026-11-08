@@ -73,6 +73,7 @@ export class SpotStore {
   spots = developmentFixturesEnabled ? [...seeds] : [];
   preferences = new Map<string, DiscoveryPreferences>();
   interactions = new Map<string, Set<string>>();
+  interactionTimestamps = new Map<string, number>();
   activityEvents: ActivityEvent[] = [];
   private pg: Pool | null = null;
 
@@ -84,7 +85,7 @@ export class SpotStore {
     const { rows: preferences } = await pool.query('SELECT * FROM discovery_preferences');
     for (const p of preferences) this.preferences.set(p.user_id, { categories:p.categories||[],tags:p.tags||[],occasions:p.occasions||[],price_levels:p.price_levels||[],radius_km:p.radius_km,onboarding_state:p.onboarding_state });
     const { rows: interactions } = await pool.query('SELECT * FROM spot_interactions');
-    for (const item of interactions) { const values=this.interactions.get(item.user_id)||new Set<string>();values.add(`${item.spot_id}:${item.interaction_type}`);this.interactions.set(item.user_id,values); }
+    for (const item of interactions) { const values=this.interactions.get(item.user_id)||new Set<string>();values.add(`${item.spot_id}:${item.interaction_type}`);this.interactions.set(item.user_id,values); if(item.created_at)this.interactionTimestamps.set(`${item.user_id}:${item.spot_id}:${item.interaction_type}`,new Date(item.created_at).getTime()); }
     const { rows: activity } = await pool.query("SELECT id,user_id,spot_id,activity_type,created_at,COALESCE(is_test, FALSE) AS is_test FROM spot_activity_events WHERE created_at >= NOW() - INTERVAL '24 hours'");
     this.activityEvents = activity.map((item:any)=>({...item,is_test:Boolean(item.is_test),created_at:new Date(item.created_at).toISOString()}));
   }
@@ -101,7 +102,7 @@ export class SpotStore {
 
   getPreferences(userId:string): DiscoveryPreferences { return this.preferences.get(userId) || {categories:[],tags:[],occasions:[],price_levels:[],radius_km:25,onboarding_state:'pending'}; }
   setPreferences(userId:string,p:DiscoveryPreferences) { this.preferences.set(userId,p); if(this.pg)this.pg.query(`INSERT INTO discovery_preferences(user_id,categories,tags,occasions,price_levels,radius_km,onboarding_state) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(user_id) DO UPDATE SET categories=$2,tags=$3,occasions=$4,price_levels=$5,radius_km=$6,onboarding_state=$7,updated_at=NOW()`,[userId,JSON.stringify(p.categories),JSON.stringify(p.tags),JSON.stringify(p.occasions),JSON.stringify(p.price_levels),p.radius_km,p.onboarding_state]).catch(()=>{}); return p; }
-  interact(userId:string,spotId:string,type:string,enabled=true) { const key=`${spotId}:${type}`; const set=this.interactions.get(userId)||new Set<string>(); enabled?set.add(key):set.delete(key); this.interactions.set(userId,set);if(this.pg){const query=enabled?'INSERT INTO spot_interactions(user_id,spot_id,interaction_type) VALUES($1,$2,$3) ON CONFLICT DO NOTHING':'DELETE FROM spot_interactions WHERE user_id=$1 AND spot_id=$2 AND interaction_type=$3';this.pg.query(query,[userId,spotId,type]).catch(()=>{});} return enabled; }
+  interact(userId:string,spotId:string,type:string,enabled=true,createdAtMs=Date.now()) { const key=`${spotId}:${type}`; const tsKey=`${userId}:${spotId}:${type}`; const set=this.interactions.get(userId)||new Set<string>(); if(enabled){set.add(key);this.interactionTimestamps.set(tsKey,createdAtMs);}else{set.delete(key);this.interactionTimestamps.delete(tsKey);} this.interactions.set(userId,set);if(this.pg){const query=enabled?'INSERT INTO spot_interactions(user_id,spot_id,interaction_type) VALUES($1,$2,$3) ON CONFLICT DO NOTHING':'DELETE FROM spot_interactions WHERE user_id=$1 AND spot_id=$2 AND interaction_type=$3';this.pg.query(query,[userId,spotId,type]).catch(()=>{});} return enabled; }
   isSaved(userId:string|undefined,spotId:string){return !!userId&&this.interactions.get(userId)?.has(`${spotId}:save`);}
   isLiked(userId:string|undefined,spotId:string){return !!userId&&this.interactions.get(userId)?.has(`${spotId}:like`);}
   trend(spotId:string){return this.trendScores().get(spotId)??0;}

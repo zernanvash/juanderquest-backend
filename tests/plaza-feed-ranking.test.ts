@@ -445,4 +445,48 @@ describe('Plan 80: PlazaRanker v2 Feed Ranking, Home Town Scope & Author Diversi
     expect(collectedIds.length).toBe(170);
     expect(new Set(collectedIds).size).toBe(170);
   }, 30000);
+
+  it('6. Plaza Post Merit & 72h Exhaustion Duration: cheered stranger post gains Popular reach, then exhausts after 72 hours', async () => {
+    clearPlazaFeedCache();
+    await testDb.pool.query('DELETE FROM social_activities');
+
+    const nowMs = Date.now();
+    const recentCreatedAt = new Date(nowMs - 2 * 3_600_000).toISOString(); // 2h ago (in peak 24h window)
+    const oldExhaustedAt = new Date(nowMs - 80 * 3_600_000).toISOString(); // 80h ago (> 72h exhaustion cutoff)
+
+    await testDb.pool.query(
+      `INSERT INTO social_activities (id, event_key, actor_id, verb, subject_type, subject_id, subject_title, subject_href, municipality, cheer_count, comment_count, is_test, created_at)
+       VALUES
+         ('act-merit-fresh', 'p80:merit:fresh', $1, 'quest_completed', 'quest', 'q-merit-1', 'Fresh Popular Quest', '/quests/q-merit-1', 'Bolinao', 4, 1, false, $2),
+         ('act-normal-fresh', 'p80:merit:normal', $3, 'quest_completed', 'quest', 'q-merit-2', 'Normal Uncheered Quest', '/quests/q-merit-2', 'Bolinao', 0, 0, false, $2),
+         ('act-merit-exhausted', 'p80:merit:exhausted', $1, 'quest_completed', 'quest', 'q-merit-3', 'Old Viral Quest', '/quests/q-merit-3', 'Bolinao', 12, 3, false, $4)`,
+      [userActor10.id, recentCreatedAt, userSpammer.id, oldExhaustedAt],
+    );
+
+    const res = await request(app)
+      .get('/api/v1/plaza/feed?scope=mixed')
+      .set('Authorization', `Bearer ${tokenViewer}`);
+
+    expect(res.status).toBe(200);
+    const items = res.body.data.items;
+
+    const freshPopular = items.find((i: any) => i.id === 'act-merit-fresh');
+    const freshNormal = items.find((i: any) => i.id === 'act-normal-fresh');
+    const oldExhausted = items.find((i: any) => i.id === 'act-merit-exhausted');
+
+    expect(freshPopular).toBeDefined();
+    expect(freshPopular.reason).toBe('popular');
+    expect(freshPopular.reason_label).toBe('Popular · 4 cheers');
+
+    // Popular post outranks same-age uncheered post
+    const idxPopular = items.findIndex((i: any) => i.id === 'act-merit-fresh');
+    const idxNormal = items.findIndex((i: any) => i.id === 'act-normal-fresh');
+    const idxExhausted = items.findIndex((i: any) => i.id === 'act-merit-exhausted');
+    expect(idxPopular).toBeLessThan(idxNormal);
+
+    // Exhausted viral post (>72h) loses 'popular' reason and ranks below fresh posts
+    expect(oldExhausted).toBeDefined();
+    expect(oldExhausted.reason).not.toBe('popular');
+    expect(idxExhausted).toBeGreaterThan(idxNormal);
+  });
 });

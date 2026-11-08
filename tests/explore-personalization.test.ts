@@ -380,4 +380,34 @@ describe('Plan 80: ExploreRanker v2 Personalization, Home Town, Privacy & Divers
     const utcLateNight = Date.parse('2026-11-07T20:00:00.000Z');
     expect(manilaDayKey(utcLateNight)).toBe('2026-11-08');
   });
+
+  it('7. Community Merit & 14-Day Exhaustion Duration: recent likes boost spot reach with Popular chip, then exhaust after 14 days', () => {
+    const nowMs = Date.parse('2026-11-08T10:00:00.000Z');
+    clearExploreRankingCache();
+    spotStore.interactions.clear();
+    spotStore.interactionTimestamps.clear();
+
+    // Baseline score for spot-cafe before community likes
+    const baselineList = rankExploreSpots(spotStore, { userId: userBeachId, now: nowMs });
+    const baselineCafe = baselineList.find((s) => s.id === 'spot-cafe')!;
+
+    // Two public non-test explorers like spot-cafe recently (1 day ago)
+    const oneDayAgoMs = nowMs - 1 * 86_400_000;
+    spotStore.interact(friendPublicId, 'spot-cafe', 'like', true, oneDayAgoMs);
+    spotStore.interact(userImplicitId, 'spot-cafe', 'like', true, oneDayAgoMs);
+
+    clearExploreRankingCache();
+    const activeMeritList = rankExploreSpots(spotStore, { userId: userBeachId, now: nowMs });
+    const activeCafe = activeMeritList.find((s) => s.id === 'spot-cafe')!;
+    expect(activeCafe.recommendation_score).toBeGreaterThan(baselineCafe.recommendation_score);
+    expect(activeCafe.recommendation_reasons).toContain('Popular · 2 likes');
+
+    // Fast-forward 15 days (> 14-day exhaustion duration): popularity boost and chip are exhausted
+    const afterExhaustionMs = nowMs + 15 * 86_400_000;
+    clearExploreRankingCache();
+    const exhaustedList = rankExploreSpots(spotStore, { userId: userBeachId, now: afterExhaustionMs });
+    const exhaustedCafe = exhaustedList.find((s) => s.id === 'spot-cafe')!;
+    expect(exhaustedCafe.recommendation_reasons).not.toContain('Popular · 2 likes');
+    expect(exhaustedCafe.recommendation_score).toBeLessThan(activeCafe.recommendation_score);
+  });
 });

@@ -16,7 +16,7 @@ export class PlazaError extends Error {
   }
 }
 
-export type ActivityReason = 'you' | 'following' | 'nearby' | 'rival' | 'saved_spot';
+export type ActivityReason = 'you' | 'following' | 'nearby' | 'rival' | 'saved_spot' | 'popular';
 
 export interface ActivityItem {
   id: string;
@@ -106,10 +106,23 @@ interface ViewerPlazaContext {
   rivalRanksByUserId: Map<string, number>;
 }
 
+/**
+ * Computes post merit exhaustion factor in [0, 1]:
+ * - 0..24h: 1.0 (peak viral breakout window)
+ * - 24..72h: linear decay from 1.0 to 0.0 (cooldown window)
+ * - >72h: 0.0 (exhausted — popular posts do not stay on top forever)
+ */
+export function computePlazaMeritExhaustion(ageHours: number): number {
+  if (ageHours <= 24) return 1.0;
+  if (ageHours >= 72) return 0.0;
+  return Math.max(0, 1 - (ageHours - 24) / 48);
+}
+
 function mapActivityRow(
   row: any,
   viewerId: string | null,
   ctx?: ViewerPlazaContext,
+  nowMs: number = Date.now(),
 ): ActivityItem {
   const isSelf = Boolean(viewerId && viewerId === row.actor_id);
   const viaFollow = Boolean(row.via_follow);
@@ -120,6 +133,20 @@ function mapActivityRow(
     rivalRank === undefined &&
     row.subject_type === 'spot' &&
     Boolean(ctx?.savedOrLikedSpotIds.has(row.subject_id));
+
+  const cheers = Number(row.cheer_count || 0);
+  const comments = Number(row.comment_count || 0);
+  const rawEngagement = cheers + 2 * comments;
+  const createdAtMs = new Date(row.created_at).getTime();
+  const ageHours = Math.max(0, (nowMs - createdAtMs) / 3_600_000);
+  const meritExhaustion = computePlazaMeritExhaustion(ageHours);
+  const isPopularBreakout =
+    !isSelf &&
+    !viaFollow &&
+    rivalRank === undefined &&
+    !isSavedSpot &&
+    rawEngagement >= 3 &&
+    meritExhaustion > 0;
 
   let reason: ActivityReason;
   let reason_label: string | undefined;
@@ -135,6 +162,9 @@ function mapActivityRow(
   } else if (isSavedSpot) {
     reason = 'saved_spot';
     reason_label = 'At a spot you saved';
+  } else if (isPopularBreakout) {
+    reason = 'popular';
+    reason_label = cheers >= 2 ? `Popular · ${cheers} cheers` : 'Popular in Plaza';
   } else {
     reason = 'nearby';
     if (row.municipality) {
@@ -367,10 +397,14 @@ export function rankPlazaCandidateRows(
   }
 
   const candidates: ScoredCandidate[] = rows.map((row) => {
-    const item = mapActivityRow(row, viewerId, ctx);
+    const item = mapActivityRow(row, viewerId, ctx, nowMs);
     const createdAtMs = new Date(row.created_at).getTime();
     const ageHours = Math.max(0, (nowMs - createdAtMs) / 3_600_000);
     const ageMinutes = ageHours * 60;
+    const meritExhaustion = computePlazaMeritExhaustion(ageHours);
+    const cheers = Number(row.cheer_count || 0);
+    const comments = Number(row.comment_count || 0);
+    const rawEngagement = cheers + 2 * comments;
 
     // 1. Actor Affinity
     let actorAffinity = 1.0;
@@ -394,6 +428,11 @@ export function rankPlazaCandidateRows(
       actorAffinity = 1.65;
     } else if (sameHomeTown) {
       actorAffinity = 1.35;
+    }
+
+    // Audience Expansion for high-merit stranger posts (within active 72h exhaustion window)
+    if (!isSelf && !viaFollow && !isRival && rawEngagement >= 3 && meritExhaustion > 0) {
+      actorAffinity += 0.65 * meritExhaustion;
     }
 
     // 2. Verb Weight
@@ -422,10 +461,11 @@ export function rankPlazaCandidateRows(
       }
     }
 
-    // 4. Engagement Velocity
-    const cheers = Number(row.cheer_count || 0);
-    const comments = Number(row.comment_count || 0);
-    const engagementFactor = 1 + 0.18 * Math.log(1 + cheers + 2 * comments);
+    // 4. Engagement Velocity & Exhaustion Duration
+    const engagementFactor =
+      1 + 0.38 * meritExhaustion * Math.log(1 + rawEngagement);
+    const postExhaustionDamper =
+      rawEngagement >= 3 && meritExhaustion === 0 ? 0.65 : 1.0;
 
     // 5. Gravity Time Decay
     const gravityDecay = Math.pow(ageHours + 2, 1.35);
@@ -440,7 +480,8 @@ export function rankPlazaCandidateRows(
 
     const baseScore =
       ((actorAffinity * verbWeight * subjectAffinity * engagementFactor) / gravityDecay) *
-      burstFactor;
+      burstFactor *
+      postExhaustionDamper;
 
     return {
       item,
@@ -581,7 +622,7 @@ export async function getFeed(
     const hasMore = rows.length > limit;
     const returnedRows = hasMore ? rows.slice(0, limit) : rows;
     const items = returnedRows.map((row: any) => {
-      const mapped = mapActivityRow(row, viewerId);
+      const mapped = mapActivityRow(row, viewerId, undefined, nowMs);
       if (mapped.reason === 'nearby' && !mapped.reason_label) {
         mapped.reason_label = `In ${viewerHomeTown}`;
       }
@@ -760,7 +801,7 @@ export async function getFeed(
       realId,
       limit,
     );
-    const items = olderRows.map((r: any) => mapActivityRow(r, viewerId, ctx));
+    const items = olderRows.map((r: any) => mapActivityRow(r, viewerId, ctx, nowMs));
     let next_cursor: string | null = null;
     if (hasMore && items.length > 0) {
       const last = items[items.length - 1];
@@ -793,7 +834,7 @@ export async function getFeed(
       oldestCandidate.id,
       needed,
     );
-    const olderMapped = olderRows.map((r: any) => mapActivityRow(r, viewerId, ctx));
+    const olderMapped = olderRows.map((r: any) => mapActivityRow(r, viewerId, ctx, nowMs));
     const combined = [...sliceFromRanked, ...olderMapped];
     let next_cursor: string | null = null;
     if (hasMore && combined.length > 0) {
