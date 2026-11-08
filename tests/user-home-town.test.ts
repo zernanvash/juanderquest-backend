@@ -3,6 +3,7 @@ import { app } from '../src/app.js';
 import { db } from '../src/db/index.js';
 import { createTestDb, TestDbInstance } from '../src/db/testHarness.js';
 import { resetRateLimits } from '../src/middleware/rateLimit.js';
+import { setPool } from '../src/db/pool.js';
 
 // Owner 2026-11-08: travelers do most quests away from home, so the home town
 // (My Town) is chosen by the traveler and stored on the account (migration 081).
@@ -28,9 +29,12 @@ describe('home town chosen by the traveler (migration 081)', () => {
     const login = await request(app).post('/api/v1/auth/login').send({ email, password });
     expect(login.status).toBe(200);
     token = login.body.data.token;
+    // Read and write the real users row from here on.
+    setPool(testDb.pool);
   }, 90000);
 
   afterAll(async () => {
+    setPool(null);
     if (testDb) await testDb.close();
   }, 90000);
 
