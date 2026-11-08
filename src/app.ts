@@ -46,6 +46,7 @@ import { adminShopRouter } from './routes/adminShop.js';
 import adminAreaAdminsRouter from './routes/adminAreaAdmins.js';
 import { stampsRouter } from './routes/stamps.js';
 import { arGamesRouter } from './routes/arGames.js';
+import { profileShowcaseRouter } from './routes/profileShowcase.js';
 import { errorHandler } from './middleware/error.js';
 import { readinessGate } from './middleware/readiness.js';
 import { appVersionGate } from './middleware/appVersionGate.js';
@@ -148,6 +149,7 @@ app.use('/api/v1', shopRouter);
 app.use('/api/v1', adminShopRouter);
 app.use('/api/v1', stampsRouter);
 app.use('/api/v1', arGamesRouter);
+app.use('/api/v1', profileShowcaseRouter);
 app.use('/api/v1/admin/chain', chainAdminRouter);
 
 // JSON parse errors -> 400 instead of 500
