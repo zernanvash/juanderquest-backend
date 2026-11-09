@@ -116,6 +116,7 @@ routesRouter.post('/routes', async (req: Request, res: Response) => {
       endLng: end.lng,
       costing: costing as TravelCosting,
       avoidCongested: avoid_congested,
+      via,
     });
 
     return res.json({
