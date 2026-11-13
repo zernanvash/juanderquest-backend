@@ -67,7 +67,7 @@ realPg('author quest creation persists to PostgreSQL', () => {
   });
 
   it('creates the quest row with steps instead of failing on non-existent columns', async () => {
-    const token = jwt.sign({ id: authorId, seed_id: authorId, role: 'user' }, env.JWT_SECRET);
+    const token = jwt.sign({ id: authorId, seed_id: authorId, role: 'user', typ: 'session' }, env.JWT_SECRET);
     const res = await request(app)
       .post(`/api/v1/spots/${spotId}/quests`)
       .set('Authorization', `Bearer ${token}`)

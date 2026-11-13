@@ -7,8 +7,11 @@ import { env } from '../src/config/env.js';
 const ADMIN_ID = '22222222-2222-2222-2222-222222222222';
 const OWNER_ID = 'merchant-owner-admin-1'; // plain id, express route reads it
 
-const adminToken = jwt.sign({ id: ADMIN_ID, seed_id: 'admin-1', role: 'admin' }, env.JWT_SECRET);
-const ownerToken = jwt.sign({ id: OWNER_ID, seed_id: 'merchant-owner-seed', role: 'user' }, env.JWT_SECRET);
+const adminToken = jwt.sign({ id: ADMIN_ID, seed_id: 'admin-1', role: 'admin', typ: 'session' }, env.JWT_SECRET);
+const ownerToken = jwt.sign(
+  { id: OWNER_ID, seed_id: 'merchant-owner-seed', role: 'user', typ: 'session' },
+  env.JWT_SECRET,
+);
 
 const MERCHANT_ID = 'merchant-admin-directory-1';
 

@@ -9,9 +9,18 @@ describe('Merchant Affiliation Lifecycle & Dashboard Workspace (Phase 1)', () =>
   const adminId = '22222222-2222-2222-2222-222222222222';
   const strangerId = '99999999-9999-9999-9999-999999999999';
 
-  const applicantToken = jwt.sign({ id: applicantId, seed_id: 'merchant-test-owner', role: 'user' }, env.JWT_SECRET);
-  const adminToken = jwt.sign({ id: adminId, seed_id: 'admin-reviewer', role: 'admin' }, env.JWT_SECRET);
-  const strangerToken = jwt.sign({ id: strangerId, seed_id: 'stranger-user', role: 'user' }, env.JWT_SECRET);
+  const applicantToken = jwt.sign(
+    { id: applicantId, seed_id: 'merchant-test-owner', role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
+  const adminToken = jwt.sign(
+    { id: adminId, seed_id: 'admin-reviewer', role: 'admin', typ: 'session' },
+    env.JWT_SECRET,
+  );
+  const strangerToken = jwt.sign(
+    { id: strangerId, seed_id: 'stranger-user', role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
   beforeAll(() => {
     db.users.push({

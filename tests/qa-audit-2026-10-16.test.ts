@@ -11,7 +11,10 @@ const auditUserId = 'qa-audit-traveler-20261016';
 const auditSelfReviewerId = 'qa-audit-self-reviewer-20261016';
 const auditQuestId = 'qa-audit-quest-20261016';
 const auditStepQr = 'JDQ-STEP-AUDIT-SECRET-20261016';
-const auditToken = jwt.sign({ id: auditUserId, seed_id: 'qa-audit-traveler', role: 'user' }, env.JWT_SECRET);
+const auditToken = jwt.sign(
+  { id: auditUserId, seed_id: 'qa-audit-traveler', role: 'user', typ: 'session' },
+  env.JWT_SECRET,
+);
 
 describe('2026-10-16 QA logic audit regression coverage', () => {
   beforeAll(() => {

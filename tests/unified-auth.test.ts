@@ -20,7 +20,6 @@ describe('Unified Sign-In, Email Recovery, and Guest Retirement', () => {
   const testEmail = 'traveler.juan@example.com';
   const testPassword = 'Password123!Safe';
   let devSignupCode: string = '';
-  const _sessionToken: string = '';
 
   it('rejects a forged Google ID token without creating a session', async () => {
     const forged =
@@ -86,7 +85,6 @@ describe('Unified Sign-In, Email Recovery, and Guest Retirement', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.token).toBeDefined();
     expect(res.body.data.user.email).toBe(testEmail);
-    sessionToken = res.body.data.token;
   });
 
   it('5. Allows signing in with verified email and password', async () => {

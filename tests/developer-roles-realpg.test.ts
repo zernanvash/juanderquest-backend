@@ -19,7 +19,8 @@ realPg('developer roles (real PostgreSQL)', () => {
   const dev = `dev-${randomUUID()}`;
   const admin = `adm-${randomUUID()}`;
   const traveler = `trv-${randomUUID()}`;
-  const token = (id: string, role: string) => jwt.sign({ id, seed_id: id, role }, env.JWT_SECRET, { expiresIn: '1h' });
+  const token = (id: string, role: string) =>
+    jwt.sign({ id, seed_id: id, role, typ: 'session' }, env.JWT_SECRET, { expiresIn: '1h' });
   const as = (id: string, role: string) => ({ Authorization: `Bearer ${token(id, role)}` });
 
   beforeAll(async () => {

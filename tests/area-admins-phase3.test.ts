@@ -14,8 +14,14 @@ realPgDescribe('Plan 59 phase 3 area administrator scope (real PostgreSQL)', () 
   let fixture: TestDbInstance;
   const developerId = 'p3-developer';
   const areaUserId = 'p3-area-admin';
-  const developerToken = jwt.sign({ id: developerId, seed_id: 'p3-developer-seed', role: 'admin' }, env.JWT_SECRET);
-  const areaToken = jwt.sign({ id: areaUserId, seed_id: 'p3-area-seed', role: 'area_admin' }, env.JWT_SECRET);
+  const developerToken = jwt.sign(
+    { id: developerId, seed_id: 'p3-developer-seed', role: 'admin', typ: 'session' },
+    env.JWT_SECRET,
+  );
+  const areaToken = jwt.sign(
+    { id: areaUserId, seed_id: 'p3-area-seed', role: 'area_admin', typ: 'session' },
+    env.JWT_SECRET,
+  );
   const inside = {
     spot: 'spot-p3-dagupan',
     merchant: 'm-p3-dagupan',

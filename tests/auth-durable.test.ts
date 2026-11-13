@@ -125,7 +125,10 @@ describe('Phase 1: Durable Identity Lifecycle & Persistent Accounts', () => {
   });
 
   it('returns 401 and clears the cookie when a valid session subject no longer exists', async () => {
-    const token = jwt.sign({ id: 'deleted-traveler-1', seed_id: 'guest:deleted', role: 'user' }, env.JWT_SECRET);
+    const token = jwt.sign(
+      { id: 'deleted-traveler-1', seed_id: 'guest:deleted', role: 'user', typ: 'session' },
+      env.JWT_SECRET,
+    );
     const response = await request(app).get('/api/v1/auth/me').set('Cookie', `jdq_session=${token}`);
 
     expect(response.status).toBe(401);

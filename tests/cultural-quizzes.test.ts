@@ -13,10 +13,16 @@ describe('Cultural Quizzes System (E2E & Concurrency)', () => {
   const travelerUserId = 'traveler-user-quiz-1';
   const otherTravelerUserId = 'traveler-user-quiz-2';
 
-  const adminToken = jwt.sign({ id: adminUserId, seed_id: 'admin-quiz-seed', role: 'admin' }, env.JWT_SECRET);
-  const travelerToken = jwt.sign({ id: travelerUserId, seed_id: 'traveler-quiz-seed', role: 'user' }, env.JWT_SECRET);
+  const adminToken = jwt.sign(
+    { id: adminUserId, seed_id: 'admin-quiz-seed', role: 'admin', typ: 'session' },
+    env.JWT_SECRET,
+  );
+  const travelerToken = jwt.sign(
+    { id: travelerUserId, seed_id: 'traveler-quiz-seed', role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
   const otherTravelerToken = jwt.sign(
-    { id: otherTravelerUserId, seed_id: 'other-traveler-seed', role: 'user' },
+    { id: otherTravelerUserId, seed_id: 'other-traveler-seed', role: 'user', typ: 'session' },
     env.JWT_SECRET,
   );
 

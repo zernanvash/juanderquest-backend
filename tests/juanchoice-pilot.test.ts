@@ -382,7 +382,7 @@ describe('JuanChoice Phase 2 pilot', () => {
     expect(standings.status).toBe(200);
     expect(JSON.stringify(standings.body)).not.toContain(user);
     expect((await request(app).get(`/api/v1/juanchoice/campaigns/${campaign}/me`)).status).toBe(401);
-    const token = jwt.sign({ id: user, seed_id: user, role: 'user' }, env.JWT_SECRET);
+    const token = jwt.sign({ id: user, seed_id: user, role: 'user', typ: 'session' }, env.JWT_SECRET);
     const mine = await request(app)
       .get(`/api/v1/juanchoice/campaigns/${campaign}/me`)
       .set('Authorization', `Bearer ${token}`);
@@ -392,7 +392,7 @@ describe('JuanChoice Phase 2 pilot', () => {
     expect(mine.body.data.can_vote_now).toBe(false);
     expect(mine.body.data.vote_unavailable_reason).toBe('ROUND_CLOSED');
     expect(Number.isFinite(Date.parse(mine.body.data.server_time))).toBe(true);
-    const youngToken = jwt.sign({ id: young, seed_id: young, role: 'user' }, env.JWT_SECRET);
+    const youngToken = jwt.sign({ id: young, seed_id: young, role: 'user', typ: 'session' }, env.JWT_SECRET);
     const youngMine = await request(app)
       .get(`/api/v1/juanchoice/campaigns/${secondCampaign}/me`)
       .set('Authorization', `Bearer ${youngToken}`);
@@ -424,7 +424,7 @@ describe('JuanChoice Phase 2 pilot', () => {
       VALUES($1,$2,$3,$4,NOW(),NOW(),false)`,
       [visitId, young, 'jc-spot-1', submissionId],
     );
-    const token = jwt.sign({ id: young, seed_id: young, role: 'user' }, env.JWT_SECRET);
+    const token = jwt.sign({ id: young, seed_id: young, role: 'user', typ: 'session' }, env.JWT_SECRET);
     const eligible = await request(app)
       .get(`/api/v1/juanchoice/campaigns/${secondCampaign}/me`)
       .set('Authorization', `Bearer ${token}`);
@@ -448,7 +448,7 @@ describe('JuanChoice Phase 2 pilot', () => {
     expect(list.status).toBe(200);
     expect(list.body.data.items.some((row: any) => row.id === synthetic)).toBe(false);
     expect((await request(app).get(`/api/v1/juanchoice/campaigns/${synthetic}`)).status).toBe(404);
-    const token = jwt.sign({ id: user, seed_id: user, role: 'user' }, env.JWT_SECRET);
+    const token = jwt.sign({ id: user, seed_id: user, role: 'user', typ: 'session' }, env.JWT_SECRET);
     expect(
       (await request(app).get(`/api/v1/juanchoice/campaigns/${synthetic}/me`).set('Authorization', `Bearer ${token}`))
         .status,
@@ -517,7 +517,7 @@ describe('JuanChoice Phase 2 pilot', () => {
     ]);
     const guest = await request(app).get('/api/v1/juanchoice/admin/campaigns');
     expect(guest.status).toBe(401);
-    const token = jwt.sign({ id: admin, seed_id: admin, role: 'admin' }, env.JWT_SECRET);
+    const token = jwt.sign({ id: admin, seed_id: admin, role: 'admin', typ: 'session' }, env.JWT_SECRET);
     const list = await request(app).get('/api/v1/juanchoice/admin/campaigns').set('Authorization', `Bearer ${token}`);
     expect(list.status).toBe(200);
     expect(list.body.data.items.some((item: any) => item.id === draft)).toBe(true);
@@ -656,7 +656,7 @@ describe('JuanChoice Phase 2 pilot', () => {
         ])
       ).rowCount,
     ).toBe(0);
-    const token = jwt.sign({ id: young, seed_id: young, role: 'user' }, env.JWT_SECRET);
+    const token = jwt.sign({ id: young, seed_id: young, role: 'user', typ: 'session' }, env.JWT_SECRET);
     const api = await request(app).get('/api/v1/juanchoice/supporter-quest').set('Authorization', `Bearer ${token}`);
     expect(api.status).toBe(200);
     expect(api.body.data.claimed).toBe(true);

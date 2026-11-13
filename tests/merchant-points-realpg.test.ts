@@ -20,7 +20,7 @@ realPg('funded-quest merchant points (isolated real PostgreSQL)', () => {
   const adminId = `points-admin-${suffix}`;
   const merchantId = `points-merchant-${suffix}`;
   const bearer = (id: string, role: 'user' | 'admin') =>
-    `Bearer ${jwt.sign({ id, seed_id: id, role }, env.JWT_SECRET)}`;
+    `Bearer ${jwt.sign({ id, seed_id: id, role, typ: 'session' }, env.JWT_SECRET)}`;
   const originalFundingFlag = env.QUEST_FUNDING_ENABLED;
 
   beforeAll(async () => {

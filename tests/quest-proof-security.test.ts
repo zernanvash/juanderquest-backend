@@ -13,16 +13,22 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
   const otherTravelerUserId = '66666666-6666-6666-6666-666666666666'; // Same-scope second traveler
   const qaUserId = '55555555-5555-5555-5555-555555555555'; // QA Evaluator
 
-  const travelerToken = jwt.sign({ id: travelerUserId, seed_id: 'demo-traveler-1', role: 'user' }, env.JWT_SECRET);
-
-  const otherTravelerToken = jwt.sign(
-    { id: otherTravelerUserId, seed_id: 'proof-security-traveler-2', role: 'user' },
+  const travelerToken = jwt.sign(
+    { id: travelerUserId, seed_id: 'demo-traveler-1', role: 'user', typ: 'session' },
     env.JWT_SECRET,
   );
 
-  const qaToken = jwt.sign({ id: qaUserId, seed_id: 'qa-evaluator-1', role: 'qa' }, env.JWT_SECRET);
+  const otherTravelerToken = jwt.sign(
+    { id: otherTravelerUserId, seed_id: 'proof-security-traveler-2', role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
-  const authorToken = jwt.sign({ id: authorUserId, seed_id: 'demo-author-1', role: 'user' }, env.JWT_SECRET);
+  const qaToken = jwt.sign({ id: qaUserId, seed_id: 'qa-evaluator-1', role: 'qa', typ: 'session' }, env.JWT_SECRET);
+
+  const authorToken = jwt.sign(
+    { id: authorUserId, seed_id: 'demo-author-1', role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
   const testSpotId = `spot-security-test-${Date.now()}`;
   const testQuestId = `quest-security-test-${Date.now()}`;

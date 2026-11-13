@@ -350,7 +350,7 @@ describe('JuanChoice presentation overview contract', () => {
       [qaUserId, qaUserId],
     );
 
-    const token = jwt.sign({ id: qaUserId, seed_id: qaUserId, role: 'qa' }, env.JWT_SECRET);
+    const token = jwt.sign({ id: qaUserId, seed_id: qaUserId, role: 'qa', typ: 'session' }, env.JWT_SECRET);
 
     // Authorized QA request
     const authRes = await request(app)

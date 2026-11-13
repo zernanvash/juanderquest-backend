@@ -17,7 +17,7 @@ realDescribe('disposable real-PostgreSQL economy HTTP flow', () => {
   const travelerId = 'economy-http-traveler';
   const otherId = 'economy-http-other';
   const bearer = (id: string, role: 'admin' | 'user') =>
-    `Bearer ${jwt.sign({ id, seed_id: id, role }, env.JWT_SECRET)}`;
+    `Bearer ${jwt.sign({ id, seed_id: id, role, typ: 'session' }, env.JWT_SECRET)}`;
 
   beforeAll(async () => {
     fixture = await createTestDb();

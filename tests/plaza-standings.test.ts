@@ -77,11 +77,20 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
     role: 'admin',
   };
 
-  const tokenAlpha = jwt.sign({ id: userAlpha.id, seed_id: userAlpha.seed_id, role: 'user' }, env.JWT_SECRET);
+  const tokenAlpha = jwt.sign(
+    { id: userAlpha.id, seed_id: userAlpha.seed_id, role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
-  const tokenPrivate = jwt.sign({ id: userPrivate.id, seed_id: userPrivate.seed_id, role: 'user' }, env.JWT_SECRET);
+  const tokenPrivate = jwt.sign(
+    { id: userPrivate.id, seed_id: userPrivate.seed_id, role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
-  const tokenBeta = jwt.sign({ id: userBeta.id, seed_id: userBeta.seed_id, role: 'user' }, env.JWT_SECRET);
+  const tokenBeta = jwt.sign(
+    { id: userBeta.id, seed_id: userBeta.seed_id, role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
   const fixedNow = new Date('2026-10-14T10:00:00.000Z'); // Wednesday Manila
   const ws = weekStartUtc(fixedNow);

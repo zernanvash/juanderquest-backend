@@ -19,7 +19,9 @@ describe('Phase 5: JuanChoice retention and measured conversion', () => {
   let database: TestDbInstance;
   const userId = '51111111-1111-1111-1111-111111111111';
   const adminId = '52222222-2222-2222-2222-222222222222';
-  const token = jwt.sign({ id: userId, seed_id: 'ret-user', role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
+  const token = jwt.sign({ id: userId, seed_id: 'ret-user', role: 'user', typ: 'session' }, env.JWT_SECRET, {
+    expiresIn: '1h',
+  });
   const campaigns = Array.from({ length: 6 }, () => randomUUID());
 
   beforeAll(async () => {
@@ -194,7 +196,7 @@ describe('Phase 5: JuanChoice retention and measured conversion', () => {
         [draft.id],
       ),
     ).rejects.toBeDefined();
-    const adminToken = jwt.sign({ id: adminId, seed_id: 'ret-admin', role: 'admin' }, env.JWT_SECRET);
+    const adminToken = jwt.sign({ id: adminId, seed_id: 'ret-admin', role: 'admin', typ: 'session' }, env.JWT_SECRET);
     const endpoint = `/api/v1/juanchoice/admin/campaigns/${campaigns[2]}/offers`;
     const body = {
       merchant_id: 'm1',
@@ -216,7 +218,7 @@ describe('Phase 5: JuanChoice retention and measured conversion', () => {
   });
 
   it('does not turn an admin reference into a funded promotional budget', async () => {
-    const adminToken = jwt.sign({ id: adminId, seed_id: 'ret-admin', role: 'admin' }, env.JWT_SECRET);
+    const adminToken = jwt.sign({ id: adminId, seed_id: 'ret-admin', role: 'admin', typ: 'session' }, env.JWT_SECRET);
     const endpoint = `/api/v1/juanchoice/admin/campaigns/${campaigns[0]}/budget`;
     const requestBody = { budget_mjdq: 1_000, request_reference: 'Draft proposal only' };
     expect(

@@ -6,7 +6,7 @@ import { env } from '../src/config/env.js';
 
 describe('Leaderboard fixes (Bugs A & B)', () => {
   const userId = '12345678-1234-1234-1234-123456789012';
-  const token = jwt.sign({ id: userId, seed_id: 'test-user', role: 'user' }, env.JWT_SECRET);
+  const token = jwt.sign({ id: userId, seed_id: 'test-user', role: 'user', typ: 'session' }, env.JWT_SECRET);
 
   beforeAll(() => {
     db.users.push({

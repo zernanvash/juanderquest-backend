@@ -23,7 +23,7 @@ realDescribe('local economy browser read contracts on disposable PostgreSQL', ()
   const poolId = `lab-read-pool-${randomUUID()}`;
   const cosmeticId = `lab-read-cosmetic-${randomUUID()}`;
   const bearer = (id: string, role: 'admin' | 'user') =>
-    `Bearer ${jwt.sign({ id, seed_id: id, role }, env.JWT_SECRET)}`;
+    `Bearer ${jwt.sign({ id, seed_id: id, role, typ: 'session' }, env.JWT_SECRET)}`;
 
   beforeAll(async () => {
     fixture = await createTestDb();
@@ -114,7 +114,10 @@ realDescribe('local economy browser read contracts on disposable PostgreSQL', ()
   });
 
   it('rejects expired cookies and forged or deleted admin identities', async () => {
-    const expired = jwt.sign({ id: travelerId, seed_id: travelerId, role: 'user', iat: 1, exp: 2 }, env.JWT_SECRET);
+    const expired = jwt.sign(
+      { id: travelerId, seed_id: travelerId, role: 'user', iat: 1, exp: 2, typ: 'session' },
+      env.JWT_SECRET,
+    );
     const staleCookie = await request(app).get('/api/v1/economy/me').set('Cookie', `jdq_session=${expired}`);
     expect(staleCookie.status).toBe(401);
     const forgedRole = await request(app)

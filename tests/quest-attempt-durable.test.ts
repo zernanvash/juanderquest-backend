@@ -10,7 +10,7 @@ describe('quest attempt durable authority', () => {
   const userId = 'a1252e55-7ad7-4ee9-b209-720a82c04237';
   const authorId = '8c8f56d3-a20c-4d91-b290-e9564a493125';
   const questId = 'durable-quest-proof-test';
-  const token = jwt.sign({ id: userId, seed_id: 'durable-traveler', role: 'user' }, env.JWT_SECRET);
+  const token = jwt.sign({ id: userId, seed_id: 'durable-traveler', role: 'user', typ: 'session' }, env.JWT_SECRET);
 
   beforeAll(async () => {
     const mem = newDb();

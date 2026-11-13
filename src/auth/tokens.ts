@@ -91,14 +91,11 @@ export function verifySessionToken(token: string): SessionClaims | null {
     const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ['HS256'] });
     if (!decoded || typeof decoded === 'string') return null;
     const claims = decoded as JwtPayload & Record<string, unknown>;
-    // TODO(2026-10-23): require typ === 'session' after the longest legacy session expires.
     if (
-      (claims.typ !== undefined && claims.typ !== SESSION_TYP) ||
+      claims.typ !== SESSION_TYP ||
       claims.sub === CHALLENGE_TYP ||
       claims.sub === AR_CHALLENGE_TYP ||
-      claims.typ === AR_CHALLENGE_TYP ||
-      claims.sub === QR_PASS_TYP ||
-      claims.typ === QR_PASS_TYP
+      claims.sub === QR_PASS_TYP
     )
       return null;
     if (typeof claims.id !== 'string' || claims.id.length === 0) return null;

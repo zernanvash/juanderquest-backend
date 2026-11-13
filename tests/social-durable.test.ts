@@ -39,9 +39,13 @@ describe('Phase 4: Durable Social Queries, Keyset Pagination, and Profile PATCH 
     is_public: true,
   };
 
-  const tokenA = jwt.sign({ id: userA.id, seed_id: userA.seed_id, role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
+  const tokenA = jwt.sign({ id: userA.id, seed_id: userA.seed_id, role: 'user', typ: 'session' }, env.JWT_SECRET, {
+    expiresIn: '1h',
+  });
 
-  const tokenB = jwt.sign({ id: userB.id, seed_id: userB.seed_id, role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
+  const tokenB = jwt.sign({ id: userB.id, seed_id: userB.seed_id, role: 'user', typ: 'session' }, env.JWT_SECRET, {
+    expiresIn: '1h',
+  });
 
   beforeAll(async () => {
     testDb = await createTestDb();

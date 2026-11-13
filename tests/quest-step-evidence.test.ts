@@ -11,11 +11,17 @@ describe('Durable Quest Step Evidence & Attempt State Contract (Phase 1-3)', () 
   const travelerUserId = 'traveler-scout-992';
   const otherAdminId = 'admin-scout-993';
 
-  const authorToken = jwt.sign({ id: authorUserId, seed_id: 'author-01', role: 'user' }, env.JWT_SECRET);
+  const authorToken = jwt.sign(
+    { id: authorUserId, seed_id: 'author-01', role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
-  const travelerToken = jwt.sign({ id: travelerUserId, seed_id: 'traveler-01', role: 'user' }, env.JWT_SECRET);
+  const travelerToken = jwt.sign(
+    { id: travelerUserId, seed_id: 'traveler-01', role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
-  const adminToken = jwt.sign({ id: otherAdminId, seed_id: 'admin-01', role: 'admin' }, env.JWT_SECRET);
+  const adminToken = jwt.sign({ id: otherAdminId, seed_id: 'admin-01', role: 'admin', typ: 'session' }, env.JWT_SECRET);
 
   const testQuestId = `quest-evidence-test-${Date.now()}`;
   const testSpotId = `spot-evidence-test-${Date.now()}`;
@@ -355,7 +361,10 @@ describe('Durable Quest Step Evidence & Attempt State Contract (Phase 1-3)', () 
       .set('Authorization', `Bearer ${travelerToken}`);
     expect(travelerFileRes.status).toBe(200);
 
-    const strangerToken = jwt.sign({ id: 'stranger-999', seed_id: 'stranger', role: 'user' }, env.JWT_SECRET);
+    const strangerToken = jwt.sign(
+      { id: 'stranger-999', seed_id: 'stranger', role: 'user', typ: 'session' },
+      env.JWT_SECRET,
+    );
     const strangerFileRes = await request(app)
       .get(`/api/v1/quests/evidence/${evidenceId}/file`)
       .set('Authorization', `Bearer ${strangerToken}`);
@@ -389,7 +398,10 @@ describe('Durable Quest Step Evidence & Attempt State Contract (Phase 1-3)', () 
       invalidateSessionScopeCache(travelerUserId);
     }
 
-    const travelerAdminToken = jwt.sign({ id: travelerUserId, seed_id: 'traveler-01', role: 'admin' }, env.JWT_SECRET);
+    const travelerAdminToken = jwt.sign(
+      { id: travelerUserId, seed_id: 'traveler-01', role: 'admin', typ: 'session' },
+      env.JWT_SECRET,
+    );
 
     const res = await request(app)
       .patch(`/api/v1/admin/quest-attempts/${attemptId}`)

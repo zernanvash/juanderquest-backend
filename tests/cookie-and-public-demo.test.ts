@@ -29,7 +29,7 @@ describe('wallet cookie session and laptop-alpha simulation boundary', () => {
   it('upgrades a legacy bearer into an HttpOnly cookie and restores a session', async () => {
     const agent = request.agent(app);
     const token = jwt.sign(
-      { id: userId, role: 'user', seed_id: 'wallet:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+      { id: userId, role: 'user', seed_id: 'wallet:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', typ: 'session' },
       env.JWT_SECRET,
       { expiresIn: '1h' },
     );
@@ -71,7 +71,7 @@ describe('wallet cookie session and laptop-alpha simulation boundary', () => {
       is_test: false,
     });
     const token = jwt.sign(
-      { id: userId, role: 'user', seed_id: 'wallet:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+      { id: userId, role: 'user', seed_id: 'wallet:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', typ: 'session' },
       env.JWT_SECRET,
       { expiresIn: '1h' },
     );
@@ -84,7 +84,7 @@ describe('wallet cookie session and laptop-alpha simulation boundary', () => {
   it('keeps wallet simulation off by default outside the alpha flag', async () => {
     Reflect.set(env, 'ALPHA_WALLET_SIMULATION_ENABLED', false);
     const token = jwt.sign(
-      { id: userId, role: 'user', seed_id: 'wallet:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+      { id: userId, role: 'user', seed_id: 'wallet:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', typ: 'session' },
       env.JWT_SECRET,
       { expiresIn: '1h' },
     );

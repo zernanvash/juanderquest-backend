@@ -104,8 +104,14 @@ describe('Plan 80: PlazaRanker v2 Feed Ranking, Home Town Scope & Author Diversi
     role: 'user',
   };
 
-  const tokenViewer = jwt.sign({ id: userViewer.id, seed_id: userViewer.seed_id, role: 'user' }, env.JWT_SECRET);
-  const tokenNoHome = jwt.sign({ id: userNoHome.id, seed_id: userNoHome.seed_id, role: 'user' }, env.JWT_SECRET);
+  const tokenViewer = jwt.sign(
+    { id: userViewer.id, seed_id: userViewer.seed_id, role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
+  const tokenNoHome = jwt.sign(
+    { id: userNoHome.id, seed_id: userNoHome.seed_id, role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
   beforeAll(async () => {
     testDb = await createTestDb();

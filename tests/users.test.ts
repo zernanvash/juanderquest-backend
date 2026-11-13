@@ -53,7 +53,9 @@ describe('Public Profile and Privacy Controls API (/api/v1/users)', () => {
   });
 
   describe('PATCH /api/v1/users/me/profile', () => {
-    const token = jwt.sign({ id: publicUserId, seed_id: 'user-1', role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
+    const token = jwt.sign({ id: publicUserId, seed_id: 'user-1', role: 'user', typ: 'session' }, env.JWT_SECRET, {
+      expiresIn: '1h',
+    });
 
     it('requires authentication to update profile', async () => {
       const res = await request(app).patch('/api/v1/users/me/profile').send({ bio: 'New bio test' });

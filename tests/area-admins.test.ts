@@ -12,15 +12,18 @@ describe('Plan 59 area administrator access (real PostgreSQL when JDQ_REAL_PG_UR
   const platformId = 'area-admin-platform';
   const areaUserId = 'area-admin-user';
   const platformToken = jwt.sign(
-    { id: platformId, seed_id: 'area-admin-platform-seed', role: 'admin' },
+    { id: platformId, seed_id: 'area-admin-platform-seed', role: 'admin', typ: 'session' },
     env.JWT_SECRET,
   );
   const plainAdminId = 'area-admin-plain-platform';
   const plainAdminToken = jwt.sign(
-    { id: plainAdminId, seed_id: 'area-admin-plain-seed', role: 'admin' },
+    { id: plainAdminId, seed_id: 'area-admin-plain-seed', role: 'admin', typ: 'session' },
     env.JWT_SECRET,
   );
-  const areaToken = jwt.sign({ id: areaUserId, seed_id: 'area-admin-user-seed', role: 'area_admin' }, env.JWT_SECRET);
+  const areaToken = jwt.sign(
+    { id: areaUserId, seed_id: 'area-admin-user-seed', role: 'area_admin', typ: 'session' },
+    env.JWT_SECRET,
+  );
   const spotIds = ['spot-area-test-dagupan', 'spot-area-test-other', 'spot-area-test-null'];
   const savedAreaFields = new Map<string, { town_area_id?: string | null; created_by?: string }>();
   let originalFindById: typeof db.usersRepo.findById;

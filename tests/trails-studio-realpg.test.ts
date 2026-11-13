@@ -43,7 +43,10 @@ describeRealPg('Trail Studio API (isolated real PostgreSQL schema)', () => {
       VALUES ($1,1,$2,0,45,0,0,'Old narration')`,
       [trailId, spotId],
     );
-    adminToken = jwt.sign({ id: adminId, seed_id: 'trail-studio-admin', role: 'admin' }, env.JWT_SECRET);
+    adminToken = jwt.sign(
+      { id: adminId, seed_id: 'trail-studio-admin', role: 'admin', typ: 'session' },
+      env.JWT_SECRET,
+    );
   }, 120_000);
 
   afterAll(async () => {

@@ -12,9 +12,12 @@ describe('Admin settings, audit and observation', () => {
   const adminUserId = 'admin-settings-1';
   const travelerUserId = 'traveler-settings-1';
 
-  const adminToken = jwt.sign({ id: adminUserId, seed_id: 'admin-settings-seed', role: 'admin' }, env.JWT_SECRET);
+  const adminToken = jwt.sign(
+    { id: adminUserId, seed_id: 'admin-settings-seed', role: 'admin', typ: 'session' },
+    env.JWT_SECRET,
+  );
   const travelerToken = jwt.sign(
-    { id: travelerUserId, seed_id: 'traveler-settings-seed', role: 'user' },
+    { id: travelerUserId, seed_id: 'traveler-settings-seed', role: 'user', typ: 'session' },
     env.JWT_SECRET,
   );
 

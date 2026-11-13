@@ -75,7 +75,9 @@ describeRealPg('Trail unlock, location check-in, and completion (isolated real P
              ($2,2,'trail-progress-spot-b',45,45,10,1,'Must not leak either')`,
       [trailId, lockedId],
     );
-    token = jwt.sign({ id: userId, seed_id: userId, role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
+    token = jwt.sign({ id: userId, seed_id: userId, role: 'user', typ: 'session' }, env.JWT_SECRET, {
+      expiresIn: '1h',
+    });
   }, 120_000);
 
   afterAll(async () => {

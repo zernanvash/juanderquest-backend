@@ -12,7 +12,8 @@ const realPg = process.env.JDQ_REAL_PG_URL ? describe : describe.skip;
 
 realPg('admin-only full inverse simulated cosmetic correction', () => {
   let fixture: TestDbInstance;
-  const token = (id: string, role: 'admin' | 'user') => `Bearer ${jwt.sign({ id, seed_id: id, role }, env.JWT_SECRET)}`;
+  const token = (id: string, role: 'admin' | 'user') =>
+    `Bearer ${jwt.sign({ id, seed_id: id, role, typ: 'session' }, env.JWT_SECRET)}`;
 
   beforeEach(async () => {
     fixture = await createTestDb();

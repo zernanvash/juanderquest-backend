@@ -9,7 +9,10 @@ describe('Phase 5: Sourced Privacy-Safe Rankings and Provenance', () => {
   const privateScoutId = '99999999-9999-9999-9999-999999999999';
   const testScoutId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 
-  const publicScoutToken = jwt.sign({ id: publicScoutId, seed_id: 'public-scout-01', role: 'user' }, env.JWT_SECRET);
+  const publicScoutToken = jwt.sign(
+    { id: publicScoutId, seed_id: 'public-scout-01', role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
   beforeAll(() => {
     // Add public scout

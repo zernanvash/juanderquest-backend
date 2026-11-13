@@ -101,7 +101,7 @@ describe('Plan 65 weekly elections on isolated real PostgreSQL', () => {
   const poor = `wk-poor-${randomUUID()}`;
   const admin = `wk-admin-${randomUUID()}`;
   const tokenFor = (id: string, role = 'user') =>
-    jwt.sign({ id, seed_id: id, role }, env.JWT_SECRET, { expiresIn: '1h' });
+    jwt.sign({ id, seed_id: id, role, typ: 'session' }, env.JWT_SECRET, { expiresIn: '1h' });
   const points = async (id: string) =>
     Number((await fixture.pool.query('SELECT demo_points FROM users WHERE id=$1', [id])).rows[0].demo_points);
   const civicXp = async (id: string) =>

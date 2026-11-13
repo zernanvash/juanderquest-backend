@@ -86,7 +86,7 @@ describe('Fast-alpha launcher JuanChoice flag closure', () => {
       Reflect.set(env, 'JUANCHOICE_SCHEDULER_ENABLED', false);
 
       const adminToken = jwt.sign(
-        { id: 'alpha-admin-test', seed_id: 'alpha-admin-test', role: 'admin' },
+        { id: 'alpha-admin-test', seed_id: 'alpha-admin-test', role: 'admin', typ: 'session' },
         env.JWT_SECRET,
       );
 

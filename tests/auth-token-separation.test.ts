@@ -8,11 +8,11 @@ import { signQuestChallenge, signSessionToken, verifySessionToken } from '../src
 describe('session and quest challenge token boundaries', () => {
   const user = db.users[0];
 
-  it('accepts a valid legacy session token without typ during migration compatibility window', async () => {
+  it('rejects legacy session tokens missing typ === session', async () => {
     const legacy = jwt.sign({ id: user.id, seed_id: user.seed_id, role: user.role }, env.JWT_SECRET);
-    expect(verifySessionToken(legacy)?.id).toBe(user.id);
+    expect(verifySessionToken(legacy)).toBeNull();
     const response = await request(app).get('/api/v1/auth/me').set('Authorization', `Bearer ${legacy}`);
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(401);
   });
 
   it('rejects challenge bearer tokens on required and optional session paths', async () => {

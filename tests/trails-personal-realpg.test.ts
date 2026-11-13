@@ -47,15 +47,21 @@ describeRealPg('Personal trail generation (isolated real PostgreSQL)', () => {
       FROM (SELECT id FROM spots WHERE municipality='Bolinao' AND status='published' AND COALESCE(is_test,FALSE)=FALSE AND gps_lat IS NOT NULL AND gps_lng IS NOT NULL) from_spot
       CROSS JOIN (SELECT id FROM spots WHERE municipality='Bolinao' AND status='published' AND COALESCE(is_test,FALSE)=FALSE AND gps_lat IS NOT NULL AND gps_lng IS NOT NULL) to_spot
       ON CONFLICT DO NOTHING`);
-    token = jwt.sign({ id: userId, seed_id: userId, role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
+    token = jwt.sign({ id: userId, seed_id: userId, role: 'user', typ: 'session' }, env.JWT_SECRET, {
+      expiresIn: '1h',
+    });
     validatorToken = jwt.sign(
-      { id: 'trail-personal-validator', seed_id: 'trail-personal-validator', role: 'user' },
+      { id: 'trail-personal-validator', seed_id: 'trail-personal-validator', role: 'user', typ: 'session' },
       env.JWT_SECRET,
       { expiresIn: '1h' },
     );
-    poorToken = jwt.sign({ id: 'trail-personal-poor', seed_id: 'trail-personal-poor', role: 'user' }, env.JWT_SECRET, {
-      expiresIn: '1h',
-    });
+    poorToken = jwt.sign(
+      { id: 'trail-personal-poor', seed_id: 'trail-personal-poor', role: 'user', typ: 'session' },
+      env.JWT_SECRET,
+      {
+        expiresIn: '1h',
+      },
+    );
   }, 120_000);
 
   afterAll(async () => {

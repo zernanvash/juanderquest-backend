@@ -22,7 +22,8 @@ realPg('JuanChoice perk controls (real PostgreSQL)', () => {
   const championId = randomUUID();
   const upcomingId = randomUUID();
   const upcomingCandidate = randomUUID();
-  const token = (id: string, role: string) => jwt.sign({ id, seed_id: id, role }, env.JWT_SECRET, { expiresIn: '1h' });
+  const token = (id: string, role: string) =>
+    jwt.sign({ id, seed_id: id, role, typ: 'session' }, env.JWT_SECRET, { expiresIn: '1h' });
   const asStaff = (req: request.Test) => req.set('Authorization', `Bearer ${token(staff, 'admin')}`);
   const perk = (key: string, value: number) => ({
     key,

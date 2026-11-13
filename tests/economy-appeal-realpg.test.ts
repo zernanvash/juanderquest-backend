@@ -14,7 +14,8 @@ realPg('funded proof appeal and independent review on disposable PostgreSQL', ()
   let fixture: TestDbInstance;
   let economy: EconomyService;
   const questId = 'appeal-quest';
-  const token = (id: string, role: 'admin' | 'user') => `Bearer ${jwt.sign({ id, seed_id: id, role }, env.JWT_SECRET)}`;
+  const token = (id: string, role: 'admin' | 'user') =>
+    `Bearer ${jwt.sign({ id, seed_id: id, role, typ: 'session' }, env.JWT_SECRET)}`;
 
   beforeAll(async () => {
     fixture = await createTestDb();

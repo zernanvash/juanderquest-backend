@@ -20,12 +20,20 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
   const travelerId = '11111111-1111-1111-1111-111111111111';
   const testUserId = '99999999-9999-9999-9999-999999999999';
 
-  const tokenAdmin = jwt.sign({ id: adminId, seed_id: 'progression-admin', role: 'admin' }, env.JWT_SECRET, {
-    expiresIn: '1h',
-  });
-  const _tokenTraveler = jwt.sign({ id: travelerId, seed_id: 'progression-traveler', role: 'user' }, env.JWT_SECRET, {
-    expiresIn: '1h',
-  });
+  const tokenAdmin = jwt.sign(
+    { id: adminId, seed_id: 'progression-admin', role: 'admin', typ: 'session' },
+    env.JWT_SECRET,
+    {
+      expiresIn: '1h',
+    },
+  );
+  const _tokenTraveler = jwt.sign(
+    { id: travelerId, seed_id: 'progression-traveler', role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+    {
+      expiresIn: '1h',
+    },
+  );
 
   beforeAll(async () => {
     db = await createTestDb();

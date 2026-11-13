@@ -82,23 +82,35 @@ describe('Plan 41 Phase 3: Interactions, Comments, Moderation & Preferences', ()
     role: 'admin',
   };
 
-  const tokenAlpha = jwt.sign({ id: userAlpha.id, seed_id: userAlpha.seed_id, role: 'user' }, env.JWT_SECRET);
+  const tokenAlpha = jwt.sign(
+    { id: userAlpha.id, seed_id: userAlpha.seed_id, role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
-  const tokenBeta = jwt.sign({ id: userBeta.id, seed_id: userBeta.seed_id, role: 'user' }, env.JWT_SECRET);
+  const tokenBeta = jwt.sign(
+    { id: userBeta.id, seed_id: userBeta.seed_id, role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
-  const tokenPrivate = jwt.sign({ id: userPrivate.id, seed_id: userPrivate.seed_id, role: 'user' }, env.JWT_SECRET);
+  const tokenPrivate = jwt.sign(
+    { id: userPrivate.id, seed_id: userPrivate.seed_id, role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
   const tokenReporter2 = jwt.sign(
-    { id: userReporter2.id, seed_id: userReporter2.seed_id, role: 'user' },
+    { id: userReporter2.id, seed_id: userReporter2.seed_id, role: 'user', typ: 'session' },
     env.JWT_SECRET,
   );
 
   const tokenReporter3 = jwt.sign(
-    { id: userReporter3.id, seed_id: userReporter3.seed_id, role: 'user' },
+    { id: userReporter3.id, seed_id: userReporter3.seed_id, role: 'user', typ: 'session' },
     env.JWT_SECRET,
   );
 
-  const tokenAdmin = jwt.sign({ id: userAdmin.id, seed_id: userAdmin.seed_id, role: 'admin' }, env.JWT_SECRET);
+  const tokenAdmin = jwt.sign(
+    { id: userAdmin.id, seed_id: userAdmin.seed_id, role: 'admin', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
   let sampleActivityId: string;
 

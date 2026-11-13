@@ -19,7 +19,8 @@ realPg('funded quest sponsorship lifecycle (disposable PostgreSQL)', () => {
   let merchantPoints: MerchantPointsService;
   const originalFlag = env.QUEST_FUNDING_ENABLED;
   const adminId = `sponsor-admin-${randomUUID()}`;
-  const token = (id: string, role = 'user') => `Bearer ${jwt.sign({ id, seed_id: id, role }, env.JWT_SECRET)}`;
+  const token = (id: string, role = 'user') =>
+    `Bearer ${jwt.sign({ id, seed_id: id, role, typ: 'session' }, env.JWT_SECRET)}`;
 
   async function user(id: string, points = 0, role = 'user') {
     await fixture.pool.query(

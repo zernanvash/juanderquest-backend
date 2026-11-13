@@ -10,16 +10,16 @@ describe('Phase 3: Durable Affiliate Application & Admin Review Foundation', () 
   const adminUserId = '22222222-2222-2222-2222-222222222222'; // admin user from mockUsers
 
   const applicantToken = jwt.sign(
-    { id: applicantUserId, seed_id: 'merchant-applicant-01', role: 'user' },
+    { id: applicantUserId, seed_id: 'merchant-applicant-01', role: 'user', typ: 'session' },
     env.JWT_SECRET,
   );
 
   const otherApplicantToken = jwt.sign(
-    { id: otherApplicantUserId, seed_id: 'merchant-applicant-02', role: 'user' },
+    { id: otherApplicantUserId, seed_id: 'merchant-applicant-02', role: 'user', typ: 'session' },
     env.JWT_SECRET,
   );
 
-  const adminToken = jwt.sign({ id: adminUserId, seed_id: 'admin-1', role: 'admin' }, env.JWT_SECRET);
+  const adminToken = jwt.sign({ id: adminUserId, seed_id: 'admin-1', role: 'admin', typ: 'session' }, env.JWT_SECRET);
 
   beforeAll(() => {
     // Add applicant user

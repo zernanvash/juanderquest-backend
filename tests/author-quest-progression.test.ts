@@ -10,11 +10,20 @@ describe('Phase 2: Progressive Destination-Author Quest Slice', () => {
   const otherUserId = '44444444-4444-4444-4444-444444444444';
   const travelerUserId = '55555555-5555-5555-5555-555555555555';
 
-  const authorToken = jwt.sign({ id: authorUserId, seed_id: 'scout-author-01', role: 'user' }, env.JWT_SECRET);
+  const authorToken = jwt.sign(
+    { id: authorUserId, seed_id: 'scout-author-01', role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
-  const otherUserToken = jwt.sign({ id: otherUserId, seed_id: 'random-scout-02', role: 'user' }, env.JWT_SECRET);
+  const otherUserToken = jwt.sign(
+    { id: otherUserId, seed_id: 'random-scout-02', role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
-  const travelerToken = jwt.sign({ id: travelerUserId, seed_id: 'traveler-scout-03', role: 'user' }, env.JWT_SECRET);
+  const travelerToken = jwt.sign(
+    { id: travelerUserId, seed_id: 'traveler-scout-03', role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
   const testSpotId = `spot-progression-${Date.now()}`;
   let questId = '';

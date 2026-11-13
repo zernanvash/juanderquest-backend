@@ -8,9 +8,15 @@ describe('Destination-Author Quests System', () => {
   const authorUserId = '11111111-1111-1111-1111-111111111111'; // Juan Dela Cruz
   const otherUserId = '22222222-2222-2222-2222-222222222222'; // Maria Santos
 
-  const authorToken = jwt.sign({ id: authorUserId, seed_id: 'demo-user-1', role: 'user' }, env.JWT_SECRET);
+  const authorToken = jwt.sign(
+    { id: authorUserId, seed_id: 'demo-user-1', role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
-  const otherUserToken = jwt.sign({ id: otherUserId, seed_id: 'demo-admin-1', role: 'user' }, env.JWT_SECRET);
+  const otherUserToken = jwt.sign(
+    { id: otherUserId, seed_id: 'demo-admin-1', role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
   const testSpotId = `spot-author-test-${Date.now()}`;
   const testSpotSlug = `author-test-spot-${Date.now()}`;

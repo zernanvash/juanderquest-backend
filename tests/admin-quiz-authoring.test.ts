@@ -38,9 +38,12 @@ describe('Admin quiz authoring: detail, draft update, immutable published versio
   const adminUserId = 'admin-quiz-authoring-1';
   const travelerUserId = 'traveler-quiz-authoring-1';
 
-  const adminToken = jwt.sign({ id: adminUserId, seed_id: 'admin-quiz-authoring-seed', role: 'admin' }, env.JWT_SECRET);
+  const adminToken = jwt.sign(
+    { id: adminUserId, seed_id: 'admin-quiz-authoring-seed', role: 'admin', typ: 'session' },
+    env.JWT_SECRET,
+  );
   const travelerToken = jwt.sign(
-    { id: travelerUserId, seed_id: 'traveler-quiz-authoring-seed', role: 'user' },
+    { id: travelerUserId, seed_id: 'traveler-quiz-authoring-seed', role: 'user', typ: 'session' },
     env.JWT_SECRET,
   );
 

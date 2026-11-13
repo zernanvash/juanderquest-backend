@@ -14,13 +14,21 @@ describe('Phase 5: Synthetic QA Data Isolation', () => {
   const testUserId = '90909090-9090-9090-9090-909090909090';
   const adminUserId = '80808080-8080-8080-8080-808080808080';
 
-  const tokenUser = jwt.sign({ id: genuineUserId, seed_id: 'qa-isolation-user', role: 'user' }, env.JWT_SECRET, {
-    expiresIn: '1h',
-  });
+  const tokenUser = jwt.sign(
+    { id: genuineUserId, seed_id: 'qa-isolation-user', role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+    {
+      expiresIn: '1h',
+    },
+  );
 
-  const tokenAdmin = jwt.sign({ id: adminUserId, seed_id: 'qa-isolation-admin', role: 'admin' }, env.JWT_SECRET, {
-    expiresIn: '1h',
-  });
+  const tokenAdmin = jwt.sign(
+    { id: adminUserId, seed_id: 'qa-isolation-admin', role: 'admin', typ: 'session' },
+    env.JWT_SECRET,
+    {
+      expiresIn: '1h',
+    },
+  );
 
   const genuineSpot: Spot = {
     id: 'spot-genuine-001',

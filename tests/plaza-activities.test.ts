@@ -77,9 +77,12 @@ describe('Plan 41 Phase 1: Activities, Feed & Producers', () => {
     is_test: true,
   };
 
-  const tokenAlpha = jwt.sign({ id: userAlpha.id, seed_id: userAlpha.seed_id, role: 'user' }, env.JWT_SECRET);
+  const tokenAlpha = jwt.sign(
+    { id: userAlpha.id, seed_id: userAlpha.seed_id, role: 'user', typ: 'session' },
+    env.JWT_SECRET,
+  );
 
-  const tokenQA = jwt.sign({ id: userTest.id, seed_id: userTest.seed_id, role: 'qa' }, env.JWT_SECRET);
+  const tokenQA = jwt.sign({ id: userTest.id, seed_id: userTest.seed_id, role: 'qa', typ: 'session' }, env.JWT_SECRET);
 
   beforeAll(async () => {
     testDb = await createTestDb();

@@ -610,7 +610,7 @@ realPg('Plan 61 Phase 1 — passport stamps (real PostgreSQL)', () => {
   it('serves platform-admin mission, reward table, QotD schedule and stats endpoints', async () => {
     const adminId = await createUser('stamp-admin');
     await fixture.pool.query("UPDATE users SET role = 'admin' WHERE id = $1", [adminId]);
-    const token = jwt.sign({ id: adminId, seed_id: adminId, role: 'admin' }, env.JWT_SECRET);
+    const token = jwt.sign({ id: adminId, seed_id: adminId, role: 'admin', typ: 'session' }, env.JWT_SECRET);
     const auth = { Authorization: `Bearer ${token}` };
 
     const mission = await request(app).post('/api/v1/admin/stamps/missions').set(auth).send({
@@ -731,7 +731,7 @@ realPg('Plan 61 Phase 1 — passport stamps (real PostgreSQL)', () => {
 
   it('serves the HTTP contract for daily, history, spend and QotD routes', async () => {
     const userId = await createUser('http');
-    const token = jwt.sign({ id: userId, seed_id: userId, role: 'user' }, env.JWT_SECRET);
+    const token = jwt.sign({ id: userId, seed_id: userId, role: 'user', typ: 'session' }, env.JWT_SECRET);
     const auth = { Authorization: `Bearer ${token}` };
 
     const claim = await request(app)

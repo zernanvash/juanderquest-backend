@@ -23,8 +23,8 @@ describe('Plan 80: ExploreRanker v2 Personalization, Home Town, Privacy & Divers
   const friendNoHandleId = 'u8000007-0000-4000-8000-000000000007';
   const friendNoShareId = 'u8000008-0000-4000-8000-000000000008';
 
-  const tokenBeach = jwt.sign({ id: userBeachId, seed_id: 'seed_beach', role: 'user' }, env.JWT_SECRET);
-  const tokenCafe = jwt.sign({ id: userCafeId, seed_id: 'seed_cafe', role: 'user' }, env.JWT_SECRET);
+  const tokenBeach = jwt.sign({ id: userBeachId, seed_id: 'seed_beach', role: 'user', typ: 'session' }, env.JWT_SECRET);
+  const tokenCafe = jwt.sign({ id: userCafeId, seed_id: 'seed_cafe', role: 'user', typ: 'session' }, env.JWT_SECRET);
 
   beforeEach(async () => {
     setPool(null);
