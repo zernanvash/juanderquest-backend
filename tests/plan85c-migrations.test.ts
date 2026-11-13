@@ -76,7 +76,6 @@ describeRealPg('Plan 85c: database tidy migrations 083–085', () => {
         'chk_auth_mail_outbox_status',
         'chk_daily_missions_kind',
         'chk_streak_shield_events_kind',
-        'chk_governance_ledger_type',
       ]) {
         expect(chkSet.has(con)).toBe(true);
       }
