@@ -131,6 +131,10 @@ export function computeHaversineDistanceKm(lat1: number, lon1: number, lat2: num
   return Number((R * c).toFixed(2));
 }
 
+function isInsideBox(lat: number, lng: number, spot: Pick<Spot, 'gps_lat' | 'gps_lng'>, delta: number): boolean {
+  return Math.abs(lat - spot.gps_lat) < delta && Math.abs(lng - spot.gps_lng) < delta;
+}
+
 /**
  * Calculates turn-by-turn route using the local Valhalla engine on Azure VM.
  * Supports algorithmic crowd diversion by injecting avoidance polygons around busy spots.
@@ -164,6 +168,7 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
         return status === 'estimated_busy';
       });
 
+      const routePoints = [{ lat: req.startLat, lng: req.startLng }, ...via, { lat: req.endLat, lng: req.endLng }];
       for (const spot of busySpots) {
         // Create a 500m bounding box avoidance polygon around the congested spot
         // 0.0045 deg lat/lng ~ 500 meters
@@ -173,12 +178,8 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
         const minLng = spot.gps_lng - delta;
         const maxLng = spot.gps_lng + delta;
 
-        // Skip if either origin or destination is inside this exact spot (so we don't block the destination itself)
-        const isStartNear =
-          Math.abs(req.startLat - spot.gps_lat) < delta && Math.abs(req.startLng - spot.gps_lng) < delta;
-        const isEndNear = Math.abs(req.endLat - spot.gps_lat) < delta && Math.abs(req.endLng - spot.gps_lng) < delta;
-
-        if (!isStartNear && !isEndNear) {
+        // Skip if origin, destination, or any via stop is inside this exact spot.
+        if (!routePoints.some((p) => isInsideBox(p.lat, p.lng, spot, delta))) {
           avoidPolygons.push([
             [
               [minLng, minLat],
