@@ -23,16 +23,21 @@ export interface RouteManeuver {
 
 export interface RouteSummary {
   distanceKm: number;
+  distance_km: number;
   durationSeconds: number;
+  duration_seconds: number;
   durationFormatted: string;
+  duration_formatted: string;
   costing: TravelCosting;
   hasCrowdDiversion: boolean;
+  has_crowd_diversion: boolean;
   engine: 'valhalla' | 'fallback_straight_line';
 }
 
 export interface RouteResponse {
   degraded: boolean;
   navigationMode: 'turn_by_turn' | 'straight_line_estimate';
+  navigation_mode: 'turn_by_turn' | 'straight_line_estimate';
   warning?: {
     code: 'STRAIGHT_LINE_FALLBACK' | 'OUTSIDE_ROUTING_COVERAGE';
     message: string;
@@ -246,16 +251,22 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
 
     const distanceKm = Number((trip.summary?.length || 0).toFixed(2));
     const durationSeconds = Math.round(trip.summary?.time || 0);
+    const durationFormatted = formatDuration(durationSeconds);
 
     return {
       degraded: false,
       navigationMode: 'turn_by_turn',
+      navigation_mode: 'turn_by_turn',
       summary: {
         distanceKm,
+        distance_km: distanceKm,
         durationSeconds,
-        durationFormatted: formatDuration(durationSeconds),
+        duration_seconds: durationSeconds,
+        durationFormatted,
+        duration_formatted: durationFormatted,
         costing,
         hasCrowdDiversion,
+        has_crowd_diversion: hasCrowdDiversion,
         engine: 'valhalla',
       },
       coordinates: decodedCoords,
@@ -291,16 +302,22 @@ function straightLineFallback(
   // Retain the legacy estimate for API compatibility; clients must not present it as travel time.
   const speedKmh = costing === 'pedestrian' ? 4.5 : costing === 'bicycle' ? 15 : 45;
   const estimatedSeconds = Math.round((directDistance / speedKmh) * 3600);
+  const durationFormatted = formatDuration(estimatedSeconds);
   return {
     degraded: true,
     navigationMode: 'straight_line_estimate',
+    navigation_mode: 'straight_line_estimate',
     warning,
     summary: {
       distanceKm: directDistance,
+      distance_km: directDistance,
       durationSeconds: estimatedSeconds,
-      durationFormatted: formatDuration(estimatedSeconds),
+      duration_seconds: estimatedSeconds,
+      durationFormatted,
+      duration_formatted: durationFormatted,
       costing,
       hasCrowdDiversion: false,
+      has_crowd_diversion: false,
       engine: 'fallback_straight_line',
     },
     coordinates: points,
