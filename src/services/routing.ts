@@ -1,7 +1,9 @@
 import { env } from '../config/env.js';
 import { spotStore, Spot } from '../spots/store.js';
+import { log } from '../utils/logger.js';
 
 export type TravelCosting = 'auto' | 'pedestrian' | 'bicycle' | 'motorcycle';
+export type RouteFallbackReason = 'timeout' | 'no_route' | 'engine_error' | 'outside_coverage';
 
 export interface RouteRequest {
   startLat: number;
@@ -40,6 +42,7 @@ export interface RouteResponse {
   navigation_mode: 'turn_by_turn' | 'straight_line_estimate';
   warning?: {
     code: 'STRAIGHT_LINE_FALLBACK' | 'OUTSIDE_ROUTING_COVERAGE';
+    reason?: RouteFallbackReason;
     message: string;
     coverageLabel?: string;
   };
@@ -131,6 +134,24 @@ export function computeHaversineDistanceKm(lat1: number, lon1: number, lat2: num
   return Number((R * c).toFixed(2));
 }
 
+export function routeTimeoutMs(straightKm: number, viaCount: number): number {
+  return Math.min(12000, Math.max(4000, Math.round(3500 + straightKm * 20 + viaCount * 800)));
+}
+
+function sumStraightLineKm(req: RouteRequest): number {
+  const points: [number, number][] = [
+    [req.startLat, req.startLng],
+    ...(req.via ?? []).map((p): [number, number] => [p.lat, p.lng]),
+    [req.endLat, req.endLng],
+  ];
+  return Number(
+    points
+      .slice(1)
+      .reduce((sum, p, i) => sum + computeHaversineDistanceKm(points[i][0], points[i][1], p[0], p[1]), 0)
+      .toFixed(2),
+  );
+}
+
 function isInsideBox(lat: number, lng: number, spot: Pick<Spot, 'gps_lat' | 'gps_lng'>, delta: number): boolean {
   return Math.abs(lat - spot.gps_lat) < delta && Math.abs(lng - spot.gps_lng) < delta;
 }
@@ -148,13 +169,30 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
     req.startLng >= minLng && req.startLng <= maxLng && req.startLat >= minLat && req.startLat <= maxLat;
   const endCovered = req.endLng >= minLng && req.endLng <= maxLng && req.endLat >= minLat && req.endLat <= maxLat;
   const via = req.via ?? [];
+  const straightKm = sumStraightLineKm(req);
+  const timeoutMs = routeTimeoutMs(straightKm, via.length);
+  const straightKmLog = Number(straightKm.toFixed(1));
   const viaCovered = via.every((p) => p.lng >= minLng && p.lng <= maxLng && p.lat >= minLat && p.lat <= maxLat);
   if (!startCovered || !endCovered || !viaCovered) {
-    return straightLineFallback(req, costing, {
+    const fallback = straightLineFallback(req, costing, straightKm, {
       code: 'OUTSIDE_ROUTING_COVERAGE',
+      reason: 'outside_coverage',
       coverageLabel: coverage.region,
       message: `Turn-by-turn directions currently cover ${coverage.region} only.`,
     });
+    log.warn('route_degraded', {
+      costing,
+      via_count: via.length,
+      straight_km: straightKmLog,
+      avoid_boxes: 0,
+      retried_without_boxes: false,
+      timeout_ms: timeoutMs,
+      valhalla_ms: 0,
+      valhalla_status: null,
+      reason: 'outside_coverage',
+      coord_count: fallback.coordinates.length,
+    });
+    return fallback;
   }
 
   // 1. Gather crowd avoidance polygons if requested
@@ -216,13 +254,33 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
   }
 
   // 3. Query Valhalla Daemon
+  const valhallaStart = Date.now();
+  let valhallaStatus: number | null = null;
+  let retriedWithoutBoxes = false;
+
   try {
-    const response = await fetch(`${env.VALHALLA_URL}/route`, {
+    let response = await fetch(`${env.VALHALLA_URL}/route`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(valhallaPayload),
-      signal: AbortSignal.timeout(4000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
+    valhallaStatus = response.status;
+
+    if (response.status === 400 && avoidPolygons.length > 0) {
+      retriedWithoutBoxes = true;
+      hasCrowdDiversion = false;
+      const retryPayload = { ...valhallaPayload };
+      delete retryPayload.avoid_polygons;
+      const remainingMs = Math.max(1, timeoutMs - (Date.now() - valhallaStart));
+      response = await fetch(`${env.VALHALLA_URL}/route`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(retryPayload),
+        signal: AbortSignal.timeout(remainingMs),
+      });
+      valhallaStatus = response.status;
+    }
 
     if (!response.ok) {
       throw new Error(`Valhalla responded with HTTP ${response.status}`);
@@ -253,6 +311,24 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
     const distanceKm = Number((trip.summary?.length || 0).toFixed(2));
     const durationSeconds = Math.round(trip.summary?.time || 0);
     const durationFormatted = formatDuration(durationSeconds);
+    const valhallaMs = Date.now() - valhallaStart;
+    const logFields = {
+      costing,
+      via_count: via.length,
+      straight_km: straightKmLog,
+      avoid_boxes: avoidPolygons.length,
+      retried_without_boxes: retriedWithoutBoxes,
+      timeout_ms: timeoutMs,
+      valhalla_ms: valhallaMs,
+      valhalla_status: valhallaStatus,
+      reason: null,
+      coord_count: decodedCoords.length,
+    };
+    if (valhallaMs >= 0.7 * timeoutMs) {
+      log.warn('route_resolved', logFields);
+    } else {
+      log.info('route_resolved', logFields);
+    }
 
     return {
       degraded: false,
@@ -273,20 +349,38 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
       coordinates: decodedCoords,
       maneuvers,
     };
-  } catch {
+  } catch (err) {
+    const valhallaMs = Date.now() - valhallaStart;
+    const isTimeout = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+    const reason: RouteFallbackReason = isTimeout ? 'timeout' : valhallaStatus === 400 ? 'no_route' : 'engine_error';
     // 4. Explicit degraded estimate if Valhalla is offline/indexing. This is
     // intentionally not represented as maneuver guidance or turn-by-turn navigation.
-    return straightLineFallback(req, costing, {
+    const fallback = straightLineFallback(req, costing, straightKm, {
       code: 'STRAIGHT_LINE_FALLBACK',
+      reason,
       message:
         'Routing is degraded. This is a straight-line distance estimate only; turn-by-turn guidance is unavailable.',
     });
+    log.warn('route_degraded', {
+      costing,
+      via_count: via.length,
+      straight_km: straightKmLog,
+      avoid_boxes: avoidPolygons.length,
+      retried_without_boxes: retriedWithoutBoxes,
+      timeout_ms: timeoutMs,
+      valhalla_ms: valhallaMs,
+      valhalla_status: valhallaStatus,
+      reason,
+      coord_count: fallback.coordinates.length,
+    });
+    return fallback;
   }
 }
 
 function straightLineFallback(
   req: RouteRequest,
   costing: TravelCosting,
+  directDistance: number,
   warning: NonNullable<RouteResponse['warning']>,
 ): RouteResponse {
   const points: [number, number][] = [
@@ -294,12 +388,6 @@ function straightLineFallback(
     ...(req.via ?? []).map((p): [number, number] => [p.lat, p.lng]),
     [req.endLat, req.endLng],
   ];
-  const directDistance = Number(
-    points
-      .slice(1)
-      .reduce((sum, p, i) => sum + computeHaversineDistanceKm(points[i][0], points[i][1], p[0], p[1]), 0)
-      .toFixed(2),
-  );
   // Retain the legacy estimate for API compatibility; clients must not present it as travel time.
   const speedKmh = costing === 'pedestrian' ? 4.5 : costing === 'bicycle' ? 15 : 45;
   const estimatedSeconds = Math.round((directDistance / speedKmh) * 3600);
