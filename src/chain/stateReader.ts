@@ -37,7 +37,16 @@ function withTimeout<T>(p: Promise<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const t = setTimeout(() => reject(new Error('CHAIN_RPC_TIMEOUT')), CALL_TIMEOUT_MS);
     t.unref?.();
-    p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
   });
 }
 
@@ -47,8 +56,7 @@ export class JsonRpcChainStateReader implements ChainStateReader {
 
   constructor(rpcUrls: string[], chainId: number) {
     if (rpcUrls.length === 0) throw new Error('CHAIN_RPC_URLS_EMPTY');
-    this.providers = rpcUrls.slice(0, 2).map((url) =>
-      new JsonRpcProvider(url, chainId, { staticNetwork: true }));
+    this.providers = rpcUrls.slice(0, 2).map((url) => new JsonRpcProvider(url, chainId, { staticNetwork: true }));
   }
 
   private async attempt<T>(fn: (p: JsonRpcProvider) => Promise<T>): Promise<T | null> {

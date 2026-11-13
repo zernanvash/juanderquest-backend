@@ -29,9 +29,15 @@ realPg('migration 065 quest marker URL cleanup (real PostgreSQL)', () => {
          ($4, 'Other repository', 'test', 'eco', 'Test place', 15, 120, $5, $6),
          ($7, 'Valid marker', 'test', 'eco', 'Test place', 15, 120, $8, $9)`,
       [
-        `${prefix}-dead`, `${prefix}-dead-code`, deadUrl,
-        `${prefix}-other`, `${prefix}-other-code`, otherOwnerUrl,
-        `${prefix}-valid`, `${prefix}-valid-code`, validUrl,
+        `${prefix}-dead`,
+        `${prefix}-dead-code`,
+        deadUrl,
+        `${prefix}-other`,
+        `${prefix}-other-code`,
+        otherOwnerUrl,
+        `${prefix}-valid`,
+        `${prefix}-valid-code`,
+        validUrl,
       ],
     );
 

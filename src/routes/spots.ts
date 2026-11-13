@@ -1,7 +1,14 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
-import { authenticateToken, optionalAuthenticateToken, requireAdmin, AuthRequest, isAuthorizedQA, checkQAAuthorization } from '../middleware/auth.js';
+import {
+  authenticateToken,
+  optionalAuthenticateToken,
+  requireAdmin,
+  AuthRequest,
+  isAuthorizedQA,
+  checkQAAuthorization,
+} from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { env } from '../config/env.js';
@@ -24,12 +31,20 @@ import { handleSpotInteraction } from '../stamps/hooks.js';
 import { getHomeTown } from '../social/homeTown.js';
 
 const router = Router();
-const csv = (value: unknown) => typeof value === 'string' && value ? value.split(',').map(v => v.trim()).filter(Boolean) : [];
-const numeric = (value: unknown) => typeof value === 'string' && value !== '' ? Number(value) : undefined;
+const csv = (value: unknown) =>
+  typeof value === 'string' && value
+    ? value
+        .split(',')
+        .map((v) => v.trim())
+        .filter(Boolean)
+    : [];
+const numeric = (value: unknown) => (typeof value === 'string' && value !== '' ? Number(value) : undefined);
 const validSpotIdentifier = (value: string) => /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,179}$/.test(value);
 const publicSpot = (identifier: string, allowTest: boolean) =>
   validSpotIdentifier(identifier)
-    ? spotStore.spots.find(s => (s.id === identifier || s.slug === identifier) && s.status === 'published' && (allowTest || !s.is_test))
+    ? spotStore.spots.find(
+        (s) => (s.id === identifier || s.slug === identifier) && s.status === 'published' && (allowTest || !s.is_test),
+      )
     : undefined;
 
 const mediaUpload = multer({
@@ -43,69 +58,164 @@ const uploadRateLimiter = rateLimit({
   max: env.NODE_ENV === 'test' ? 1000 : 20,
   keyStrategy: 'actor_or_ip',
 });
-const spotInAdminScope = (scope: NonNullable<AuthRequest['adminScope']>, spot: { town_area_id?: string | null; barangay_area_id?: string | null }) =>
-  assertInScope(scope, 'destinations', spot.town_area_id) || assertInScope(scope, 'destinations', spot.barangay_area_id);
+const spotInAdminScope = (
+  scope: NonNullable<AuthRequest['adminScope']>,
+  spot: { town_area_id?: string | null; barangay_area_id?: string | null },
+) =>
+  assertInScope(scope, 'destinations', spot.town_area_id) ||
+  assertInScope(scope, 'destinations', spot.barangay_area_id);
 
-
-router.get('/spot-taxonomy', (_req, res) => res.json({ success: true, data: {
-  categories: taxonomy,
-  tags: ['coffee', 'local_food', 'family', 'friends', 'quiet', 'work_friendly', 'scenic', 'running', 'sports', 'hidden_gem', 'free'],
-  amenities: ['parking', 'restroom', 'wifi', 'wheelchair_accessible', 'pet_friendly', 'child_friendly'],
-} }));
+router.get('/spot-taxonomy', (_req, res) =>
+  res.json({
+    success: true,
+    data: {
+      categories: taxonomy,
+      tags: [
+        'coffee',
+        'local_food',
+        'family',
+        'friends',
+        'quiet',
+        'work_friendly',
+        'scenic',
+        'running',
+        'sports',
+        'hidden_gem',
+        'free',
+      ],
+      amenities: ['parking', 'restroom', 'wifi', 'wheelchair_accessible', 'pet_friendly', 'child_friendly'],
+    },
+  }),
+);
 
 router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res) => {
   const allowTest = isAuthorizedQA(req);
   if (allowTest) res.set('X-Robots-Tag', 'noindex, nofollow');
-  const lat = numeric(req.query.lat), lng = numeric(req.query.lng), radius = numeric(req.query.radius_km);
-  const limit = numeric(req.query.limit), offset = numeric(req.query.offset);
-  if ((lat !== undefined) !== (lng !== undefined) || [lat, lng, radius, limit, offset].some(v => v !== undefined && !Number.isFinite(v))) {
-    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Valid lat/lng and radius values are required.' } });
+  const lat = numeric(req.query.lat),
+    lng = numeric(req.query.lng),
+    radius = numeric(req.query.radius_km);
+  const limit = numeric(req.query.limit),
+    offset = numeric(req.query.offset);
+  if (
+    (lat !== undefined) !== (lng !== undefined) ||
+    [lat, lng, radius, limit, offset].some((v) => v !== undefined && !Number.isFinite(v))
+  ) {
+    return res
+      .status(400)
+      .json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Valid lat/lng and radius values are required.' },
+      });
   }
-  const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
+  const actorId =
+    req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
   const homeTown = req.user?.id ? await getHomeTown(req.user.id) : null;
-  const data = spotStore.list({ search: req.query.q as string | undefined, categories: csv(req.query.categories), tags: csv(req.query.tags), municipality: req.query.municipality as string | undefined, lat, lng, radius, intent: req.query.intent as string | undefined, sort: req.query.sort as string | undefined, hasQuest: req.query.has_quest === 'true', userId: req.user?.id || actorId, actorId, homeTown, allowTest, limit: limit !== undefined ? Math.max(1, Math.min(100, Math.floor(limit))) : undefined, offset: offset !== undefined ? Math.max(0, Math.floor(offset)) : undefined });
+  const data = spotStore.list({
+    search: req.query.q as string | undefined,
+    categories: csv(req.query.categories),
+    tags: csv(req.query.tags),
+    municipality: req.query.municipality as string | undefined,
+    lat,
+    lng,
+    radius,
+    intent: req.query.intent as string | undefined,
+    sort: req.query.sort as string | undefined,
+    hasQuest: req.query.has_quest === 'true',
+    userId: req.user?.id || actorId,
+    actorId,
+    homeTown,
+    allowTest,
+    limit: limit !== undefined ? Math.max(1, Math.min(100, Math.floor(limit))) : undefined,
+    offset: offset !== undefined ? Math.max(0, Math.floor(offset)) : undefined,
+  });
   return res.json({ success: true, data, meta: { count: data.length, sort: req.query.sort || 'recommended' } });
 });
 
 router.get('/spots/highlights', optionalAuthenticateToken, (req: AuthRequest, res) => {
   res.set('Cache-Control', 'private, no-store');
-  return res.json({ success: true, data: hiddenGemHighlights(spotStore, req.user?.id),
-    meta: { algorithm: 'curated_hidden_gems_v1', estimated_not_live: true } });
+  return res.json({
+    success: true,
+    data: hiddenGemHighlights(spotStore, req.user?.id),
+    meta: { algorithm: 'curated_hidden_gems_v1', estimated_not_live: true },
+  });
 });
 
 router.get('/spots/trending', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
   const allowTest = isAuthorizedQA(req);
   if (allowTest) res.set('X-Robots-Tag', 'noindex, nofollow');
-  const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
-  res.json({ success: true, data: spotStore.list({ municipality: req.query.municipality as string | undefined, sort: 'trending', userId: actorId, allowTest }).slice(0, 10) });
+  const actorId =
+    req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
+  res.json({
+    success: true,
+    data: spotStore
+      .list({
+        municipality: req.query.municipality as string | undefined,
+        sort: 'trending',
+        userId: actorId,
+        allowTest,
+      })
+      .slice(0, 10),
+  });
 });
 
 // Plan 66: recognize a map pin (town/barangay, POI name, suggested category/details, story starters,
 // nearby duplicates). Registered before /spots/:slug so "recognize" is never read as a slug.
-const recognizeQuery = z.object({ lat: z.coerce.number().min(4.5).max(21.5), lng: z.coerce.number().min(116).max(127) });
-const recognizeRateLimiter = rateLimit({ policyId: 'spots:recognize', windowMs: 60 * 1000, max: env.NODE_ENV === 'test' ? 1000 : 60, keyStrategy: 'actor_or_ip' });
+const recognizeQuery = z.object({
+  lat: z.coerce.number().min(4.5).max(21.5),
+  lng: z.coerce.number().min(116).max(127),
+});
+const recognizeRateLimiter = rateLimit({
+  policyId: 'spots:recognize',
+  windowMs: 60 * 1000,
+  max: env.NODE_ENV === 'test' ? 1000 : 60,
+  keyStrategy: 'actor_or_ip',
+});
 router.get('/spots/recognize', optionalAuthenticateToken, recognizeRateLimiter, async (req: AuthRequest, res) => {
   const parsed = recognizeQuery.safeParse(req.query);
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'lat and lng must be inside the Philippines.' } });
+    return res
+      .status(400)
+      .json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'lat and lng must be inside the Philippines.' },
+      });
   }
   try {
     res.set('Cache-Control', 'private, max-age=300');
     return res.json({ success: true, data: await recognizeSpotLocation(parsed.data.lat, parsed.data.lng, getPool()) });
   } catch (error) {
     console.error('[spots] recognize failed:', error instanceof Error ? error.message : error);
-    return res.status(503).json({ success: false, error: { code: 'RECOGNIZE_UNAVAILABLE', message: 'Place recognition is unavailable right now.' } });
+    return res
+      .status(503)
+      .json({
+        success: false,
+        error: { code: 'RECOGNIZE_UNAVAILABLE', message: 'Place recognition is unavailable right now.' },
+      });
   }
 });
 
 router.get('/spots/:slug/alternatives', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
   const allowTest = isAuthorizedQA(req);
   if (allowTest) res.set('X-Robots-Tag', 'noindex, nofollow');
-  const source=publicSpot(req.params.slug,allowTest);
-  if(!source)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
-  const requested=numeric(req.query.limit);const limit=requested===undefined?3:Math.max(1,Math.min(5,Math.floor(requested)));
-  const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
-  return res.json({success:true,data:spotStore.alternatives(source,actorId,limit),meta:{source_spot_id:source.id,catalog_scope:'pangasinan_alpha',ranking_scope:'catalog_wide',expansion_ready:'philippines',personalized:Boolean(req.user),estimated_not_live:true}});
+  const source = publicSpot(req.params.slug, allowTest);
+  if (!source)
+    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
+  const requested = numeric(req.query.limit);
+  const limit = requested === undefined ? 3 : Math.max(1, Math.min(5, Math.floor(requested)));
+  const actorId =
+    req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
+  return res.json({
+    success: true,
+    data: spotStore.alternatives(source, actorId, limit),
+    meta: {
+      source_spot_id: source.id,
+      catalog_scope: 'pangasinan_alpha',
+      ranking_scope: 'catalog_wide',
+      expansion_ready: 'philippines',
+      personalized: Boolean(req.user),
+      estimated_not_live: true,
+    },
+  });
 });
 
 router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
@@ -115,63 +225,204 @@ router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, (req
   if (spot.is_test) {
     res.set('X-Robots-Tag', 'noindex, nofollow');
   }
-  const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
-  const attached = Array.from(assetStore.assets.values()).filter(a => a.spot_id === spot.id && a.status === 'attached');
-  return res.json({ success: true, data: { ...spot, ...spotStore.crowd(spot), saved: spotStore.isSaved(actorId, spot.id), liked: spotStore.isLiked(actorId, spot.id), trend_score: spotStore.trend(spot.id), attached_assets: attached } });
+  const actorId =
+    req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
+  const attached = Array.from(assetStore.assets.values()).filter(
+    (a) => a.spot_id === spot.id && a.status === 'attached',
+  );
+  return res.json({
+    success: true,
+    data: {
+      ...spot,
+      ...spotStore.crowd(spot),
+      saved: spotStore.isSaved(actorId, spot.id),
+      liked: spotStore.isLiked(actorId, spot.id),
+      trend_score: spotStore.trend(spot.id),
+      attached_assets: attached,
+    },
+  });
 });
 
-router.get('/me/discovery-preferences', authenticateToken, (req: AuthRequest, res) => res.json({ success: true, data: spotStore.getPreferences(req.user!.id) }));
-const preferencesSchema = z.object({ body: z.object({ categories: z.array(z.string()).max(10).default([]), tags: z.array(z.string()).max(20).default([]), occasions: z.array(z.string()).max(10).default([]), price_levels: z.array(z.number().int().min(0).max(4)).max(5).default([]), radius_km: z.number().int().min(1).max(200).default(25), onboarding_state: z.enum(['pending', 'completed', 'skipped']).default('completed') }) });
-router.put('/me/discovery-preferences', authenticateToken, validateRequest(preferencesSchema), (req: AuthRequest, res) => res.json({ success: true, data: spotStore.setPreferences(req.user!.id, req.body) }));
+router.get('/me/discovery-preferences', authenticateToken, (req: AuthRequest, res) =>
+  res.json({ success: true, data: spotStore.getPreferences(req.user!.id) }),
+);
+const preferencesSchema = z.object({
+  body: z.object({
+    categories: z.array(z.string()).max(10).default([]),
+    tags: z.array(z.string()).max(20).default([]),
+    occasions: z.array(z.string()).max(10).default([]),
+    price_levels: z.array(z.number().int().min(0).max(4)).max(5).default([]),
+    radius_km: z.number().int().min(1).max(200).default(25),
+    onboarding_state: z.enum(['pending', 'completed', 'skipped']).default('completed'),
+  }),
+});
+router.put(
+  '/me/discovery-preferences',
+  authenticateToken,
+  validateRequest(preferencesSchema),
+  (req: AuthRequest, res) => res.json({ success: true, data: spotStore.setPreferences(req.user!.id, req.body) }),
+);
 
-router.put('/spots/:id/save', authenticateToken, (req: AuthRequest, res) => { const spot=spotStore.spots.find(item=>item.id===req.params.id); const actor=db.findUserById(req.user!.id); if(!actor)return res.status(403).json({success:false,error:{code:'FORBIDDEN',message:'Account is unavailable.'}}); if(spot&&Boolean(spot.is_test)!==Boolean(actor.is_test))return res.status(403).json({success:false,error:{code:'SCOPE_MISMATCH',message:'Fictional alpha posts are read-only for real accounts.'}}); const saved=spotStore.interact(req.user!.id,req.params.id,'save',true);spotStore.recordActivity(req.user!.id,req.params.id,'save');return res.json({success:true,data:{saved}}); });
-router.delete('/spots/:id/save', authenticateToken, (req: AuthRequest, res) => res.json({ success: true, data: { saved: spotStore.interact(req.user!.id, req.params.id, 'save', false) } }));
+router.put('/spots/:id/save', authenticateToken, (req: AuthRequest, res) => {
+  const spot = spotStore.spots.find((item) => item.id === req.params.id);
+  const actor = db.findUserById(req.user!.id);
+  if (!actor)
+    return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Account is unavailable.' } });
+  if (spot && Boolean(spot.is_test) !== Boolean(actor.is_test))
+    return res
+      .status(403)
+      .json({
+        success: false,
+        error: { code: 'SCOPE_MISMATCH', message: 'Fictional alpha posts are read-only for real accounts.' },
+      });
+  const saved = spotStore.interact(req.user!.id, req.params.id, 'save', true);
+  spotStore.recordActivity(req.user!.id, req.params.id, 'save');
+  return res.json({ success: true, data: { saved } });
+});
+router.delete('/spots/:id/save', authenticateToken, (req: AuthRequest, res) =>
+  res.json({ success: true, data: { saved: spotStore.interact(req.user!.id, req.params.id, 'save', false) } }),
+);
 
 router.put('/spots/:id/like', optionalAuthenticateToken, (req: AuthRequest, res) => {
-  const spot = spotStore.spots.find(item => item.id === req.params.id || item.slug === req.params.id);
+  const spot = spotStore.spots.find((item) => item.id === req.params.id || item.slug === req.params.id);
   if (!spot) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
-  const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip || 'anon';
+  const actorId =
+    req.user?.id ||
+    (req.headers['x-device-id'] as string) ||
+    (req.headers['x-forwarded-for'] as string) ||
+    req.ip ||
+    'anon';
   spotStore.interact(String(actorId), spot.id, 'like', true);
   return res.json({ success: true, data: { liked: true, spot_id: spot.id } });
 });
 
 router.delete('/spots/:id/like', optionalAuthenticateToken, (req: AuthRequest, res) => {
-  const spot = spotStore.spots.find(item => item.id === req.params.id || item.slug === req.params.id);
+  const spot = spotStore.spots.find((item) => item.id === req.params.id || item.slug === req.params.id);
   if (!spot) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
-  const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip || 'anon';
+  const actorId =
+    req.user?.id ||
+    (req.headers['x-device-id'] as string) ||
+    (req.headers['x-forwarded-for'] as string) ||
+    req.ip ||
+    'anon';
   spotStore.interact(String(actorId), spot.id, 'like', false);
   return res.json({ success: true, data: { liked: false, spot_id: spot.id } });
 });
-router.post('/spots/:id/interactions', authenticateToken, validateRequest(z.object({ body: z.object({ type: z.enum(['view', 'directions', 'helpful', 'visit']), captured_lat:z.number().min(-90).max(90).optional(), captured_lng:z.number().min(-180).max(180).optional() }) })), async (req: AuthRequest, res) => {
-  const spot=spotStore.spots.find(item=>item.id===req.params.id);if(!spot)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
-  const actor=db.findUserById(req.user!.id);if(!actor)return res.status(403).json({success:false,error:{code:'FORBIDDEN',message:'Account is unavailable.'}});if(Boolean(spot.is_test)!==Boolean(actor.is_test))return res.status(403).json({success:false,error:{code:'SCOPE_MISMATCH',message:'Fictional alpha posts are read-only for real accounts.'}});
-  if(req.body.type==='visit'&&(req.body.captured_lat===undefined||req.body.captured_lng===undefined||distanceKm(req.body.captured_lat,req.body.captured_lng,spot.gps_lat,spot.gps_lng)>.25))return res.status(422).json({success:false,error:{code:'VISIT_NOT_VERIFIED',message:'A visit must include coordinates within 250 meters of the destination.'}});
-  const recorded=spotStore.interact(req.user!.id,req.params.id,req.body.type,true);if(req.body.type!=='helpful')spotStore.recordActivity(req.user!.id,req.params.id,req.body.type);
-  await handleSpotInteraction(getPool(), { userId: req.user!.id, spotId: spot.id, type: req.body.type });
-  return res.status(201).json({success:true,data:{recorded}});
-});
+router.post(
+  '/spots/:id/interactions',
+  authenticateToken,
+  validateRequest(
+    z.object({
+      body: z.object({
+        type: z.enum(['view', 'directions', 'helpful', 'visit']),
+        captured_lat: z.number().min(-90).max(90).optional(),
+        captured_lng: z.number().min(-180).max(180).optional(),
+      }),
+    }),
+  ),
+  async (req: AuthRequest, res) => {
+    const spot = spotStore.spots.find((item) => item.id === req.params.id);
+    if (!spot)
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
+    const actor = db.findUserById(req.user!.id);
+    if (!actor)
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Account is unavailable.' } });
+    if (Boolean(spot.is_test) !== Boolean(actor.is_test))
+      return res
+        .status(403)
+        .json({
+          success: false,
+          error: { code: 'SCOPE_MISMATCH', message: 'Fictional alpha posts are read-only for real accounts.' },
+        });
+    if (
+      req.body.type === 'visit' &&
+      (req.body.captured_lat === undefined ||
+        req.body.captured_lng === undefined ||
+        distanceKm(req.body.captured_lat, req.body.captured_lng, spot.gps_lat, spot.gps_lng) > 0.25)
+    )
+      return res
+        .status(422)
+        .json({
+          success: false,
+          error: {
+            code: 'VISIT_NOT_VERIFIED',
+            message: 'A visit must include coordinates within 250 meters of the destination.',
+          },
+        });
+    const recorded = spotStore.interact(req.user!.id, req.params.id, req.body.type, true);
+    if (req.body.type !== 'helpful') spotStore.recordActivity(req.user!.id, req.params.id, req.body.type);
+    await handleSpotInteraction(getPool(), { userId: req.user!.id, spotId: spot.id, type: req.body.type });
+    return res.status(201).json({ success: true, data: { recorded } });
+  },
+);
 
-const spotReviewSchema=z.object({body:z.object({status:z.enum(['published','needs_review','unpublished']),crowd_capacity_band:z.enum(['low','medium','high']),recommendation_suppressed:z.boolean().default(false)})});
+const spotReviewSchema = z.object({
+  body: z.object({
+    status: z.enum(['published', 'needs_review', 'unpublished']),
+    crowd_capacity_band: z.enum(['low', 'medium', 'high']),
+    recommendation_suppressed: z.boolean().default(false),
+  }),
+});
 // Read-only list: quiz authors (quests_quizzes) also need their area's destinations for the quiz destination picker.
-router.get('/admin/spots',authenticateToken,requireAreaAdmin(['destinations','quests_quizzes']),(req:AuthRequest,res)=>{
-  const scope=req.adminScope!;
-  const spots=spotStore.spots.filter(s=>spotInAdminScope(scope,s)||spotInScope(scope,'quests_quizzes',s.id));
-  return res.json({success:true,data:spots.map(s=>({...s,...spotStore.crowd(s)}))});
+router.get(
+  '/admin/spots',
+  authenticateToken,
+  requireAreaAdmin(['destinations', 'quests_quizzes']),
+  (req: AuthRequest, res) => {
+    const scope = req.adminScope!;
+    const spots = spotStore.spots.filter(
+      (s) => spotInAdminScope(scope, s) || spotInScope(scope, 'quests_quizzes', s.id),
+    );
+    return res.json({ success: true, data: spots.map((s) => ({ ...s, ...spotStore.crowd(s) })) });
+  },
+);
+router.get('/admin/spots/:id', authenticateToken, requireAreaAdmin('destinations'), (req: AuthRequest, res) => {
+  const spot = spotStore.spots.find((s) => s.id === req.params.id || s.slug === req.params.id);
+  if (!spot || !spotInAdminScope(req.adminScope!, spot))
+    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
+  return res.json({ success: true, data: { ...spot, ...spotStore.crowd(spot) } });
 });
-router.get('/admin/spots/:id',authenticateToken,requireAreaAdmin('destinations'),(req:AuthRequest,res)=>{
-  const spot=spotStore.spots.find(s=>s.id===req.params.id || s.slug===req.params.id);
-  if(!spot || !spotInAdminScope(req.adminScope!,spot))return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
-  return res.json({success:true,data:{...spot,...spotStore.crowd(spot)}});
-});
-router.patch('/admin/spots/:id',authenticateToken,requireAreaAdmin('destinations'),validateRequest(spotReviewSchema),async(req:AuthRequest,res)=>{
-  const before=spotStore.spots.find(s=>s.id===req.params.id);
-  if(!before || !spotInAdminScope(req.adminScope!,before))return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
-  if(!req.adminScope!.platform && before.created_by===req.user!.id)return res.status(403).json({success:false,error:{code:'SELF_MODERATION_FORBIDDEN',message:'Platform administrator review is required for a destination you created.'}});
-  const spot=spotStore.review(req.params.id,req.user!.id,req.body.status,req.body.crowd_capacity_band,req.body.recommendation_suppressed);
-  if(!spot)return res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'Spot not found.'}});
-  await writeAdminAudit({actorId:req.user!.id,actorRole:req.user!.role,areaId:spot.town_area_id,action:'destination.reviewed',subjectType:'spot',subjectId:spot.id,before,after:spot});
-  return res.json({success:true,data:{...spot,...spotStore.crowd(spot)}});
-});
+router.patch(
+  '/admin/spots/:id',
+  authenticateToken,
+  requireAreaAdmin('destinations'),
+  validateRequest(spotReviewSchema),
+  async (req: AuthRequest, res) => {
+    const before = spotStore.spots.find((s) => s.id === req.params.id);
+    if (!before || !spotInAdminScope(req.adminScope!, before))
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
+    if (!req.adminScope!.platform && before.created_by === req.user!.id)
+      return res
+        .status(403)
+        .json({
+          success: false,
+          error: {
+            code: 'SELF_MODERATION_FORBIDDEN',
+            message: 'Platform administrator review is required for a destination you created.',
+          },
+        });
+    const spot = spotStore.review(
+      req.params.id,
+      req.user!.id,
+      req.body.status,
+      req.body.crowd_capacity_band,
+      req.body.recommendation_suppressed,
+    );
+    if (!spot)
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
+    await writeAdminAudit({
+      actorId: req.user!.id,
+      actorRole: req.user!.role,
+      areaId: spot.town_area_id,
+      action: 'destination.reviewed',
+      subjectType: 'spot',
+      subjectId: spot.id,
+      before,
+      after: spot,
+    });
+    return res.json({ success: true, data: { ...spot, ...spotStore.crowd(spot) } });
+  },
+);
 
 // Shared handler for photo & rich video media uploads
 const handleMediaUpload = (req: AuthRequest, res: any) => {
@@ -184,7 +435,10 @@ const handleMediaUpload = (req: AuthRequest, res: any) => {
       if (err.code === 'LIMIT_FILE_SIZE') {
         return res.status(400).json({
           success: false,
-          error: { code: 'FILE_TOO_LARGE', message: 'File size exceeds maximum limit of 30 MB for video clips (8 MB for photos).' },
+          error: {
+            code: 'FILE_TOO_LARGE',
+            message: 'File size exceeds maximum limit of 30 MB for video clips (8 MB for photos).',
+          },
         });
       }
       return res.status(400).json({
@@ -194,8 +448,7 @@ const handleMediaUpload = (req: AuthRequest, res: any) => {
     }
 
     const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
-    const uploadedFile =
-      files?.photo?.[0] || files?.media?.[0] || files?.file?.[0] || req.file;
+    const uploadedFile = files?.photo?.[0] || files?.media?.[0] || files?.file?.[0] || req.file;
 
     if (!uploadedFile || !uploadedFile.buffer) {
       return res.status(400).json({
@@ -209,7 +462,11 @@ const handleMediaUpload = (req: AuthRequest, res: any) => {
     if (!detected) {
       return res.status(400).json({
         success: false,
-        error: { code: 'INVALID_IMAGE_CONTENT', message: 'File content does not match a valid image (JPEG, PNG, WebP) or video (MP4, WebM, QuickTime) signature.' },
+        error: {
+          code: 'INVALID_IMAGE_CONTENT',
+          message:
+            'File content does not match a valid image (JPEG, PNG, WebP) or video (MP4, WebM, QuickTime) signature.',
+        },
       });
     }
 
@@ -244,7 +501,7 @@ const handleMediaUpload = (req: AuthRequest, res: any) => {
         uploadedFile.buffer,
         detected.mime,
         detected.ext,
-        detected.mediaType
+        detected.mediaType,
       );
       const assetRecord = await assetStore.createPendingAsset(req.user!.id, saveResult, storageProvider.name);
 
@@ -275,12 +532,18 @@ router.post('/spot-photos', authenticateToken, uploadRateLimiter, handleMediaUpl
 // POST /api/v1/spot-media - Authenticated rich media upload (photos & videos)
 router.post('/spot-media', authenticateToken, uploadRateLimiter, handleMediaUpload);
 
-
 const contributionSchema = z.object({
   body: z.object({
     name: z.string().trim().min(3).max(200),
     description: z.string().trim().min(20).max(2000),
-    category: z.enum(['eat_drink', 'nature_outdoors', 'culture_heritage', 'activities_wellness', 'shopping_local', 'stay']),
+    category: z.enum([
+      'eat_drink',
+      'nature_outdoors',
+      'culture_heritage',
+      'activities_wellness',
+      'shopping_local',
+      'stay',
+    ]),
     subcategory: z.string().min(2).max(50),
     tags: z.array(z.string()).max(15).default([]),
     municipality: z.string().min(2).max(100),
@@ -293,17 +556,7 @@ const contributionSchema = z.object({
       .max(5)
       .default([]),
     best_time: z
-      .array(
-        z.enum([
-          'early_morning',
-          'daytime',
-          'sunset',
-          'night',
-          'weekdays',
-          'dry_season',
-          'rainy_season',
-        ])
-      )
+      .array(z.enum(['early_morning', 'daytime', 'sunset', 'night', 'weekdays', 'dry_season', 'rainy_season']))
       .max(4)
       .default([]),
     hours: z.record(z.string()).default({}),
@@ -317,10 +570,7 @@ const contributionSchema = z.object({
 
 router.post('/spots', authenticateToken, validateRequest(contributionSchema), async (req: AuthRequest, res) => {
   const assetIds = Array.from(
-    new Set([
-      ...(req.body.asset_ids || []),
-      ...(req.body.asset_id ? [req.body.asset_id] : []),
-    ])
+    new Set([...(req.body.asset_ids || []), ...(req.body.asset_id ? [req.body.asset_id] : [])]),
   );
 
   if (assetIds.length > 5) {
@@ -406,111 +656,119 @@ const createAuthorQuestSchema = z.object({
   }),
 });
 
-router.post('/spots/:id/quests', authenticateToken, validateRequest(createAuthorQuestSchema), async (req: AuthRequest, res) => {
-  const spot = spotStore.spots.find(s => s.id === req.params.id || s.slug === req.params.id);
-  if (!spot) {
-    return res.status(404).json({
-      success: false,
-      error: { code: 'NOT_FOUND', message: 'Destination not found.' },
-    });
-  }
+router.post(
+  '/spots/:id/quests',
+  authenticateToken,
+  validateRequest(createAuthorQuestSchema),
+  async (req: AuthRequest, res) => {
+    const spot = spotStore.spots.find((s) => s.id === req.params.id || s.slug === req.params.id);
+    if (!spot) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Destination not found.' },
+      });
+    }
 
-  // Author ownership enforcement
-  if (!spot.created_by || spot.created_by !== req.user!.id) {
-    return res.status(403).json({
-      success: false,
-      error: {
-        code: 'FORBIDDEN_NOT_DESTINATION_AUTHOR',
-        message: 'Only the original scout who posted this destination can create quests for it.',
-      },
-    });
-  }
+    // Author ownership enforcement
+    if (!spot.created_by || spot.created_by !== req.user!.id) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'FORBIDDEN_NOT_DESTINATION_AUTHOR',
+          message: 'Only the original scout who posted this destination can create quests for it.',
+        },
+      });
+    }
 
-  const questStatus = env.QUEST_FUNDING_ENABLED ? 'draft' : (req.body.status ?? 'published');
-  let rawTasks = req.body.tasks || req.body.steps || [];
+    const questStatus = env.QUEST_FUNDING_ENABLED ? 'draft' : (req.body.status ?? 'published');
+    let rawTasks = req.body.tasks || req.body.steps || [];
 
-  // Backward compatibility: If no tasks/steps are provided by legacy clients, default to destination check-in task
-  if (rawTasks.length === 0) {
-    rawTasks = [{
-      step_order: 1,
-      title: 'Destination check-in',
-      description: 'Visit the destination and verify your location.',
-      checkpoint_type: 'location',
-      required: true,
+    // Backward compatibility: If no tasks/steps are provided by legacy clients, default to destination check-in task
+    if (rawTasks.length === 0) {
+      rawTasks = [
+        {
+          step_order: 1,
+          title: 'Destination check-in',
+          description: 'Visit the destination and verify your location.',
+          checkpoint_type: 'location',
+          required: true,
+          gps_lat: spot.gps_lat,
+          gps_lng: spot.gps_lng,
+          radius_meters: req.body.radius_meters || 200,
+        },
+      ];
+    }
+
+    // Validate tasks distance from destination spot (Plan 43 §4.6)
+    const maxDistanceKm = Number(process.env.QUEST_TASK_MAX_DISTANCE_KM || 5);
+    const distanceValidation = validateTasksWithinDistance(rawTasks, spot.gps_lat, spot.gps_lng, maxDistanceKm);
+    if (!distanceValidation.valid) {
+      return res.status(422).json({
+        success: false,
+        error: { code: 'TASK_TOO_FAR', message: distanceValidation.error },
+      });
+    }
+
+    // Normalize tasks into canonical v2 QuestTask[] (server generates keys and marker_code)
+    const normalizedTasks = normalizeTasks(rawTasks, spot, { allowClientMarkerCode: false });
+
+    if (questStatus === 'published') {
+      if (normalizedTasks.length === 0 || normalizedTasks.length > 10) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'Published quests must have between 1 and 10 tasks.' },
+        });
+      }
+      const hasRequired = normalizedTasks.some((t) => t.required);
+      if (!hasRequired) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'NO_REQUIRED_TASKS', message: 'Published quests must have at least one required task.' },
+        });
+      }
+    }
+
+    const sanitizedSlug = spot.slug.replace(/[^a-z0-9_-]/g, '').slice(0, 36);
+    const questId = `quest-${sanitizedSlug}-${Date.now().toString(36)}`;
+    const markerCode = `JDQ-${randomUUID().slice(0, 8).toUpperCase()}`;
+    const nowIso = new Date().toISOString();
+    const stepOrderMode = req.body.step_order_mode ?? 'sequential';
+
+    const newQuest: QuestRow = {
+      id: questId,
+      author_id: req.user!.id,
+      status: questStatus,
+      version: 1,
+      steps: normalizedTasks,
+      step_order_mode: stepOrderMode,
+      title: req.body.title,
+      description: req.body.description,
+      category: req.body.category,
+      location_name: spot.name,
       gps_lat: spot.gps_lat,
       gps_lng: spot.gps_lng,
-      radius_meters: req.body.radius_meters || 200,
-    }];
-  }
+      radius_meters: req.body.radius_meters,
+      base_reward_php: req.body.reward_points * 0.5,
+      difficulty_factor: 1.0,
+      geo_multiplier: 2.0,
+      reward_points: req.body.reward_points,
+      marker_code: markerCode,
+      marker_image_url:
+        spot.image_url ||
+        'https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?auto=format&fit=crop&w=1200&q=80',
+      is_active: questStatus === 'published',
+      is_test: Boolean(spot.is_test),
+      created_at: nowIso,
+      updated_at: nowIso,
+    };
 
-  // Validate tasks distance from destination spot (Plan 43 §4.6)
-  const maxDistanceKm = Number(process.env.QUEST_TASK_MAX_DISTANCE_KM || 5);
-  const distanceValidation = validateTasksWithinDistance(rawTasks, spot.gps_lat, spot.gps_lng, maxDistanceKm);
-  if (!distanceValidation.valid) {
-    return res.status(422).json({
-      success: false,
-      error: { code: 'TASK_TOO_FAR', message: distanceValidation.error },
-    });
-  }
+    const pool = getPool();
+    const bindingId = randomUUID();
 
-  // Normalize tasks into canonical v2 QuestTask[] (server generates keys and marker_code)
-  const normalizedTasks = normalizeTasks(rawTasks, spot, { allowClientMarkerCode: false });
-
-  if (questStatus === 'published') {
-    if (normalizedTasks.length === 0 || normalizedTasks.length > 10) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'VALIDATION_ERROR', message: 'Published quests must have between 1 and 10 tasks.' },
-      });
-    }
-    const hasRequired = normalizedTasks.some((t) => t.required);
-    if (!hasRequired) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'NO_REQUIRED_TASKS', message: 'Published quests must have at least one required task.' },
-      });
-    }
-  }
-
-  const sanitizedSlug = spot.slug.replace(/[^a-z0-9_-]/g, '').slice(0, 36);
-  const questId = `quest-${sanitizedSlug}-${Date.now().toString(36)}`;
-  const markerCode = `JDQ-${randomUUID().slice(0, 8).toUpperCase()}`;
-  const nowIso = new Date().toISOString();
-  const stepOrderMode = req.body.step_order_mode ?? 'sequential';
-
-  const newQuest: QuestRow = {
-    id: questId,
-    author_id: req.user!.id,
-    status: questStatus,
-    version: 1,
-    steps: normalizedTasks,
-    step_order_mode: stepOrderMode,
-    title: req.body.title,
-    description: req.body.description,
-    category: req.body.category,
-    location_name: spot.name,
-    gps_lat: spot.gps_lat,
-    gps_lng: spot.gps_lng,
-    radius_meters: req.body.radius_meters,
-    base_reward_php: req.body.reward_points * 0.5,
-    difficulty_factor: 1.0,
-    geo_multiplier: 2.0,
-    reward_points: req.body.reward_points,
-    marker_code: markerCode,
-    marker_image_url: spot.image_url || 'https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?auto=format&fit=crop&w=1200&q=80',
-    is_active: questStatus === 'published',
-    is_test: Boolean(spot.is_test),
-    created_at: nowIso,
-    updated_at: nowIso,
-  };
-
-  const pool = getPool();
-  const bindingId = randomUUID();
-
-  if (pool) {
-    try {
-      await pool.query(
-        `INSERT INTO quests (
+    if (pool) {
+      try {
+        await pool.query(
+          `INSERT INTO quests (
           id, title, description, category, location_name, gps_lat, gps_lng,
           radius_meters, reward_points, marker_code, marker_image_url, is_active, is_test,
           author_id, status, version, steps, step_order_mode,
@@ -521,78 +779,78 @@ router.post('/spots/:id/quests', authenticateToken, validateRequest(createAuthor
           description = EXCLUDED.description,
           step_order_mode = EXCLUDED.step_order_mode,
           updated_at = NOW()`,
-        [
-          newQuest.id,
-          newQuest.title,
-          newQuest.description,
-          newQuest.category,
-          newQuest.location_name,
-          newQuest.gps_lat,
-          newQuest.gps_lng,
-          newQuest.radius_meters,
-          newQuest.reward_points,
-          newQuest.marker_code,
-          newQuest.marker_image_url,
-          newQuest.is_active,
-          newQuest.is_test,
-          newQuest.author_id,
-          newQuest.status,
-          newQuest.version,
-          JSON.stringify(newQuest.steps),
-          newQuest.step_order_mode,
-          newQuest.created_at,
-          newQuest.updated_at,
-          env.QUEST_FUNDING_ENABLED,
-        ]
-      );
+          [
+            newQuest.id,
+            newQuest.title,
+            newQuest.description,
+            newQuest.category,
+            newQuest.location_name,
+            newQuest.gps_lat,
+            newQuest.gps_lng,
+            newQuest.radius_meters,
+            newQuest.reward_points,
+            newQuest.marker_code,
+            newQuest.marker_image_url,
+            newQuest.is_active,
+            newQuest.is_test,
+            newQuest.author_id,
+            newQuest.status,
+            newQuest.version,
+            JSON.stringify(newQuest.steps),
+            newQuest.step_order_mode,
+            newQuest.created_at,
+            newQuest.updated_at,
+            env.QUEST_FUNDING_ENABLED,
+          ],
+        );
 
-      await pool.query(
-        `INSERT INTO reviewed_quest_spot_bindings (
+        await pool.query(
+          `INSERT INTO reviewed_quest_spot_bindings (
           id, quest_id, spot_id, binding_version, status, reviewed_by, notes, is_test, created_at, updated_at
         ) VALUES ($1, $2, $3, 'v1', 'active', $4, $5, $6, NOW(), NOW())
         ON CONFLICT DO NOTHING`,
-        [
-          bindingId,
-          newQuest.id,
-          spot.id,
-          req.user!.id,
-          `Author quest created by ${req.user!.id} for spot ${spot.name}`,
-          newQuest.is_test,
-        ]
-      );
-
-      if (!spot.quest_id) {
-        await pool.query(
-          `UPDATE spots SET quest_id = $1, updated_at = NOW() WHERE id = $2`,
-          [newQuest.id, spot.id]
+          [
+            bindingId,
+            newQuest.id,
+            spot.id,
+            req.user!.id,
+            `Author quest created by ${req.user!.id} for spot ${spot.name}`,
+            newQuest.is_test,
+          ],
         );
+
+        if (!spot.quest_id) {
+          await pool.query(`UPDATE spots SET quest_id = $1, updated_at = NOW() WHERE id = $2`, [newQuest.id, spot.id]);
+        }
+      } catch (err: any) {
+        console.error('[spots:createQuest] Database persistence error:', err);
+        return res.status(500).json({
+          success: false,
+          error: { code: 'DATABASE_ERROR', message: 'Failed to record quest in database.' },
+        });
       }
-    } catch (err: any) {
-      console.error('[spots:createQuest] Database persistence error:', err);
-      return res.status(500).json({
-        success: false,
-        error: { code: 'DATABASE_ERROR', message: 'Failed to record quest in database.' },
-      });
     }
-  }
 
-  // Update in-memory state
-  db.upsertQuest(newQuest);
-  if (!spot.quest_id) {
-    spot.quest_id = newQuest.id;
-  }
+    // Update in-memory state
+    db.upsertQuest(newQuest);
+    if (!spot.quest_id) {
+      spot.quest_id = newQuest.id;
+    }
 
-  return res.status(201).json({
-    success: true,
-    data: newQuest,
-    message: 'Quest created successfully and bound to destination.',
-  });
-});
+    return res.status(201).json({
+      success: true,
+      data: newQuest,
+      message: 'Quest created successfully and bound to destination.',
+    });
+  },
+);
 
 router.get('/spots/:id/quests', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res) => {
   const allowTest = isAuthorizedQA(req);
   if (allowTest) res.set('X-Robots-Tag', 'noindex, nofollow');
-  const spot = publicSpot(req.params.id, allowTest) || spotStore.spots.find(s => s.id === req.params.id || s.slug === req.params.id);
+  const spot =
+    publicSpot(req.params.id, allowTest) ||
+    spotStore.spots.find((s) => s.id === req.params.id || s.slug === req.params.id);
   if (!spot) {
     return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
   }
@@ -610,7 +868,7 @@ router.get('/spots/:id/quests', optionalAuthenticateToken, checkQAAuthorization,
          LEFT JOIN reviewed_quest_spot_bindings b ON b.quest_id = q.id AND b.status = 'active'
          WHERE (b.spot_id = $1 OR q.id = $2) AND (q.is_test = $3 OR $3 = TRUE)
          ORDER BY q.created_at DESC`,
-        [spot.id, spot.quest_id || '', allowTest]
+        [spot.id, spot.quest_id || '', allowTest],
       );
       quests = rows.map((r: any) => ({
         id: r.id,
@@ -638,15 +896,19 @@ router.get('/spots/:id/quests', optionalAuthenticateToken, checkQAAuthorization,
       }));
     } catch (e: any) {
       console.warn('[spots:getQuests] PG query fallback:', e.message);
-      quests = db.quests.filter(q => (q.id === spot.quest_id || q.author_id === spot.created_by) && (allowTest || !q.is_test));
+      quests = db.quests.filter(
+        (q) => (q.id === spot.quest_id || q.author_id === spot.created_by) && (allowTest || !q.is_test),
+      );
     }
   } else {
-    quests = db.quests.filter(q => (q.id === spot.quest_id || q.author_id === spot.created_by) && (allowTest || !q.is_test));
+    quests = db.quests.filter(
+      (q) => (q.id === spot.quest_id || q.author_id === spot.created_by) && (allowTest || !q.is_test),
+    );
   }
 
   // Filter out drafts or archived for general travelers
   if (!isAuthor && !isAdminOrQA) {
-    quests = quests.filter(q => q.status === 'published' || (!q.status && q.is_active));
+    quests = quests.filter((q) => q.status === 'published' || (!q.status && q.is_active));
   }
 
   // Sanitize: strip marker_code unless authorized
@@ -674,7 +936,7 @@ router.get('/spots/:id/quests', optionalAuthenticateToken, checkQAAuthorization,
 
 // GET /spots/:id/comments (or /spots/:id/field-logs)
 router.get(['/spots/:id/comments', '/spots/:id/field-logs'], optionalAuthenticateToken, (req: AuthRequest, res) => {
-  const spot = spotStore.spots.find(s => s.id === req.params.id || s.slug === req.params.id);
+  const spot = spotStore.spots.find((s) => s.id === req.params.id || s.slug === req.params.id);
   if (!spot) {
     return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
   }
@@ -693,128 +955,155 @@ router.get(['/spots/:id/comments', '/spots/:id/field-logs'], optionalAuthenticat
 const createFieldLogSchema = z.object({
   body: z.object({
     content: z.string().min(1).max(1000),
-    tag: z.enum(['local_tip', 'gear_alert', 'tide_condition', 'food_find', 'heritage', 'eco_watch', 'general']).optional().default('general'),
+    tag: z
+      .enum(['local_tip', 'gear_alert', 'tide_condition', 'food_find', 'heritage', 'eco_watch', 'general'])
+      .optional()
+      .default('general'),
     author_name: z.string().max(80).optional(),
     author_avatar: z.string().max(2000).optional(),
     image_url: z.string().max(2000000).optional(),
-    location_pin: z.object({
-      name: z.string().min(1).max(100),
-      lat: z.number().optional(),
-      lng: z.number().optional(),
-    }).optional(),
+    location_pin: z
+      .object({
+        name: z.string().min(1).max(100),
+        lat: z.number().optional(),
+        lng: z.number().optional(),
+      })
+      .optional(),
     is_verified_visit: z.boolean().optional(),
   }),
 });
 
-router.post(['/spots/:id/comments', '/spots/:id/field-logs'], optionalAuthenticateToken, validateRequest(createFieldLogSchema), (req: AuthRequest, res) => {
-  const spot = spotStore.spots.find(s => s.id === req.params.id || s.slug === req.params.id);
-  if (!spot) {
-    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
-  }
-
-  const userId = req.user?.id || `guest-${randomUUID().slice(0, 8)}`;
-  let authorName = req.body.author_name;
-  let authorBadge = 'Explorer';
-  let authorAvatar = req.body.author_avatar;
-
-  if (req.user) {
-    const actor = db.findUserById(req.user.id);
-    authorName = actor?.display_name || authorName || 'Traveler';
-    authorAvatar = actor?.avatar_url || authorAvatar;
-    if (actor?.role === 'admin') {
-      authorBadge = 'Tourism Officer';
-    } else if (actor && actor.demo_points > 100) {
-      authorBadge = `Scout • Lvl ${Math.floor(actor.demo_points / 100) + 1}`;
-    } else {
-      authorBadge = 'Verified Scout';
+router.post(
+  ['/spots/:id/comments', '/spots/:id/field-logs'],
+  optionalAuthenticateToken,
+  validateRequest(createFieldLogSchema),
+  (req: AuthRequest, res) => {
+    const spot = spotStore.spots.find((s) => s.id === req.params.id || s.slug === req.params.id);
+    if (!spot) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
     }
-  } else {
-    authorName = authorName || 'Guest Explorer';
-    authorBadge = 'Traveler';
-  }
 
-  const log = fieldLogStore.create(
-    spot.id,
-    userId,
-    authorName,
-    authorBadge,
-    req.body.tag,
-    req.body.content,
-    Boolean(req.body.is_verified_visit),
-    req.body.image_url,
-    req.body.location_pin,
-    authorAvatar
-  );
+    const userId = req.user?.id || `guest-${randomUUID().slice(0, 8)}`;
+    let authorName = req.body.author_name;
+    let authorBadge = 'Explorer';
+    let authorAvatar = req.body.author_avatar;
 
-  return res.status(201).json({
-    success: true,
-    data: log,
-  });
-});
+    if (req.user) {
+      const actor = db.findUserById(req.user.id);
+      authorName = actor?.display_name || authorName || 'Traveler';
+      authorAvatar = actor?.avatar_url || authorAvatar;
+      if (actor?.role === 'admin') {
+        authorBadge = 'Tourism Officer';
+      } else if (actor && actor.demo_points > 100) {
+        authorBadge = `Scout • Lvl ${Math.floor(actor.demo_points / 100) + 1}`;
+      } else {
+        authorBadge = 'Verified Scout';
+      }
+    } else {
+      authorName = authorName || 'Guest Explorer';
+      authorBadge = 'Traveler';
+    }
+
+    const log = fieldLogStore.create(
+      spot.id,
+      userId,
+      authorName,
+      authorBadge,
+      req.body.tag,
+      req.body.content,
+      Boolean(req.body.is_verified_visit),
+      req.body.image_url,
+      req.body.location_pin,
+      authorAvatar,
+    );
+
+    return res.status(201).json({
+      success: true,
+      data: log,
+    });
+  },
+);
 
 // POST /spots/:id/comments/:logId/helpful
-router.post(['/spots/:id/comments/:logId/helpful', '/spots/:id/field-logs/:logId/helpful'], optionalAuthenticateToken, (req: AuthRequest, res) => {
-  const spot = spotStore.spots.find(s => s.id === req.params.id || s.slug === req.params.id);
-  if (!spot) {
-    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
-  }
+router.post(
+  ['/spots/:id/comments/:logId/helpful', '/spots/:id/field-logs/:logId/helpful'],
+  optionalAuthenticateToken,
+  (req: AuthRequest, res) => {
+    const spot = spotStore.spots.find((s) => s.id === req.params.id || s.slug === req.params.id);
+    if (!spot) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
+    }
 
-  const userId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip || 'anon';
-  const result = fieldLogStore.toggleHelpful(spot.id, req.params.logId, String(userId));
-  if (!result) {
-    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Field log not found.' } });
-  }
+    const userId =
+      req.user?.id ||
+      (req.headers['x-device-id'] as string) ||
+      (req.headers['x-forwarded-for'] as string) ||
+      req.ip ||
+      'anon';
+    const result = fieldLogStore.toggleHelpful(spot.id, req.params.logId, String(userId));
+    if (!result) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Field log not found.' } });
+    }
 
-  return res.json({
-    success: true,
-    data: result,
-  });
-});
+    return res.json({
+      success: true,
+      data: result,
+    });
+  },
+);
 
 // POST /spots/:id/reports
 const createReportSchema = z.object({
   body: z.object({
-    reason: z.enum(['inaccurate_location', 'site_closed_or_hazard', 'misleading_photo', 'spam_or_scam', 'environmental_concern', 'other']),
+    reason: z.enum([
+      'inaccurate_location',
+      'site_closed_or_hazard',
+      'misleading_photo',
+      'spam_or_scam',
+      'environmental_concern',
+      'other',
+    ]),
     details: z.string().max(500).optional(),
     reporter_name: z.string().max(80).optional(),
   }),
 });
 
-router.post('/spots/:id/reports', optionalAuthenticateToken, validateRequest(createReportSchema), (req: AuthRequest, res) => {
-  const spot = spotStore.spots.find(s => s.id === req.params.id || s.slug === req.params.id);
-  if (!spot) {
-    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
-  }
+router.post(
+  '/spots/:id/reports',
+  optionalAuthenticateToken,
+  validateRequest(createReportSchema),
+  (req: AuthRequest, res) => {
+    const spot = spotStore.spots.find((s) => s.id === req.params.id || s.slug === req.params.id);
+    if (!spot) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
+    }
 
-  const userId = req.user?.id;
-  const reporterActor = userId ? db.findUserById(userId) : undefined;
-  const reporterName = reporterActor?.display_name || req.body.reporter_name || 'Anonymous Scout';
+    const userId = req.user?.id;
+    const reporterActor = userId ? db.findUserById(userId) : undefined;
+    const reporterName = reporterActor?.display_name || req.body.reporter_name || 'Anonymous Scout';
 
-  const report = fieldLogStore.createReport(
-    spot.id,
-    req.body.reason,
-    userId,
-    reporterName,
-    req.body.details
-  );
+    const report = fieldLogStore.createReport(spot.id, req.body.reason, userId, reporterName, req.body.details);
 
-  return res.status(201).json({
-    success: true,
-    data: {
-      report_id: report.id,
-      spot_id: spot.id,
-      status: report.status,
-      message: 'Report received. LGU Tourism moderators will review this spot within 24 hours.',
-    },
-  });
-});
+    return res.status(201).json({
+      success: true,
+      data: {
+        report_id: report.id,
+        spot_id: spot.id,
+        status: report.status,
+        message: 'Report received. LGU Tourism moderators will review this spot within 24 hours.',
+      },
+    });
+  },
+);
 
 // GET /admin/spot-reports
 router.get('/admin/spot-reports', authenticateToken, requireAreaAdmin('destinations'), (req: AuthRequest, res) => {
-  const scopedSpotIds=new Set(spotStore.spots.filter(spot=>spotInAdminScope(req.adminScope!,spot)).map(spot=>spot.id));
+  const scopedSpotIds = new Set(
+    spotStore.spots.filter((spot) => spotInAdminScope(req.adminScope!, spot)).map((spot) => spot.id),
+  );
   return res.json({
     success: true,
-    data: fieldLogStore.listReports().filter(report=>scopedSpotIds.has(report.spot_id)),
+    data: fieldLogStore.listReports().filter((report) => scopedSpotIds.has(report.spot_id)),
   });
 });
 

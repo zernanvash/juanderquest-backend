@@ -31,8 +31,8 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
   ]);
 
   const validMp4Buffer = Buffer.from([
-    0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x02, 0x00, 0x69, 0x73,
-    0x6f, 0x6d, 0x69, 0x73, 0x6f, 0x32,
+    0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x02, 0x00, 0x69, 0x73, 0x6f,
+    0x6d, 0x69, 0x73, 0x6f, 0x32,
   ]);
 
   const validWebmBuffer = Buffer.from([
@@ -46,8 +46,6 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
   const oversizedVideoBuffer = Buffer.alloc(30 * 1024 * 1024 + 100);
   validMp4Buffer.copy(oversizedVideoBuffer, 0, 0, validMp4Buffer.length);
 
-
-
   beforeAll(async () => {
     const res1 = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'user-1' });
     user1Token = res1.body.data.token;
@@ -57,9 +55,7 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
   });
 
   it('requires authentication for POST /api/v1/spot-photos', async () => {
-    const res = await request(app)
-      .post('/api/v1/spot-photos')
-      .attach('photo', validJpegBuffer, 'test.jpg');
+    const res = await request(app).post('/api/v1/spot-photos').attach('photo', validJpegBuffer, 'test.jpg');
 
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('UNAUTHORIZED');
@@ -143,7 +139,6 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
     expect(res.body.error.code).toBe('INVALID_IMAGE_CONTENT');
   });
 
-
   it('rejects oversized image files exceeding 8 MB', async () => {
     const res = await request(app)
       .post('/api/v1/spot-photos')
@@ -164,7 +159,6 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
     expect(res.body.error.code).toBe('FILE_TOO_LARGE');
   }, 15000);
 
-
   it('prevents path traversal during local storage operations', async () => {
     const provider = new LocalStorageProvider();
     await expect(provider.deletePhoto('../../etc/passwd')).rejects.toThrow('PATH_TRAVERSAL_ATTEMPT');
@@ -179,20 +173,17 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
     const assetId = uploadRes.body.data.asset_id;
 
     // User 2 attempts to attach User 1's asset
-    const spotRes = await request(app)
-      .post('/api/v1/spots')
-      .set('Authorization', `Bearer ${user2Token}`)
-      .send({
-        name: 'Tamuntay Beach Viewpoint',
-        description: 'A quiet coastal spot created for testing asset ownership controls.',
-        category: 'nature_outdoors',
-        subcategory: 'viewpoint',
-        municipality: 'Infanta',
-        address: 'Tamuntay Coast',
-        gps_lat: 15.82,
-        gps_lng: 119.91,
-        asset_id: assetId,
-      });
+    const spotRes = await request(app).post('/api/v1/spots').set('Authorization', `Bearer ${user2Token}`).send({
+      name: 'Tamuntay Beach Viewpoint',
+      description: 'A quiet coastal spot created for testing asset ownership controls.',
+      category: 'nature_outdoors',
+      subcategory: 'viewpoint',
+      municipality: 'Infanta',
+      address: 'Tamuntay Coast',
+      gps_lat: 15.82,
+      gps_lng: 119.91,
+      asset_id: assetId,
+    });
 
     expect(spotRes.status).toBe(403);
     expect(spotRes.body.error.code).toBe('UNAUTHORIZED_ATTACHMENT');
@@ -209,20 +200,17 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
       assetIds.push(up.body.data.asset_id);
     }
 
-    const res = await request(app)
-      .post('/api/v1/spots')
-      .set('Authorization', `Bearer ${user1Token}`)
-      .send({
-        name: 'Agno Umbrella Rocks',
-        description: 'Unique mushroom-shaped rock formations on the western Pangasinan coast.',
-        category: 'nature_outdoors',
-        subcategory: 'viewpoint',
-        municipality: 'Agno',
-        address: 'Sabangan',
-        gps_lat: 16.15,
-        gps_lng: 119.79,
-        asset_ids: assetIds,
-      });
+    const res = await request(app).post('/api/v1/spots').set('Authorization', `Bearer ${user1Token}`).send({
+      name: 'Agno Umbrella Rocks',
+      description: 'Unique mushroom-shaped rock formations on the western Pangasinan coast.',
+      category: 'nature_outdoors',
+      subcategory: 'viewpoint',
+      municipality: 'Agno',
+      address: 'Sabangan',
+      gps_lat: 16.15,
+      gps_lng: 119.79,
+      asset_ids: assetIds,
+    });
 
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
@@ -235,20 +223,17 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
       .attach('photo', validJpegBuffer, 'attached_test.jpg');
     const assetId = uploadRes.body.data.asset_id;
 
-    const createRes = await request(app)
-      .post('/api/v1/spots')
-      .set('Authorization', `Bearer ${user1Token}`)
-      .send({
-        name: 'Sual Sunset Deck',
-        description: 'Overlooking Lingayen Gulf and local fishing ports along the highway.',
-        category: 'nature_outdoors',
-        subcategory: 'viewpoint',
-        municipality: 'Sual',
-        address: 'Poblacion Sual',
-        gps_lat: 16.06,
-        gps_lng: 120.09,
-        asset_id: assetId,
-      });
+    const createRes = await request(app).post('/api/v1/spots').set('Authorization', `Bearer ${user1Token}`).send({
+      name: 'Sual Sunset Deck',
+      description: 'Overlooking Lingayen Gulf and local fishing ports along the highway.',
+      category: 'nature_outdoors',
+      subcategory: 'viewpoint',
+      municipality: 'Sual',
+      address: 'Poblacion Sual',
+      gps_lat: 16.06,
+      gps_lng: 120.09,
+      asset_id: assetId,
+    });
 
     expect(createRes.status).toBe(201);
     expect(createRes.body.data.image_url).toBe(uploadRes.body.data.url);
@@ -296,7 +281,7 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
         error: expect.objectContaining({ code: 'RATE_LIMITED' }),
-      })
+      }),
     );
   });
 

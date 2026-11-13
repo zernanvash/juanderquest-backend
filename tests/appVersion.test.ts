@@ -27,7 +27,9 @@ describe('App Version Endpoint (OTA Updates)', () => {
     expect(res.body.data.commitHash).toBeDefined();
     expect(res.body.data.fileName).toMatch(/^juanderquest-alpha-.*\.apk$/);
     expect(res.body.data.downloadUrl).toContain('.apk');
-    expect(res.body.data.downloadUrl).toBe('https://github.com/zernanvash/juanderquest-mobile/releases/latest/download/juanderquest-latest.apk');
+    expect(res.body.data.downloadUrl).toBe(
+      'https://github.com/zernanvash/juanderquest-mobile/releases/latest/download/juanderquest-latest.apk',
+    );
     expect(res.body.data.minimumBaseVersionCode).toBe(1);
     expect(res.body.data.baseReleaseRequired).toBe(false);
     expect(res.body.data.updatePolicy).toBe('optional');
@@ -74,7 +76,6 @@ describe('App Version Endpoint (OTA Updates)', () => {
     expect(res.body.data.content.signature).toBe('mock-sig-abc');
   });
 
-
   it('GET /api/v1/app/latest redirects (302) to downloadUrl', async () => {
     const res = await request(app).get('/api/v1/app/latest');
     expect(res.status).toBe(302);
@@ -91,4 +92,3 @@ describe('App Version Endpoint (OTA Updates)', () => {
     }
   }, 30000);
 });
-

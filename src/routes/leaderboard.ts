@@ -33,11 +33,23 @@ leaderboardRouter.get('/leaderboard', optionalAuthenticateToken, async (req: Aut
     limit,
     currentUserId,
   });
-  const userIds=leaderboard.top_scouts.map(item=>item.user_id);
-  if(leaderboard.my_rank)userIds.push(leaderboard.my_rank.user_id);
-  const cosmeticMap=await safeCosmeticsFor(userIds);
-  leaderboard.top_scouts=leaderboard.top_scouts.map(item=>({...item,cosmetics:cosmeticMap.get(item.user_id)??{banner:null,frame:null,title:null,nameColor:null}}));
-  if(leaderboard.my_rank)leaderboard.my_rank={...leaderboard.my_rank,cosmetics:cosmeticMap.get(leaderboard.my_rank.user_id)??{banner:null,frame:null,title:null,nameColor:null}};
+  const userIds = leaderboard.top_scouts.map((item) => item.user_id);
+  if (leaderboard.my_rank) userIds.push(leaderboard.my_rank.user_id);
+  const cosmeticMap = await safeCosmeticsFor(userIds);
+  leaderboard.top_scouts = leaderboard.top_scouts.map((item) => ({
+    ...item,
+    cosmetics: cosmeticMap.get(item.user_id) ?? { banner: null, frame: null, title: null, nameColor: null },
+  }));
+  if (leaderboard.my_rank)
+    leaderboard.my_rank = {
+      ...leaderboard.my_rank,
+      cosmetics: cosmeticMap.get(leaderboard.my_rank.user_id) ?? {
+        banner: null,
+        frame: null,
+        title: null,
+        nameColor: null,
+      },
+    };
 
   return res.status(200).json({
     success: true,

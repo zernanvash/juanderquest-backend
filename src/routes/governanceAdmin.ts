@@ -15,7 +15,15 @@ const screenSchema = z.object({
 });
 
 const transitionSchema = z.object({
-  action: z.enum(['close_voting', 'schedule', 'activate', 'open_feedback', 'close_feedback', 'finalize_payout', 'mark_disputed']),
+  action: z.enum([
+    'close_voting',
+    'schedule',
+    'activate',
+    'open_feedback',
+    'close_feedback',
+    'finalize_payout',
+    'mark_disputed',
+  ]),
   force: z.boolean().optional(),
 });
 
@@ -36,10 +44,13 @@ const controlsSchema = z.object({
 
 function fail(res: Response, error: unknown) {
   const code = error instanceof Error ? error.message : 'INTERNAL_ERROR';
-  const status = code.includes('NOT_FOUND') ? 404
-    : ['INVALID_TRANSITION', 'INSUFFICIENT_JDQ'].includes(code) ? 409
-    : ['PAYOUTS_PAUSED', 'FINANCIAL_ACTIVITY_PAUSED'].includes(code) ? 403
-    : 422;
+  const status = code.includes('NOT_FOUND')
+    ? 404
+    : ['INVALID_TRANSITION', 'INSUFFICIENT_JDQ'].includes(code)
+      ? 409
+      : ['PAYOUTS_PAUSED', 'FINANCIAL_ACTIVITY_PAUSED'].includes(code)
+        ? 403
+        : 422;
   res.status(status).json({ success: false, error: { code, message: code.replaceAll('_', ' ').toLowerCase() } });
 }
 
@@ -63,11 +74,27 @@ router.get('/admin/governance/proposals/:id', (req, res) => {
 router.post('/admin/governance/proposals/:id/screen', async (req: AuthRequest, res: Response) => {
   const parsed = screenSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(422).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Complete checklist, reason, and evidence reference are required.', details: parsed.error.errors } });
+    res
+      .status(422)
+      .json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Complete checklist, reason, and evidence reference are required.',
+          details: parsed.error.errors,
+        },
+      });
     return;
   }
   try {
-    const data = await governanceStore.screenProposal(req.params.id, req.user!.id, parsed.data.decision, parsed.data.reason, parsed.data.evidence_reference, parsed.data.checklist_complete);
+    const data = await governanceStore.screenProposal(
+      req.params.id,
+      req.user!.id,
+      parsed.data.decision,
+      parsed.data.reason,
+      parsed.data.evidence_reference,
+      parsed.data.checklist_complete,
+    );
     res.json({ success: true, data });
   } catch (error) {
     fail(res, error);
@@ -77,7 +104,9 @@ router.post('/admin/governance/proposals/:id/screen', async (req: AuthRequest, r
 router.post('/admin/governance/proposals/:id/transition', async (req: AuthRequest, res: Response) => {
   const parsed = transitionSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(422).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid governance transition.' } });
+    res
+      .status(422)
+      .json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid governance transition.' } });
     return;
   }
   try {
@@ -87,13 +116,14 @@ router.post('/admin/governance/proposals/:id/transition', async (req: AuthReques
       open_feedback: 'feedback',
       mark_disputed: 'disputed',
     } as const;
-    const data = parsed.data.action === 'close_voting'
-      ? await governanceStore.closeVoting(req.params.id, req.user!.id, parsed.data.force)
-      : parsed.data.action === 'close_feedback'
-      ? await governanceStore.closeFeedback(req.params.id, req.user!.id, parsed.data.force)
-      : parsed.data.action === 'finalize_payout'
-      ? await governanceStore.finalizePayout(req.params.id, req.user!.id)
-      : await governanceStore.transitionProposal(req.params.id, req.user!.id, targets[parsed.data.action]);
+    const data =
+      parsed.data.action === 'close_voting'
+        ? await governanceStore.closeVoting(req.params.id, req.user!.id, parsed.data.force)
+        : parsed.data.action === 'close_feedback'
+          ? await governanceStore.closeFeedback(req.params.id, req.user!.id, parsed.data.force)
+          : parsed.data.action === 'finalize_payout'
+            ? await governanceStore.finalizePayout(req.params.id, req.user!.id)
+            : await governanceStore.transitionProposal(req.params.id, req.user!.id, targets[parsed.data.action]);
     res.json({ success: true, data });
   } catch (error) {
     fail(res, error);
@@ -103,11 +133,27 @@ router.post('/admin/governance/proposals/:id/transition', async (req: AuthReques
 router.post('/admin/governance/proposals/:id/resolve', async (req: AuthRequest, res: Response) => {
   const parsed = resolveSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(422).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Release, bond, reason, and evidence are required.', details: parsed.error.errors } });
+    res
+      .status(422)
+      .json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Release, bond, reason, and evidence are required.',
+          details: parsed.error.errors,
+        },
+      });
     return;
   }
   try {
-    const data = await governanceStore.resolveDispute(req.params.id, req.user!.id, parsed.data.release_percent, parsed.data.bond_action, parsed.data.reason, parsed.data.evidence_reference);
+    const data = await governanceStore.resolveDispute(
+      req.params.id,
+      req.user!.id,
+      parsed.data.release_percent,
+      parsed.data.bond_action,
+      parsed.data.reason,
+      parsed.data.evidence_reference,
+    );
     res.json({ success: true, data });
   } catch (error) {
     fail(res, error);
@@ -133,7 +179,16 @@ router.get('/admin/governance/controls', (_req, res) => {
 router.put('/admin/governance/controls', async (req: AuthRequest, res: Response) => {
   const parsed = controlsSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(422).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'A reason and valid control values are required.', details: parsed.error.errors } });
+    res
+      .status(422)
+      .json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'A reason and valid control values are required.',
+          details: parsed.error.errors,
+        },
+      });
     return;
   }
   try {

@@ -1,7 +1,4 @@
-import {
-  AlphaSessionScopeBatcher,
-  AlphaBatchQueryFn,
-} from '../src/auth/alphaSessionScopeBatcher.js';
+import { AlphaSessionScopeBatcher, AlphaBatchQueryFn } from '../src/auth/alphaSessionScopeBatcher.js';
 import type { AlphaSessionScope } from '../src/repositories/users.js';
 
 describe('AlphaSessionScopeBatcher (Iteration 20b)', () => {
@@ -58,7 +55,11 @@ describe('AlphaSessionScopeBatcher (Iteration 20b)', () => {
       });
     });
 
-    const batcher = new AlphaSessionScopeBatcher(mockQuery, { delayMs: 2, maxBatchSize: 100, maxUnresolvedCallers: 500 });
+    const batcher = new AlphaSessionScopeBatcher(mockQuery, {
+      delayMs: 2,
+      maxBatchSize: 100,
+      maxUnresolvedCallers: 500,
+    });
 
     const promises = Array.from({ length: 101 }, (_, i) => batcher.lookup(`user-${i}`));
 
@@ -206,9 +207,12 @@ describe('AlphaSessionScopeBatcher (Iteration 20b)', () => {
 
   it('rejects 501st unresolved caller with static error and prevents leaking ID or hanging caller', async () => {
     let resolveBatch: (val: Map<string, AlphaSessionScope>) => void = () => {};
-    const mockQuery = jest.fn<Promise<Map<string, AlphaSessionScope>>, [string[]]>((_ids: string[]) => new Promise<Map<string, AlphaSessionScope>>((resolve) => {
-      resolveBatch = resolve;
-    }));
+    const mockQuery = jest.fn<Promise<Map<string, AlphaSessionScope>>, [string[]]>(
+      (_ids: string[]) =>
+        new Promise<Map<string, AlphaSessionScope>>((resolve) => {
+          resolveBatch = resolve;
+        }),
+    );
 
     const batcher = new AlphaSessionScopeBatcher(mockQuery, {
       delayMs: 2,
@@ -269,9 +273,12 @@ describe('AlphaSessionScopeBatcher (Iteration 20b)', () => {
 
   it('cancels timer and rejects pending and in-flight callers upon close()', async () => {
     let resolveQuery: (val: Map<string, AlphaSessionScope>) => void = () => {};
-    const mockQuery = jest.fn<Promise<Map<string, AlphaSessionScope>>, [string[]]>((_ids: string[]) => new Promise<Map<string, AlphaSessionScope>>((resolve) => {
-      resolveQuery = resolve;
-    }));
+    const mockQuery = jest.fn<Promise<Map<string, AlphaSessionScope>>, [string[]]>(
+      (_ids: string[]) =>
+        new Promise<Map<string, AlphaSessionScope>>((resolve) => {
+          resolveQuery = resolve;
+        }),
+    );
 
     const batcher = new AlphaSessionScopeBatcher(mockQuery, { delayMs: 2, maxBatchSize: 2 });
 
@@ -297,14 +304,19 @@ describe('AlphaSessionScopeBatcher (Iteration 20b)', () => {
   });
 
   it('recovers after a query function throws synchronously instead of leaving the queue stuck', async () => {
-    const query = jest.fn()
-      .mockImplementationOnce(() => { throw new Error('synchronous database failure'); })
+    const query = jest
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error('synchronous database failure');
+      })
       .mockResolvedValueOnce(new Map([['second', { id: 'second', seed_id: 'wallet:second', is_test: false }]]));
     const batcher = new AlphaSessionScopeBatcher(query, { maxBatchSize: 1 });
 
     await expect(batcher.lookup('first')).rejects.toThrow('synchronous database failure');
     await expect(batcher.lookup('second')).resolves.toEqual({
-      id: 'second', seed_id: 'wallet:second', is_test: false,
+      id: 'second',
+      seed_id: 'wallet:second',
+      is_test: false,
     });
     expect(query).toHaveBeenCalledTimes(2);
     batcher.close();
@@ -313,15 +325,23 @@ describe('AlphaSessionScopeBatcher (Iteration 20b)', () => {
   it('rejects invalid and over-cap constructor options with a static error', () => {
     const query = jest.fn(async () => new Map<string, AlphaSessionScope>());
     const invalidCases = [
-      { maxBatchSize: 0 }, { maxBatchSize: -1 }, { maxBatchSize: 101 },
-      { maxBatchSize: 1.5 }, { maxBatchSize: Number.NaN }, { maxBatchSize: Infinity },
-      { maxUnresolvedCallers: 0 }, { maxUnresolvedCallers: 501 },
-      { maxUnresolvedCallers: 2.5 }, { maxUnresolvedCallers: Infinity },
-      { delayMs: -1 }, { delayMs: 3 }, { delayMs: 0.5 }, { delayMs: Number.NaN },
+      { maxBatchSize: 0 },
+      { maxBatchSize: -1 },
+      { maxBatchSize: 101 },
+      { maxBatchSize: 1.5 },
+      { maxBatchSize: Number.NaN },
+      { maxBatchSize: Infinity },
+      { maxUnresolvedCallers: 0 },
+      { maxUnresolvedCallers: 501 },
+      { maxUnresolvedCallers: 2.5 },
+      { maxUnresolvedCallers: Infinity },
+      { delayMs: -1 },
+      { delayMs: 3 },
+      { delayMs: 0.5 },
+      { delayMs: Number.NaN },
     ];
     for (const options of invalidCases) {
-      expect(() => new AlphaSessionScopeBatcher(query, options))
-        .toThrow('Invalid batcher options.');
+      expect(() => new AlphaSessionScopeBatcher(query, options)).toThrow('Invalid batcher options.');
     }
     expect(query).not.toHaveBeenCalled();
   });

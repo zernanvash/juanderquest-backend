@@ -55,7 +55,9 @@ describe('home town chosen by the traveler (migration 081)', () => {
 
     const me = await request(app).get('/api/v1/auth/me').set(auth());
     expect(me.body.data.home_municipality).toBe('Dagupan City');
-    const { rows } = await testDb.pool.query('SELECT home_municipality FROM users WHERE email = $1', ['home.town@example.com']);
+    const { rows } = await testDb.pool.query('SELECT home_municipality FROM users WHERE email = $1', [
+      'home.town@example.com',
+    ]);
     expect(rows[0].home_municipality).toBe('Dagupan City');
   });
 

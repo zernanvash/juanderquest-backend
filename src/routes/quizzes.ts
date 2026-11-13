@@ -24,20 +24,22 @@ const startAttemptSchema = z.object({
 });
 
 const submitAttemptSchema = z.object({
-  answers: z.array(
-    z.object({
-      question_id: z.string().min(1),
-      selected_option_id: z.string().optional(),
-      selected_order: z.array(z.string()).optional(),
-      selected_location: z
-        .object({
-          lat: z.number().min(-90).max(90),
-          lng: z.number().min(-180).max(180),
-        })
-        .optional(),
-      skipped: z.boolean().optional(),
-    })
-  ).length(5),
+  answers: z
+    .array(
+      z.object({
+        question_id: z.string().min(1),
+        selected_option_id: z.string().optional(),
+        selected_order: z.array(z.string()).optional(),
+        selected_location: z
+          .object({
+            lat: z.number().min(-90).max(90),
+            lng: z.number().min(-180).max(180),
+          })
+          .optional(),
+        skipped: z.boolean().optional(),
+      }),
+    )
+    .length(5),
   style_score: z.number().int().min(0).max(100000).optional(),
   streak_max: z.number().int().min(0).max(5).optional(),
   idempotency_key: z.string().max(100).optional(),
@@ -59,11 +61,7 @@ router.post('/quizzes/nearby', optionalAuthenticateToken, async (req: AuthReques
   }
 
   try {
-    const invitations = await service.getNearbyQuizzes(
-      parsed.data.lat,
-      parsed.data.lng,
-      req.user?.id
-    );
+    const invitations = await service.getNearbyQuizzes(parsed.data.lat, parsed.data.lng, req.user?.id);
 
     res.setHeader('Cache-Control', 'private, no-store');
     return res.status(200).json({
@@ -200,7 +198,11 @@ router.post('/quizzes/:id/attempts/:attemptId/lifeline', authenticateToken, asyn
     if (msg.startsWith('LIFELINE_ALREADY_USED')) {
       return res.status(400).json({ success: false, error: { code: 'LIFELINE_ALREADY_USED', message: msg } });
     }
-    if (msg.startsWith('MISSING_QUESTION_ID') || msg.startsWith('INVALID_QUESTION_ID') || msg.startsWith('LIFELINE_NOT_AVAILABLE')) {
+    if (
+      msg.startsWith('MISSING_QUESTION_ID') ||
+      msg.startsWith('INVALID_QUESTION_ID') ||
+      msg.startsWith('LIFELINE_NOT_AVAILABLE')
+    ) {
       return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: msg } });
     }
     if (msg.startsWith('ATTEMPT_NOT_FOUND')) {
@@ -286,7 +288,12 @@ router.put('/quiz-attempts/:id/submission', authenticateToken, async (req: AuthR
     if (msg.startsWith('UNAUTHORIZED_ATTEMPT')) {
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: msg } });
     }
-    if (msg.startsWith('MISSING_ANSWERS') || msg.startsWith('DUPLICATE_ANSWERS') || msg.startsWith('INVALID_OPTION_ID') || msg.startsWith('INVALID_SKIP')) {
+    if (
+      msg.startsWith('MISSING_ANSWERS') ||
+      msg.startsWith('DUPLICATE_ANSWERS') ||
+      msg.startsWith('INVALID_OPTION_ID') ||
+      msg.startsWith('INVALID_SKIP')
+    ) {
       return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: msg } });
     }
 

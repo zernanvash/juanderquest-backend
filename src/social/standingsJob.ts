@@ -5,18 +5,8 @@ import { env } from '../config/env.js';
 import type { Queryable } from './activity.js';
 import { recordActivity } from './activity.js';
 import { notify } from './notify.js';
-import {
-  computeWeeklyScores,
-  computeHomeTowns,
-  rankRows,
-  type UserRankInput,
-} from './standings.js';
-import {
-  weekStartUtc,
-  nextWeekStartUtc,
-  weekStartDate,
-  weekId,
-} from './time.js';
+import { computeWeeklyScores, computeHomeTowns, rankRows, type UserRankInput } from './standings.js';
+import { weekStartUtc, nextWeekStartUtc, weekStartDate, weekId } from './time.js';
 
 export const PLAZA_STANDINGS_LOCK_KEY = 410041;
 
@@ -48,10 +38,7 @@ export interface StandingsTickResult {
  * Runs a single tick of the standings job for both production and test scopes.
  * May be invoked directly by tests with a custom timestamp and transaction/pool.
  */
-export async function runStandingsTick(
-  poolOrClient: Queryable,
-  now = new Date(),
-): Promise<StandingsTickResult> {
+export async function runStandingsTick(poolOrClient: Queryable, now = new Date()): Promise<StandingsTickResult> {
   const result: StandingsTickResult = {
     scoresUpdated: 0,
     overtakesNotified: 0,
@@ -71,7 +58,10 @@ export async function runStandingsTick(
 
     // Fetch user details for sorting and privacy
     const userIds = rawScores.map((s) => s.user_id);
-    const userMap = new Map<string, { display_name: string; is_public: boolean; share_activity: boolean; created_at: Date }>();
+    const userMap = new Map<
+      string,
+      { display_name: string; is_public: boolean; share_activity: boolean; created_at: Date }
+    >();
     if (userIds.length > 0) {
       const placeholders = userIds.map((_, i) => `$${i + 1}`).join(', ');
       const uRes = await poolOrClient.query(
@@ -231,10 +221,7 @@ export async function runStandingsTick(
       const prevWDate = weekStartDate(prevWeekDateObj);
       const jobKey = `finalize:${prevWId}`;
 
-      const jobRunRes = await poolOrClient.query(
-        'SELECT 1 FROM plaza_job_runs WHERE job_key = $1',
-        [jobKey],
-      );
+      const jobRunRes = await poolOrClient.query('SELECT 1 FROM plaza_job_runs WHERE job_key = $1', [jobKey]);
 
       if (jobRunRes.rows.length === 0) {
         const lastWeekWinners = await poolOrClient.query(
@@ -314,10 +301,7 @@ async function tick(): Promise<void> {
     try {
       lockClient = await pool.connect();
       try {
-        const lockRes = await lockClient.query(
-          'SELECT pg_try_advisory_lock($1) AS locked',
-          [PLAZA_STANDINGS_LOCK_KEY],
-        );
+        const lockRes = await lockClient.query('SELECT pg_try_advisory_lock($1) AS locked', [PLAZA_STANDINGS_LOCK_KEY]);
         lockAcquired = Boolean(lockRes.rows[0]?.locked);
       } catch {
         // Limited environments like pg-mem ignore advisory locks

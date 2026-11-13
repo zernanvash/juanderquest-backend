@@ -9,15 +9,9 @@ describe('Destination-Author Quests System', () => {
   const authorUserId = '11111111-1111-1111-1111-111111111111'; // Juan Dela Cruz
   const otherUserId = '22222222-2222-2222-2222-222222222222'; // Maria Santos
 
-  const authorToken = jwt.sign(
-    { id: authorUserId, seed_id: 'demo-user-1', role: 'user' },
-    env.JWT_SECRET
-  );
+  const authorToken = jwt.sign({ id: authorUserId, seed_id: 'demo-user-1', role: 'user' }, env.JWT_SECRET);
 
-  const otherUserToken = jwt.sign(
-    { id: otherUserId, seed_id: 'demo-admin-1', role: 'user' },
-    env.JWT_SECRET
-  );
+  const otherUserToken = jwt.sign({ id: otherUserId, seed_id: 'demo-admin-1', role: 'user' }, env.JWT_SECRET);
 
   const testSpotId = `spot-author-test-${Date.now()}`;
   const testSpotSlug = `author-test-spot-${Date.now()}`;
@@ -59,13 +53,11 @@ describe('Destination-Author Quests System', () => {
   });
 
   it('rejects unauthenticated requests to create a quest for a destination', async () => {
-    const res = await request(app)
-      .post(`/api/v1/spots/${testSpotId}/quests`)
-      .send({
-        title: 'Unauthenticated Trail Quest',
-        description: 'Should fail because request has no auth token.',
-        category: 'eco',
-      });
+    const res = await request(app).post(`/api/v1/spots/${testSpotId}/quests`).send({
+      title: 'Unauthenticated Trail Quest',
+      description: 'Should fail because request has no auth token.',
+      category: 'eco',
+    });
 
     expect(res.status).toBe(401);
     expect(res.body.success).toBe(false);
@@ -121,9 +113,7 @@ describe('Destination-Author Quests System', () => {
     expect(Array.isArray(res.body.data)).toBe(true);
     expect(res.body.data.length).toBeGreaterThanOrEqual(1);
 
-    const created = res.body.data.find(
-      (q: any) => q.title === 'Sunset Beacon Exploration Trail'
-    );
+    const created = res.body.data.find((q: any) => q.title === 'Sunset Beacon Exploration Trail');
     expect(created).toBeDefined();
     expect(created.marker_code).toBeUndefined(); // list must not leak markers
     expect(created.reward_points).toBe(75);

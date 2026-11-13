@@ -1,10 +1,6 @@
 import type { Response } from 'express';
 import { env, validatePresentationModeConfig } from '../src/config/env.js';
-import {
-  sessionCookieName,
-  setSessionCookie,
-  readSessionCookie,
-} from '../src/auth/sessionCookie.js';
+import { sessionCookieName, setSessionCookie, readSessionCookie } from '../src/auth/sessionCookie.js';
 import { validateAndParseCorsOrigin } from '../src/config/cors.js';
 
 describe('JuanChoice presentation security & profile contracts', () => {
@@ -104,12 +100,13 @@ describe('JuanChoice presentation security & profile contracts', () => {
       const allowed = validateAndParseCorsOrigin('https://presentation.juanderquest.app', 'production', true);
       expect(allowed.origins).toEqual(['https://presentation.juanderquest.app']);
 
-      expect(() => validateAndParseCorsOrigin('https://juanderquest.app', 'production', true))
-        .toThrow(/Presentation mode only permits/);
-      expect(() => validateAndParseCorsOrigin('https://evil.com', 'production', true))
-        .toThrow(/Presentation mode only permits/);
-      expect(() => validateAndParseCorsOrigin('*', 'production', true))
-        .toThrow(/Production cannot use wildcard/);
+      expect(() => validateAndParseCorsOrigin('https://juanderquest.app', 'production', true)).toThrow(
+        /Presentation mode only permits/,
+      );
+      expect(() => validateAndParseCorsOrigin('https://evil.com', 'production', true)).toThrow(
+        /Presentation mode only permits/,
+      );
+      expect(() => validateAndParseCorsOrigin('*', 'production', true)).toThrow(/Production cannot use wildcard/);
     });
 
     it('accepts exact HTTP loopback origin in local presentation mode', () => {
@@ -157,7 +154,7 @@ describe('JuanChoice presentation security & profile contracts', () => {
         CORS_ORIGIN: 'http://127.0.0.1:3200',
       };
       expect(() => validatePresentationModeConfig(mismatchedConfig as any)).toThrow(
-        /requires dedicated loopback API port 4200 and web origin https:\/\/presentation\.juanderquest\.app/
+        /requires dedicated loopback API port 4200 and web origin https:\/\/presentation\.juanderquest\.app/,
       );
     });
 
@@ -168,7 +165,7 @@ describe('JuanChoice presentation security & profile contracts', () => {
         CORS_ORIGIN: 'https://presentation.juanderquest.app',
       };
       expect(() => validatePresentationModeConfig(mismatchedConfig as any)).toThrow(
-        /requires dedicated loopback API port 4200 and web origin http:\/\/127\.0\.0\.1:3200/
+        /requires dedicated loopback API port 4200 and web origin http:\/\/127\.0\.0\.1:3200/,
       );
     });
 
@@ -179,7 +176,7 @@ describe('JuanChoice presentation security & profile contracts', () => {
         CORS_ORIGIN: 'https://juanderquest.app',
       };
       expect(() => validatePresentationModeConfig(alphaOriginConfig as any)).toThrow(
-        /requires dedicated loopback API port 4200 and web origin https:\/\/presentation\.juanderquest\.app/
+        /requires dedicated loopback API port 4200 and web origin https:\/\/presentation\.juanderquest\.app/,
       );
     });
 
@@ -190,7 +187,7 @@ describe('JuanChoice presentation security & profile contracts', () => {
         CORS_ORIGIN: 'http://127.0.0.1:3200',
       };
       expect(() => validatePresentationModeConfig(invalidProfileConfig as any)).toThrow(
-        /JDQ_PRESENTATION_PROFILE must be "local" or "public"/
+        /JDQ_PRESENTATION_PROFILE must be "local" or "public"/,
       );
     });
 
@@ -202,7 +199,7 @@ describe('JuanChoice presentation security & profile contracts', () => {
         CORS_ORIGIN: 'https://presentation.juanderquest.app',
       };
       expect(() => validatePresentationModeConfig(exposedApiConfig as any)).toThrow(
-        /requires dedicated loopback API port 4200/
+        /requires dedicated loopback API port 4200/,
       );
     });
 
@@ -222,7 +219,7 @@ describe('JuanChoice presentation security & profile contracts', () => {
         };
 
         expect(() => validatePresentationModeConfig(testDbConfig as any)).toThrow(
-          /JDQ_ALLOW_PRESENTATION_TEST_DB is forbidden in public presentation profile outside isolated script drill harness/
+          /JDQ_ALLOW_PRESENTATION_TEST_DB is forbidden in public presentation profile outside isolated script drill harness/,
         );
       } finally {
         if (origFlag !== undefined) process.env.JDQ_ALLOW_PRESENTATION_TEST_DB = origFlag;

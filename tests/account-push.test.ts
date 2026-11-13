@@ -81,14 +81,32 @@ describe('Account push notifications', () => {
         [`push_sent_${i}`, user.id, `c${i}`, noon],
       );
     }
-    await enqueuePush(testDb.pool as any, {
-      userId: user.id, category: 'account', collapseKey: 'account:sponsorship:1',
-      title: 'Sponsorship approved', body: 'A merchant funded your quest.', href: '/quests/q1', isTest: false,
-    }, noon);
-    await enqueuePush(testDb.pool as any, {
-      userId: user.id, category: 'social', collapseKey: 'social:x',
-      title: 'Cheer', body: 'Someone cheered', href: '/plaza', isTest: false,
-    }, noon);
+    await enqueuePush(
+      testDb.pool as any,
+      {
+        userId: user.id,
+        category: 'account',
+        collapseKey: 'account:sponsorship:1',
+        title: 'Sponsorship approved',
+        body: 'A merchant funded your quest.',
+        href: '/quests/q1',
+        isTest: false,
+      },
+      noon,
+    );
+    await enqueuePush(
+      testDb.pool as any,
+      {
+        userId: user.id,
+        category: 'social',
+        collapseKey: 'social:x',
+        title: 'Cheer',
+        body: 'Someone cheered',
+        href: '/plaza',
+        isTest: false,
+      },
+      noon,
+    );
 
     const rows = await testDb.pool.query(
       `SELECT category, status, skip_reason FROM push_deliveries
@@ -103,10 +121,19 @@ describe('Account push notifications', () => {
 
   it('still waits for 08:00 during quiet hours', async () => {
     const lateNight = new Date('2026-10-21T15:30:00Z'); // 23:30 Manila
-    await enqueuePush(testDb.pool as any, {
-      userId: user.id, category: 'account', collapseKey: 'account:late',
-      title: 'Funding goal reached', body: 'Your quest is fully funded.', href: '/quests/q1', isTest: false,
-    }, lateNight);
+    await enqueuePush(
+      testDb.pool as any,
+      {
+        userId: user.id,
+        category: 'account',
+        collapseKey: 'account:late',
+        title: 'Funding goal reached',
+        body: 'Your quest is fully funded.',
+        href: '/quests/q1',
+        isTest: false,
+      },
+      lateNight,
+    );
     const row = await testDb.pool.query(
       `SELECT send_after FROM push_deliveries WHERE user_id = $1 AND collapse_key = 'account:late'`,
       [user.id],
@@ -115,9 +142,20 @@ describe('Account push notifications', () => {
   });
 
   it('an unknown category is rejected by the database (never sent)', async () => {
-    await expect(enqueuePush(testDb.pool as any, {
-      userId: user.id, category: 'mystery' as any, collapseKey: 'm',
-      title: 't', body: 'b', href: '/', isTest: false,
-    }, noon)).rejects.toThrow(/push_deliveries_category_check/);
+    await expect(
+      enqueuePush(
+        testDb.pool as any,
+        {
+          userId: user.id,
+          category: 'mystery' as any,
+          collapseKey: 'm',
+          title: 't',
+          body: 'b',
+          href: '/',
+          isTest: false,
+        },
+        noon,
+      ),
+    ).rejects.toThrow(/push_deliveries_category_check/);
   });
 });

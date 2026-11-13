@@ -104,14 +104,8 @@ describe('Plan 80: PlazaRanker v2 Feed Ranking, Home Town Scope & Author Diversi
     role: 'user',
   };
 
-  const tokenViewer = jwt.sign(
-    { id: userViewer.id, seed_id: userViewer.seed_id, role: 'user' },
-    env.JWT_SECRET,
-  );
-  const tokenNoHome = jwt.sign(
-    { id: userNoHome.id, seed_id: userNoHome.seed_id, role: 'user' },
-    env.JWT_SECRET,
-  );
+  const tokenViewer = jwt.sign({ id: userViewer.id, seed_id: userViewer.seed_id, role: 'user' }, env.JWT_SECRET);
+  const tokenNoHome = jwt.sign({ id: userNoHome.id, seed_id: userNoHome.seed_id, role: 'user' }, env.JWT_SECRET);
 
   beforeAll(async () => {
     testDb = await createTestDb();
@@ -204,9 +198,7 @@ describe('Plan 80: PlazaRanker v2 Feed Ranking, Home Town Scope & Author Diversi
       isTest: false,
     });
 
-    const res = await request(app)
-      .get('/api/v1/plaza/feed?scope=mixed')
-      .set('Authorization', `Bearer ${tokenViewer}`);
+    const res = await request(app).get('/api/v1/plaza/feed?scope=mixed').set('Authorization', `Bearer ${tokenViewer}`);
 
     expect(res.status).toBe(200);
     const titles = res.body.data.items.map((i: any) => i.subject.title);
@@ -258,9 +250,7 @@ describe('Plan 80: PlazaRanker v2 Feed Ranking, Home Town Scope & Author Diversi
       isTest: false,
     });
 
-    const res = await request(app)
-      .get('/api/v1/plaza/feed?scope=mixed')
-      .set('Authorization', `Bearer ${tokenViewer}`);
+    const res = await request(app).get('/api/v1/plaza/feed?scope=mixed').set('Authorization', `Bearer ${tokenViewer}`);
 
     expect(res.status).toBe(200);
     const items = res.body.data.items;
@@ -318,9 +308,7 @@ describe('Plan 80: PlazaRanker v2 Feed Ranking, Home Town Scope & Author Diversi
       .get('/api/v1/plaza/feed?scope=town')
       .set('Authorization', `Bearer ${tokenViewer}`);
     expect(viewerTownRes.status).toBe(200);
-    expect(viewerTownRes.body.data.items.map((i: any) => i.subject.title)).toEqual([
-      'Dagupan Town Quest',
-    ]);
+    expect(viewerTownRes.body.data.items.map((i: any) => i.subject.title)).toEqual(['Dagupan Town Quest']);
     expect(viewerTownRes.body.data.items[0].reason_label).toBe('In Dagupan City');
 
     // When userNoHome sets home town to Bolinao via setHomeTown, scope=town immediately returns Bolinao activity
@@ -329,9 +317,7 @@ describe('Plan 80: PlazaRanker v2 Feed Ranking, Home Town Scope & Author Diversi
       .get('/api/v1/plaza/feed?scope=town')
       .set('Authorization', `Bearer ${tokenNoHome}`);
     expect(afterSetRes.status).toBe(200);
-    expect(afterSetRes.body.data.items.map((i: any) => i.subject.title)).toEqual([
-      'Bolinao Town Quest',
-    ]);
+    expect(afterSetRes.body.data.items.map((i: any) => i.subject.title)).toEqual(['Bolinao Town Quest']);
 
     // Reset userNoHome back to NULL
     await setHomeTown(userNoHome.id, null);
@@ -375,9 +361,7 @@ describe('Plan 80: PlazaRanker v2 Feed Ranking, Home Town Scope & Author Diversi
       isTest: false,
     });
 
-    const res = await request(app)
-      .get('/api/v1/plaza/feed?scope=mixed')
-      .set('Authorization', `Bearer ${tokenViewer}`);
+    const res = await request(app).get('/api/v1/plaza/feed?scope=mixed').set('Authorization', `Bearer ${tokenViewer}`);
 
     expect(res.status).toBe(200);
     const items = res.body.data.items;
@@ -427,9 +411,7 @@ describe('Plan 80: PlazaRanker v2 Feed Ranking, Home Town Scope & Author Diversi
       const query = nextCursor
         ? `?scope=mixed&limit=50&cursor=${encodeURIComponent(nextCursor)}`
         : '?scope=mixed&limit=50';
-      const res = await request(app)
-        .get(`/api/v1/plaza/feed${query}`)
-        .set('Authorization', `Bearer ${tokenViewer}`);
+      const res = await request(app).get(`/api/v1/plaza/feed${query}`).set('Authorization', `Bearer ${tokenViewer}`);
 
       expect(res.status).toBe(200);
       const items = res.body.data.items;
@@ -463,9 +445,7 @@ describe('Plan 80: PlazaRanker v2 Feed Ranking, Home Town Scope & Author Diversi
       [userActor10.id, recentCreatedAt, userSpammer.id, oldExhaustedAt],
     );
 
-    const res = await request(app)
-      .get('/api/v1/plaza/feed?scope=mixed')
-      .set('Authorization', `Bearer ${tokenViewer}`);
+    const res = await request(app).get('/api/v1/plaza/feed?scope=mixed').set('Authorization', `Bearer ${tokenViewer}`);
 
     expect(res.status).toBe(200);
     const items = res.body.data.items;

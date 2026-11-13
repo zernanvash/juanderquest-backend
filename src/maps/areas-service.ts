@@ -50,7 +50,7 @@ export async function ensureAreaCache(pool: Pick<Pool, 'query'> | null, force = 
       const { rows } = await pool.query(
         `SELECT id, psgc_code, level, name, display_name, parent_id, osm_relation_id, has_boundary,
                 label_lat, label_lng, bbox, min_zoom, shape_file, data_version, boundary
-           FROM admin_areas WHERE level IN ('town', 'barangay')`
+           FROM admin_areas WHERE level IN ('town', 'barangay')`,
       );
       cachedAreas = rows.map((r: any) => ({
         ...r,
@@ -58,11 +58,14 @@ export async function ensureAreaCache(pool: Pick<Pool, 'query'> | null, force = 
         label_lat: Number(r.label_lat),
         label_lng: Number(r.label_lng),
         bbox: (r.bbox || []).map(Number) as [number, number, number, number],
-        geometry: typeof r.boundary === 'string' ? JSON.parse(r.boundary) : r.boundary ?? undefined,
+        geometry: typeof r.boundary === 'string' ? JSON.parse(r.boundary) : (r.boundary ?? undefined),
       }));
       cacheLoadedAt = Date.now();
     } catch (error) {
-      console.error('[areas] could not load admin_areas for spot matching:', error instanceof Error ? error.message : error);
+      console.error(
+        '[areas] could not load admin_areas for spot matching:',
+        error instanceof Error ? error.message : error,
+      );
     } finally {
       cacheLoading = null;
     }
@@ -77,7 +80,7 @@ export function matchSpotToAreas(
   lat: number,
   lng: number,
   municipalityName?: string,
-  areas?: AreaRecord[]
+  areas?: AreaRecord[],
 ): { townAreaId: string | null; barangayAreaId: string | null } {
   const areaList = areas || cachedAreas || [];
   if (areaList.length === 0) {
@@ -111,15 +114,13 @@ export function matchSpotToAreas(
         (t) =>
           t.name.toLowerCase() === municipalityName.toLowerCase() ||
           t.name.toLowerCase().replace(/ city$/, '') === norm ||
-          t.id === norm
+          t.id === norm,
       ) || null;
   }
 
   // 2. Try point-in-polygon for barangays within the matched town
   let matchedBarangay: AreaRecord | null = null;
-  const barangays = areaList.filter(
-    (a) => a.level === 'barangay' && (!matchedTown || a.parent_id === matchedTown.id)
-  );
+  const barangays = areaList.filter((a) => a.level === 'barangay' && (!matchedTown || a.parent_id === matchedTown.id));
 
   for (const bgy of barangays) {
     if (bgy.has_boundary && bgy.geometry) {

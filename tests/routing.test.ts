@@ -103,7 +103,10 @@ describe('Valhalla Routing & Polyline Decoder', () => {
     });
 
     test('POST in coverage still queries Valhalla', async () => {
-      const shape = encodePolyline6([[16.0433, 120.3333], [16.0218, 120.2319]]);
+      const shape = encodePolyline6([
+        [16.0433, 120.3333],
+        [16.0218, 120.2319],
+      ]);
       jest.mocked(global.fetch).mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -111,10 +114,12 @@ describe('Valhalla Routing & Polyline Decoder', () => {
         }),
       } as Response);
 
-      const res = await request(app).post('/api/v1/routes').send({
-        start: { lat: 16.0433, lng: 120.3333 },
-        end: { lat: 16.0218, lng: 120.2319 },
-      });
+      const res = await request(app)
+        .post('/api/v1/routes')
+        .send({
+          start: { lat: 16.0433, lng: 120.3333 },
+          end: { lat: 16.0218, lng: 120.2319 },
+        });
 
       expect(res.status).toBe(200);
       expect(jest.mocked(global.fetch)).toHaveBeenCalledTimes(1);
@@ -122,15 +127,13 @@ describe('Valhalla Routing & Polyline Decoder', () => {
     });
 
     test('GET /api/v1/routes labels straight-line fallback as degraded and non-turn-by-turn', async () => {
-      const res = await request(app)
-        .get('/api/v1/routes')
-        .query({
-          start_lat: 16.0433,
-          start_lng: 120.3333,
-          end_lat: 16.0218,
-          end_lng: 120.2319,
-          costing: 'auto',
-        });
+      const res = await request(app).get('/api/v1/routes').query({
+        start_lat: 16.0433,
+        start_lng: 120.3333,
+        end_lat: 16.0218,
+        end_lng: 120.2319,
+        costing: 'auto',
+      });
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -153,22 +156,22 @@ describe('Valhalla Routing & Polyline Decoder', () => {
         json: async () => ({
           trip: {
             summary: { length: 11.2, time: 900 },
-            legs: [{
-              shape,
-              maneuvers: [{ instruction: 'Continue south', length: 11.2, time: 900 }],
-            }],
+            legs: [
+              {
+                shape,
+                maneuvers: [{ instruction: 'Continue south', length: 11.2, time: 900 }],
+              },
+            ],
           },
         }),
       } as Response);
 
-      const res = await request(app)
-        .get('/api/v1/routes')
-        .query({
-          start_lat: 16.0433,
-          start_lng: 120.3333,
-          end_lat: 16.0218,
-          end_lng: 120.2319,
-        });
+      const res = await request(app).get('/api/v1/routes').query({
+        start_lat: 16.0433,
+        start_lng: 120.3333,
+        end_lat: 16.0218,
+        end_lng: 120.2319,
+      });
 
       expect(res.status).toBe(200);
       expect(res.body.data.degraded).toBe(false);

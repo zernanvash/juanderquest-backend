@@ -69,7 +69,10 @@ async function recordQuestCompletionSocialActivities(
     // P2: town_completed
     const municipality = questRow.municipality;
     if (municipality) {
-      const muniSlug = municipality.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      const muniSlug = municipality
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
       const totalQuestsRes = await client.query(
         `SELECT COUNT(DISTINCT q.id)::int AS count
            FROM quests q
@@ -136,16 +139,18 @@ export async function settleReward(input: SettleRewardInput): Promise<SettleRewa
       result = funded;
     } else {
       const requirement = await client.query('SELECT funding_required FROM quests WHERE id=$1', [questId]);
-      if (requirement.rows[0]?.funding_required) throw new FundingError('FUNDED_ATTEMPT_REQUIRED', 409, 'A reserved funded reward is required.');
+      if (requirement.rows[0]?.funding_required)
+        throw new FundingError('FUNDED_ATTEMPT_REQUIRED', 409, 'A reserved funded reward is required.');
       const balance = await client.query(
         'UPDATE users SET demo_points = demo_points + ($2)::int, updated_at = NOW() WHERE id = $1 RETURNING demo_points',
         [userId, rewardPoints],
       );
       const newPoints = balance.rows[0]?.demo_points;
       if (newPoints === undefined) throw new Error('USER_NOT_FOUND');
-      const governanceResult = rewardPoints > 0
-        ? await governanceStore.creditQuestReward(userId, questId, referenceId, rewardPoints, actorId, client)
-        : null;
+      const governanceResult =
+        rewardPoints > 0
+          ? await governanceStore.creditQuestReward(userId, questId, referenceId, rewardPoints, actorId, client)
+          : null;
       result = { awardedPoints: rewardPoints, newPoints: Number(newPoints), governanceResult };
     }
 
@@ -154,8 +159,9 @@ export async function settleReward(input: SettleRewardInput): Promise<SettleRewa
   }
 
   const newPoints = db.applyDemoPointsDelta(userId, rewardPoints);
-  const governanceResult = rewardPoints > 0
-    ? await governanceStore.creditQuestReward(userId, questId, referenceId, rewardPoints, actorId)
-    : null;
+  const governanceResult =
+    rewardPoints > 0
+      ? await governanceStore.creditQuestReward(userId, questId, referenceId, rewardPoints, actorId)
+      : null;
   return { awardedPoints: rewardPoints, newPoints, governanceResult };
 }

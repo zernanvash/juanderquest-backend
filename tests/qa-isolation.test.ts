@@ -14,17 +14,13 @@ describe('Phase 5: Synthetic QA Data Isolation', () => {
   const testUserId = '90909090-9090-9090-9090-909090909090';
   const adminUserId = '80808080-8080-8080-8080-808080808080';
 
-  const tokenUser = jwt.sign(
-    { id: genuineUserId, seed_id: 'qa-isolation-user', role: 'user' },
-    env.JWT_SECRET,
-    { expiresIn: '1h' }
-  );
+  const tokenUser = jwt.sign({ id: genuineUserId, seed_id: 'qa-isolation-user', role: 'user' }, env.JWT_SECRET, {
+    expiresIn: '1h',
+  });
 
-  const tokenAdmin = jwt.sign(
-    { id: adminUserId, seed_id: 'qa-isolation-admin', role: 'admin' },
-    env.JWT_SECRET,
-    { expiresIn: '1h' }
-  );
+  const tokenAdmin = jwt.sign({ id: adminUserId, seed_id: 'qa-isolation-admin', role: 'admin' }, env.JWT_SECRET, {
+    expiresIn: '1h',
+  });
 
   const genuineSpot: Spot = {
     id: 'spot-genuine-001',
@@ -63,7 +59,7 @@ describe('Phase 5: Synthetic QA Data Isolation', () => {
     tags: ['hidden_gem'],
     municipality: 'Alaminos',
     address: 'Alaminos, Pangasinan',
-    gps_lat: 16.20,
+    gps_lat: 16.2,
     gps_lng: 120.01,
     price_level: 0,
     hours: {},
@@ -169,9 +165,7 @@ describe('Phase 5: Synthetic QA Data Isolation', () => {
     });
 
     it('blocks unauthenticated requests with header x-include-test: true with HTTP 403 UNAUTHORIZED_QA_MODE', async () => {
-      const res = await request(app)
-        .get('/api/v1/spots')
-        .set('x-include-test', 'true');
+      const res = await request(app).get('/api/v1/spots').set('x-include-test', 'true');
 
       expect(res.status).toBe(403);
       expect(res.body.success).toBe(false);
@@ -179,9 +173,7 @@ describe('Phase 5: Synthetic QA Data Isolation', () => {
     });
 
     it('blocks non-admin authenticated users from using ?include_test=true', async () => {
-      const res = await request(app)
-        .get('/api/v1/spots?include_test=true')
-        .set('Authorization', `Bearer ${tokenUser}`);
+      const res = await request(app).get('/api/v1/spots?include_test=true').set('Authorization', `Bearer ${tokenUser}`);
 
       expect(res.status).toBe(403);
       expect(res.body.success).toBe(false);

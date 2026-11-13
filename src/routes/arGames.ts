@@ -27,17 +27,28 @@ arGamesRouter.post(
       res.status(status).json({ success: false, error: { code, message } });
     try {
       const session = await findSession(req.params.id);
-      if (!session || session.user_id !== req.user!.id) return fail(404, 'SESSION_NOT_FOUND', 'Game session not found.');
+      if (!session || session.user_id !== req.user!.id)
+        return fail(404, 'SESSION_NOT_FOUND', 'Game session not found.');
       if (session.status !== 'open') return fail(409, 'SESSION_CLOSED', 'This game has already ended.');
 
       const { score, passed, stats } = req.body as z.infer<typeof finishSchema>['body'];
       const elapsedMs = Date.now() - session.started_at.getTime();
       const reason = implausibleReason(session.game, elapsedMs, score, passed, stats);
       if (reason) {
-        await closeSession(session.id, { status: 'rejected', score, passed: false, stats: { ...stats, reject_reason: reason } });
+        await closeSession(session.id, {
+          status: 'rejected',
+          score,
+          passed: false,
+          stats: { ...stats, reject_reason: reason },
+        });
         return fail(422, 'SCORE_REJECTED', 'That result could not be accepted. Play again.');
       }
-      const closed = await closeSession(session.id, { status: 'finished', score, passed, stats: { ...stats, duration_ms: elapsedMs } });
+      const closed = await closeSession(session.id, {
+        status: 'finished',
+        score,
+        passed,
+        stats: { ...stats, duration_ms: elapsedMs },
+      });
       if (!closed) return fail(409, 'SESSION_CLOSED', 'This game has already ended.');
 
       const viewer = req.user!.id;
@@ -64,8 +75,16 @@ arGamesRouter.post(
 
 const boardSchema = z.object({
   query: z.union([
-    z.object({ quest_id: z.string().min(1).max(100), task_key: z.string().min(1).max(100), limit: z.coerce.number().int().min(1).max(20).optional() }),
-    z.object({ game: z.enum(AR_GAMES), scope: z.literal('week'), limit: z.coerce.number().int().min(1).max(20).optional() }),
+    z.object({
+      quest_id: z.string().min(1).max(100),
+      task_key: z.string().min(1).max(100),
+      limit: z.coerce.number().int().min(1).max(20).optional(),
+    }),
+    z.object({
+      game: z.enum(AR_GAMES),
+      scope: z.literal('week'),
+      limit: z.coerce.number().int().min(1).max(20).optional(),
+    }),
   ]),
 });
 
@@ -76,9 +95,10 @@ arGamesRouter.get(
   async (req: AuthRequest, res: Response) => {
     const q = req.query as Record<string, string | undefined>;
     const limit = q.limit ? Number(q.limit) : 20;
-    const board = q.quest_id && q.task_key
-      ? await getBoard({ kind: 'place', questId: q.quest_id, taskKey: q.task_key }, req.user?.id ?? null, limit)
-      : await getBoard({ kind: 'week', game: q.game as (typeof AR_GAMES)[number] }, req.user?.id ?? null, limit);
+    const board =
+      q.quest_id && q.task_key
+        ? await getBoard({ kind: 'place', questId: q.quest_id, taskKey: q.task_key }, req.user?.id ?? null, limit)
+        : await getBoard({ kind: 'week', game: q.game as (typeof AR_GAMES)[number] }, req.user?.id ?? null, limit);
     res.setHeader('Cache-Control', 'private, no-store');
     return res.json({ success: true, data: board });
   },

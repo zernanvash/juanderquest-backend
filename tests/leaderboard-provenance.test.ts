@@ -9,10 +9,7 @@ describe('Phase 5: Sourced Privacy-Safe Rankings and Provenance', () => {
   const privateScoutId = '99999999-9999-9999-9999-999999999999';
   const testScoutId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 
-  const publicScoutToken = jwt.sign(
-    { id: publicScoutId, seed_id: 'public-scout-01', role: 'user' },
-    env.JWT_SECRET
-  );
+  const publicScoutToken = jwt.sign({ id: publicScoutId, seed_id: 'public-scout-01', role: 'user' }, env.JWT_SECRET);
 
   beforeAll(() => {
     // Add public scout
@@ -115,9 +112,7 @@ describe('Phase 5: Sourced Privacy-Safe Rankings and Provenance', () => {
   });
 
   test('3. Authenticated scout lookup attaches my_rank and is_self', async () => {
-    const res = await request(app)
-      .get('/api/v1/leaderboard')
-      .set('Authorization', `Bearer ${publicScoutToken}`);
+    const res = await request(app).get('/api/v1/leaderboard').set('Authorization', `Bearer ${publicScoutToken}`);
 
     expect(res.status).toBe(200);
     const data = res.body.data;

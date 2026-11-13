@@ -14,7 +14,9 @@ if (requestedProfile) {
   }
   const profileFile = join(__dirname, '..', '..', `.env.${requestedProfile}`);
   if (!existsSync(profileFile)) {
-    throw new Error(`JDQ_ENV=${requestedProfile} requires ${profileFile}, but it does not exist. Refusing to fall back to .env.`);
+    throw new Error(
+      `JDQ_ENV=${requestedProfile} requires ${profileFile}, but it does not exist. Refusing to fall back to .env.`,
+    );
   }
   dotenv.config({ path: profileFile });
 } else {
@@ -44,7 +46,8 @@ const rawEnv = cleanEnv(process.env, {
   // Prototype fixtures are local-only and can never be enabled in production.
   SEED_DEVELOPMENT_DATA: bool({ default: isLocalRuntime }),
   // Fail fast in production when the real secret is missing; dev/test get a throwaway default.
-  JWT_SECRET: process.env.NODE_ENV === 'production' ? str() : str({ default: 'dev_only_jwt_secret_do_not_use_in_production' }),
+  JWT_SECRET:
+    process.env.NODE_ENV === 'production' ? str() : str({ default: 'dev_only_jwt_secret_do_not_use_in_production' }),
   CORS_ORIGIN: process.env.NODE_ENV === 'production' ? str() : str({ default: '*' }),
   WALLET_AUTH_MODE: str({
     choices: ['local', 'signature'],
@@ -128,7 +131,7 @@ const flagOverrides: Record<string, any> = {};
 
 // The proxy intentionally supports scoped test overrides; cleanEnv's readonly
 // type does not describe that existing runtime behavior.
-type MutableEnv = { -readonly [K in keyof typeof rawEnv]: typeof rawEnv[K] };
+type MutableEnv = { -readonly [K in keyof typeof rawEnv]: (typeof rawEnv)[K] };
 export const env: MutableEnv = new Proxy({} as any, {
   get(_target, prop: string) {
     if (prop in flagOverrides) {
@@ -199,7 +202,11 @@ if (!Number.isInteger(env.JUANCHOICE_FINALIZER_INTERVAL_MS) || env.JUANCHOICE_FI
 if (!Number.isInteger(env.JUANCHOICE_SCHEDULER_INTERVAL_MS) || env.JUANCHOICE_SCHEDULER_INTERVAL_MS <= 0) {
   throw new Error('JUANCHOICE_SCHEDULER_INTERVAL_MS must be a positive integer');
 }
-if (!Number.isInteger(env.JUANCHOICE_SCHEDULER_BATCH_SIZE) || env.JUANCHOICE_SCHEDULER_BATCH_SIZE < 1 || env.JUANCHOICE_SCHEDULER_BATCH_SIZE > 100) {
+if (
+  !Number.isInteger(env.JUANCHOICE_SCHEDULER_BATCH_SIZE) ||
+  env.JUANCHOICE_SCHEDULER_BATCH_SIZE < 1 ||
+  env.JUANCHOICE_SCHEDULER_BATCH_SIZE > 100
+) {
   throw new Error('JUANCHOICE_SCHEDULER_BATCH_SIZE must be an integer from 1 to 100');
 }
 
@@ -210,14 +217,20 @@ validateAndParseCorsOrigin(env.CORS_ORIGIN, env.NODE_ENV, env.JUANCHOICE_PRESENT
 // `dev` must never seed demo fixtures into a real/alpha/presentation database.
 if (requestedProfile === 'prod') {
   if (env.SEED_DEVELOPMENT_DATA) {
-    throw new Error('JDQ_ENV=prod forbids SEED_DEVELOPMENT_DATA=true: dummy fixtures must never load into the real UX database.');
+    throw new Error(
+      'JDQ_ENV=prod forbids SEED_DEVELOPMENT_DATA=true: dummy fixtures must never load into the real UX database.',
+    );
   }
   if (env.ALLOW_IN_MEMORY_FALLBACK) {
-    throw new Error('JDQ_ENV=prod requires ALLOW_IN_MEMORY_FALLBACK=false so the real UX always exercises durable storage.');
+    throw new Error(
+      'JDQ_ENV=prod requires ALLOW_IN_MEMORY_FALLBACK=false so the real UX always exercises durable storage.',
+    );
   }
   const dbName = extractDatabaseName(env.DATABASE_URL);
   if (dbName && /(^|_)(dev|test)(_|$)/i.test(dbName)) {
-    throw new Error(`JDQ_ENV=prod refuses development database "${dbName}". Point DATABASE_URL at the production/UX database.`);
+    throw new Error(
+      `JDQ_ENV=prod refuses development database "${dbName}". Point DATABASE_URL at the production/UX database.`,
+    );
   }
 }
 
@@ -225,7 +238,9 @@ if (requestedProfile === 'dev') {
   const dbName = extractDatabaseName(env.DATABASE_URL);
   const protectedDatabases = new Set(['juanderquest', 'juanderquest_alpha', 'juanderquest_prod']);
   if (dbName && (protectedDatabases.has(dbName) || dbName.startsWith('juanderquest_presentation'))) {
-    throw new Error(`JDQ_ENV=dev refuses non-development database "${dbName}"; dummy fixtures must not touch it. Use a *_dev database.`);
+    throw new Error(
+      `JDQ_ENV=dev refuses non-development database "${dbName}"; dummy fixtures must not touch it. Use a *_dev database.`,
+    );
   }
 }
 
@@ -235,10 +250,18 @@ if (requestedProfile === 'dev') {
 const LIVE_DATABASE_PORTS = new Set(['55433']);
 const LIVE_DATABASE_NAMES = new Set(['juanderquest_alpha']);
 
-export function localRuntimeSafetyError(nodeEnv: string, profile: string | undefined, databaseUrl: string): string | null {
+export function localRuntimeSafetyError(
+  nodeEnv: string,
+  profile: string | undefined,
+  databaseUrl: string,
+): string | null {
   if (nodeEnv === 'production') return null;
   let port = '';
-  try { port = new URL(databaseUrl).port; } catch { /* checked by name below */ }
+  try {
+    port = new URL(databaseUrl).port;
+  } catch {
+    /* checked by name below */
+  }
   const dbName = extractDatabaseName(databaseUrl);
   if (LIVE_DATABASE_PORTS.has(port) || (dbName && LIVE_DATABASE_NAMES.has(dbName))) {
     return `NODE_ENV=${nodeEnv} refuses the live alpha database${dbName ? ` "${dbName}"` : ''}. Local runs use a *_dev database.`;
@@ -268,7 +291,7 @@ export function extractDatabaseName(databaseUrl: string): string | null {
 export function isPresentationDatabaseName(
   dbName: string,
   nodeEnv: string,
-  profile: string = process.env.JDQ_PRESENTATION_PROFILE || 'local'
+  profile: string = process.env.JDQ_PRESENTATION_PROFILE || 'local',
 ): boolean {
   if (dbName === 'juanderquest_presentation') return true;
   if (profile === 'public' && process.env.JDQ_TEST_HARNESS_SCOPE !== 'isolated_script_drill') {
@@ -301,13 +324,16 @@ export function validatePresentationModeConfig(targetEnv: typeof env = env): voi
     throw new Error('JDQ_PRESENTATION_PROFILE must be "local" or "public".');
   }
 
-  const expectedCorsOrigin = presentationProfile === 'public'
-    ? 'https://presentation.juanderquest.app'
-    : 'http://127.0.0.1:3200';
+  const expectedCorsOrigin =
+    presentationProfile === 'public' ? 'https://presentation.juanderquest.app' : 'http://127.0.0.1:3200';
 
-  if (targetEnv.NODE_ENV === 'production' &&
-    (targetEnv.HOST !== '127.0.0.1' || targetEnv.PORT !== 4200 || targetEnv.CORS_ORIGIN !== expectedCorsOrigin)) {
-    throw new Error(`JUANCHOICE_PRESENTATION_MODE in ${presentationProfile} profile requires dedicated loopback API port 4200 and web origin ${expectedCorsOrigin}.`);
+  if (
+    targetEnv.NODE_ENV === 'production' &&
+    (targetEnv.HOST !== '127.0.0.1' || targetEnv.PORT !== 4200 || targetEnv.CORS_ORIGIN !== expectedCorsOrigin)
+  ) {
+    throw new Error(
+      `JUANCHOICE_PRESENTATION_MODE in ${presentationProfile} profile requires dedicated loopback API port 4200 and web origin ${expectedCorsOrigin}.`,
+    );
   }
 
   const campaignId = targetEnv.JUANCHOICE_PRESENTATION_CAMPAIGN_ID?.trim();
@@ -318,10 +344,14 @@ export function validatePresentationModeConfig(targetEnv: typeof env = env): voi
   const dbNameSetting = targetEnv.JUANCHOICE_PRESENTATION_DB_NAME?.trim();
   if (presentationProfile === 'public' && process.env.JDQ_TEST_HARNESS_SCOPE !== 'isolated_script_drill') {
     if (process.env.JDQ_ALLOW_PRESENTATION_TEST_DB === 'true') {
-      throw new Error('JDQ_ALLOW_PRESENTATION_TEST_DB is forbidden in public presentation profile outside isolated script drill harness.');
+      throw new Error(
+        'JDQ_ALLOW_PRESENTATION_TEST_DB is forbidden in public presentation profile outside isolated script drill harness.',
+      );
     }
     if (dbNameSetting !== 'juanderquest_presentation') {
-      throw new Error(`Public presentation profile requires canonical database "juanderquest_presentation", got "${dbNameSetting}".`);
+      throw new Error(
+        `Public presentation profile requires canonical database "juanderquest_presentation", got "${dbNameSetting}".`,
+      );
     }
   }
 
@@ -331,19 +361,26 @@ export function validatePresentationModeConfig(targetEnv: typeof env = env): voi
 
   const actualDbName = extractDatabaseName(targetEnv.DATABASE_URL);
   if (!actualDbName) {
-    throw new Error('JUANCHOICE_PRESENTATION_MODE: DATABASE_URL must be a valid connection string containing a database name.');
+    throw new Error(
+      'JUANCHOICE_PRESENTATION_MODE: DATABASE_URL must be a valid connection string containing a database name.',
+    );
   }
 
   if (actualDbName !== dbNameSetting) {
     throw new Error(
-      `JUANCHOICE_PRESENTATION_MODE database mismatch: configured allowlist "${dbNameSetting}" does not match DATABASE_URL database "${actualDbName}".`
+      `JUANCHOICE_PRESENTATION_MODE database mismatch: configured allowlist "${dbNameSetting}" does not match DATABASE_URL database "${actualDbName}".`,
     );
   }
 
   if (targetEnv.NODE_ENV === 'production') {
     const databaseUrl = new URL(targetEnv.DATABASE_URL);
-    if (databaseUrl.hostname !== '127.0.0.1' || databaseUrl.port !== '55434' ||
-        databaseUrl.username !== 'jdq_presentation' || databaseUrl.search || databaseUrl.hash) {
+    if (
+      databaseUrl.hostname !== '127.0.0.1' ||
+      databaseUrl.port !== '55434' ||
+      databaseUrl.username !== 'jdq_presentation' ||
+      databaseUrl.search ||
+      databaseUrl.hash
+    ) {
       throw new Error('JUANCHOICE_PRESENTATION_MODE requires dedicated loopback PostgreSQL on port 55434.');
     }
   }

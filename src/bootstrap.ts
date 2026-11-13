@@ -43,6 +43,6 @@ export async function bootstrap() {
   initEconomicOutboxWorker();
   initFundingScheduler();
   console.log(
-    `[bootstrap] storage: ${pgAvailable ? 'postgres' : 'in-memory'} (${db.users.length} users, ${db.quests.length} quests, ${db.submissions.length} submissions, ${db.vouchers.length} vouchers)`
+    `[bootstrap] storage: ${pgAvailable ? 'postgres' : 'in-memory'} (${db.users.length} users, ${db.quests.length} quests, ${db.submissions.length} submissions, ${db.vouchers.length} vouchers)`,
   );
 }

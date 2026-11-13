@@ -52,8 +52,8 @@ describe('Disposable wallet reader identities helper', () => {
     it('generates 50 reader identity records without overlap', () => {
       const records = buildDisposableWalletReaderIdentities(50);
       expect(records).toHaveLength(50);
-      const ids = new Set(records.map(r => r.id));
-      const seeds = new Set(records.map(r => r.seed));
+      const ids = new Set(records.map((r) => r.id));
+      const seeds = new Set(records.map((r) => r.seed));
       expect(ids.size).toBe(50);
       expect(seeds.size).toBe(50);
       for (const record of records) {
@@ -106,58 +106,58 @@ describe('Disposable wallet reader identities helper', () => {
   describe('input validation and edge case rejection', () => {
     it('rejects 0 count', () => {
       expect(() => buildDisposableWalletReaderIdentities(0)).toThrow(
-        'readerCount must be a positive safe integer no greater than 100'
+        'readerCount must be a positive safe integer no greater than 100',
       );
     });
 
     it('rejects negative count', () => {
       expect(() => buildDisposableWalletReaderIdentities(-1)).toThrow(
-        'readerCount must be a positive safe integer no greater than 100'
+        'readerCount must be a positive safe integer no greater than 100',
       );
       expect(() => buildDisposableWalletReaderIdentities(-100)).toThrow(
-        'readerCount must be a positive safe integer no greater than 100'
+        'readerCount must be a positive safe integer no greater than 100',
       );
     });
 
     it('rejects count greater than 100', () => {
       expect(() => buildDisposableWalletReaderIdentities(101)).toThrow(
-        'readerCount must be a positive safe integer no greater than 100'
+        'readerCount must be a positive safe integer no greater than 100',
       );
       expect(() => buildDisposableWalletReaderIdentities(500)).toThrow(
-        'readerCount must be a positive safe integer no greater than 100'
+        'readerCount must be a positive safe integer no greater than 100',
       );
     });
 
     it('rejects fractional numbers', () => {
       expect(() => buildDisposableWalletReaderIdentities(1.5)).toThrow(
-        'readerCount must be a positive safe integer no greater than 100'
+        'readerCount must be a positive safe integer no greater than 100',
       );
       expect(() => buildDisposableWalletReaderIdentities(99.99)).toThrow(
-        'readerCount must be a positive safe integer no greater than 100'
+        'readerCount must be a positive safe integer no greater than 100',
       );
     });
 
     it('rejects non-safe or non-finite numbers', () => {
       expect(() => buildDisposableWalletReaderIdentities(Number.MAX_SAFE_INTEGER + 1)).toThrow(
-        'readerCount must be a positive safe integer no greater than 100'
+        'readerCount must be a positive safe integer no greater than 100',
       );
       expect(() => buildDisposableWalletReaderIdentities(Infinity)).toThrow(
-        'readerCount must be a positive safe integer no greater than 100'
+        'readerCount must be a positive safe integer no greater than 100',
       );
       expect(() => buildDisposableWalletReaderIdentities(NaN)).toThrow(
-        'readerCount must be a positive safe integer no greater than 100'
+        'readerCount must be a positive safe integer no greater than 100',
       );
     });
 
     it('rejects non-number inputs at runtime', () => {
       expect(() => buildDisposableWalletReaderIdentities('100' as unknown as number)).toThrow(
-        'readerCount must be a positive safe integer no greater than 100'
+        'readerCount must be a positive safe integer no greater than 100',
       );
       expect(() => buildDisposableWalletReaderIdentities(null as unknown as number)).toThrow(
-        'readerCount must be a positive safe integer no greater than 100'
+        'readerCount must be a positive safe integer no greater than 100',
       );
       expect(() => buildDisposableWalletReaderIdentities(undefined as unknown as number)).toThrow(
-        'readerCount must be a positive safe integer no greater than 100'
+        'readerCount must be a positive safe integer no greater than 100',
       );
     });
   });

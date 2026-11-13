@@ -12,7 +12,9 @@ describe('local runtime safety', () => {
     expect(localRuntimeSafetyError('development', 'dev', live)).toMatch(/live alpha database/);
     expect(localRuntimeSafetyError('development', undefined, live)).toMatch(/live alpha database/);
     expect(localRuntimeSafetyError('test', undefined, live)).toMatch(/live alpha database/);
-    expect(localRuntimeSafetyError('development', 'dev', 'postgres://u:x@127.0.0.1:55433/other_dev')).toMatch(/live alpha/);
+    expect(localRuntimeSafetyError('development', 'dev', 'postgres://u:x@127.0.0.1:55433/other_dev')).toMatch(
+      /live alpha/,
+    );
   });
 
   it('requires a profile for development runs', () => {

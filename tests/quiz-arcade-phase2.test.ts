@@ -12,14 +12,8 @@ describe('Cultural Quiz Arcade Phase 2 (Data Model, Lifelines & Scoring)', () =>
   const adminUserId = 'admin-quiz-arcade-phase2';
   const travelerUserId = 'traveler-quiz-arcade-phase2';
 
-  const adminToken = jwt.sign(
-    { id: adminUserId, seed_id: 'admin-quiz-seed', role: 'admin' },
-    env.JWT_SECRET
-  );
-  const travelerToken = jwt.sign(
-    { id: travelerUserId, seed_id: 'traveler-quiz-seed', role: 'user' },
-    env.JWT_SECRET
-  );
+  const adminToken = jwt.sign({ id: adminUserId, seed_id: 'admin-quiz-seed', role: 'admin' }, env.JWT_SECRET);
+  const travelerToken = jwt.sign({ id: travelerUserId, seed_id: 'traveler-quiz-seed', role: 'user' }, env.JWT_SECRET);
 
   const destinationId = 'spot-bolinao-quiz-test-p2';
   const destLat = 16.3204;
@@ -40,7 +34,7 @@ describe('Cultural Quiz Arcade Phase 2 (Data Model, Lifelines & Scoring)', () =>
          ($1, 'admin-quiz-seed', 'Admin Author', 'admin-p2@juanderquest.app', 'admin'),
          ($2, 'traveler-quiz-seed', 'Traveler One', 'traveler-p2@juanderquest.app', 'user')
        ON CONFLICT (id) DO NOTHING`,
-      [adminUserId, travelerUserId]
+      [adminUserId, travelerUserId],
     );
 
     await testDb.pool.query(
@@ -52,7 +46,7 @@ describe('Cultural Quiz Arcade Phase 2 (Data Model, Lifelines & Scoring)', () =>
          'culture_heritage', 'heritage_site', 'Bolinao', 'Patar, Bolinao, Pangasinan',
          $2, $3, 1, 'lgu', 'Bolinao Tourism', 'lgu_verified', 'published'
        ) ON CONFLICT (id) DO NOTHING`,
-      [destinationId, destLat, destLng]
+      [destinationId, destLat, destLng],
     );
   });
 
@@ -311,7 +305,10 @@ describe('Cultural Quiz Arcade Phase 2 (Data Model, Lifelines & Scoring)', () =>
     const twoSkips = await request(app)
       .put(`/api/v1/quiz-attempts/${attemptId}/submission`)
       .set('Authorization', `Bearer ${travelerToken}`)
-      .send({ ...submissionPayload, answers: submissionPayload.answers.map((a, i) => (i < 2 ? { question_id: a.question_id, skipped: true } : a)) });
+      .send({
+        ...submissionPayload,
+        answers: submissionPayload.answers.map((a, i) => (i < 2 ? { question_id: a.question_id, skipped: true } : a)),
+      });
     expect(twoSkips.status).toBe(400);
     expect(twoSkips.body.error.message).toContain('INVALID_SKIP');
 
@@ -328,8 +325,6 @@ describe('Cultural Quiz Arcade Phase 2 (Data Model, Lifelines & Scoring)', () =>
     expect(res.body.data.breakdown[2].is_correct).toBe(false);
     expect(res.body.data.attempt.style_score).toBe(850);
     expect(res.body.data.attempt.streak_max).toBe(5);
-    expect(res.body.data.attempt.lifelines_used).toEqual(
-      expect.arrayContaining(['fifty_fifty', 'ask_local', 'skip'])
-    );
+    expect(res.body.data.attempt.lifelines_used).toEqual(expect.arrayContaining(['fifty_fifty', 'ask_local', 'skip']));
   });
 });

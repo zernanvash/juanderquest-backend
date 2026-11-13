@@ -13,17 +13,11 @@ describe('Cultural Quizzes System (E2E & Concurrency)', () => {
   const travelerUserId = 'traveler-user-quiz-1';
   const otherTravelerUserId = 'traveler-user-quiz-2';
 
-  const adminToken = jwt.sign(
-    { id: adminUserId, seed_id: 'admin-quiz-seed', role: 'admin' },
-    env.JWT_SECRET
-  );
-  const travelerToken = jwt.sign(
-    { id: travelerUserId, seed_id: 'traveler-quiz-seed', role: 'user' },
-    env.JWT_SECRET
-  );
+  const adminToken = jwt.sign({ id: adminUserId, seed_id: 'admin-quiz-seed', role: 'admin' }, env.JWT_SECRET);
+  const travelerToken = jwt.sign({ id: travelerUserId, seed_id: 'traveler-quiz-seed', role: 'user' }, env.JWT_SECRET);
   const otherTravelerToken = jwt.sign(
     { id: otherTravelerUserId, seed_id: 'other-traveler-seed', role: 'user' },
-    env.JWT_SECRET
+    env.JWT_SECRET,
   );
 
   const destinationId = 'spot-bolinao-quiz-test';
@@ -44,7 +38,7 @@ describe('Cultural Quizzes System (E2E & Concurrency)', () => {
          ($2, 'traveler-quiz-seed', 'Traveler One', 'traveler1@juanderquest.app', 'user'),
          ($3, 'other-traveler-seed', 'Traveler Two', 'traveler2@juanderquest.app', 'user')
        ON CONFLICT (id) DO NOTHING`,
-      [adminUserId, travelerUserId, otherTravelerUserId]
+      [adminUserId, travelerUserId, otherTravelerUserId],
     );
 
     // Insert destination spot
@@ -57,7 +51,7 @@ describe('Cultural Quizzes System (E2E & Concurrency)', () => {
          'culture_heritage', 'heritage_site', 'Bolinao', 'Patar Road, Bolinao, Pangasinan',
          $2, $3, 1, 'lgu', 'Bolinao Tourism', 'lgu_verified', 'published'
        ) ON CONFLICT (id) DO NOTHING`,
-      [destinationId, destLat, destLng]
+      [destinationId, destLat, destLng],
     );
   });
 
@@ -149,13 +143,10 @@ describe('Cultural Quizzes System (E2E & Concurrency)', () => {
   });
 
   it('rejects non-admin users from creating or modifying quizzes', async () => {
-    const res = await request(app)
-      .post('/api/v1/admin/quizzes')
-      .set('Authorization', `Bearer ${travelerToken}`)
-      .send({
-        destination_id: destinationId,
-        title: 'Unauthorized quiz',
-      });
+    const res = await request(app).post('/api/v1/admin/quizzes').set('Authorization', `Bearer ${travelerToken}`).send({
+      destination_id: destinationId,
+      title: 'Unauthorized quiz',
+    });
     expect(res.status).toBe(403);
   });
 
@@ -172,13 +163,10 @@ describe('Cultural Quizzes System (E2E & Concurrency)', () => {
 
   it('discovers published quiz via nearby endpoint within radius', async () => {
     // 50 meters away from Patar destination
-    const res = await request(app)
-      .post('/api/v1/quizzes/nearby')
-      .set('Authorization', `Bearer ${travelerToken}`)
-      .send({
-        lat: 16.3205,
-        lng: 119.7848,
-      });
+    const res = await request(app).post('/api/v1/quizzes/nearby').set('Authorization', `Bearer ${travelerToken}`).send({
+      lat: 16.3205,
+      lng: 119.7848,
+    });
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -190,12 +178,10 @@ describe('Cultural Quizzes System (E2E & Concurrency)', () => {
 
   it('does NOT discover quiz when traveler is far away (> 250m)', async () => {
     // Lingayen coords (far away)
-    const res = await request(app)
-      .post('/api/v1/quizzes/nearby')
-      .send({
-        lat: 16.0218,
-        lng: 120.2319,
-      });
+    const res = await request(app).post('/api/v1/quizzes/nearby').send({
+      lat: 16.0218,
+      lng: 120.2319,
+    });
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -323,17 +309,16 @@ describe('Cultural Quizzes System (E2E & Concurrency)', () => {
     // Verify progression_totals table reflects 25 explorer_xp
     const { rows: totalsRows } = await testDb.pool.query(
       `SELECT explorer_xp, civic_xp FROM progression_totals WHERE user_id = $1`,
-      [otherTravelerUserId]
+      [otherTravelerUserId],
     );
     expect(totalsRows).toHaveLength(1);
     expect(Number(totalsRows[0].explorer_xp)).toBe(25);
     expect(Number(totalsRows[0].civic_xp)).toBe(0); // Zero Civic XP invariant preserved
 
     // Verify no verified_visits or demo_points were affected
-    const { rows: visitRows } = await testDb.pool.query(
-      `SELECT * FROM verified_visits WHERE user_id = $1`,
-      [otherTravelerUserId]
-    );
+    const { rows: visitRows } = await testDb.pool.query(`SELECT * FROM verified_visits WHERE user_id = $1`, [
+      otherTravelerUserId,
+    ]);
     expect(visitRows).toHaveLength(0);
 
     // Traveler 2 replays the quiz (learning-only replay)
@@ -363,7 +348,7 @@ describe('Cultural Quizzes System (E2E & Concurrency)', () => {
     // Confirm totals still equal 25
     const { rows: replayTotals } = await testDb.pool.query(
       `SELECT explorer_xp FROM progression_totals WHERE user_id = $1`,
-      [otherTravelerUserId]
+      [otherTravelerUserId],
     );
     expect(Number(replayTotals[0].explorer_xp)).toBe(25);
   });

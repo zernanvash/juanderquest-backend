@@ -14,23 +14,17 @@ describe('Phase 0 & 1: QA Visibility & Evaluator Preview Mode', () => {
   const qaUserId = '22222222-2222-2222-2222-222222222222';
   const adminUserId = '33333333-3333-3333-3333-333333333333';
 
-  const tokenAdmin = jwt.sign(
-    { id: adminUserId, seed_id: 'qa-visibility-admin', role: 'admin' },
-    env.JWT_SECRET,
-    { expiresIn: '1h' }
-  );
+  const tokenAdmin = jwt.sign({ id: adminUserId, seed_id: 'qa-visibility-admin', role: 'admin' }, env.JWT_SECRET, {
+    expiresIn: '1h',
+  });
 
-  const tokenQA = jwt.sign(
-    { id: qaUserId, seed_id: 'qa-visibility-qa', role: 'qa' },
-    env.JWT_SECRET,
-    { expiresIn: '1h' }
-  );
+  const tokenQA = jwt.sign({ id: qaUserId, seed_id: 'qa-visibility-qa', role: 'qa' }, env.JWT_SECRET, {
+    expiresIn: '1h',
+  });
 
-  const tokenUser = jwt.sign(
-    { id: genuineUserId, seed_id: 'qa-visibility-user', role: 'user' },
-    env.JWT_SECRET,
-    { expiresIn: '1h' }
-  );
+  const tokenUser = jwt.sign({ id: genuineUserId, seed_id: 'qa-visibility-user', role: 'user' }, env.JWT_SECRET, {
+    expiresIn: '1h',
+  });
 
   const testSpot: Spot = {
     id: 'spot-preview-test-001',
@@ -42,7 +36,7 @@ describe('Phase 0 & 1: QA Visibility & Evaluator Preview Mode', () => {
     tags: ['hidden_gem'],
     municipality: 'Alaminos',
     address: 'Alaminos, Pangasinan',
-    gps_lat: 16.20,
+    gps_lat: 16.2,
     gps_lng: 120.01,
     price_level: 0,
     hours: {},
@@ -65,7 +59,7 @@ describe('Phase 0 & 1: QA Visibility & Evaluator Preview Mode', () => {
     description: 'Explore the test cove',
     category: 'eco',
     location_name: 'Alaminos Cove',
-    gps_lat: 16.20,
+    gps_lat: 16.2,
     gps_lng: 120.01,
     radius_meters: 100,
     base_reward_php: 50,
@@ -185,13 +179,20 @@ describe('Phase 0 & 1: QA Visibility & Evaluator Preview Mode', () => {
     });
 
     it('rejects preview feed cursors in public scope and under another identity', async () => {
-      const first = await request(app).get('/api/v1/feed?limit=1').auth(tokenQA, { type: 'bearer' }).set('x-include-test', 'true');
+      const first = await request(app)
+        .get('/api/v1/feed?limit=1')
+        .auth(tokenQA, { type: 'bearer' })
+        .set('x-include-test', 'true');
       expect(first.status).toBe(200);
       const cursor = first.body.data.cursor;
       expect(cursor).toBeTruthy();
       const publicPage = await request(app).get('/api/v1/feed').query({ cursor }).auth(tokenQA, { type: 'bearer' });
       expect(publicPage.status).toBe(400);
-      const other = await request(app).get('/api/v1/feed').query({ cursor }).auth(tokenAdmin, { type: 'bearer' }).set('x-include-test', 'true');
+      const other = await request(app)
+        .get('/api/v1/feed')
+        .query({ cursor })
+        .auth(tokenAdmin, { type: 'bearer' })
+        .set('x-include-test', 'true');
       expect(other.status).toBe(400);
     });
 
@@ -251,15 +252,13 @@ describe('Phase 0 & 1: QA Visibility & Evaluator Preview Mode', () => {
     });
 
     it('preserves quest coordinates and title for inactive quest submissions in GET /admin/submissions', async () => {
-      const res = await request(app)
-        .get('/api/v1/admin/submissions')
-        .set('Authorization', `Bearer ${tokenAdmin}`);
+      const res = await request(app).get('/api/v1/admin/submissions').set('Authorization', `Bearer ${tokenAdmin}`);
 
       expect(res.status).toBe(200);
       const testSub = res.body.data.find((s: any) => s.id === 'sub-preview-test-001');
       expect(testSub).toBeDefined();
       expect(testSub.quest_title).toBe('Preview Test Quest');
-      expect(testSub.target_lat).toBe(16.20);
+      expect(testSub.target_lat).toBe(16.2);
       expect(testSub.target_lng).toBe(120.01);
       expect(testSub.distance_meters).toBeLessThan(100); // 16.2001, 120.0101 is ~15 meters away
     });
@@ -276,9 +275,7 @@ describe('Phase 0 & 1: QA Visibility & Evaluator Preview Mode', () => {
     });
 
     it('rejects unauthenticated caller attempting QA mode with invalid passkey', async () => {
-      const res = await request(app)
-        .get('/api/v1/spots?include_test=true')
-        .set('x-qa-preview-token', 'wrong-passkey');
+      const res = await request(app).get('/api/v1/spots?include_test=true').set('x-qa-preview-token', 'wrong-passkey');
 
       expect(res.status).toBe(403);
       expect(res.body.error?.code).toBe('UNAUTHORIZED_QA_MODE');

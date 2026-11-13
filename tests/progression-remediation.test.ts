@@ -20,8 +20,12 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
   const travelerId = '11111111-1111-1111-1111-111111111111';
   const testUserId = '99999999-9999-9999-9999-999999999999';
 
-  const tokenAdmin = jwt.sign({ id: adminId, seed_id: 'progression-admin', role: 'admin' }, env.JWT_SECRET, { expiresIn: '1h' });
-  const tokenTraveler = jwt.sign({ id: travelerId, seed_id: 'progression-traveler', role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
+  const tokenAdmin = jwt.sign({ id: adminId, seed_id: 'progression-admin', role: 'admin' }, env.JWT_SECRET, {
+    expiresIn: '1h',
+  });
+  const tokenTraveler = jwt.sign({ id: travelerId, seed_id: 'progression-traveler', role: 'user' }, env.JWT_SECRET, {
+    expiresIn: '1h',
+  });
 
   beforeAll(async () => {
     db = await createTestDb();
@@ -82,7 +86,9 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
       expect(staleCompleted).toBe(false);
 
       // Verify event is still processing under new-worker
-      const { rows } = await db.pool.query('SELECT status, lease_owner, claim_token FROM outbox_events WHERE id = $1', [eventId]);
+      const { rows } = await db.pool.query('SELECT status, lease_owner, claim_token FROM outbox_events WHERE id = $1', [
+        eventId,
+      ]);
       expect(rows[0].status).toBe('processing');
       expect(rows[0].lease_owner).toBe(reclaimedEvent?.lease_owner);
       expect(rows[0].claim_token).toBe(reclaimedEvent?.claim_token);
@@ -92,7 +98,7 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
         eventId,
         reclaimedEvent!.lease_owner!,
         db.pool,
-        reclaimedEvent!.claim_token
+        reclaimedEvent!.claim_token,
       );
       expect(newCompleted).toBe(true);
     });
@@ -116,7 +122,7 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
             earned_at: new Date().toISOString(),
             is_test: false,
           },
-          client
+          client,
         );
         expect(origEvent).not.toBeNull();
 
@@ -136,8 +142,8 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
               is_test: false,
               reversal_of: origId,
             },
-            client
-          )
+            client,
+          ),
         ).rejects.toThrow('REVERSAL_DELTA_MISMATCH');
 
         // 2. Valid reversal with exact opposite delta (-50)
@@ -155,7 +161,7 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
             is_test: false,
             reversal_of: origId,
           },
-          client
+          client,
         );
         expect(validReversal).not.toBeNull();
 
@@ -175,8 +181,8 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
               is_test: false,
               reversal_of: origId,
             },
-            client
-          )
+            client,
+          ),
         ).rejects.toThrow();
       } finally {
         client.release();
@@ -200,8 +206,8 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
               earned_at: new Date().toISOString(),
               is_test: false,
             },
-            client
-          )
+            client,
+          ),
         ).rejects.toThrow('INVALID_EVENT_DELTA');
       } finally {
         client.release();
@@ -247,17 +253,16 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
             quest_id: 'quest-real-1',
             created_at: new Date().toISOString(),
           },
-          client
+          client,
         );
       } finally {
         client.release();
       }
 
       // Check that it was quarantined as unresolved scope mismatch
-      const { rows } = await db.pool.query(
-        'SELECT * FROM outbox_events WHERE event_key = $1',
-        [`submission_approval_unresolved_${subId}`]
-      );
+      const { rows } = await db.pool.query('SELECT * FROM outbox_events WHERE event_key = $1', [
+        `submission_approval_unresolved_${subId}`,
+      ]);
       expect(rows.length).toBe(1);
       const payload = typeof rows[0].payload === 'string' ? JSON.parse(rows[0].payload) : rows[0].payload;
       expect(payload.reason).toBe('SCOPE_MISMATCH');
@@ -340,12 +345,18 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
               evidence_version: 'v1',
               is_test: false,
             },
-            client
+            client,
           );
         }
 
         // Process milestone evaluation
-        await (progressionService as any).evaluateAchievementsForUser(userId, 'spot-alaminos-1', 'test-sub-id', false, client);
+        await (progressionService as any).evaluateAchievementsForUser(
+          userId,
+          'spot-alaminos-1',
+          'test-sub-id',
+          false,
+          client,
+        );
 
         // Check awards: First Footstep should be awarded, but NOT Pangasinan Pioneer!
         const awards = await progressionRepo.getAwardsForUser(userId, false, client);
@@ -379,13 +390,19 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
               evidence_version: 'v1',
               is_test: false,
             },
-            client
+            client,
           );
           diffIdx++;
         }
 
         // Re-evaluate achievements
-        await (progressionService as any).evaluateAchievementsForUser(userId, 'spot-bolinao-1', 'test-sub-id-2', false, client);
+        await (progressionService as any).evaluateAchievementsForUser(
+          userId,
+          'spot-bolinao-1',
+          'test-sub-id-2',
+          false,
+          client,
+        );
 
         // Now Pangasinan Pioneer MUST be awarded!
         const updatedAwards = await progressionRepo.getAwardsForUser(userId, false, client);
@@ -417,7 +434,7 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
         db.pool.query(`
           INSERT INTO reviewed_quest_spot_bindings (id, quest_id, spot_id, binding_version, status)
           VALUES ('${randomUUID()}', '${questId}', 'spot-alaminos-2', 'v2', 'active')
-        `)
+        `),
       ).rejects.toThrow();
 
       // 3. Deprecate first binding
@@ -440,7 +457,7 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
       // 6. Verify multiple deprecated rows exist without constraint violation
       const { rows } = await db.pool.query(
         'SELECT * FROM reviewed_quest_spot_bindings WHERE LOWER(quest_id) = LOWER($1) AND status = $2',
-        [questId, 'deprecated']
+        [questId, 'deprecated'],
       );
       expect(rows.length).toBe(2);
     });
@@ -461,7 +478,9 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
       expect(ev1!.claim_token).toBeDefined();
 
       // 2. Expire lease
-      await db.pool.query("UPDATE outbox_events SET lease_expires_at = '2020-01-01T00:00:00Z' WHERE id = $1", [eventId]);
+      await db.pool.query("UPDATE outbox_events SET lease_expires_at = '2020-01-01T00:00:00Z' WHERE id = $1", [
+        eventId,
+      ]);
 
       // 3. Worker A reclaims with same worker name
       const secondClaim = await progressionRepo.claimPendingOutboxEvents(10, 30, 'worker-alpha', db.pool);
@@ -471,11 +490,21 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
       expect(ev2!.claim_token).not.toBe(ev1!.claim_token);
 
       // 4. Stale invocation with first claim token fails
-      const staleCompleted = await progressionRepo.markOutboxCompleted(eventId, ev1!.lease_owner!, db.pool, ev1!.claim_token);
+      const staleCompleted = await progressionRepo.markOutboxCompleted(
+        eventId,
+        ev1!.lease_owner!,
+        db.pool,
+        ev1!.claim_token,
+      );
       expect(staleCompleted).toBe(false);
 
       // 5. Active invocation with second claim token succeeds
-      const activeCompleted = await progressionRepo.markOutboxCompleted(eventId, ev2!.lease_owner!, db.pool, ev2!.claim_token);
+      const activeCompleted = await progressionRepo.markOutboxCompleted(
+        eventId,
+        ev2!.lease_owner!,
+        db.pool,
+        ev2!.claim_token,
+      );
       expect(activeCompleted).toBe(true);
     });
   });
@@ -506,20 +535,25 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
 
       // Enqueue event as non-test (real)
       const outboxId = randomUUID();
-      await db.pool.query(`
+      await db.pool.query(
+        `
         INSERT INTO outbox_events (id, event_key, event_type, payload, status, next_attempt_at)
         VALUES ('${outboxId}', 'ob-esc-${outboxId}', 'submission_approved', $1, 'pending', NOW())
-      `, [JSON.stringify({
-        submission_id: subId,
-        user_id: uId,
-        quest_id: qId,
-        spot_id: sId,
-        binding_id: bId,
-        binding_version: 'v1',
-        occurred_at: new Date().toISOString(),
-        verified_at: new Date().toISOString(),
-        is_test: false,
-      })]);
+      `,
+        [
+          JSON.stringify({
+            submission_id: subId,
+            user_id: uId,
+            quest_id: qId,
+            spot_id: sId,
+            binding_id: bId,
+            binding_version: 'v1',
+            occurred_at: new Date().toISOString(),
+            verified_at: new Date().toISOString(),
+            is_test: false,
+          }),
+        ],
+      );
 
       // Before worker processes, user converts to test actor (scope change!)
       await db.pool.query('UPDATE users SET is_test = TRUE WHERE id = $1', [uId]);
@@ -554,16 +588,21 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
 
       // Enqueue with spoofed user_id in payload
       const outboxId = randomUUID();
-      await db.pool.query(`
+      await db.pool.query(
+        `
         INSERT INTO outbox_events (id, event_key, event_type, payload, status, next_attempt_at)
         VALUES ('${outboxId}', 'ob-mismatch-${outboxId}', 'submission_approved', $1, 'pending', NOW())
-      `, [JSON.stringify({
-        submission_id: subId,
-        user_id: randomUUID(), // Spoofed user ID!
-        quest_id: qId,
-        spot_id: 'spot-alaminos-1',
-        is_test: false,
-      })]);
+      `,
+        [
+          JSON.stringify({
+            submission_id: subId,
+            user_id: randomUUID(), // Spoofed user ID!
+            quest_id: qId,
+            spot_id: 'spot-alaminos-1',
+            is_test: false,
+          }),
+        ],
+      );
 
       await progressionService.processOutboxBatch(10, 'worker-mismatch');
 
@@ -587,24 +626,8 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
 
       const client = await db.pool.connect();
       try {
-        await progressionRepo.recordVerifiedVisit({
-          id: randomUUID(),
-          user_id: uId,
-          spot_id: sId,
-          municipality_id: 'alaminos_city',
-          source_submission_id: subId,
-          occurred_at: new Date().toISOString(),
-          verified_at: new Date().toISOString(),
-          evidence_version: 'v1',
-          is_test: false,
-        }, client);
-
-        // Revoke the visit
-        await client.query("UPDATE verified_visits SET revoked_at = NOW(), revocation_reason = 'Disputed' WHERE source_submission_id = $1", [subId]);
-
-        // Attempting to record visit again should throw VISIT_REVOKED
-        await expect(
-          progressionRepo.recordVerifiedVisit({
+        await progressionRepo.recordVerifiedVisit(
+          {
             id: randomUUID(),
             user_id: uId,
             spot_id: sId,
@@ -614,7 +637,32 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
             verified_at: new Date().toISOString(),
             evidence_version: 'v1',
             is_test: false,
-          }, client)
+          },
+          client,
+        );
+
+        // Revoke the visit
+        await client.query(
+          "UPDATE verified_visits SET revoked_at = NOW(), revocation_reason = 'Disputed' WHERE source_submission_id = $1",
+          [subId],
+        );
+
+        // Attempting to record visit again should throw VISIT_REVOKED
+        await expect(
+          progressionRepo.recordVerifiedVisit(
+            {
+              id: randomUUID(),
+              user_id: uId,
+              spot_id: sId,
+              municipality_id: 'alaminos_city',
+              source_submission_id: subId,
+              occurred_at: new Date().toISOString(),
+              verified_at: new Date().toISOString(),
+              evidence_version: 'v1',
+              is_test: false,
+            },
+            client,
+          ),
         ).rejects.toThrow('VISIT_REVOKED');
       } finally {
         client.release();
@@ -632,51 +680,60 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
 
       const client = await db.pool.connect();
       try {
-        const orig = await progressionRepo.recordProgressionEvent({
-          id: randomUUID(),
-          user_id: uId,
-          track: 'explorer',
-          delta: 50,
-          source_type: 'submission_approval',
-          source_id: 'sub-rev-1',
-          award_kind: 'xp',
-          rule_version: 'v1',
-          earned_at: new Date().toISOString(),
-          is_test: false,
-        }, client);
-
-        // Mismatched award_kind
-        await expect(
-          progressionRepo.recordProgressionEvent({
+        const orig = await progressionRepo.recordProgressionEvent(
+          {
             id: randomUUID(),
             user_id: uId,
             track: 'explorer',
-            delta: -50,
-            source_type: 'reversal',
+            delta: 50,
+            source_type: 'submission_approval',
             source_id: 'sub-rev-1',
-            award_kind: 'stamp', // Mismatched!
+            award_kind: 'xp',
             rule_version: 'v1',
-            reversal_of: orig!.id,
             earned_at: new Date().toISOString(),
             is_test: false,
-          }, client)
+          },
+          client,
+        );
+
+        // Mismatched award_kind
+        await expect(
+          progressionRepo.recordProgressionEvent(
+            {
+              id: randomUUID(),
+              user_id: uId,
+              track: 'explorer',
+              delta: -50,
+              source_type: 'reversal',
+              source_id: 'sub-rev-1',
+              award_kind: 'stamp', // Mismatched!
+              rule_version: 'v1',
+              reversal_of: orig!.id,
+              earned_at: new Date().toISOString(),
+              is_test: false,
+            },
+            client,
+          ),
         ).rejects.toThrow('REVERSAL_AWARD_KIND_MISMATCH');
 
         // Mismatched is_test
         await expect(
-          progressionRepo.recordProgressionEvent({
-            id: randomUUID(),
-            user_id: uId,
-            track: 'explorer',
-            delta: -50,
-            source_type: 'reversal',
-            source_id: 'sub-rev-1',
-            award_kind: 'xp',
-            rule_version: 'v1',
-            reversal_of: orig!.id,
-            earned_at: new Date().toISOString(),
-            is_test: true, // Mismatched!
-          }, client)
+          progressionRepo.recordProgressionEvent(
+            {
+              id: randomUUID(),
+              user_id: uId,
+              track: 'explorer',
+              delta: -50,
+              source_type: 'reversal',
+              source_id: 'sub-rev-1',
+              award_kind: 'xp',
+              rule_version: 'v1',
+              reversal_of: orig!.id,
+              earned_at: new Date().toISOString(),
+              is_test: true, // Mismatched!
+            },
+            client,
+          ),
         ).rejects.toThrow('REVERSAL_SCOPE_MISMATCH');
       } finally {
         client.release();
@@ -692,48 +749,57 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
 
       const client = await db.pool.connect();
       try {
-        const orig = await progressionRepo.recordProgressionEvent({
-          id: randomUUID(),
-          user_id: uId,
-          track: 'civic',
-          delta: 25,
-          source_type: 'governance_vote',
-          source_id: 'gov-1',
-          award_kind: 'xp',
-          rule_version: 'v1',
-          earned_at: new Date().toISOString(),
-          is_test: false,
-        }, client);
-
-        const rev1 = await progressionRepo.recordProgressionEvent({
-          id: randomUUID(),
-          user_id: uId,
-          track: 'civic',
-          delta: -25,
-          source_type: 'reversal',
-          source_id: 'gov-1',
-          award_kind: 'xp',
-          rule_version: 'v1',
-          reversal_of: orig!.id,
-          earned_at: new Date().toISOString(),
-          is_test: false,
-        }, client);
-
-        // Attempting to reverse rev1 (reversal of reversal) must throw
-        await expect(
-          progressionRepo.recordProgressionEvent({
+        const orig = await progressionRepo.recordProgressionEvent(
+          {
             id: randomUUID(),
             user_id: uId,
             track: 'civic',
             delta: 25,
+            source_type: 'governance_vote',
+            source_id: 'gov-1',
+            award_kind: 'xp',
+            rule_version: 'v1',
+            earned_at: new Date().toISOString(),
+            is_test: false,
+          },
+          client,
+        );
+
+        const rev1 = await progressionRepo.recordProgressionEvent(
+          {
+            id: randomUUID(),
+            user_id: uId,
+            track: 'civic',
+            delta: -25,
             source_type: 'reversal',
             source_id: 'gov-1',
             award_kind: 'xp',
             rule_version: 'v1',
-            reversal_of: rev1!.id,
+            reversal_of: orig!.id,
             earned_at: new Date().toISOString(),
             is_test: false,
-          }, client)
+          },
+          client,
+        );
+
+        // Attempting to reverse rev1 (reversal of reversal) must throw
+        await expect(
+          progressionRepo.recordProgressionEvent(
+            {
+              id: randomUUID(),
+              user_id: uId,
+              track: 'civic',
+              delta: 25,
+              source_type: 'reversal',
+              source_id: 'gov-1',
+              award_kind: 'xp',
+              rule_version: 'v1',
+              reversal_of: rev1!.id,
+              earned_at: new Date().toISOString(),
+              is_test: false,
+            },
+            client,
+          ),
         ).rejects.toThrow('REVERSAL_OF_REVERSAL_PROHIBITED');
       } finally {
         client.release();
@@ -766,7 +832,7 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
 
         const { rows: obRows } = await db.pool.query(
           "SELECT * FROM outbox_events WHERE payload->>'submission_id' = $1",
-          [subId]
+          [subId],
         );
         expect(obRows.length).toBe(0);
       } finally {
@@ -778,10 +844,12 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
       const uId = randomUUID();
       const subId = randomUUID();
       const malformedId = randomUUID();
-      await db.pool.query(`INSERT INTO outbox_events
+      await db.pool.query(
+        `INSERT INTO outbox_events
         (id, event_key, event_type, payload, status, next_attempt_at)
         VALUES ($1, $2, 'submission_approved_unresolved', '{}', 'pending', NOW())`,
-        [malformedId, `missing-submission-${malformedId}`]);
+        [malformedId, `missing-submission-${malformedId}`],
+      );
       await db.pool.query(`
         INSERT INTO users (id, seed_id, display_name, email, role)
         VALUES ('${uId}', 'seed-catch-${uId}', 'Catch User', '${uId}@test.ph', 'user')
@@ -796,10 +864,7 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
       expect(catchResult.enqueued).toBeGreaterThanOrEqual(1);
 
       // Verify outbox event now exists
-      const { rows } = await db.pool.query(
-        "SELECT * FROM outbox_events WHERE payload->>'submission_id' = $1",
-        [subId]
-      );
+      const { rows } = await db.pool.query("SELECT * FROM outbox_events WHERE payload->>'submission_id' = $1", [subId]);
       expect(rows.length).toBe(1);
     });
 
@@ -841,18 +906,21 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
 
       const client = await db.pool.connect();
       try {
-        const visit = await progressionRepo.recordVerifiedVisit({
-          id: randomUUID(),
-          user_id: uId,
-          spot_id: 'spot-alaminos-1',
-          binding_id: bindingId,
-          municipality_id: 'alaminos_city',
-          source_submission_id: subId,
-          occurred_at: new Date().toISOString(),
-          verified_at: new Date().toISOString(),
-          evidence_version: 'v1',
-          is_test: false,
-        }, client);
+        const visit = await progressionRepo.recordVerifiedVisit(
+          {
+            id: randomUUID(),
+            user_id: uId,
+            spot_id: 'spot-alaminos-1',
+            binding_id: bindingId,
+            municipality_id: 'alaminos_city',
+            source_submission_id: subId,
+            occurred_at: new Date().toISOString(),
+            verified_at: new Date().toISOString(),
+            evidence_version: 'v1',
+            is_test: false,
+          },
+          client,
+        );
 
         expect(visit.binding_id).toBe(bindingId);
 
@@ -873,23 +941,28 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
       const client = await db.pool.connect();
       try {
         // Award achievement
-        const award = await progressionRepo.awardAchievement({
-          id: randomUUID(),
-          user_id: uId,
-          achievement_id: 'first_footstep',
-          season: 'all_time',
-          source_evidence_id: randomUUID(),
-          awarded_at: new Date().toISOString(),
-          evidence_version: 'v1',
-          criteria_version: 'v1',
-          is_test: false,
-        }, client);
+        const award = await progressionRepo.awardAchievement(
+          {
+            id: randomUUID(),
+            user_id: uId,
+            achievement_id: 'first_footstep',
+            season: 'all_time',
+            source_evidence_id: randomUUID(),
+            awarded_at: new Date().toISOString(),
+            evidence_version: 'v1',
+            criteria_version: 'v1',
+            is_test: false,
+          },
+          client,
+        );
 
         expect(award).not.toBeNull();
         expect(award?.definition?.title).toBe('First Footstep');
 
         // Later definition edit in database (e.g. title changes to "Changed First Footstep")
-        await client.query("UPDATE achievement_definitions SET title = 'MODIFIED TITLE', description = 'MODIFIED DESC' WHERE id = 'first_footstep'");
+        await client.query(
+          "UPDATE achievement_definitions SET title = 'MODIFIED TITLE', description = 'MODIFIED DESC' WHERE id = 'first_footstep'",
+        );
 
         // Reading award for user must still return historical snapshot title, NOT the modified definition
         const awards = await progressionRepo.getAwardsForUser(uId, false, client);
@@ -898,7 +971,9 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
         expect(userAward?.definition?.description).not.toBe('MODIFIED DESC');
 
         // Restore original definition
-        await client.query("UPDATE achievement_definitions SET title = 'First Footstep', description = 'Verified your first physical destination visit in Pangasinan.' WHERE id = 'first_footstep'");
+        await client.query(
+          "UPDATE achievement_definitions SET title = 'First Footstep', description = 'Verified your first physical destination visit in Pangasinan.' WHERE id = 'first_footstep'",
+        );
       } finally {
         client.release();
       }
@@ -932,14 +1007,16 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
         `);
 
         // Delete 014 from schema_migrations to simulate an earlier 013 database that has not yet run 014
-        await upgradeDb.pool.query("DELETE FROM schema_migrations WHERE filename = '014_progression_hardening_and_retrofits.sql'");
+        await upgradeDb.pool.query(
+          "DELETE FROM schema_migrations WHERE filename = '014_progression_hardening_and_retrofits.sql'",
+        );
 
         // Run applyMigrations: normal migration runner detects 014 is missing from schema_migrations and applies it
         await applyMigrations(upgradeDb.pool);
 
         // 1. Verify schema_migrations contains 014
         const { rows: migRows } = await upgradeDb.pool.query(
-          "SELECT filename FROM schema_migrations WHERE filename = '014_progression_hardening_and_retrofits.sql'"
+          "SELECT filename FROM schema_migrations WHERE filename = '014_progression_hardening_and_retrofits.sql'",
         );
         expect(migRows.length).toBe(1);
 
@@ -955,18 +1032,18 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
           UPDATE progression_totals SET civic_stamps = 5000000000 WHERE user_id = '${legacyUserId}'
         `);
         const { rows: totalRows } = await upgradeDb.pool.query(
-          `SELECT civic_stamps FROM progression_totals WHERE user_id = '${legacyUserId}'`
+          `SELECT civic_stamps FROM progression_totals WHERE user_id = '${legacyUserId}'`,
         );
         expect(Number(totalRows[0].civic_stamps)).toBe(5000000000);
 
         // 4. Verify check constraint rejects out-of-bounds negative value
         await expect(
-          upgradeDb.pool.query(`UPDATE progression_totals SET civic_stamps = -1 WHERE user_id = '${legacyUserId}'`)
+          upgradeDb.pool.query(`UPDATE progression_totals SET civic_stamps = -1 WHERE user_id = '${legacyUserId}'`),
         ).rejects.toThrow();
 
         // 5. Verify pre-existing data was preserved
         const { rows: preserved } = await upgradeDb.pool.query(
-          `SELECT explorer_xp, civic_xp FROM progression_totals WHERE user_id = '${legacyUserId}'`
+          `SELECT explorer_xp, civic_xp FROM progression_totals WHERE user_id = '${legacyUserId}'`,
         );
         expect(Number(preserved[0].explorer_xp)).toBe(100);
         expect(Number(preserved[0].civic_xp)).toBe(50);
@@ -978,12 +1055,14 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
     it('migration 014 preflight check detects and aborts on out-of-bounds historical records', async () => {
       const mem = newDb();
       mem.registerLanguage('plpgsql', ({ code }) => () => {
-        const ifExistsMatch = code.match(/IF\s+EXISTS\s*\(\s*([\s\S]+?)\s*\)\s*THEN\s*RAISE\s+EXCEPTION\s+['"]([\s\S]+?)['"]/i);
+        const ifExistsMatch = code.match(
+          /IF\s+EXISTS\s*\(\s*([\s\S]+?)\s*\)\s*THEN\s*RAISE\s+EXCEPTION\s+['"]([\s\S]+?)['"]/i,
+        );
         if (ifExistsMatch) {
           const checkQuery = ifExistsMatch[1];
           const errorMsg = ifExistsMatch[2];
           const result = mem.public.query(checkQuery);
-          const rows = result ? (result.rows || (Array.isArray(result) ? result : [])) : [];
+          const rows = result ? result.rows || (Array.isArray(result) ? result : []) : [];
           if (rows.length > 0) {
             throw new Error(errorMsg);
           }
@@ -1004,8 +1083,13 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
         `);
 
         // Executing migration 014 preflight must fail with descriptive error
-        const mig014Sql = readFileSync(join(__dirname, '..', 'migrations', '014_progression_hardening_and_retrofits.sql'), 'utf8');
-        await expect(pool.query(mig014Sql)).rejects.toThrow('Migration 014 aborted: progression_totals contains values outside JavaScript safe integer range');
+        const mig014Sql = readFileSync(
+          join(__dirname, '..', 'migrations', '014_progression_hardening_and_retrofits.sql'),
+          'utf8',
+        );
+        await expect(pool.query(mig014Sql)).rejects.toThrow(
+          'Migration 014 aborted: progression_totals contains values outside JavaScript safe integer range',
+        );
       } finally {
         await pool.end();
       }
@@ -1029,15 +1113,30 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
       expect(noTokenRes).toBe(false);
 
       // 2. Wrong token: must return false
-      const wrongTokenRes = await progressionRepo.markOutboxCompleted(eventId, activeClaim!.lease_owner!, db.pool, randomUUID());
+      const wrongTokenRes = await progressionRepo.markOutboxCompleted(
+        eventId,
+        activeClaim!.lease_owner!,
+        db.pool,
+        randomUUID(),
+      );
       expect(wrongTokenRes).toBe(false);
 
       // 3. Wrong worker owner: must return false
-      const wrongOwnerRes = await progressionRepo.markOutboxCompleted(eventId, 'impostor-worker', db.pool, activeClaim!.claim_token);
+      const wrongOwnerRes = await progressionRepo.markOutboxCompleted(
+        eventId,
+        'impostor-worker',
+        db.pool,
+        activeClaim!.claim_token,
+      );
       expect(wrongOwnerRes).toBe(false);
 
       // 4. Exact owner AND token: succeeds
-      const legitRes = await progressionRepo.markOutboxCompleted(eventId, activeClaim!.lease_owner!, db.pool, activeClaim!.claim_token);
+      const legitRes = await progressionRepo.markOutboxCompleted(
+        eventId,
+        activeClaim!.lease_owner!,
+        db.pool,
+        activeClaim!.claim_token,
+      );
       expect(legitRes).toBe(true);
     });
 
@@ -1057,7 +1156,14 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
       expect(noToken).toBe(false);
 
       // Exact owner and token succeeds
-      const legit = await progressionRepo.markOutboxFailed(eventId, activeClaim!.lease_owner!, 'simulated error', 10, db.pool, activeClaim!.claim_token);
+      const legit = await progressionRepo.markOutboxFailed(
+        eventId,
+        activeClaim!.lease_owner!,
+        'simulated error',
+        10,
+        db.pool,
+        activeClaim!.claim_token,
+      );
       expect(legit).toBe(true);
     });
   });
@@ -1068,22 +1174,28 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
       const uId = randomUUID();
       await db.pool.query(`INSERT INTO users (id, seed_id, display_name, email, role, is_test)
         VALUES ('${uId}', 'seed-nb-${uId}', 'No Binding User', '${uId}@test.ph', 'user', false)`);
-      await db.pool.query(`INSERT INTO submissions (id, idempotency_key, user_id, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy, status, is_test)
+      await db.pool
+        .query(`INSERT INTO submissions (id, idempotency_key, user_id, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy, status, is_test)
         VALUES ('${subId}', 'sub-nb-${subId}', '${uId}', 'quest-real-1', 'MARKER_R_1', 16.2, 119.9, 5, 'approved', false)`);
 
       const outboxId = randomUUID();
-      await db.pool.query(`
+      await db.pool.query(
+        `
         INSERT INTO outbox_events (id, event_key, event_type, payload, status, next_attempt_at)
         VALUES ('${outboxId}', 'key-nb-${outboxId}', 'submission_approved', $1, 'pending', NOW())
-      `, [JSON.stringify({
-        submission_id: subId,
-        user_id: uId,
-        quest_id: 'quest-real-1',
-        spot_id: 'spot-alaminos-1',
-        municipality_id: 'alaminos_city',
-        occurred_at: new Date().toISOString(),
-        is_test: false,
-      })]);
+      `,
+        [
+          JSON.stringify({
+            submission_id: subId,
+            user_id: uId,
+            quest_id: 'quest-real-1',
+            spot_id: 'spot-alaminos-1',
+            municipality_id: 'alaminos_city',
+            occurred_at: new Date().toISOString(),
+            is_test: false,
+          }),
+        ],
+      );
 
       const result = await progressionService.processOutboxBatch(1, 'worker-scope-test');
       expect(result.failed).toBe(1);
@@ -1098,25 +1210,32 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
       const depBindingId = randomUUID();
       await db.pool.query(`INSERT INTO users (id, seed_id, display_name, email, role, is_test)
         VALUES ('${uId}', 'seed-dep-${uId}', 'Dep User', '${uId}@test.ph', 'user', false)`);
-      await db.pool.query(`INSERT INTO submissions (id, idempotency_key, user_id, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy, status, is_test)
+      await db.pool
+        .query(`INSERT INTO submissions (id, idempotency_key, user_id, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy, status, is_test)
         VALUES ('${subId}', 'sub-dep-${subId}', '${uId}', 'quest-real-1', 'MARKER_R_1', 16.2, 119.9, 5, 'approved', false)`);
-      await db.pool.query(`INSERT INTO reviewed_quest_spot_bindings (id, quest_id, spot_id, binding_version, status, is_test)
+      await db.pool
+        .query(`INSERT INTO reviewed_quest_spot_bindings (id, quest_id, spot_id, binding_version, status, is_test)
         VALUES ('${depBindingId}', 'quest-real-1', 'spot-alaminos-1', 'v1', 'deprecated', false)`);
 
       const outboxId = randomUUID();
-      await db.pool.query(`
+      await db.pool.query(
+        `
         INSERT INTO outbox_events (id, event_key, event_type, payload, status, next_attempt_at)
         VALUES ('${outboxId}', 'key-dep-${outboxId}', 'submission_approved', $1, 'pending', NOW())
-      `, [JSON.stringify({
-        submission_id: subId,
-        user_id: uId,
-        quest_id: 'quest-real-1',
-        spot_id: 'spot-alaminos-1',
-        binding_id: depBindingId,
-        municipality_id: 'alaminos_city',
-        occurred_at: new Date().toISOString(),
-        is_test: false,
-      })]);
+      `,
+        [
+          JSON.stringify({
+            submission_id: subId,
+            user_id: uId,
+            quest_id: 'quest-real-1',
+            spot_id: 'spot-alaminos-1',
+            binding_id: depBindingId,
+            municipality_id: 'alaminos_city',
+            occurred_at: new Date().toISOString(),
+            is_test: false,
+          }),
+        ],
+      );
 
       const result = await progressionService.processOutboxBatch(1, 'worker-dep-test');
       expect(result.failed).toBe(1);
@@ -1134,27 +1253,35 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
 
       await db.pool.query(`INSERT INTO users (id, seed_id, display_name, email, role, is_test)
         VALUES ('${uId}', 'seed-mix-${uId}', 'Mix User', '${uId}@test.ph', 'user', false)`);
-      await db.pool.query(`INSERT INTO quests (id, title, description, category, location_name, gps_lat, gps_lng, radius_meters, reward_points, marker_code, marker_image_url, is_test)
+      await db.pool
+        .query(`INSERT INTO quests (id, title, description, category, location_name, gps_lat, gps_lng, radius_meters, reward_points, marker_code, marker_image_url, is_test)
         VALUES ('${mixQuestId}', 'Mix Quest', 'Desc', 'eco', 'Alaminos', 16.2, 119.9, 100, 50, 'MK_MIX', '', false)`);
-      await db.pool.query(`INSERT INTO submissions (id, idempotency_key, user_id, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy, status, is_test)
+      await db.pool
+        .query(`INSERT INTO submissions (id, idempotency_key, user_id, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy, status, is_test)
         VALUES ('${subId}', 'sub-mix-${subId}', '${uId}', '${mixQuestId}', 'MK_MIX', 16.2, 119.9, 5, 'approved', false)`);
-      await db.pool.query(`INSERT INTO reviewed_quest_spot_bindings (id, quest_id, spot_id, binding_version, status, is_test)
+      await db.pool
+        .query(`INSERT INTO reviewed_quest_spot_bindings (id, quest_id, spot_id, binding_version, status, is_test)
         VALUES ('${mixedBindingId}', '${mixQuestId}', 'spot-alaminos-1', 'v1', 'active', true)`);
 
       const outboxId = randomUUID();
-      await db.pool.query(`
+      await db.pool.query(
+        `
         INSERT INTO outbox_events (id, event_key, event_type, payload, status, next_attempt_at)
         VALUES ('${outboxId}', 'key-mix-${outboxId}', 'submission_approved', $1, 'pending', NOW())
-      `, [JSON.stringify({
-        submission_id: subId,
-        user_id: uId,
-        quest_id: mixQuestId,
-        spot_id: 'spot-alaminos-1',
-        binding_id: mixedBindingId,
-        municipality_id: 'alaminos_city',
-        occurred_at: new Date().toISOString(),
-        is_test: false,
-      })]);
+      `,
+        [
+          JSON.stringify({
+            submission_id: subId,
+            user_id: uId,
+            quest_id: mixQuestId,
+            spot_id: 'spot-alaminos-1',
+            binding_id: mixedBindingId,
+            municipality_id: 'alaminos_city',
+            occurred_at: new Date().toISOString(),
+            is_test: false,
+          }),
+        ],
+      );
 
       const result = await progressionService.processOutboxBatch(1, 'worker-mix-test');
       expect(result.failed).toBe(1);
@@ -1177,18 +1304,21 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
       try {
         await c1.query('BEGIN');
         // c1 records progression event, acquiring user row lock
-        await progressionRepo.recordProgressionEvent({
-          id: randomUUID(),
-          user_id: uId,
-          track: 'explorer',
-          delta: 50,
-          source_type: 'submission_approval',
-          source_id: 'lock-test-1',
-          award_kind: 'xp',
-          rule_version: 'v1',
-          earned_at: new Date().toISOString(),
-          is_test: false,
-        }, c1);
+        await progressionRepo.recordProgressionEvent(
+          {
+            id: randomUUID(),
+            user_id: uId,
+            track: 'explorer',
+            delta: 50,
+            source_type: 'submission_approval',
+            source_id: 'lock-test-1',
+            award_kind: 'xp',
+            rule_version: 'v1',
+            earned_at: new Date().toISOString(),
+            is_test: false,
+          },
+          c1,
+        );
 
         await c1.query('COMMIT');
 
@@ -1225,59 +1355,85 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
             ADD CONSTRAINT uq_quest_binding_status UNIQUE (quest_id, status)`);
           await upgradeDb.pool.query('ALTER TABLE users ALTER COLUMN scout_reputation SET DEFAULT 100');
           await upgradeDb.pool.query("DELETE FROM municipalities WHERE id IN ('basista', 'binmaley')");
-          await upgradeDb.pool.query("DELETE FROM schema_migrations WHERE filename = '015_progression_legacy_013_upgrade.sql'");
+          await upgradeDb.pool.query(
+            "DELETE FROM schema_migrations WHERE filename = '015_progression_legacy_013_upgrade.sql'",
+          );
 
           const historicalUserId = randomUUID();
-          await upgradeDb.pool.query(`INSERT INTO users(id, seed_id, display_name, email, role)
+          await upgradeDb.pool.query(
+            `INSERT INTO users(id, seed_id, display_name, email, role)
             VALUES ($1, $2, 'Historical Account', $3, 'user')`,
-            [historicalUserId, `historical-${historicalUserId}`, `${historicalUserId}@test.ph`]);
+            [historicalUserId, `historical-${historicalUserId}`, `${historicalUserId}@test.ph`],
+          );
 
           await applyMigrations(upgradeDb.pool);
 
           const { rows: historicalUsers } = await upgradeDb.pool.query(
-            'SELECT scout_reputation FROM users WHERE id = $1', [historicalUserId]
+            'SELECT scout_reputation FROM users WHERE id = $1',
+            [historicalUserId],
           );
           expect(Number(historicalUsers[0].scout_reputation)).toBe(100);
 
           const { rows: oldBindingsConstraint } = await upgradeDb.pool.query(
             `SELECT conname FROM pg_constraint WHERE conname = 'uq_quest_binding_status'
-             AND conrelid = 'reviewed_quest_spot_bindings'::regclass`
+             AND conrelid = 'reviewed_quest_spot_bindings'::regclass`,
           );
           expect(oldBindingsConstraint).toHaveLength(0);
           const { rows: activeIndex } = await upgradeDb.pool.query(
             `SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()
              AND tablename = 'reviewed_quest_spot_bindings'
-             AND indexname = 'idx_unique_active_quest_binding'`
+             AND indexname = 'idx_unique_active_quest_binding'`,
           );
           expect(activeIndex).toHaveLength(1);
 
           const { rows: lguRows } = await upgradeDb.pool.query(
-            "SELECT COUNT(*)::int AS total FROM municipalities WHERE is_active = TRUE"
+            'SELECT COUNT(*)::int AS total FROM municipalities WHERE is_active = TRUE',
           );
           expect(Number(lguRows[0].total)).toBe(48);
 
           const userId = randomUUID();
-          await upgradeDb.pool.query(`INSERT INTO users(id, seed_id, display_name, email, role)
+          await upgradeDb.pool.query(
+            `INSERT INTO users(id, seed_id, display_name, email, role)
             VALUES ($1, $2, 'Legacy Upgrade', $3, 'user')`,
-            [userId, `legacy-${userId}`, `${userId}@test.ph`]);
-          const { rows: users } = await upgradeDb.pool.query(
-            'SELECT scout_reputation FROM users WHERE id = $1', [userId]
+            [userId, `legacy-${userId}`, `${userId}@test.ph`],
           );
+          const { rows: users } = await upgradeDb.pool.query('SELECT scout_reputation FROM users WHERE id = $1', [
+            userId,
+          ]);
           expect(Number(users[0].scout_reputation)).toBe(0);
 
           const client = await upgradeDb.pool.connect();
           try {
             const base = {
-              user_id: userId, track: 'explorer' as const, delta: 50,
-              source_type: 'submission_approval', source_id: `upgrade-${userId}`,
-              award_kind: 'xp', earned_at: new Date().toISOString(), is_test: false,
+              user_id: userId,
+              track: 'explorer' as const,
+              delta: 50,
+              source_type: 'submission_approval',
+              source_id: `upgrade-${userId}`,
+              award_kind: 'xp',
+              earned_at: new Date().toISOString(),
+              is_test: false,
             };
-            expect(await progressionRepo.recordProgressionEvent({
-              ...base, id: randomUUID(), rule_version: 'v1',
-            }, client)).not.toBeNull();
-            expect(await progressionRepo.recordProgressionEvent({
-              ...base, id: randomUUID(), rule_version: 'v2',
-            }, client)).toBeNull();
+            expect(
+              await progressionRepo.recordProgressionEvent(
+                {
+                  ...base,
+                  id: randomUUID(),
+                  rule_version: 'v1',
+                },
+                client,
+              ),
+            ).not.toBeNull();
+            expect(
+              await progressionRepo.recordProgressionEvent(
+                {
+                  ...base,
+                  id: randomUUID(),
+                  rule_version: 'v2',
+                },
+                client,
+              ),
+            ).toBeNull();
           } finally {
             client.release();
           }
@@ -1291,14 +1447,17 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
         for (let i = 0; i < 20; i++) {
           const eid = randomUUID();
           eventIds.push(eid);
-          await realDb.pool.query(`
+          await realDb.pool.query(
+            `
             INSERT INTO outbox_events (id, event_key, event_type, payload, status, next_attempt_at)
             VALUES ($1, $2, 'submission_approved_unresolved', '{}', 'pending', NOW())
-          `, [eid, `real-pg-concurrency-${eid}`]);
+          `,
+            [eid, `real-pg-concurrency-${eid}`],
+          );
         }
 
         const claimPromises = [1, 2, 3, 4, 5].map((wId) =>
-          progressionRepo.claimPendingOutboxEvents(5, 30, `real-worker-${wId}`, realDb.pool)
+          progressionRepo.claimPendingOutboxEvents(5, 30, `real-worker-${wId}`, realDb.pool),
         );
 
         const claimResults = await Promise.all(claimPromises);
@@ -1316,10 +1475,13 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
 
       it('enforces reclaim and rejects stale worker completion under real PostgreSQL', async () => {
         const eid = randomUUID();
-        await realDb.pool.query(`
+        await realDb.pool.query(
+          `
           INSERT INTO outbox_events (id, event_key, event_type, payload, status, next_attempt_at)
           VALUES ($1, $2, 'submission_approved_unresolved', '{}', 'pending', NOW())
-        `, [eid, `real-pg-fence-${eid}`]);
+        `,
+          [eid, `real-pg-fence-${eid}`],
+        );
 
         const claimed1 = await progressionRepo.claimPendingOutboxEvents(1, 30, 'worker-real-1', realDb.pool);
         expect(claimed1.length).toBe(1);
@@ -1327,17 +1489,27 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
 
         await realDb.pool.query(
           "UPDATE outbox_events SET lease_expires_at = NOW() - INTERVAL '10 seconds' WHERE id = $1",
-          [eid]
+          [eid],
         );
 
         const claimed2 = await progressionRepo.claimPendingOutboxEvents(1, 30, 'worker-real-2', realDb.pool);
         expect(claimed2.length).toBe(1);
         const w2Claim = claimed2[0];
 
-        const staleRes = await progressionRepo.markOutboxCompleted(eid, w1Claim.lease_owner!, realDb.pool, w1Claim.claim_token);
+        const staleRes = await progressionRepo.markOutboxCompleted(
+          eid,
+          w1Claim.lease_owner!,
+          realDb.pool,
+          w1Claim.claim_token,
+        );
         expect(staleRes).toBe(false);
 
-        const legitRes = await progressionRepo.markOutboxCompleted(eid, w2Claim.lease_owner!, realDb.pool, w2Claim.claim_token);
+        const legitRes = await progressionRepo.markOutboxCompleted(
+          eid,
+          w2Claim.lease_owner!,
+          realDb.pool,
+          w2Claim.claim_token,
+        );
         expect(legitRes).toBe(true);
 
         const { rows } = await realDb.pool.query('SELECT status, delivered_at FROM outbox_events WHERE id = $1', [eid]);
@@ -1347,28 +1519,34 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
 
       it('serializes concurrent writers and rebuilder under real PostgreSQL row-level locks', async () => {
         const uId = randomUUID();
-        await realDb.pool.query(`
+        await realDb.pool.query(
+          `
           INSERT INTO users (id, seed_id, display_name, email, role)
           VALUES ($1, $2, 'Real Concurrency User', $3, 'user')
-        `, [uId, `seed-real-${uId}`, `${uId}@test.ph`]);
+        `,
+          [uId, `seed-real-${uId}`, `${uId}@test.ph`],
+        );
 
         const c1 = await realDb.pool.connect();
         const c2 = await realDb.pool.connect();
 
         try {
           await c1.query('BEGIN');
-          await progressionRepo.recordProgressionEvent({
-            id: randomUUID(),
-            user_id: uId,
-            track: 'explorer',
-            delta: 50,
-            source_type: 'submission_approval',
-            source_id: `real-src-1-${uId}`,
-            award_kind: 'xp',
-            rule_version: 'v1',
-            earned_at: new Date().toISOString(),
-            is_test: false,
-          }, c1);
+          await progressionRepo.recordProgressionEvent(
+            {
+              id: randomUUID(),
+              user_id: uId,
+              track: 'explorer',
+              delta: 50,
+              source_type: 'submission_approval',
+              source_id: `real-src-1-${uId}`,
+              award_kind: 'xp',
+              rule_version: 'v1',
+              earned_at: new Date().toISOString(),
+              is_test: false,
+            },
+            c1,
+          );
 
           let rebuilderFinished = false;
           const rebuilderTask = (async () => {

@@ -93,7 +93,7 @@ export class CulturalQuizService {
   constructor(
     private readonly repo: CulturalQuizRepository,
     private readonly progressionRepo: ProgressionRepository,
-    private readonly pool?: Pool
+    private readonly pool?: Pool,
   ) {}
 
   private getPool(): Pool {
@@ -105,12 +105,7 @@ export class CulturalQuizService {
     const invitations: NearbyQuizInvitation[] = [];
 
     for (const item of list) {
-      const distance = computeHaversineMeters(
-        lat,
-        lng,
-        item.destination.gps_lat,
-        item.destination.gps_lng
-      );
+      const distance = computeHaversineMeters(lat, lng, item.destination.gps_lat, item.destination.gps_lng);
 
       // Offer invitation if traveler is within radius (or slight 50m buffer for GPS jitter)
       if (distance <= item.version.radius_meters + 50) {
@@ -149,7 +144,7 @@ export class CulturalQuizService {
     const pool = this.getPool();
     const { rows: spotRows } = await pool.query(
       `SELECT id, name, municipality, gps_lat, gps_lng FROM spots WHERE id = $1`,
-      [quiz.destination_id]
+      [quiz.destination_id],
     );
     if (!spotRows.length) return null;
     const dest = {
@@ -198,7 +193,9 @@ export class CulturalQuizService {
     };
   }
 
-  async startAttempt(params: StartAttemptParams): Promise<{ attempt: CulturalQuizAttempt; questions: CulturalQuizQuestion[] }> {
+  async startAttempt(
+    params: StartAttemptParams,
+  ): Promise<{ attempt: CulturalQuizAttempt; questions: CulturalQuizQuestion[] }> {
     const pool = this.getPool();
     const client = await pool.connect();
 
@@ -209,10 +206,9 @@ export class CulturalQuizService {
       await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [params.userId]);
 
       // 2. Fetch and lock quiz
-      const { rows: quizRows } = await client.query(
-        'SELECT * FROM cultural_quizzes WHERE id = $1 FOR UPDATE',
-        [params.quizId]
-      );
+      const { rows: quizRows } = await client.query('SELECT * FROM cultural_quizzes WHERE id = $1 FOR UPDATE', [
+        params.quizId,
+      ]);
       if (!quizRows.length) {
         throw new Error('QUIZ_NOT_FOUND: Cultural quiz does not exist.');
       }
@@ -227,10 +223,9 @@ export class CulturalQuizService {
       }
 
       // Check destination and validate Haversine radius
-      const { rows: destRows } = await client.query(
-        'SELECT id, gps_lat, gps_lng FROM spots WHERE id = $1',
-        [quiz.destination_id]
-      );
+      const { rows: destRows } = await client.query('SELECT id, gps_lat, gps_lng FROM spots WHERE id = $1', [
+        quiz.destination_id,
+      ]);
       if (!destRows.length) {
         throw new Error('DESTINATION_NOT_FOUND: Quiz destination is missing.');
       }
@@ -245,7 +240,7 @@ export class CulturalQuizService {
         `UPDATE cultural_quiz_attempts 
          SET status = 'expired', updated_at = NOW() 
          WHERE quiz_id = $1 AND user_id = $2 AND status = 'in_progress' AND expires_at < NOW()`,
-        [quiz.id, params.userId]
+        [quiz.id, params.userId],
       );
 
       // Check if there is still an unexpired active attempt
@@ -305,7 +300,7 @@ export class CulturalQuizService {
           expiresAt,
           distance,
           params.idempotencyKey || null,
-        ]
+        ],
       );
 
       const createdAttempt = (this.repo as any).mapAttempt(attemptRows[0]);
@@ -342,7 +337,10 @@ export class CulturalQuizService {
     }
   }
 
-  async getAttemptForUser(attemptId: string, userId: string): Promise<{ attempt: CulturalQuizAttempt; questions: CulturalQuizQuestion[] } | null> {
+  async getAttemptForUser(
+    attemptId: string,
+    userId: string,
+  ): Promise<{ attempt: CulturalQuizAttempt; questions: CulturalQuizQuestion[] } | null> {
     const attempt = await this.repo.findAttemptById(attemptId);
     if (!attempt || attempt.user_id !== userId) return null;
 
@@ -395,7 +393,7 @@ export class CulturalQuizService {
 
       const { rows: attemptRows } = await client.query(
         'SELECT * FROM cultural_quiz_attempts WHERE id = $1 FOR UPDATE',
-        [params.attemptId]
+        [params.attemptId],
       );
       if (!attemptRows.length) {
         throw new Error('ATTEMPT_NOT_FOUND: Attempt does not exist.');
@@ -420,7 +418,7 @@ export class CulturalQuizService {
       }
       const { rows: questionRows } = await client.query(
         'SELECT id, hint FROM cultural_quiz_questions WHERE id = $1 AND version_id = $2',
-        [params.questionId, attempt.version_id]
+        [params.questionId, attempt.version_id],
       );
       if (!questionRows.length) {
         throw new Error('INVALID_QUESTION_ID: Question is not part of this attempt.');
@@ -432,10 +430,10 @@ export class CulturalQuizService {
       }
 
       const updatedLifelines = [...usedLifelines, params.lifeline];
-      await client.query(
-        `UPDATE cultural_quiz_attempts SET lifelines_used = $1, updated_at = NOW() WHERE id = $2`,
-        [updatedLifelines, attempt.id]
-      );
+      await client.query(`UPDATE cultural_quiz_attempts SET lifelines_used = $1, updated_at = NOW() WHERE id = $2`, [
+        updatedLifelines,
+        attempt.id,
+      ]);
 
       const result: {
         lifeline: string;
@@ -453,7 +451,7 @@ export class CulturalQuizService {
       if (params.lifeline === 'fifty_fifty') {
         const { rows: optRows } = await client.query(
           `SELECT id, is_correct FROM cultural_quiz_options WHERE question_id = $1 ORDER BY ordinal ASC`,
-          [params.questionId]
+          [params.questionId],
         );
         // Always leave at least two options so 50:50 never reveals the answer (e.g. on true/false).
         const removable = Math.min(2, optRows.length - 2);
@@ -463,7 +461,8 @@ export class CulturalQuizService {
         const incorrectOpts = optRows.filter((opt) => !opt.is_correct).map((opt) => String(opt.id));
         result.eliminated_option_ids = incorrectOpts.slice(0, removable);
       } else if (params.lifeline === 'ask_local') {
-        result.hint = questionRows[0].hint || 'Local Elder tip: Look closely at Pangasinan coastal traditions and history!';
+        result.hint =
+          questionRows[0].hint || 'Local Elder tip: Look closely at Pangasinan coastal traditions and history!';
       } else if (params.lifeline === 'skip') {
         result.skipped = true;
       }
@@ -491,7 +490,7 @@ export class CulturalQuizService {
       // 2. Fetch and lock attempt row
       const { rows: attemptRows } = await client.query(
         'SELECT * FROM cultural_quiz_attempts WHERE id = $1 FOR UPDATE',
-        [params.attemptId]
+        [params.attemptId],
       );
       if (!attemptRows.length) {
         throw new Error('ATTEMPT_NOT_FOUND: Attempt does not exist.');
@@ -505,7 +504,11 @@ export class CulturalQuizService {
       if (attemptRow.status !== 'in_progress') {
         const answers = await this.repo.findAttemptAnswers(attemptRow.id, client);
         const questions = await this.repo.findQuestionsWithOptions(attemptRow.version_id, client);
-        const alreadyAwarded = await this.repo.hasCompletedRewardScope(params.userId, attemptRow.reward_scope_id, client);
+        const alreadyAwarded = await this.repo.hasCompletedRewardScope(
+          params.userId,
+          attemptRow.reward_scope_id,
+          client,
+        );
 
         const breakdown = questions.map((q) => {
           const ans = answers.find((a) => a.question_id === q.id);
@@ -535,10 +538,9 @@ export class CulturalQuizService {
 
       // Check expiry against server clock
       if (new Date(attemptRow.expires_at).getTime() < Date.now()) {
-        await client.query(
-          `UPDATE cultural_quiz_attempts SET status = 'expired', updated_at = NOW() WHERE id = $1`,
-          [attemptRow.id]
-        );
+        await client.query(`UPDATE cultural_quiz_attempts SET status = 'expired', updated_at = NOW() WHERE id = $1`, [
+          attemptRow.id,
+        ]);
         await client.query('COMMIT');
         throw new Error('ATTEMPT_EXPIRED: The time limit for this attempt has passed.');
       }
@@ -582,7 +584,8 @@ export class CulturalQuizService {
           // Skipped: no answer row (selected_option_id is NOT NULL) and no point.
         } else if (q.question_type === 'order' && q.answer_payload?.order) {
           const expectedOrder = q.answer_payload.order;
-          isCorrect = Array.isArray(submitted.selectedOrder) &&
+          isCorrect =
+            Array.isArray(submitted.selectedOrder) &&
             submitted.selectedOrder.length === expectedOrder.length &&
             submitted.selectedOrder.every((val, idx) => val === expectedOrder[idx]);
           if (q.options.length > 0) {
@@ -594,9 +597,9 @@ export class CulturalQuizService {
               submitted.selectedLocation.lat,
               submitted.selectedLocation.lng,
               Number(q.answer_payload.lat),
-              Number(q.answer_payload.lng)
+              Number(q.answer_payload.lng),
             );
-            const radius = Number(q.answer_payload.radius_meters || (Number(q.answer_payload.radius_km || 5) * 1000));
+            const radius = Number(q.answer_payload.radius_meters || Number(q.answer_payload.radius_km || 5) * 1000);
             isCorrect = dist <= radius;
           }
           if (q.options.length > 0) {
@@ -605,7 +608,9 @@ export class CulturalQuizService {
         } else {
           const selectedOpt = q.options.find((opt) => opt.id === submitted.selectedOptionId);
           if (!selectedOpt) {
-            throw new Error(`INVALID_OPTION_ID: Option '${submitted.selectedOptionId}' is not valid for question ${q.ordinal}.`);
+            throw new Error(
+              `INVALID_OPTION_ID: Option '${submitted.selectedOptionId}' is not valid for question ${q.ordinal}.`,
+            );
           }
           selectedOptId = selectedOpt.id;
           isCorrect = Boolean(selectedOpt.is_correct);
@@ -618,7 +623,7 @@ export class CulturalQuizService {
           await client.query(
             `INSERT INTO cultural_quiz_attempt_answers (attempt_id, question_id, selected_option_id, is_correct, answered_at)
              VALUES ($1, $2, $3, $4, NOW())`,
-            [attemptRow.id, q.id, selectedOptId, isCorrect]
+            [attemptRow.id, q.id, selectedOptId, isCorrect],
           );
         }
 
@@ -641,12 +646,16 @@ export class CulturalQuizService {
       let alreadyCompletedPrior = false;
 
       if (passed) {
-        alreadyCompletedPrior = await this.repo.hasCompletedRewardScope(params.userId, attemptRow.reward_scope_id, client);
+        alreadyCompletedPrior = await this.repo.hasCompletedRewardScope(
+          params.userId,
+          attemptRow.reward_scope_id,
+          client,
+        );
 
         if (!alreadyCompletedPrior) {
           const version = await this.repo.findVersionById(attemptRow.version_id, client);
           // Plan 65: a reigning quiz_arcade_xp_boost perk raises passed-quiz XP.
-          const quizBonus = await perkBonus(client, false, perk => perk.key === 'quiz_arcade_xp_boost');
+          const quizBonus = await perkBonus(client, false, (perk) => perk.key === 'quiz_arcade_xp_boost');
           xpToAward = Math.round((version?.xp_reward ?? 25) * (1 + quizBonus.value));
 
           // Record progression event
@@ -664,32 +673,31 @@ export class CulturalQuizService {
               earned_at: new Date().toISOString(),
               is_test: false,
             },
-            client
+            client,
           );
 
           if (recordedEvent) {
             // Update user progression totals atomically
-            await this.progressionRepo.updateProgressionTotals(
-              params.userId,
-              { explorerXp: xpToAward },
-              client
-            );
+            await this.progressionRepo.updateProgressionTotals(params.userId, { explorerXp: xpToAward }, client);
 
             // Record completion receipt
             await client.query(
               `INSERT INTO cultural_quiz_completions (user_id, reward_scope_id, progression_event_id, completed_at)
                VALUES ($1, $2, $3, NOW())
                ON CONFLICT (user_id, reward_scope_id) DO NOTHING`,
-              [params.userId, attemptRow.reward_scope_id, progressionEventId]
+              [params.userId, attemptRow.reward_scope_id, progressionEventId],
             );
 
             // P11: quiz_aced (score == max score, first completion only)
             if (score === breakdown.length) {
               await runIsolatedProducer(client, '[social:producer] Failed to record quiz_aced activity:', async () => {
-                const qzRes = await client.query(`SELECT v.title, q.is_test
+                const qzRes = await client.query(
+                  `SELECT v.title, q.is_test
                      FROM cultural_quizzes q
                      LEFT JOIN cultural_quiz_versions v ON v.quiz_id = q.id AND v.version = q.current_version
-                    WHERE q.id = $1`, [attemptRow.quiz_id]);
+                    WHERE q.id = $1`,
+                  [attemptRow.quiz_id],
+                );
                 const qzTitle = qzRes.rows[0]?.title || 'Cultural Quiz';
                 const qzIsTest = Boolean(qzRes.rows[0]?.is_test);
                 await recordActivity(client, {
@@ -720,7 +728,7 @@ export class CulturalQuizService {
              style_score = $5, streak_max = $6
          WHERE id = $4
          RETURNING *`,
-        [finalStatus, score, xpToAward, attemptRow.id, Number(params.styleScore || 0), Number(params.streakMax || 0)]
+        [finalStatus, score, xpToAward, attemptRow.id, Number(params.styleScore || 0), Number(params.streakMax || 0)],
       );
 
       const finalAttempt = (this.repo as any).mapAttempt(updatedAttemptRows[0]);
@@ -782,7 +790,7 @@ export class CulturalQuizService {
         `INSERT INTO cultural_quizzes (id, destination_id, reward_scope_id, status, current_version, created_by, is_test)
          VALUES ($1, $2, $3, 'draft', 1, $4, $5)
          RETURNING *`,
-        [quizId, params.destinationId, rewardScopeId, params.adminUserId, Boolean(params.isTest)]
+        [quizId, params.destinationId, rewardScopeId, params.adminUserId, Boolean(params.isTest)],
       );
 
       const { rows: vRows } = await client.query(
@@ -805,7 +813,7 @@ export class CulturalQuizService {
           params.adminUserId,
           params.hostLines ? JSON.stringify(params.hostLines) : null,
           params.theme || 'crt',
-        ]
+        ],
       );
 
       for (const q of params.questions) {
@@ -828,7 +836,7 @@ export class CulturalQuizService {
             q.hint || null,
             q.round || 'main',
             q.answerPayload ? JSON.stringify(q.answerPayload) : null,
-          ]
+          ],
         );
 
         for (const opt of q.options) {
@@ -836,7 +844,7 @@ export class CulturalQuizService {
           await client.query(
             `INSERT INTO cultural_quiz_options (id, question_id, ordinal, option_text, is_correct)
              VALUES ($1, $2, $3, $4, $5)`,
-            [optId, qId, opt.ordinal, opt.optionText, opt.isCorrect]
+            [optId, qId, opt.ordinal, opt.optionText, opt.isCorrect],
           );
         }
       }
@@ -871,10 +879,9 @@ export class CulturalQuizService {
     const questions = await this.repo.findQuestionsWithOptions(version.id);
 
     const pool = this.getPool();
-    const { rows } = await pool.query(
-      `SELECT id, name, municipality, gps_lat, gps_lng FROM spots WHERE id = $1`,
-      [quiz.destination_id]
-    );
+    const { rows } = await pool.query(`SELECT id, name, municipality, gps_lat, gps_lng FROM spots WHERE id = $1`, [
+      quiz.destination_id,
+    ]);
     if (!rows.length) return null;
 
     return {
@@ -891,7 +898,10 @@ export class CulturalQuizService {
     };
   }
 
-  async updateQuizDraft(quizId: string, params: CreateQuizDraftParams): Promise<{
+  async updateQuizDraft(
+    quizId: string,
+    params: CreateQuizDraftParams,
+  ): Promise<{
     quiz: CulturalQuiz;
     version: CulturalQuizVersion;
     destination: { id: string; name: string; municipality: string; gps_lat: number; gps_lng: number };
@@ -916,16 +926,17 @@ export class CulturalQuizService {
     try {
       await client.query('BEGIN');
 
-      const { rows: quizRows } = await client.query(
-        'SELECT * FROM cultural_quizzes WHERE id = $1 FOR UPDATE',
-        [quizId]
-      );
+      const { rows: quizRows } = await client.query('SELECT * FROM cultural_quizzes WHERE id = $1 FOR UPDATE', [
+        quizId,
+      ]);
       if (!quizRows.length) {
         throw new Error('QUIZ_NOT_FOUND: Cultural quiz does not exist.');
       }
       const quiz = quizRows[0];
       if (quiz.status !== 'draft') {
-        throw new Error('QUIZ_IMMUTABLE: Published quiz versions are immutable. Pause or archive this quiz, or create a new draft.');
+        throw new Error(
+          'QUIZ_IMMUTABLE: Published quiz versions are immutable. Pause or archive this quiz, or create a new draft.',
+        );
       }
 
       const version = await this.repo.findVersion(quiz.id, Number(quiz.current_version), client);
@@ -938,7 +949,7 @@ export class CulturalQuizService {
 
       await client.query(
         `UPDATE cultural_quizzes SET destination_id = $1, is_test = $2, updated_at = NOW() WHERE id = $3`,
-        [params.destinationId, params.isTest === undefined ? Boolean(quiz.is_test) : Boolean(params.isTest), quiz.id]
+        [params.destinationId, params.isTest === undefined ? Boolean(quiz.is_test) : Boolean(params.isTest), quiz.id],
       );
 
       await client.query(
@@ -957,9 +968,13 @@ export class CulturalQuizService {
           params.cooldownHours || version.cooldown_hours,
           params.adminUserId,
           version.id,
-          params.hostLines !== undefined ? JSON.stringify(params.hostLines) : (version.host_lines ? JSON.stringify(version.host_lines) : null),
+          params.hostLines !== undefined
+            ? JSON.stringify(params.hostLines)
+            : version.host_lines
+              ? JSON.stringify(version.host_lines)
+              : null,
           params.theme || version.theme || 'crt',
-        ]
+        ],
       );
 
       // Draft-only replacement: no attempts can exist for an unpublished quiz.
@@ -985,7 +1000,7 @@ export class CulturalQuizService {
             q.hint || null,
             q.round || 'main',
             q.answerPayload ? JSON.stringify(q.answerPayload) : null,
-          ]
+          ],
         );
 
         for (const opt of q.options) {
@@ -993,7 +1008,7 @@ export class CulturalQuizService {
           await client.query(
             `INSERT INTO cultural_quiz_options (id, question_id, ordinal, option_text, is_correct)
              VALUES ($1, $2, $3, $4, $5)`,
-            [optId, qId, opt.ordinal, opt.optionText, opt.isCorrect]
+            [optId, qId, opt.ordinal, opt.optionText, opt.isCorrect],
           );
         }
       }
@@ -1011,7 +1026,8 @@ export class CulturalQuizService {
     return detail;
   }
 
-  async publishQuiz(quizId: string): Promise<CulturalQuiz> {    const pool = this.getPool();
+  async publishQuiz(quizId: string): Promise<CulturalQuiz> {
+    const pool = this.getPool();
     const client = await pool.connect();
 
     try {
@@ -1037,14 +1053,11 @@ export class CulturalQuizService {
         }
       }
 
-      await client.query(
-        `UPDATE cultural_quiz_versions SET published_at = NOW() WHERE id = $1`,
-        [version.id]
-      );
+      await client.query(`UPDATE cultural_quiz_versions SET published_at = NOW() WHERE id = $1`, [version.id]);
 
       const { rows } = await client.query(
         `UPDATE cultural_quizzes SET status = 'published', updated_at = NOW() WHERE id = $1 RETURNING *`,
-        [quiz.id]
+        [quiz.id],
       );
 
       await client.query('COMMIT');
@@ -1062,7 +1075,7 @@ export class CulturalQuizService {
     const pool = this.getPool();
     const { rows } = await pool.query(
       `UPDATE cultural_quizzes SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
-      [status, quizId]
+      [status, quizId],
     );
     if (!rows.length) throw new Error('Cultural quiz not found.');
     const updated = await this.repo.findQuizById(quizId);
@@ -1074,14 +1087,11 @@ export class CulturalQuizService {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query(
-        `UPDATE cultural_quizzes SET status = 'archived', updated_at = NOW() WHERE id = $1`,
-        [quizId]
-      );
+      await client.query(`UPDATE cultural_quizzes SET status = 'archived', updated_at = NOW() WHERE id = $1`, [quizId]);
       // Invalidate active in-progress attempts
       await client.query(
         `UPDATE cultural_quiz_attempts SET status = 'abandoned', updated_at = NOW() WHERE quiz_id = $1 AND status = 'in_progress'`,
-        [quizId]
+        [quizId],
       );
       await client.query('COMMIT');
     } catch (err) {

@@ -21,10 +21,12 @@ export interface PlazaCheerHookInput {
 export async function handlePlazaCheer(pool: Pool | null, input: PlazaCheerHookInput) {
   if (!pool) return null;
   if (input.viewerId === input.activityOwnerId) return { completed: false, reason: 'self_content' as const };
-  return safeHook('[stamps] cheer mission failed', () => recordMissionEvent(pool, input.viewerId, 'cheer_post', {
-    now: input.now,
-    sourceKey: `cheer:${input.activityId}:${input.viewerId}`,
-  }));
+  return safeHook('[stamps] cheer mission failed', () =>
+    recordMissionEvent(pool, input.viewerId, 'cheer_post', {
+      now: input.now,
+      sourceKey: `cheer:${input.activityId}:${input.viewerId}`,
+    }),
+  );
 }
 
 export interface QuestStepHookInput {
@@ -84,8 +86,10 @@ export interface QotdAnsweredHookInput {
 
 export async function handleQotdAnswered(pool: Pool | null, input: QotdAnsweredHookInput) {
   if (!pool) return null;
-  return safeHook('[stamps] qotd mission failed', () => recordMissionEvent(pool, input.userId, 'qotd', {
-    now: input.now,
-    sourceKey: `qotd:${input.date}`,
-  }));
+  return safeHook('[stamps] qotd mission failed', () =>
+    recordMissionEvent(pool, input.userId, 'qotd', {
+      now: input.now,
+      sourceKey: `qotd:${input.date}`,
+    }),
+  );
 }

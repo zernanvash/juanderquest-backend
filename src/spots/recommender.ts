@@ -469,10 +469,7 @@ export function applyExploreDiversity(
       if (gemIdx !== -1) {
         const [gem] = pool.splice(gemIdx, 1);
         const gemReason = `Quiet Hidden Gem in ${gem.municipality}`;
-        if (
-          gem.crowd_status === 'quiet' &&
-          !gem.recommendation_reasons.includes(gemReason)
-        ) {
+        if (gem.crowd_status === 'quiet' && !gem.recommendation_reasons.includes(gemReason)) {
           gem.recommendation_reasons = [gemReason, ...gem.recommendation_reasons];
         }
         result.push(gem);
@@ -487,9 +484,7 @@ export function applyExploreDiversity(
         ? pool.some((c) => c.municipality !== prev1.municipality)
         : false;
     const hasDifferentCat =
-      prev1 && prev2 && prev1.category === prev2.category
-        ? pool.some((c) => c.category !== prev1.category)
-        : false;
+      prev1 && prev2 && prev1.category === prev2.category ? pool.some((c) => c.category !== prev1.category) : false;
 
     let bestIdx = 0;
     let bestScore = -Infinity;
@@ -511,8 +506,7 @@ export function applyExploreDiversity(
 
       // MMR sliding-window category penalty (last 2 cards)
       const catRepeats =
-        (prev1 && prev1.category === cand.category ? 1 : 0) +
-        (prev2 && prev2.category === cand.category ? 1 : 0);
+        (prev1 && prev1.category === cand.category ? 1 : 0) + (prev2 && prev2.category === cand.category ? 1 : 0);
       if (catRepeats >= 2 && hasDifferentCat) {
         adj *= 0.36;
       } else if (catRepeats === 1) {
@@ -552,7 +546,11 @@ export function clearExploreRankingCache(): void {
   exploreCache.clear();
 }
 
-function computeStateFingerprint(store: SpotStore, userId: string | undefined, homeTown: string | null | undefined): string {
+function computeStateFingerprint(
+  store: SpotStore,
+  userId: string | undefined,
+  homeTown: string | null | undefined,
+): string {
   const userSet = userId ? store.interactions.get(userId) : undefined;
   const userInteractionsSig = userSet ? [...userSet].sort().join(',') : '';
   const prefs = userId ? store.preferences.get(userId) : undefined;
@@ -641,11 +639,11 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
   // Only treat registered user IDs (or actors with stored preferences/interactions/follows) as authenticated for personal reasons
   const hasRegisteredUser = Boolean(
     q.userId &&
-      (db.findUserById(q.userId) ||
-        store.preferences.has(q.userId) ||
-        store.interactions.has(q.userId) ||
-        db.follows.some((f) => f.follower_id === q.userId) ||
-        db.submissions.some((s) => s.user_id === q.userId)),
+    (db.findUserById(q.userId) ||
+      store.preferences.has(q.userId) ||
+      store.interactions.has(q.userId) ||
+      db.follows.some((f) => f.follower_id === q.userId) ||
+      db.submissions.some((s) => s.user_id === q.userId)),
   );
   const profileUserId = hasRegisteredUser ? q.userId : undefined;
 
@@ -654,8 +652,9 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
     q.homeTown !== undefined
       ? q.homeTown
       : profileUserId
-      ? ((db.findUserById(profileUserId) as { home_municipality?: string | null } | undefined)?.home_municipality ?? null)
-      : null;
+        ? ((db.findUserById(profileUserId) as { home_municipality?: string | null } | undefined)?.home_municipality ??
+          null)
+        : null;
 
   const filterKey = JSON.stringify({
     search: (q.search || '').trim().toLowerCase(),
@@ -702,10 +701,7 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
   const tier3Centroid = tier3Town ? centroids.get(tier3Town.toLowerCase()) : undefined;
 
   const eligibleSpots = store.spots.filter(
-    (s) =>
-      s.status === 'published' &&
-      !s.recommendation_suppressed &&
-      (q.allowTest || !s.is_test),
+    (s) => s.status === 'published' && !s.recommendation_suppressed && (q.allowTest || !s.is_test),
   );
 
   const scored = eligibleSpots
@@ -714,9 +710,7 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
       const merit = spotMerits.get(s.id) ?? { activeLikes: 0, activeMeritPoints: 0 };
       const crowd = store.crowd(s, nowMs, bySpot);
       const liveDistance =
-        q.lat !== undefined && q.lng !== undefined
-          ? distanceKm(q.lat, q.lng, s.gps_lat, s.gps_lng)
-          : undefined;
+        q.lat !== undefined && q.lng !== undefined ? distanceKm(q.lat, q.lng, s.gps_lat, s.gps_lng) : undefined;
 
       // 1. Taste Score [0, 1]
       let tasteScore = 0.3;
@@ -741,12 +735,7 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
         const radiusKm = Math.max(1, q.radius || prefs?.radius_km || 25);
         proximityScore = Math.exp(-liveDistance / radiusKm);
       } else if (taste.lastActiveSpot) {
-        const anchorDist = distanceKm(
-          taste.lastActiveSpot.gps_lat,
-          taste.lastActiveSpot.gps_lng,
-          s.gps_lat,
-          s.gps_lng,
-        );
+        const anchorDist = distanceKm(taste.lastActiveSpot.gps_lat, taste.lastActiveSpot.gps_lng, s.gps_lat, s.gps_lng);
         proximityScore = Math.exp(-anchorDist / 30);
       } else if (tier3Town) {
         if (s.municipality.toLowerCase() === tier3Town.toLowerCase()) {
@@ -774,20 +763,21 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
       questAndSocial = Math.min(1, questAndSocial);
 
       // 4. Quality & Crowd Score [0, 1]
-      const trustBase = {
-        lgu_verified: 0.45,
-        editorial: 0.38,
-        community: 0.3,
-        open_data: 0.22,
-      }[s.trust_level] ?? 0.1;
+      const trustBase =
+        {
+          lgu_verified: 0.45,
+          editorial: 0.38,
+          community: 0.3,
+          open_data: 0.22,
+        }[s.trust_level] ?? 0.1;
       const crowdMod =
         crowd.crowd_status === 'quiet'
           ? 0.25
           : crowd.crowd_status === 'moderate'
-          ? 0.15
-          : crowd.crowd_status === 'estimated_busy'
-          ? -0.2
-          : 0.1;
+            ? 0.15
+            : crowd.crowd_status === 'estimated_busy'
+              ? -0.2
+              : 0.1;
       const trendNorm = Math.min(0.3, trendScore / 15);
       const ageDays = Math.max(0, (nowMs - Date.parse(s.created_at)) / 86_400_000);
       const freshnessBoost = ageDays <= 30 ? 0.05 * (1 - ageDays / 30) : 0;
@@ -797,12 +787,8 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
       const intentQuery = (q.intent || '').trim().toLowerCase();
       const intentMatch =
         intentQuery.length > 0 &&
-        [s.category, s.subcategory, ...s.tags, s.name].some((v) =>
-          v.toLowerCase().includes(intentQuery),
-        );
-      const intentOrTime = intentQuery.length > 0
-        ? (intentMatch ? 1.0 : 0.0)
-        : computeTimeOfDayBoost(s, currentHour);
+        [s.category, s.subcategory, ...s.tags, s.name].some((v) => v.toLowerCase().includes(intentQuery));
+      const intentOrTime = intentQuery.length > 0 ? (intentMatch ? 1.0 : 0.0) : computeTimeOfDayBoost(s, currentHour);
 
       // 6. Deterministic Daily Explore Jitter [0, 1]
       const jitter = dailyExploreJitter(actorKey, s.id, manilaDay);
@@ -823,8 +809,7 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
 
       // 7. Novelty, Merit Breakout & Completion Multiplier
       const isVisited =
-        taste.visitedSpotIds.has(s.id) ||
-        Boolean(s.quest_id && taste.completedQuestIds.has(s.quest_id));
+        taste.visitedSpotIds.has(s.id) || Boolean(s.quest_id && taste.completedQuestIds.has(s.quest_id));
       const isSaved = store.isSaved(q.userId || actorKey, s.id) || taste.savedSpotIds.has(s.id);
       const isLiked = store.isLiked(q.userId || actorKey, s.id) || taste.likedSpotIds.has(s.id);
       const views24h = taste.recentViewCounts24h.get(s.id) ?? 0;
@@ -832,9 +817,7 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
       // Community Merit Audience Expansion (subject to 14-day global exhaustion and <2 views viewer exhaustion)
       const isViewerExhaustedForMerit = isVisited || (views24h >= 2 && !isSaved && !isLiked);
       const hasActivePopularMerit =
-        !isViewerExhaustedForMerit &&
-        crowd.crowd_status !== 'estimated_busy' &&
-        merit.activeMeritPoints >= 4.0;
+        !isViewerExhaustedForMerit && crowd.crowd_status !== 'estimated_busy' && merit.activeMeritPoints >= 4.0;
       if (hasActivePopularMerit) {
         const meritBreakoutBoost = Math.min(0.24, 0.08 * Math.log(1 + merit.activeMeritPoints));
         baseScore += meritBreakoutBoost;
@@ -918,13 +901,10 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
     .filter(
       (s) =>
         (!q.search ||
-          `${s.name} ${s.description} ${s.tags.join(' ')}`
-            .toLowerCase()
-            .includes(q.search.toLowerCase())) &&
+          `${s.name} ${s.description} ${s.tags.join(' ')}`.toLowerCase().includes(q.search.toLowerCase())) &&
         (!q.categories?.length || q.categories.includes(s.category)) &&
         (!q.tags?.length || q.tags.some((t) => s.tags.includes(t))) &&
-        (!q.municipality ||
-          s.municipality.toLowerCase() === q.municipality.toLowerCase()) &&
+        (!q.municipality || s.municipality.toLowerCase() === q.municipality.toLowerCase()) &&
         (!q.hasQuest || Boolean(s.quest_id)) &&
         (s.distance_km === undefined || !q.radius || s.distance_km <= q.radius),
     );
@@ -938,22 +918,19 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
       return Date.parse(b.created_at) - Date.parse(a.created_at) || a.slug.localeCompare(b.slug);
     }
     if (sortMode === 'trending') {
-      return b.trend_score - a.trend_score || b.recommendation_score - a.recommendation_score || a.slug.localeCompare(b.slug);
+      return (
+        b.trend_score - a.trend_score || b.recommendation_score - a.recommendation_score || a.slug.localeCompare(b.slug)
+      );
     }
     return b.recommendation_score - a.recommendation_score || a.slug.localeCompare(b.slug);
   });
 
   // Apply MMR sliding-window diversity & 1-in-5 Hidden Gem slot on default 'recommended' sort
   const shouldDiversify =
-    sortMode === 'recommended' &&
-    !q.search &&
-    (!q.categories || q.categories.length !== 1) &&
-    !q.municipality;
+    sortMode === 'recommended' && !q.search && (!q.categories || q.categories.length !== 1) && !q.municipality;
 
   const enableSerendipitySlot = shouldDiversify && !q.intent;
-  const ranked = shouldDiversify
-    ? applyExploreDiversity(scored, taste, enableSerendipitySlot)
-    : scored;
+  const ranked = shouldDiversify ? applyExploreDiversity(scored, taste, enableSerendipitySlot) : scored;
 
   if (exploreCache.size >= 250) {
     const oldestKey = exploreCache.keys().next().value;
@@ -970,4 +947,3 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
 }
 
 export const scoreAndRankSpots = rankExploreSpots;
-

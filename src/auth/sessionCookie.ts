@@ -3,12 +3,16 @@ import { env } from '../config/env.js';
 
 const isPresentationMode = (): boolean => Boolean(env.JUANCHOICE_PRESENTATION_MODE);
 const isPublicPresentationProfile = (): boolean =>
-  isPresentationMode() && (env.JDQ_PRESENTATION_PROFILE === 'public' || Boolean(env.CORS_ORIGIN?.startsWith('https://')));
+  isPresentationMode() &&
+  (env.JDQ_PRESENTATION_PROFILE === 'public' || Boolean(env.CORS_ORIGIN?.startsWith('https://')));
 
 // The isolated demo needs its own cookie namespace so demo sessions cannot authenticate alpha.
-export const sessionCookieName = (): string => isPresentationMode()
-  ? 'jdq_presentation_session'
-  : env.NODE_ENV === 'production' ? '__Host-jdq_session' : 'jdq_session';
+export const sessionCookieName = (): string =>
+  isPresentationMode()
+    ? 'jdq_presentation_session'
+    : env.NODE_ENV === 'production'
+      ? '__Host-jdq_session'
+      : 'jdq_session';
 
 const isCookieSecure = (): boolean => {
   if (isPresentationMode()) {

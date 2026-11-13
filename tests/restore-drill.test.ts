@@ -36,9 +36,14 @@ describe('Phase 6: Isolated Backup & Restore Drill', () => {
     `);
 
     // 2. Export / Dump Phase: simulate logical pg_dump by extracting committed state
-    const migrationsDump = await primaryDb.pool.query('SELECT filename, applied_at FROM schema_migrations ORDER BY filename ASC');
+    const migrationsDump = await primaryDb.pool.query(
+      'SELECT filename, applied_at FROM schema_migrations ORDER BY filename ASC',
+    );
     const usersDump = await primaryDb.pool.query('SELECT * FROM users WHERE id IN ($1, $2)', [user1Id, user2Id]);
-    const followsDump = await primaryDb.pool.query('SELECT * FROM user_follows WHERE follower_id = $1 AND following_id = $2', [user1Id, user2Id]);
+    const followsDump = await primaryDb.pool.query(
+      'SELECT * FROM user_follows WHERE follower_id = $1 AND following_id = $2',
+      [user1Id, user2Id],
+    );
 
     expect(migrationsDump.rows.length).toBeGreaterThanOrEqual(19);
     expect(usersDump.rows.length).toBe(2);
@@ -48,19 +53,25 @@ describe('Phase 6: Isolated Backup & Restore Drill', () => {
     const restoreStartTime = Date.now();
 
     for (const u of usersDump.rows) {
-      await isolatedRestoreDb.pool.query(`
+      await isolatedRestoreDb.pool.query(
+        `
         INSERT INTO users (id, seed_id, display_name, email, handle, bio, is_public, role, demo_points, is_test)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         ON CONFLICT (id) DO NOTHING;
-      `, [u.id, u.seed_id, u.display_name, u.email, u.handle, u.bio, u.is_public, u.role, u.demo_points, u.is_test]);
+      `,
+        [u.id, u.seed_id, u.display_name, u.email, u.handle, u.bio, u.is_public, u.role, u.demo_points, u.is_test],
+      );
     }
 
     for (const f of followsDump.rows) {
-      await isolatedRestoreDb.pool.query(`
+      await isolatedRestoreDb.pool.query(
+        `
         INSERT INTO user_follows (follower_id, following_id, created_at)
         VALUES ($1, $2, $3)
         ON CONFLICT (follower_id, following_id) DO NOTHING;
-      `, [f.follower_id, f.following_id, f.created_at]);
+      `,
+        [f.follower_id, f.following_id, f.created_at],
+      );
     }
 
     const restoreDurationMs = Date.now() - restoreStartTime;

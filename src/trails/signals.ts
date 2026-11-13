@@ -3,22 +3,41 @@ import { DEFAULT_SIGNAL_WEIGHTS, type SpotSignalInput, type TrailSignal, type Tr
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 
-export function computeSpotSignals(spots: SpotSignalInput[], request: TrailSignalRequest = {}, weights = DEFAULT_SIGNAL_WEIGHTS): TrailSignal[] {
-  const maxPopularity = Math.max(1, ...spots.map(s => s.saves30d + s.interactions30d + s.questCompletions30d));
-  const wanted = new Set([...(request.themes ?? []), ...(request.goodFor ?? [])].map(s => s.toLowerCase()));
+export function computeSpotSignals(
+  spots: SpotSignalInput[],
+  request: TrailSignalRequest = {},
+  weights = DEFAULT_SIGNAL_WEIGHTS,
+): TrailSignal[] {
+  const maxPopularity = Math.max(1, ...spots.map((s) => s.saves30d + s.interactions30d + s.questCompletions30d));
+  const wanted = new Set([...(request.themes ?? []), ...(request.goodFor ?? [])].map((s) => s.toLowerCase()));
   const trends = request.trendThemes ?? [];
-  return spots.map(spot => {
-    const quality = (spot.approvedPhotoCount > 0 ? 0.4 : 0) + (['editorial', 'lgu', 'lgu_verified'].includes(spot.sourceType) ? 0.3 : 0) + (spot.description.trim().length >= 120 ? 0.3 : 0);
-    const popularity = Math.log1p(spot.saves30d + spot.interactions30d + spot.questCompletions30d) / Math.log1p(maxPopularity);
-    const terms = new Set([spot.category, ...spot.goodFor].map(s => s.toLowerCase()));
-    const trend = clamp01(trends.reduce((sum, t) => {
-      const matches = [...(t.categories ?? []), ...(t.good_for ?? []), ...(t.label ? [t.label] : [])].some(v => terms.has(v.toLowerCase()));
-      return sum + (matches ? clamp01(t.weight ?? 0) : 0);
-    }, 0));
-    const fit = wanted.size ? clamp01([...wanted].filter(v => terms.has(v)).length / wanted.size) : 0.5;
+  return spots.map((spot) => {
+    const quality =
+      (spot.approvedPhotoCount > 0 ? 0.4 : 0) +
+      (['editorial', 'lgu', 'lgu_verified'].includes(spot.sourceType) ? 0.3 : 0) +
+      (spot.description.trim().length >= 120 ? 0.3 : 0);
+    const popularity =
+      Math.log1p(spot.saves30d + spot.interactions30d + spot.questCompletions30d) / Math.log1p(maxPopularity);
+    const terms = new Set([spot.category, ...spot.goodFor].map((s) => s.toLowerCase()));
+    const trend = clamp01(
+      trends.reduce((sum, t) => {
+        const matches = [...(t.categories ?? []), ...(t.good_for ?? []), ...(t.label ? [t.label] : [])].some((v) =>
+          terms.has(v.toLowerCase()),
+        );
+        return sum + (matches ? clamp01(t.weight ?? 0) : 0);
+      }, 0),
+    );
+    const fit = wanted.size ? clamp01([...wanted].filter((v) => terms.has(v)).length / wanted.size) : 0.5;
     const novelty = spot.priorVisit ? 0.2 : 1;
     const components = { quality: clamp01(quality), popularity: clamp01(popularity), trend, fit, novelty };
-    return { spotId: spot.spotId, components, value: Object.entries(components).reduce((sum, [key, value]) => sum + value * (weights as Record<string, number>)[key], 0) };
+    return {
+      spotId: spot.spotId,
+      components,
+      value: Object.entries(components).reduce(
+        (sum, [key, value]) => sum + value * (weights as Record<string, number>)[key],
+        0,
+      ),
+    };
   });
 }
 
@@ -41,12 +60,14 @@ export async function loadTrailSignalInputs(
   const center = scope.center;
   const radiusKm = scope.radiusKm ?? 60;
   const latDelta = center ? radiusKm / 111.32 : null;
-  const longitudeScale = center ? Math.max(0.01, Math.abs(Math.cos(center.lat * Math.PI / 180))) : null;
+  const longitudeScale = center ? Math.max(0.01, Math.abs(Math.cos((center.lat * Math.PI) / 180))) : null;
   const lngDelta = center ? radiusKm / (111.32 * longitudeScale!) : null;
-  const normalizedMunicipalities = scope.municipalities?.map(value => value.trim().toLocaleLowerCase()).filter(Boolean) ?? [];
+  const normalizedMunicipalities =
+    scope.municipalities?.map((value) => value.trim().toLocaleLowerCase()).filter(Boolean) ?? [];
   const municipalities = normalizedMunicipalities.length ? normalizedMunicipalities : null;
-  const spotIds = scope.spotIds?.map(value => value.trim()).filter(Boolean) ?? null;
-  const result = await pool.query(`
+  const spotIds = scope.spotIds?.map((value) => value.trim()).filter(Boolean) ?? null;
+  const result = await pool.query(
+    `
     WITH RECURSIVE area_scope(id,name,level,path) AS (
       SELECT id,name,level,ARRAY[id]::text[] FROM admin_areas WHERE id=$2::text
       UNION ALL
@@ -132,35 +153,74 @@ export async function loadTrailSignalInputs(
       AND ($7::text[] IS NULL OR lower(s.municipality)=ANY($7::text[]))
       AND ($8::text[] IS NULL OR s.id=ANY($8::text[]))
     ORDER BY s.id
-  `, [userId ?? null, scope.areaId ?? null, center?.lat ?? null, center?.lng ?? null, latDelta, lngDelta, municipalities, spotIds, Boolean(scope.compact)]);
-  return result.rows.map(r => ({
-    spotId: String(r.spot_id), category: String(r.category), goodFor: asStringArray(r.good_for),
-    description: String(r.description ?? ''), sourceType: String(r.source_type ?? ''), approvedPhotoCount: Number(r.approved_photo_count),
-    saves30d: Number(r.saves_30d), interactions30d: Number(r.interactions_30d), questCompletions30d: Number(r.completions_30d), priorVisit: Boolean(r.prior_visit),
-    ...(scope.compact ? {} : {
-      title: String(r.name), bestTime: asStringArray(r.best_time),
-      lat: Number(r.gps_lat), lng: Number(r.gps_lng), municipality: String(r.municipality),
-    }),
+  `,
+    [
+      userId ?? null,
+      scope.areaId ?? null,
+      center?.lat ?? null,
+      center?.lng ?? null,
+      latDelta,
+      lngDelta,
+      municipalities,
+      spotIds,
+      Boolean(scope.compact),
+    ],
+  );
+  return result.rows.map((r) => ({
+    spotId: String(r.spot_id),
+    category: String(r.category),
+    goodFor: asStringArray(r.good_for),
+    description: String(r.description ?? ''),
+    sourceType: String(r.source_type ?? ''),
+    approvedPhotoCount: Number(r.approved_photo_count),
+    saves30d: Number(r.saves_30d),
+    interactions30d: Number(r.interactions_30d),
+    questCompletions30d: Number(r.completions_30d),
+    priorVisit: Boolean(r.prior_visit),
+    ...(scope.compact
+      ? {}
+      : {
+          title: String(r.name),
+          bestTime: asStringArray(r.best_time),
+          lat: Number(r.gps_lat),
+          lng: Number(r.gps_lng),
+          municipality: String(r.municipality),
+        }),
   }));
 }
 
 /** Hydrate only the bounded set selected for routing, preserving its score/order. */
 export async function hydrateTrailCandidates(pool: Pool | PoolClient, candidates: SpotSignalInput[]): Promise<void> {
   if (!candidates.length) return;
-  const result = await pool.query(`SELECT id,name,best_time,gps_lat,gps_lng,municipality FROM spots
+  const result = await pool.query(
+    `SELECT id,name,best_time,gps_lat,gps_lng,municipality FROM spots
     WHERE id=ANY($1::text[]) AND status='published' AND COALESCE(is_test,FALSE)=FALSE
-      AND gps_lat IS NOT NULL AND gps_lng IS NOT NULL`, [candidates.map(candidate => candidate.spotId)]);
-  const details = new Map(result.rows.map(row => [String(row.id), row]));
+      AND gps_lat IS NOT NULL AND gps_lng IS NOT NULL`,
+    [candidates.map((candidate) => candidate.spotId)],
+  );
+  const details = new Map(result.rows.map((row) => [String(row.id), row]));
   for (const candidate of candidates) {
     const row = details.get(candidate.spotId);
     if (!row) throw new Error('A selected trail candidate is no longer available. Retry generation.');
-    Object.assign(candidate, { title: String(row.name), bestTime: asStringArray(row.best_time),
-      lat: Number(row.gps_lat), lng: Number(row.gps_lng), municipality: String(row.municipality) });
+    Object.assign(candidate, {
+      title: String(row.name),
+      bestTime: asStringArray(row.best_time),
+      lat: Number(row.gps_lat),
+      lng: Number(row.gps_lng),
+      municipality: String(row.municipality),
+    });
   }
 }
 
 function asStringArray(value: unknown): string[] {
   if (Array.isArray(value)) return value.map(String);
-  if (typeof value === 'string') { try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed.map(String) : []; } catch { return []; } }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed.map(String) : [];
+    } catch {
+      return [];
+    }
+  }
   return [];
 }

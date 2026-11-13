@@ -1,12 +1,7 @@
 import { getPool } from '../db/pool.js';
 import { MJDQ_PER_JDQ } from '../governance/store.js';
 import type { Queryable } from './activity.js';
-import {
-  weekStartUtc,
-  nextWeekStartUtc,
-  weekStartDate,
-  weekId,
-} from './time.js';
+import { weekStartUtc, nextWeekStartUtc, weekStartDate, weekId } from './time.js';
 import { computeLeaderboard } from '../services/leaderboard.js';
 
 export interface WeeklyScoreRow {
@@ -135,10 +130,7 @@ export async function computeWeeklyScores(
  * Owner 2026-11-08: travelers do most quests away from home, so the town is
  * never guessed from where they played. Users without one have no entry.
  */
-export async function computeHomeTowns(
-  client: Queryable,
-  isTest?: boolean,
-): Promise<Map<string, string>> {
+export async function computeHomeTowns(client: Queryable, isTest?: boolean): Promise<Map<string, string>> {
   const res = await client.query(
     `SELECT id, home_municipality
        FROM users
@@ -268,10 +260,7 @@ export async function getBoard(input: GetBoardInput): Promise<GetBoardResult> {
   // Load viewer follows
   const followingSet = new Set<string>();
   if (viewerId) {
-    const fRes = await client.query(
-      'SELECT following_id FROM user_follows WHERE follower_id = $1',
-      [viewerId],
-    );
+    const fRes = await client.query('SELECT following_id FROM user_follows WHERE follower_id = $1', [viewerId]);
     for (const r of fRes.rows) {
       followingSet.add(r.following_id);
     }
@@ -354,7 +343,7 @@ export async function getBoard(input: GetBoardInput): Promise<GetBoardResult> {
   rankedAll = rankedAll.map((r) => ({ ...r, home_town: homeTowns.get(r.user_id) ?? null }));
 
   // Filter according to requested board
-  const viewerHomeTown: string | null = viewerId ? homeTowns.get(viewerId) ?? null : null;
+  const viewerHomeTown: string | null = viewerId ? (homeTowns.get(viewerId) ?? null) : null;
 
   let filteredRanked: (UserRankInput & { rank: number })[] = [];
   let townMeta: { name: string } | null = null;

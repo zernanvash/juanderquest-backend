@@ -54,7 +54,7 @@ function safeClosedResponse(
   now: Date,
   regionKey: string,
   reason: string,
-  notice?: { code: string; message: string } | null
+  notice?: { code: string; message: string } | null,
 ): PresentationOverviewResult {
   return {
     server_time: now.toISOString(),
@@ -135,7 +135,7 @@ async function queryPresentationOverview(regionKey: string): Promise<Presentatio
                 series_key, round_number, counts_for_streak
          FROM juanchoice_campaigns
          WHERE id = $1 AND is_test = FALSE`,
-        [configuredCampaignId]
+        [configuredCampaignId],
       )
     ).rows[0];
 
@@ -155,10 +155,9 @@ async function queryPresentationOverview(regionKey: string): Promise<Presentatio
     }
 
     // Fail closed if associated with any monthly schedule period
-    const periodCheck = await client.query(
-      `SELECT 1 FROM juanchoice_schedule_periods WHERE campaign_id = $1 LIMIT 1`,
-      [configuredCampaignId]
-    );
+    const periodCheck = await client.query(`SELECT 1 FROM juanchoice_schedule_periods WHERE campaign_id = $1 LIMIT 1`, [
+      configuredCampaignId,
+    ]);
     if ((periodCheck.rowCount ?? 0) > 0) {
       await client.query('COMMIT');
       return safeClosedResponse(now, regionKey, 'SCHEDULE_RELATION_NOT_PERMITTED');
@@ -210,7 +209,12 @@ async function queryPresentationOverview(regionKey: string): Promise<Presentatio
         code: 'PRESENTATION_ROUND_SCHEDULED',
         message: 'The presentation demo round is scheduled to open soon.',
       };
-    } else if (isPastWindow || campaignStatus === 'closed' || campaignStatus === 'finalized' || campaignStatus === 'archived') {
+    } else if (
+      isPastWindow ||
+      campaignStatus === 'closed' ||
+      campaignStatus === 'finalized' ||
+      campaignStatus === 'archived'
+    ) {
       view = 'between';
       // Query result snapshot if finalized
       const resultRow = (
@@ -218,7 +222,7 @@ async function queryPresentationOverview(regionKey: string): Promise<Presentatio
           `SELECT finalized_at, valid_ballots, co_winner_ids, standings
            FROM juanchoice_results
            WHERE campaign_id = $1`,
-          [configuredCampaignId]
+          [configuredCampaignId],
         )
       ).rows[0];
 
@@ -249,17 +253,12 @@ async function queryPresentationOverview(regionKey: string): Promise<Presentatio
     const isVotingActive = view === 'open' && (campaignStatus === 'scheduled' || campaignStatus === 'voting');
 
     const votingEnabled = Boolean(
-      isVotingActive &&
-      env.JUANCHOICE_ENABLED &&
-      env.JUANCHOICE_WRITES_ENABLED &&
-      env.PROGRESSION_ENABLED
+      isVotingActive && env.JUANCHOICE_ENABLED && env.JUANCHOICE_WRITES_ENABLED && env.PROGRESSION_ENABLED,
     );
 
     let availabilityReason: string | null = null;
     if (!isVotingActive) {
-      availabilityReason = isFutureWindow
-        ? 'ROUND_NOT_OPEN'
-        : 'ROUND_CLOSED';
+      availabilityReason = isFutureWindow ? 'ROUND_NOT_OPEN' : 'ROUND_CLOSED';
     } else if (!env.JUANCHOICE_ENABLED) {
       availabilityReason = 'FEATURE_DISABLED';
     } else if (!env.JUANCHOICE_WRITES_ENABLED) {

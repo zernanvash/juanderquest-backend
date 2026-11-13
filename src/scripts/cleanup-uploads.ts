@@ -7,7 +7,10 @@ export async function runCleanupScript(expirationHours = 24) {
   return cleanedCount;
 }
 
-if (process.argv[1] && (process.argv[1].endsWith('cleanup-uploads.ts') || process.argv[1].endsWith('cleanup-uploads.js'))) {
+if (
+  process.argv[1] &&
+  (process.argv[1].endsWith('cleanup-uploads.ts') || process.argv[1].endsWith('cleanup-uploads.js'))
+) {
   runCleanupScript()
     .then((count) => {
       process.exit(0);

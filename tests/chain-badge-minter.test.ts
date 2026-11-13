@@ -29,23 +29,39 @@ class FakeChain implements BadgeChain {
   revertNext = false;
   autoMine = true;
 
-  async latestBlock() { return this.head; }
-  async balanceWei() { return this.balance; }
-  async pendingNonce() { return this.nonce; }
-  async minedNonce() { return this.mined; }
-  async isEntitlementUsed(e: string) { return this.used.has(e); }
-  async receipt(hash: string) { return this.receipts.get(hash) ?? null; }
+  async latestBlock() {
+    return this.head;
+  }
+  async balanceWei() {
+    return this.balance;
+  }
+  async pendingNonce() {
+    return this.nonce;
+  }
+  async minedNonce() {
+    return this.mined;
+  }
+  async isEntitlementUsed(e: string) {
+    return this.used.has(e);
+  }
+  async receipt(hash: string) {
+    return this.receipts.get(hash) ?? null;
+  }
   async sendIssue(args: FakeChain['sent'][number]) {
     if (this.failSend) throw this.failSend;
     this.sent.push(args);
-    const hash = `0x${(this.sent.length).toString(16).padStart(64, '0')}`;
+    const hash = `0x${this.sent.length.toString(16).padStart(64, '0')}`;
     this.nonce += 1;
     if (this.autoMine) {
       this.mined += 1;
       const success = !this.revertNext;
       this.revertNext = false;
       if (success) this.used.add(args.entitlement);
-      this.receipts.set(hash, { success, blockNumber: this.head + 1, blockHash: `0x${'b'.repeat(63)}${this.sent.length}` });
+      this.receipts.set(hash, {
+        success,
+        blockNumber: this.head + 1,
+        blockHash: `0x${'b'.repeat(63)}${this.sent.length}`,
+      });
     }
     return hash;
   }
@@ -83,15 +99,31 @@ realPg('badge minter on disposable PostgreSQL (Plan 50)', () => {
     const id = `u-badge-${randomUUID().slice(0, 8)}`;
     await fixture.pool.query(
       `INSERT INTO users (id, seed_id, display_name, email, role, wallet_address, is_test) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [id, `seed-${id}`, 'Badge Traveler', `${id}@test.local`, opts.role ?? 'user', opts.wallet === undefined ? randomWallet() : opts.wallet, opts.isTest ?? false]);
-    db.users.push({ id, seed_id: `seed-${id}`, display_name: id, email: `${id}@test.local`, role: opts.role ?? 'user' } as any);
+      [
+        id,
+        `seed-${id}`,
+        'Badge Traveler',
+        `${id}@test.local`,
+        opts.role ?? 'user',
+        opts.wallet === undefined ? randomWallet() : opts.wallet,
+        opts.isTest ?? false,
+      ],
+    );
+    db.users.push({
+      id,
+      seed_id: `seed-${id}`,
+      display_name: id,
+      email: `${id}@test.local`,
+      role: opts.role ?? 'user',
+    } as any);
     return id;
   };
   const award = async (userId: string, achievement = 'first_footstep', isTest = false) => {
     const id = randomUUID();
     await fixture.pool.query(
       `INSERT INTO achievement_awards (id, user_id, achievement_id, season, is_test) VALUES ($1,$2,$3,'all_time',$4)`,
-      [id, userId, achievement, isTest]);
+      [id, userId, achievement, isTest],
+    );
     return id;
   };
   const command = async (awardId: string) =>
@@ -103,7 +135,9 @@ realPg('badge minter on disposable PostgreSQL (Plan 50)', () => {
     db.usersRepo.setPool(fixture.pool);
     chain = new FakeChain();
   }, 120_000);
-  afterEach(async () => { await fixture?.close(); }, 120_000);
+  afterEach(async () => {
+    await fixture?.close();
+  }, 120_000);
 
   it('queues only eligible awards: live, non-test, with a hex wallet', async () => {
     const ok = await award(await addUser({ wallet: WALLET }));
@@ -111,12 +145,19 @@ realPg('badge minter on disposable PostgreSQL (Plan 50)', () => {
     const testUser = await award(await addUser({ isTest: true }));
     const testAward = await award(await addUser(), 'first_footstep', true);
     const revoked = await award(await addUser());
-    await fixture.pool.query(`UPDATE achievement_awards SET revoked_at = now(), revocation_reason = 'test' WHERE id = $1`, [revoked]);
+    await fixture.pool.query(
+      `UPDATE achievement_awards SET revoked_at = now(), revocation_reason = 'test' WHERE id = $1`,
+      [revoked],
+    );
 
     const r = await runBadgeMintTick(fixture.pool, chain, OPTIONS);
     expect(r.enqueued).toBe(1);
     const cmd = await command(ok);
-    expect(cmd).toMatchObject({ operation: 'badge_claim', recipient_address: WALLET, entitlement_id: badgeEntitlement(ok) });
+    expect(cmd).toMatchObject({
+      operation: 'badge_claim',
+      recipient_address: WALLET,
+      entitlement_id: badgeEntitlement(ok),
+    });
     expect(String(cmd.expected_token_id)).toBe(badgeTokenId(ok));
     for (const id of [noWallet, testUser, testAward, revoked]) expect(await command(id)).toBeUndefined();
   });
@@ -126,7 +167,12 @@ realPg('badge minter on disposable PostgreSQL (Plan 50)', () => {
     const first = await runBadgeMintTick(fixture.pool, chain, OPTIONS);
     expect(first.sent).toBeTruthy();
     expect(chain.sent).toHaveLength(1);
-    expect(chain.sent[0]).toMatchObject({ recipient: WALLET, entitlement: badgeEntitlement(id), tokenId: badgeTokenId(id), nonce: 0 });
+    expect(chain.sent[0]).toMatchObject({
+      recipient: WALLET,
+      entitlement: badgeEntitlement(id),
+      tokenId: badgeTokenId(id),
+      nonce: 0,
+    });
     expect((await command(id)).status).toBe('submitted');
 
     await runBadgeMintTick(fixture.pool, chain, OPTIONS);
@@ -144,7 +190,10 @@ realPg('badge minter on disposable PostgreSQL (Plan 50)', () => {
     const id = await award(user);
     await runBadgeMintTick(fixture.pool, chain, OPTIONS);
     expect(await command(id)).toBeUndefined();
-    await fixture.pool.query(`UPDATE users SET wallet_address = $2 WHERE id = $1`, [user, '0x2222222222222222222222222222222222222222']);
+    await fixture.pool.query(`UPDATE users SET wallet_address = $2 WHERE id = $1`, [
+      user,
+      '0x2222222222222222222222222222222222222222',
+    ]);
     await runBadgeMintTick(fixture.pool, chain, OPTIONS);
     expect(chain.sent[0].recipient).toBe('0x2222222222222222222222222222222222222222');
   });
@@ -204,7 +253,10 @@ realPg('badge minter on disposable PostgreSQL (Plan 50)', () => {
     const id = await award(await addUser());
     chain.failSend = new Error('rpc down');
     await runBadgeMintTick(fixture.pool, chain, OPTIONS);
-    await fixture.pool.query(`UPDATE achievement_awards SET revoked_at = now(), revocation_reason = 'fraud' WHERE id = $1`, [id]);
+    await fixture.pool.query(
+      `UPDATE achievement_awards SET revoked_at = now(), revocation_reason = 'fraud' WHERE id = $1`,
+      [id],
+    );
     chain.failSend = null;
     await runBadgeMintTick(fixture.pool, chain, { ...OPTIONS, now: new Date(Date.now() + 10 * 60_000) });
     expect(chain.sent).toHaveLength(0);
@@ -232,7 +284,9 @@ realPg('badge minter on disposable PostgreSQL (Plan 50)', () => {
     const waiting = await addUser({ wallet: null });
     const tester = await addUser({ isTest: true });
     const adminId = await addUser({ role: 'admin', wallet: null });
-    await fixture.pool.query(`UPDATE users SET display_name = 'Maria Waiting', handle = 'maria' WHERE id = $1`, [waiting]);
+    await fixture.pool.query(`UPDATE users SET display_name = 'Maria Waiting', handle = 'maria' WHERE id = $1`, [
+      waiting,
+    ]);
     const mintedAward = await award(minted);
     const waitingAward = await award(waiting, 'pangasinan_pioneer');
     await award(tester);
@@ -241,15 +295,25 @@ realPg('badge minter on disposable PostgreSQL (Plan 50)', () => {
     chain.head += 5;
     await runBadgeMintTick(fixture.pool, chain, OPTIONS);
 
-    const adminAuth = { Authorization: `Bearer ${signSessionToken({ id: adminId, seed_id: `seed-${adminId}`, role: 'admin' })}` };
+    const adminAuth = {
+      Authorization: `Bearer ${signSessionToken({ id: adminId, seed_id: `seed-${adminId}`, role: 'admin' })}`,
+    };
     const all = await request(app).get('/api/v1/admin/chain/badges/ledger').set(adminAuth);
     expect(all.status).toBe(200);
     expect(all.body.data.total).toBe(2); // the test user's award is excluded
     expect(all.body.data.totals).toMatchObject({ on_chain: 1, pending_wallet: 1 });
     const byAward = Object.fromEntries(all.body.data.entries.map((e: any) => [e.awardId, e]));
-    expect(byAward[mintedAward]).toMatchObject({ state: 'on_chain', wallet: WALLET, tokenId: badgeTokenId(mintedAward) });
-    expect(byAward[waitingAward]).toMatchObject({ state: 'pending_wallet', wallet: null, title: 'Pangasinan Pioneer',
-      traveler: { id: waiting, name: 'Maria Waiting', handle: 'maria' } });
+    expect(byAward[mintedAward]).toMatchObject({
+      state: 'on_chain',
+      wallet: WALLET,
+      tokenId: badgeTokenId(mintedAward),
+    });
+    expect(byAward[waitingAward]).toMatchObject({
+      state: 'pending_wallet',
+      wallet: null,
+      title: 'Pangasinan Pioneer',
+      traveler: { id: waiting, name: 'Maria Waiting', handle: 'maria' },
+    });
 
     const pendingOnly = await request(app).get('/api/v1/admin/chain/badges/ledger?state=pending_wallet').set(adminAuth);
     expect(pendingOnly.body.data.entries.map((e: any) => e.awardId)).toEqual([waitingAward]);
@@ -257,8 +321,13 @@ realPg('badge minter on disposable PostgreSQL (Plan 50)', () => {
     const search = await request(app).get('/api/v1/admin/chain/badges/ledger?q=MARIA').set(adminAuth);
     expect(search.body.data.entries.map((e: any) => e.awardId)).toEqual([waitingAward]);
 
-    expect((await request(app).get('/api/v1/admin/chain/badges/ledger')
-      .set('Authorization', `Bearer ${signSessionToken({ id: minted, seed_id: `seed-${minted}`, role: 'user' })}`)).status).toBe(403);
+    expect(
+      (
+        await request(app)
+          .get('/api/v1/admin/chain/badges/ledger')
+          .set('Authorization', `Bearer ${signSessionToken({ id: minted, seed_id: `seed-${minted}`, role: 'user' })}`)
+      ).status,
+    ).toBe(403);
   });
 
   it('serves badge status, public metadata, an image and the admin queue', async () => {
@@ -273,14 +342,19 @@ realPg('badge minter on disposable PostgreSQL (Plan 50)', () => {
     await runBadgeMintTick(fixture.pool, chain, OPTIONS);
     const tokenId = badgeTokenId(id);
 
-    const me = await request(app).get('/api/v1/me/chain/badges')
+    const me = await request(app)
+      .get('/api/v1/me/chain/badges')
       .set('Authorization', `Bearer ${signSessionToken({ id: userId, seed_id: `seed-${userId}`, role: 'user' })}`);
     expect(me.status).toBe(200);
     expect(me.body.data.badges[0]).toMatchObject({ awardId: id, state: 'on_chain', tokenId, title: 'First Footstep' });
     expect(me.body.data.badges[0].tokenUrl).toContain(`/nft/0xc9b1cc4f980edf71daca182944ecb67e494b3e9b/${tokenId}`);
 
-    const pending = await request(app).get('/api/v1/me/chain/badges')
-      .set('Authorization', `Bearer ${signSessionToken({ id: noWalletUser, seed_id: `seed-${noWalletUser}`, role: 'user' })}`);
+    const pending = await request(app)
+      .get('/api/v1/me/chain/badges')
+      .set(
+        'Authorization',
+        `Bearer ${signSessionToken({ id: noWalletUser, seed_id: `seed-${noWalletUser}`, role: 'user' })}`,
+      );
     expect(pending.body.data.badges[0].state).toBe('pending_wallet');
 
     const meta = await request(app).get(`/api/v1/chain/badges/${tokenId}`);
@@ -295,9 +369,16 @@ realPg('badge minter on disposable PostgreSQL (Plan 50)', () => {
     expect((await request(app).get('/api/v1/chain/badges/123')).status).toBe(404);
     expect((await request(app).get('/api/v1/chain/badges/abc')).status).toBe(404);
 
-    const adminAuth = { Authorization: `Bearer ${signSessionToken({ id: adminId, seed_id: `seed-${adminId}`, role: 'admin' })}` };
-    expect((await request(app).get('/api/v1/admin/chain/badges')
-      .set('Authorization', `Bearer ${signSessionToken({ id: userId, seed_id: `seed-${userId}`, role: 'user' })}`)).status).toBe(403);
+    const adminAuth = {
+      Authorization: `Bearer ${signSessionToken({ id: adminId, seed_id: `seed-${adminId}`, role: 'admin' })}`,
+    };
+    expect(
+      (
+        await request(app)
+          .get('/api/v1/admin/chain/badges')
+          .set('Authorization', `Bearer ${signSessionToken({ id: userId, seed_id: `seed-${userId}`, role: 'user' })}`)
+      ).status,
+    ).toBe(403);
     const admin = await request(app).get('/api/v1/admin/chain/badges').set(adminAuth);
     expect(admin.status).toBe(200);
     expect(admin.body.data.counts).toMatchObject({ onChain: 1, waitingForWallet: 1, failed: 0 });

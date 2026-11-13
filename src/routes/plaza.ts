@@ -286,8 +286,17 @@ plazaRouter.get(
         cursor,
         limit,
       });
-      const cosmetics=await safeCosmeticsFor(result.items.map(item=>item.actor.user_id),pool);
-      result.items=result.items.map(item=>({...item,actor:{...item.actor,cosmetics:cosmetics.get(item.actor.user_id)??{banner:null,frame:null,title:null,nameColor:null}}}));
+      const cosmetics = await safeCosmeticsFor(
+        result.items.map((item) => item.actor.user_id),
+        pool,
+      );
+      result.items = result.items.map((item) => ({
+        ...item,
+        actor: {
+          ...item.actor,
+          cosmetics: cosmetics.get(item.actor.user_id) ?? { banner: null, frame: null, title: null, nameColor: null },
+        },
+      }));
 
       return res.status(200).json({
         success: true,
@@ -327,12 +336,7 @@ plazaRouter.get(
     }
 
     try {
-      const item = await getActivityById(
-        pool,
-        req.params.id,
-        req.user?.id ?? null,
-        isTest,
-      );
+      const item = await getActivityById(pool, req.params.id, req.user?.id ?? null, isTest);
 
       if (!item) {
         return res.status(404).json({
@@ -415,11 +419,18 @@ plazaRouter.get(
         limit,
         afterRank,
       });
-      const actors=[...result.entries,...result.podium,...result.rivals.above,...result.rivals.below];
-      const cosmetics=await safeCosmeticsFor(actors.map(item=>item.user_id||'').filter(Boolean),pool);
-      const addCosmetics=(item:any)=>({...item,cosmetics:item.user_id?cosmetics.get(item.user_id)??{banner:null,frame:null,title:null,nameColor:null}:undefined});
-      result.entries=result.entries.map(addCosmetics); result.podium=result.podium.map(addCosmetics);
-      result.rivals.above=result.rivals.above.map(addCosmetics); result.rivals.below=result.rivals.below.map(addCosmetics);
+      const actors = [...result.entries, ...result.podium, ...result.rivals.above, ...result.rivals.below];
+      const cosmetics = await safeCosmeticsFor(actors.map((item) => item.user_id || '').filter(Boolean), pool);
+      const addCosmetics = (item: any) => ({
+        ...item,
+        cosmetics: item.user_id
+          ? (cosmetics.get(item.user_id) ?? { banner: null, frame: null, title: null, nameColor: null })
+          : undefined,
+      });
+      result.entries = result.entries.map(addCosmetics);
+      result.podium = result.podium.map(addCosmetics);
+      result.rivals.above = result.rivals.above.map(addCosmetics);
+      result.rivals.below = result.rivals.below.map(addCosmetics);
 
       return res.status(200).json({
         success: true,
@@ -633,8 +644,17 @@ plazaRouter.get(
         limit,
         isTest,
       });
-      const cosmetics=await safeCosmeticsFor(result.items.map(item=>item.author.user_id),pool);
-      result.items=result.items.map(item=>({...item,author:{...item.author,cosmetics:cosmetics.get(item.author.user_id)??{banner:null,frame:null,title:null,nameColor:null}}}));
+      const cosmetics = await safeCosmeticsFor(
+        result.items.map((item) => item.author.user_id),
+        pool,
+      );
+      result.items = result.items.map((item) => ({
+        ...item,
+        author: {
+          ...item.author,
+          cosmetics: cosmetics.get(item.author.user_id) ?? { banner: null, frame: null, title: null, nameColor: null },
+        },
+      }));
 
       return res.status(200).json({
         success: true,
@@ -1078,17 +1098,12 @@ plazaRouter.delete(
 
     try {
       const { token } = req.body;
-      await pool.query(
-        'DELETE FROM user_devices WHERE user_id = $1 AND token = $2',
-        [req.user!.id, token],
-      );
+      await pool.query('DELETE FROM user_devices WHERE user_id = $1 AND token = $2', [req.user!.id, token]);
       return res.status(200).json({ success: true, data: { removed: true } });
     } catch (err) {
       return next(err);
     }
   },
 );
-
-
 
 forwardAsyncRouteErrors(plazaRouter);

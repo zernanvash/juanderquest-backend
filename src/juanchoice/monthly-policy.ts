@@ -1,21 +1,38 @@
 import { createHash } from 'crypto';
 
-export interface MonthlyTheme { name: string; categories: string[] }
+export interface MonthlyTheme {
+  name: string;
+  categories: string[];
+}
 export interface MonthlyCandidate {
-  id: string; municipality: string; category: string;
-  last_nominated_at: string | null; last_won_at: string | null;
-  recommendation_suppressed: boolean; crowd_status: 'unknown' | 'quiet' | 'moderate' | 'estimated_busy';
+  id: string;
+  municipality: string;
+  category: string;
+  last_nominated_at: string | null;
+  last_won_at: string | null;
+  recommendation_suppressed: boolean;
+  crowd_status: 'unknown' | 'quiet' | 'moderate' | 'estimated_busy';
 }
 
 export function localMonth(now: Date, timezone: string): string {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: timezone, year: 'numeric', month: '2-digit' }).formatToParts(now);
-  const value = (name: string) => parts.find(part => part.type === name)?.value;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(now);
+  const value = (name: string) => parts.find((part) => part.type === name)?.value;
   return `${value('year')}-${value('month')}-01`;
 }
 
 export function nextMonth(period: string): string {
   const [year, month] = period.split('-').map(Number);
-  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12 || !/^\d{4}-\d{2}-01$/.test(period)) {
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    month < 1 ||
+    month > 12 ||
+    !/^\d{4}-\d{2}-01$/.test(period)
+  ) {
     throw new Error('INVALID_MONTHLY_PERIOD');
   }
   return month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, '0')}-01`;
@@ -26,13 +43,26 @@ function zonedMidnightUtc(period: string, timezone: string): Date {
   if (!Number.isFinite(target)) throw new Error('INVALID_MONTHLY_PERIOD');
   let guess = target;
   const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
   });
   for (let attempt = 0; attempt < 4; attempt++) {
     const parts = formatter.formatToParts(new Date(guess));
-    const get = (type: string) => Number(parts.find(part => part.type === type)?.value);
-    const actualLocalAsUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
+    const get = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+    const actualLocalAsUtc = Date.UTC(
+      get('year'),
+      get('month') - 1,
+      get('day'),
+      get('hour'),
+      get('minute'),
+      get('second'),
+    );
     const difference = target - actualLocalAsUtc;
     guess += difference;
     if (difference === 0) return new Date(guess);
@@ -58,16 +88,25 @@ export function themeForPeriod(period: string, themes: MonthlyTheme[], effective
 }
 
 export function selectMonthlyCandidates(input: {
-  candidates: MonthlyCandidate[]; themes: MonthlyTheme[]; primaryTheme: MonthlyTheme;
-  period: string; minimum: number; target: number; cooldownMs: number; closesAt: Date;
+  candidates: MonthlyCandidate[];
+  themes: MonthlyTheme[];
+  primaryTheme: MonthlyTheme;
+  period: string;
+  minimum: number;
+  target: number;
+  cooldownMs: number;
+  closesAt: Date;
 }): { theme: MonthlyTheme; selected: MonthlyCandidate[] } | null {
-  const cycle = [input.primaryTheme, ...input.themes.filter(theme => theme.name !== input.primaryTheme.name)];
+  const cycle = [input.primaryTheme, ...input.themes.filter((theme) => theme.name !== input.primaryTheme.name)];
   for (const theme of cycle) {
-    const eligible = input.candidates.filter(candidate => {
+    const eligible = input.candidates.filter((candidate) => {
       const won = candidate.last_won_at ? Date.parse(candidate.last_won_at) : NaN;
-      return theme.categories.includes(candidate.category) && !candidate.recommendation_suppressed
-        && candidate.crowd_status !== 'estimated_busy'
-        && !(Number.isFinite(won) && won >= input.closesAt.getTime() - input.cooldownMs);
+      return (
+        theme.categories.includes(candidate.category) &&
+        !candidate.recommendation_suppressed &&
+        candidate.crowd_status !== 'estimated_busy' &&
+        !(Number.isFinite(won) && won >= input.closesAt.getTime() - input.cooldownMs)
+      );
     });
     const ranked = eligible.sort((a, b) => {
       const aTime = a.last_nominated_at ? Date.parse(a.last_nominated_at) : -Infinity;
@@ -80,7 +119,7 @@ export function selectMonthlyCandidates(input: {
     const byMunicipality = new Map<string, number>();
     for (const pass of [0, 1]) {
       for (const candidate of ranked) {
-        if (selected.some(item => item.id === candidate.id)) continue;
+        if (selected.some((item) => item.id === candidate.id)) continue;
         const count = byMunicipality.get(candidate.municipality) ?? 0;
         if (count !== pass || count >= 2) continue;
         selected.push(candidate);

@@ -98,7 +98,7 @@ describe('juanchoice capacity ballot admission pure helper unit tests', () => {
 
       let p2Resolved = false;
       let r2Release: (() => void) | undefined;
-      const p2 = controller.acquire().then(release => {
+      const p2 = controller.acquire().then((release) => {
         p2Resolved = true;
         r2Release = release;
       });
@@ -229,7 +229,7 @@ describe('juanchoice capacity ballot admission pure helper unit tests', () => {
       const r1 = await controller.acquire();
 
       const p2 = controller.acquire();
-      await new Promise(resolve => setTimeout(resolve, 15));
+      await new Promise((resolve) => setTimeout(resolve, 15));
       r1();
       const r2 = await p2;
       r2();

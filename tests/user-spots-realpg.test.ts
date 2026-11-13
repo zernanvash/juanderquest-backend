@@ -27,7 +27,7 @@ realPg('GET /api/v1/users/:handle/spots (Real PostgreSQL)', () => {
     await fixture.pool.query(
       `INSERT INTO users(id, seed_id, display_name, handle, email, role, is_public, is_test, demo_points)
        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [authorId, authorId, 'PG Author', handle, `${authorId}@example.test`, 'user', true, false, 100]
+      [authorId, authorId, 'PG Author', handle, `${authorId}@example.test`, 'user', true, false, 100],
     );
 
     // Insert spots into PostgreSQL:
@@ -38,7 +38,7 @@ realPg('GET /api/v1/users/:handle/spots (Real PostgreSQL)', () => {
        VALUES($1, $2, 'PG Scenic Beach', 'Beautiful white sand beach.', 'nature_outdoors', 'beach',
          'Bolinao', 'Patar, Bolinao', 16.3, 119.79, 'published', false, false, 'community', 'PG Author', $3,
          NOW() - INTERVAL '2 hours', NOW())`,
-      [spotId1, spotId1, authorId]
+      [spotId1, spotId1, authorId],
     );
 
     // 2. Published spot 2 (newer)
@@ -48,7 +48,7 @@ realPg('GET /api/v1/users/:handle/spots (Real PostgreSQL)', () => {
        VALUES($1, $2, 'PG Historic Lighthouse', 'Spanish-era historic lighthouse.', 'culture_heritage', 'heritage_site',
          'Bolinao', 'Cape Bolinao', 16.35, 119.79, 'published', false, false, 'community', $3, $4,
          NOW() - INTERVAL '1 hour', NOW())`,
-      [spotId2, spotId2, 'PG Author', authorId]
+      [spotId2, spotId2, 'PG Author', authorId],
     );
 
     // 3. Unpublished draft spot
@@ -58,7 +58,7 @@ realPg('GET /api/v1/users/:handle/spots (Real PostgreSQL)', () => {
        VALUES($1, $2, 'PG Draft Spot', 'Draft details.', 'eat_drink', 'cafe',
          'Lingayen', 'Capitol', 16.02, 120.23, 'needs_review', false, false, 'community', 'PG Author', $3,
          NOW(), NOW())`,
-      [draftSpotId, draftSpotId, authorId]
+      [draftSpotId, draftSpotId, authorId],
     );
 
     // 4. Test spot (is_test = true)
@@ -68,7 +68,7 @@ realPg('GET /api/v1/users/:handle/spots (Real PostgreSQL)', () => {
        VALUES($1, $2, 'PG Test Spot', 'Simulated test.', 'nature_outdoors', 'beach',
          'Dasol', 'Tambobong', 15.9, 119.78, 'published', true, false, 'community', 'PG Author', $3,
          NOW(), NOW())`,
-      [testSpotId, testSpotId, authorId]
+      [testSpotId, testSpotId, authorId],
     );
   });
 

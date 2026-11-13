@@ -4,8 +4,7 @@ import { Pool } from 'pg';
 import { createTestDb, type TestDbInstance } from '../src/db/testHarness';
 import { reconcileEconomy, summarizeEconomyReconciliation } from '../src/economy/reconcile';
 
-const realDockerPg = process.env.JDQ_REAL_PG_URL && process.platform === 'linux'
-  ? describe : describe.skip;
+const realDockerPg = process.env.JDQ_REAL_PG_URL && process.platform === 'linux' ? describe : describe.skip;
 
 realDockerPg('economy shadow backup/restore on isolated real PostgreSQL', () => {
   // The workspace assigns each implementer a separate disposable container.
@@ -18,8 +17,12 @@ realDockerPg('economy shadow backup/restore on isolated real PostgreSQL', () => 
   const databaseUser = 'jdq_test';
   let source: TestDbInstance;
 
-  beforeAll(async () => { source = await createTestDb(); }, 120_000);
-  afterAll(async () => { await source?.close(); }, 120_000);
+  beforeAll(async () => {
+    source = await createTestDb();
+  }, 120_000);
+  afterAll(async () => {
+    await source?.close();
+  }, 120_000);
 
   it('restores legacy classifications and transfer-derived pilot balances exactly', async () => {
     const sourceSchema = String((await source.pool.query('SELECT current_schema() AS name')).rows[0].name);
@@ -27,9 +30,12 @@ realDockerPg('economy shadow backup/restore on isolated real PostgreSQL', () => 
     const suffix = randomUUID().replace(/-/g, '');
     const targetName = `jdq_shadow_restore_${suffix}`;
     const archive = `/tmp/${targetName}.dump`;
-    const runDocker = (...args: string[]) => execFileSync('docker', ['exec', container, ...args], {
-      encoding: 'utf8', timeout: 120_000, stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const runDocker = (...args: string[]) =>
+      execFileSync('docker', ['exec', container, ...args], {
+        encoding: 'utf8',
+        timeout: 120_000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
 
     await source.pool.query(`
       INSERT INTO users(id,seed_id,display_name,email,role,demo_points)
@@ -39,7 +45,7 @@ realDockerPg('economy shadow backup/restore on isolated real PostgreSQL', () => 
     await source.pool.query(
       `UPDATE governance_snapshot
        SET data = jsonb_set(data, '{balances}', ($1)::jsonb) WHERE id = 1`,
-      ['{"shadow-restore-user":20550}']
+      ['{"shadow-restore-user":20550}'],
     );
     await source.pool.query(`
       INSERT INTO governance_ledger(id,transaction_group_id,type,account,amount_mjdq,
@@ -86,26 +92,41 @@ realDockerPg('economy shadow backup/restore on isolated real PostgreSQL', () => 
     // drill. On a restore failure it is retained for forensics, not dropped.
     const exists = await source.pool.query('SELECT 1 FROM pg_database WHERE datname = $1', [targetName]);
     if (exists.rowCount) throw new Error('SHADOW_RESTORE_TARGET_EXISTS');
-    runDocker('pg_dump', '-U', databaseUser, '-d', 'jdq_reliability_test',
-      '-n', sourceSchema, '-Fc', '-f', archive);
+    runDocker('pg_dump', '-U', databaseUser, '-d', 'jdq_reliability_test', '-n', sourceSchema, '-Fc', '-f', archive);
     runDocker('createdb', '-U', databaseUser, targetName);
     let verified = false;
     try {
-      runDocker('pg_restore', '-U', databaseUser, '-d', targetName,
-        '--no-owner', '--exit-on-error', '--single-transaction', archive);
+      runDocker(
+        'pg_restore',
+        '-U',
+        databaseUser,
+        '-d',
+        targetName,
+        '--no-owner',
+        '--exit-on-error',
+        '--single-transaction',
+        archive,
+      );
       const targetUrl = new URL(process.env.JDQ_REAL_PG_URL!);
       targetUrl.pathname = `/${targetName}`;
-      const restored = new Pool({ connectionString: targetUrl.toString(),
-        options: `-c search_path=${sourceSchema}`, max: 2 });
+      const restored = new Pool({
+        connectionString: targetUrl.toString(),
+        options: `-c search_path=${sourceSchema}`,
+        max: 2,
+      });
       try {
         const after = summarizeEconomyReconciliation(await reconcileEconomy(restored));
         expect(after).toEqual(before);
-        const sourceMigrations = await source.pool.query('SELECT filename,checksum FROM schema_migrations ORDER BY filename');
-        const restoredMigrations = await restored.query('SELECT filename,checksum FROM schema_migrations ORDER BY filename');
+        const sourceMigrations = await source.pool.query(
+          'SELECT filename,checksum FROM schema_migrations ORDER BY filename',
+        );
+        const restoredMigrations = await restored.query(
+          'SELECT filename,checksum FROM schema_migrations ORDER BY filename',
+        );
         expect(restoredMigrations.rows).toEqual(sourceMigrations.rows);
         const balance = await restored.query(
           `SELECT balance_minor FROM economic_accounts
-           WHERE id = 'sim:traveler:shadow-restore-user'`
+           WHERE id = 'sim:traveler:shadow-restore-user'`,
         );
         expect(String(balance.rows[0].balance_minor)).toBe('7');
         verified = true;

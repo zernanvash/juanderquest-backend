@@ -64,7 +64,12 @@ stampsRouter.post('/me/daily/claim', authenticateToken, claimLimiter, async (req
   if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
   const key = idempotencyKey(req);
   if (key !== null && (key.length < 8 || key.length > 100)) {
-    return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST', message: 'Idempotency-Key must be 8-100 characters.' } });
+    return res
+      .status(400)
+      .json({
+        success: false,
+        error: { code: 'INVALID_REQUEST', message: 'Idempotency-Key must be 8-100 characters.' },
+      });
   }
   try {
     const data = await claimDaily(pool, req.user!.id, { idempotencyKey: key });
@@ -80,7 +85,9 @@ stampsRouter.get('/me/stamps', authenticateToken, async (req: AuthRequest, res: 
   const cursorRaw = req.query.cursor;
   const cursor = cursorRaw === undefined ? null : Number(cursorRaw);
   if (cursor !== null && (!Number.isInteger(cursor) || cursor < 1)) {
-    return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST', message: 'cursor must be a positive integer.' } });
+    return res
+      .status(400)
+      .json({ success: false, error: { code: 'INVALID_REQUEST', message: 'cursor must be a positive integer.' } });
   }
   const limit = req.query.limit === undefined ? 20 : Number(req.query.limit);
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
@@ -101,11 +108,18 @@ stampsRouter.post('/me/stamps/spend', authenticateToken, spendLimiter, async (re
   if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
   const parsed = spendSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST', message: 'Provide item: streak_shield.' } });
+    return res
+      .status(400)
+      .json({ success: false, error: { code: 'INVALID_REQUEST', message: 'Provide item: streak_shield.' } });
   }
   const key = idempotencyKey(req);
   if (!key || key.length < 8 || key.length > 100) {
-    return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST', message: 'A valid Idempotency-Key (8-100 characters) is required.' } });
+    return res
+      .status(400)
+      .json({
+        success: false,
+        error: { code: 'INVALID_REQUEST', message: 'A valid Idempotency-Key (8-100 characters) is required.' },
+      });
   }
   try {
     const data = await spendStamps(pool, req.user!.id, parsed.data.item, key);
@@ -144,146 +158,215 @@ stampsRouter.post('/qotd/answer', authenticateToken, qotdLimiter, async (req: Au
   }
 });
 
-stampsRouter.get('/admin/stamps/missions', authenticateToken, requireAdmin, async (_req: AuthRequest, res: Response) => {
-  const pool = getPool();
-  if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
-  try {
-    return res.json({ success: true, data: await listDailyMissions(pool) });
-  } catch (error) {
-    return fail(res, error);
-  }
-});
+stampsRouter.get(
+  '/admin/stamps/missions',
+  authenticateToken,
+  requireAdmin,
+  async (_req: AuthRequest, res: Response) => {
+    const pool = getPool();
+    if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
+    try {
+      return res.json({ success: true, data: await listDailyMissions(pool) });
+    } catch (error) {
+      return fail(res, error);
+    }
+  },
+);
 
-const missionSchema = z.object({
-  id: z.string().min(3).max(80).regex(/^[a-z0-9-]+$/).optional(),
-  kind: z.string().min(2).max(50).regex(/^[a-z0-9_]+$/),
-  title: z.string().min(3).max(120),
-  stamps: z.number().int().min(1).max(100),
-  on_site: z.boolean(),
-  active: z.boolean().optional(),
-}).strict();
+const missionSchema = z
+  .object({
+    id: z
+      .string()
+      .min(3)
+      .max(80)
+      .regex(/^[a-z0-9-]+$/)
+      .optional(),
+    kind: z
+      .string()
+      .min(2)
+      .max(50)
+      .regex(/^[a-z0-9_]+$/),
+    title: z.string().min(3).max(120),
+    stamps: z.number().int().min(1).max(100),
+    on_site: z.boolean(),
+    active: z.boolean().optional(),
+  })
+  .strict();
 
-stampsRouter.post('/admin/stamps/missions', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
-  const pool = getPool();
-  if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
-  const parsed = missionSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST', message: 'Invalid mission payload.' } });
-  }
-  try {
-    return res.status(201).json({ success: true, data: await upsertDailyMission(pool, parsed.data) });
-  } catch (error) {
-    return fail(res, error);
-  }
-});
+stampsRouter.post(
+  '/admin/stamps/missions',
+  authenticateToken,
+  requireAdmin,
+  async (req: AuthRequest, res: Response) => {
+    const pool = getPool();
+    if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
+    const parsed = missionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ success: false, error: { code: 'INVALID_REQUEST', message: 'Invalid mission payload.' } });
+    }
+    try {
+      return res.status(201).json({ success: true, data: await upsertDailyMission(pool, parsed.data) });
+    } catch (error) {
+      return fail(res, error);
+    }
+  },
+);
 
 const missionPatchSchema = z.object({ active: z.boolean() }).strict();
 
-stampsRouter.patch('/admin/stamps/missions/:id', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
-  const pool = getPool();
-  if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
-  const parsed = missionPatchSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST', message: 'Provide active: true|false.' } });
-  }
-  try {
-    await setDailyMissionActive(pool, req.params.id, parsed.data.active);
-    return res.json({ success: true, data: { id: req.params.id, active: parsed.data.active } });
-  } catch (error) {
-    return fail(res, error);
-  }
-});
+stampsRouter.patch(
+  '/admin/stamps/missions/:id',
+  authenticateToken,
+  requireAdmin,
+  async (req: AuthRequest, res: Response) => {
+    const pool = getPool();
+    if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
+    const parsed = missionPatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ success: false, error: { code: 'INVALID_REQUEST', message: 'Provide active: true|false.' } });
+    }
+    try {
+      await setDailyMissionActive(pool, req.params.id, parsed.data.active);
+      return res.json({ success: true, data: { id: req.params.id, active: parsed.data.active } });
+    } catch (error) {
+      return fail(res, error);
+    }
+  },
+);
 
-stampsRouter.get('/admin/stamps/qotd/candidates', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
-  const pool = getPool();
-  if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
-  const limit = req.query.limit === undefined ? 50 : Number(req.query.limit);
-  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
-    return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST', message: 'limit must be 1-100.' } });
-  }
-  try {
-    return res.json({ success: true, data: await listQotdCandidates(pool, limit) });
-  } catch (error) {
-    return fail(res, error);
-  }
-});
+stampsRouter.get(
+  '/admin/stamps/qotd/candidates',
+  authenticateToken,
+  requireAdmin,
+  async (req: AuthRequest, res: Response) => {
+    const pool = getPool();
+    if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
+    const limit = req.query.limit === undefined ? 50 : Number(req.query.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      return res
+        .status(400)
+        .json({ success: false, error: { code: 'INVALID_REQUEST', message: 'limit must be 1-100.' } });
+    }
+    try {
+      return res.json({ success: true, data: await listQotdCandidates(pool, limit) });
+    } catch (error) {
+      return fail(res, error);
+    }
+  },
+);
 
 const qotdOptionSchema = z.object({
   option_text: z.string().trim().min(1).max(200),
   is_correct: z.boolean(),
 });
 
-const qotdCreateSchema = z.object({
-  question_text: z.string().trim().min(5).max(300),
-  explanation: z.string().trim().min(3).max(1000),
-  source_url: z.string().url().max(500).nullable().optional(),
-  options: z.array(qotdOptionSchema).length(4),
-}).strict();
+const qotdCreateSchema = z
+  .object({
+    question_text: z.string().trim().min(5).max(300),
+    explanation: z.string().trim().min(3).max(1000),
+    source_url: z.string().url().max(500).nullable().optional(),
+    options: z.array(qotdOptionSchema).length(4),
+  })
+  .strict();
 
-const qotdPatchSchema = z.object({
-  question_text: z.string().trim().min(5).max(300).optional(),
-  explanation: z.string().trim().min(3).max(1000).optional(),
-  source_url: z.string().url().max(500).nullable().optional(),
-  active: z.boolean().optional(),
-  options: z.array(qotdOptionSchema).length(4).optional(),
-}).strict().refine((value) => Object.keys(value).length > 0, {
-  message: 'Provide at least one field to update.',
-});
+const qotdPatchSchema = z
+  .object({
+    question_text: z.string().trim().min(5).max(300).optional(),
+    explanation: z.string().trim().min(3).max(1000).optional(),
+    source_url: z.string().url().max(500).nullable().optional(),
+    active: z.boolean().optional(),
+    options: z.array(qotdOptionSchema).length(4).optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: 'Provide at least one field to update.',
+  });
 
-stampsRouter.get('/admin/stamps/qotd/questions', authenticateToken, requireAdmin, async (_req: AuthRequest, res: Response) => {
-  const pool = getPool();
-  if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
-  try {
-    return res.json({ success: true, data: await listQotdPoolQuestions(pool) });
-  } catch (error) {
-    return fail(res, error);
-  }
-});
+stampsRouter.get(
+  '/admin/stamps/qotd/questions',
+  authenticateToken,
+  requireAdmin,
+  async (_req: AuthRequest, res: Response) => {
+    const pool = getPool();
+    if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
+    try {
+      return res.json({ success: true, data: await listQotdPoolQuestions(pool) });
+    } catch (error) {
+      return fail(res, error);
+    }
+  },
+);
 
-stampsRouter.post('/admin/stamps/qotd/questions', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
-  const pool = getPool();
-  if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
-  const parsed = qotdCreateSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'INVALID_REQUEST', message: 'Provide question_text, explanation and exactly four options with one correct.' },
-    });
-  }
-  try {
-    const question = await createQotdQuestion(pool, parsed.data, req.user!.id);
-    return res.status(201).json({ success: true, data: question });
-  } catch (error) {
-    return fail(res, error);
-  }
-});
+stampsRouter.post(
+  '/admin/stamps/qotd/questions',
+  authenticateToken,
+  requireAdmin,
+  async (req: AuthRequest, res: Response) => {
+    const pool = getPool();
+    if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
+    const parsed = qotdCreateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'Provide question_text, explanation and exactly four options with one correct.',
+        },
+      });
+    }
+    try {
+      const question = await createQotdQuestion(pool, parsed.data, req.user!.id);
+      return res.status(201).json({ success: true, data: question });
+    } catch (error) {
+      return fail(res, error);
+    }
+  },
+);
 
-stampsRouter.patch('/admin/stamps/qotd/questions/:id', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
-  const pool = getPool();
-  if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
-  const parsed = qotdPatchSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST', message: 'Invalid QotD question update.' } });
-  }
-  try {
-    const question = await updateQotdQuestion(pool, req.params.id, parsed.data);
-    return res.json({ success: true, data: question });
-  } catch (error) {
-    return fail(res, error);
-  }
-});
+stampsRouter.patch(
+  '/admin/stamps/qotd/questions/:id',
+  authenticateToken,
+  requireAdmin,
+  async (req: AuthRequest, res: Response) => {
+    const pool = getPool();
+    if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
+    const parsed = qotdPatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ success: false, error: { code: 'INVALID_REQUEST', message: 'Invalid QotD question update.' } });
+    }
+    try {
+      const question = await updateQotdQuestion(pool, req.params.id, parsed.data);
+      return res.json({ success: true, data: question });
+    } catch (error) {
+      return fail(res, error);
+    }
+  },
+);
 
-const scheduleSchema = z.object({
-  manila_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  question_id: z.string().min(1).max(120),
-}).strict();
+const scheduleSchema = z
+  .object({
+    manila_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    question_id: z.string().min(1).max(120),
+  })
+  .strict();
 
 stampsRouter.put('/admin/stamps/qotd', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
   const pool = getPool();
   if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
   const parsed = scheduleSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST', message: 'Provide manila_date (YYYY-MM-DD) and question_id.' } });
+    return res
+      .status(400)
+      .json({
+        success: false,
+        error: { code: 'INVALID_REQUEST', message: 'Provide manila_date (YYYY-MM-DD) and question_id.' },
+      });
   }
   try {
     await scheduleQuestionOfTheDay(pool, parsed.data.manila_date, parsed.data.question_id);

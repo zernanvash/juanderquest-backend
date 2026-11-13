@@ -21,11 +21,13 @@ realPg('read-only legacy shadow reconciliation on disposable PostgreSQL', () => 
     await fixture.pool.query(
       `UPDATE governance_snapshot SET data = jsonb_set(data, '{balances}', ($1)::jsonb)
        WHERE id = 1`,
-      ['{"shadow-exact":20000,"shadow-fraction":20550,"shadow-invalid":"20.5","shadow-huge":9007199254740993}']
+      ['{"shadow-exact":20000,"shadow-fraction":20550,"shadow-invalid":"20.5","shadow-huge":9007199254740993}'],
     );
   }, 120_000);
 
-  afterAll(async () => { await fixture?.close(); }, 120_000);
+  afterAll(async () => {
+    await fixture?.close();
+  }, 120_000);
 
   it('classifies exact, subpoint, missing, invalid and huge mismatch without rounding', async () => {
     const first = await reconcileEconomy(fixture.pool);
@@ -37,20 +39,23 @@ realPg('read-only legacy shadow reconciliation on disposable PostgreSQL', () => 
     expect(byId['shadow-missing']).toMatchObject({ classification: 'missing_snapshot', snapshotMjdq: null });
     expect(byId['shadow-invalid']).toMatchObject({ classification: 'invalid_snapshot', snapshotMjdq: '20.5' });
     expect(byId['shadow-huge']).toMatchObject({
-      classification: 'mismatch', snapshotMjdq: '9007199254740993',
+      classification: 'mismatch',
+      snapshotMjdq: '9007199254740993',
       differenceMjdq: '9007199254720993',
     });
     expect(first.pilotAccountDrift).toEqual([]);
     expect(first.unbalancedLegacyGroups).toEqual([]);
     const summary = summarizeEconomyReconciliation(first);
     expect(summary.legacyClassifications).toMatchObject({
-      exact: 1, fractional_remainder: 1, missing_snapshot: 1,
-      invalid_snapshot: 1, mismatch: 1,
+      exact: 1,
+      fractional_remainder: 1,
+      missing_snapshot: 1,
+      invalid_snapshot: 1,
+      mismatch: 1,
     });
     expect(summary.cutoverEligible).toBe(false);
     expect(summary.canonicalDigestSha256).toMatch(/^[a-f0-9]{64}$/);
-    expect(summarizeEconomyReconciliation(second).canonicalDigestSha256)
-      .toBe(summary.canonicalDigestSha256);
+    expect(summarizeEconomyReconciliation(second).canonicalDigestSha256).toBe(summary.canonicalDigestSha256);
   });
 
   it('does not modify any legacy or pilot accounting row', async () => {

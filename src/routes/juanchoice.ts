@@ -3,64 +3,163 @@ import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { env } from '../config/env.js';
 import { getPool } from '../db/pool.js';
-import { authenticateToken, optionalAuthenticateToken, requireAdmin, checkQAAuthorization, isAuthorizedQA, AuthRequest } from '../middleware/auth.js';
+import {
+  authenticateToken,
+  optionalAuthenticateToken,
+  requireAdmin,
+  checkQAAuthorization,
+  isAuthorizedQA,
+  AuthRequest,
+} from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
-import { addCandidate, castBallot, cancelCampaign, claimSupporterQuest, finalizeCampaign, getMyJuanChoiceCampaignState, getPublicSpotlight, getStandings, getSupporterQuest, JuanChoiceError, moderateCandidate, publishCampaign } from '../juanchoice/service.js';
-import { recordPromotionAssessment, getLatestPromotionAssessment, evaluateCandidatePromotionEligibility } from '../juanchoice/promotion-safety.js';
+import {
+  addCandidate,
+  castBallot,
+  cancelCampaign,
+  claimSupporterQuest,
+  finalizeCampaign,
+  getMyJuanChoiceCampaignState,
+  getPublicSpotlight,
+  getStandings,
+  getSupporterQuest,
+  JuanChoiceError,
+  moderateCandidate,
+  publishCampaign,
+} from '../juanchoice/service.js';
+import {
+  recordPromotionAssessment,
+  getLatestPromotionAssessment,
+  evaluateCandidatePromotionEligibility,
+} from '../juanchoice/promotion-safety.js';
 import { createMerchantOffer, createPromotionBudget, listActiveMerchantOffers } from '../juanchoice/partnerships.js';
 import { getMonthlyOverview } from '../juanchoice/monthly-overview.js';
 import { getPresentationOverview } from '../juanchoice/presentation-overview.js';
 import { createMonthlySchedule, reconcileMonthlySchedules } from '../juanchoice/monthly-service.js';
 import { getJuanChoiceSchedulerStatus } from '../jobs/juanchoice-scheduler.js';
 import { getActiveJuanChoicePerks } from '../juanchoice/perks.js';
-import { editCandidateManifesto, isPlatformStaff, liftSuspension, perkControlState, suspendLivePerk, updatePerkSetting } from '../juanchoice/perk-controls.js';
+import {
+  editCandidateManifesto,
+  isPlatformStaff,
+  liftSuspension,
+  perkControlState,
+  suspendLivePerk,
+  updatePerkSetting,
+} from '../juanchoice/perk-controls.js';
 
 export const juanChoiceRouter = Router();
 const uuid = z.string().uuid();
-const ballotBody = z.object({ candidate_id: uuid, expected_version: z.number().int().min(0),
-  /** Plan 65: ballot weight 1..5 (boosts cost points); omitted keeps the current weight. */
-  target_weight: z.number().int().min(1).max(5).optional() }).strict();
-const campaignBody = z.object({
-  slug: z.string().min(3).max(100).regex(/^[a-z0-9-]+$/),
-  region: z.string().min(2).max(100), theme: z.string().min(2).max(120),
-  opens_at: z.string().datetime({ offset: true }), closes_at: z.string().datetime({ offset: true }),
-  is_test: z.boolean().default(false),
-  series_key: z.string().min(3).max(80).regex(/^[a-z0-9-]+$/).nullable().optional(),
-  round_number: z.number().int().positive().nullable().optional(),
-  counts_for_streak: z.boolean().default(false),
-}).strict().superRefine((value, ctx) => {
-  if (value.counts_for_streak && (value.series_key !== 'pangasinan-primary' || !value.round_number)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Official streak rounds require pangasinan-primary and a round number.' });
-  }
-  if (!value.counts_for_streak && (value.series_key != null || value.round_number != null)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Series identity is reserved for official streak rounds.' });
-  }
-});
+const ballotBody = z
+  .object({
+    candidate_id: uuid,
+    expected_version: z.number().int().min(0),
+    /** Plan 65: ballot weight 1..5 (boosts cost points); omitted keeps the current weight. */
+    target_weight: z.number().int().min(1).max(5).optional(),
+  })
+  .strict();
+const campaignBody = z
+  .object({
+    slug: z
+      .string()
+      .min(3)
+      .max(100)
+      .regex(/^[a-z0-9-]+$/),
+    region: z.string().min(2).max(100),
+    theme: z.string().min(2).max(120),
+    opens_at: z.string().datetime({ offset: true }),
+    closes_at: z.string().datetime({ offset: true }),
+    is_test: z.boolean().default(false),
+    series_key: z
+      .string()
+      .min(3)
+      .max(80)
+      .regex(/^[a-z0-9-]+$/)
+      .nullable()
+      .optional(),
+    round_number: z.number().int().positive().nullable().optional(),
+    counts_for_streak: z.boolean().default(false),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.counts_for_streak && (value.series_key !== 'pangasinan-primary' || !value.round_number)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Official streak rounds require pangasinan-primary and a round number.',
+      });
+    }
+    if (!value.counts_for_streak && (value.series_key != null || value.round_number != null)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Series identity is reserved for official streak rounds.' });
+    }
+  });
 const candidateBody = z.object({ spot_id: z.string().min(1).max(150) }).strict();
-const merchantOfferBody = z.object({ merchant_id: z.string().min(1).max(150), voucher_id: z.string().min(1).max(150),
-  terms_snapshot: z.record(z.string(), z.unknown()).default({}), starts_at: z.string().datetime({ offset: true }),
-  ends_at: z.string().datetime({ offset: true }), is_test: z.boolean().default(false) }).strict();
-const promotionBudgetBody = z.object({ budget_mjdq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-  request_reference: z.string().trim().min(3).max(200), is_test: z.boolean().default(false) }).strict();
-const monthlyScheduleBody = z.object({
-  schedule_key:z.string().regex(/^[a-z0-9-]{3,80}$/),
-  region_key:z.literal('pangasinan'),display_region:z.literal('Pangasinan'),timezone:z.literal('Asia/Manila'),
-  enabled:z.boolean().default(false),effective_period:z.string().regex(/^\d{4}-(0[1-9]|1[0-2])-\d{2}$/),
-  cadence:z.enum(['monthly','weekly']).default('monthly'),
-  preparation_lead_days:z.number().int().min(1).max(28).default(7),
-  minimum_candidates:z.number().int().min(2).max(6).default(2),
-  target_candidates:z.number().int().min(2).max(6).default(4),
-  maximum_candidates:z.number().int().min(2).max(6).default(6),
-  themes:z.array(z.object({name:z.string().trim().min(3).max(100),
-    categories:z.array(z.enum(['eat_drink','nature_outdoors','culture_heritage','activities_wellness','shopping_local','stay'])).min(1).max(6)}).strict()).min(1).max(12),
-  policy_version:z.enum(['juanchoice-monthly-v1','juanchoice-weekly-v1']).default('juanchoice-monthly-v1'),
-  is_test:z.boolean().default(false),
-}).strict().refine(value=>value.minimum_candidates<=value.target_candidates&&value.target_candidates<=value.maximum_candidates);
+const merchantOfferBody = z
+  .object({
+    merchant_id: z.string().min(1).max(150),
+    voucher_id: z.string().min(1).max(150),
+    terms_snapshot: z.record(z.string(), z.unknown()).default({}),
+    starts_at: z.string().datetime({ offset: true }),
+    ends_at: z.string().datetime({ offset: true }),
+    is_test: z.boolean().default(false),
+  })
+  .strict();
+const promotionBudgetBody = z
+  .object({
+    budget_mjdq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    request_reference: z.string().trim().min(3).max(200),
+    is_test: z.boolean().default(false),
+  })
+  .strict();
+const monthlyScheduleBody = z
+  .object({
+    schedule_key: z.string().regex(/^[a-z0-9-]{3,80}$/),
+    region_key: z.literal('pangasinan'),
+    display_region: z.literal('Pangasinan'),
+    timezone: z.literal('Asia/Manila'),
+    enabled: z.boolean().default(false),
+    effective_period: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])-\d{2}$/),
+    cadence: z.enum(['monthly', 'weekly']).default('monthly'),
+    preparation_lead_days: z.number().int().min(1).max(28).default(7),
+    minimum_candidates: z.number().int().min(2).max(6).default(2),
+    target_candidates: z.number().int().min(2).max(6).default(4),
+    maximum_candidates: z.number().int().min(2).max(6).default(6),
+    themes: z
+      .array(
+        z
+          .object({
+            name: z.string().trim().min(3).max(100),
+            categories: z
+              .array(
+                z.enum([
+                  'eat_drink',
+                  'nature_outdoors',
+                  'culture_heritage',
+                  'activities_wellness',
+                  'shopping_local',
+                  'stay',
+                ]),
+              )
+              .min(1)
+              .max(6),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(12),
+    policy_version: z.enum(['juanchoice-monthly-v1', 'juanchoice-weekly-v1']).default('juanchoice-monthly-v1'),
+    is_test: z.boolean().default(false),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.minimum_candidates <= value.target_candidates && value.target_candidates <= value.maximum_candidates,
+  );
 
 function failure(res: Response, error: unknown) {
-  if (error instanceof JuanChoiceError) return res.status(error.status).json({ success: false, error: { code: error.code, message: error.message } });
+  if (error instanceof JuanChoiceError)
+    return res.status(error.status).json({ success: false, error: { code: error.code, message: error.message } });
   console.error('[JUANCHOICE]', error);
-  return res.status(503).json({ success: false, error: { code: 'DATABASE_OUTAGE', message: 'JuanChoice is temporarily unavailable.' } });
+  return res
+    .status(503)
+    .json({ success: false, error: { code: 'DATABASE_OUTAGE', message: 'JuanChoice is temporarily unavailable.' } });
 }
 function pool() {
   const result = getPool();
@@ -75,7 +174,8 @@ juanChoiceRouter.use('/juanchoice/admin', (_req, res, next) => {
   if (_req.path.startsWith('/schedules') && env.JUANCHOICE_SCHEDULER_ENABLED) return next();
   // Perk controls are emergency tools: they keep working while JuanChoice writes are paused.
   if (_req.path.startsWith('/perk-controls')) return next();
-  if (_req.method !== 'GET' && !env.JUANCHOICE_WRITES_ENABLED) return res.status(503).json({ success: false, error: { code: 'WRITES_DISABLED' } });
+  if (_req.method !== 'GET' && !env.JUANCHOICE_WRITES_ENABLED)
+    return res.status(503).json({ success: false, error: { code: 'WRITES_DISABLED' } });
   next();
 });
 
@@ -84,392 +184,839 @@ juanChoiceRouter.get('/juanchoice/spotlight', async (_req, res) => {
   try {
     res.set('Cache-Control', 'no-store');
     return res.json({ success: true, data: await getPublicSpotlight() });
-  } catch (error) { return failure(res, error); }
+  } catch (error) {
+    return failure(res, error);
+  }
 });
 
-juanChoiceRouter.get('/juanchoice/supporter-quest', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest,res) => {
-  try {
-    res.set('Cache-Control', 'private, no-store');
-    return res.json({success:true,data:await getSupporterQuest(req.user?.id,isAuthorizedQA(req))});
-  } catch(error){return failure(res,error);}
-});
+juanChoiceRouter.get(
+  '/juanchoice/supporter-quest',
+  optionalAuthenticateToken,
+  checkQAAuthorization,
+  async (req: AuthRequest, res) => {
+    try {
+      res.set('Cache-Control', 'private, no-store');
+      return res.json({ success: true, data: await getSupporterQuest(req.user?.id, isAuthorizedQA(req)) });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
 
 // Plan 65: the perks reigning right now (Champion + Minister), for the web and gameplay hooks.
-juanChoiceRouter.get('/juanchoice/perks/active', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res) => {
-  try {
-    const isTest = req.query.scope === 'test' && isAuthorizedQA(req);
-    res.set('Cache-Control', isTest ? 'private, no-store' : 'public, max-age=30');
-    return res.json({ success: true, data: { perks: await getActiveJuanChoicePerks(pool(), isTest) } });
-  } catch (error) { return failure(res, error); }
-});
+juanChoiceRouter.get(
+  '/juanchoice/perks/active',
+  optionalAuthenticateToken,
+  checkQAAuthorization,
+  async (req: AuthRequest, res) => {
+    try {
+      const isTest = req.query.scope === 'test' && isAuthorizedQA(req);
+      res.set('Cache-Control', isTest ? 'private, no-store' : 'public, max-age=30');
+      return res.json({ success: true, data: { perks: await getActiveJuanChoicePerks(pool(), isTest) } });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
 
 // Plan 65 §9.4: festival calendar for special festival rounds. Seeded empty; admins enter real dates.
-const festivalBody = z.object({ name: z.string().trim().min(2).max(160), municipality: z.string().trim().min(2).max(100).nullable().optional(),
-  starts_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), ends_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  boost_multiplier: z.number().min(1).max(3).default(1.5), is_test: z.boolean().default(false) }).strict()
-  .refine(value => value.ends_on >= value.starts_on, { message: 'ends_on must not be before starts_on' });
+const festivalBody = z
+  .object({
+    name: z.string().trim().min(2).max(160),
+    municipality: z.string().trim().min(2).max(100).nullable().optional(),
+    starts_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    ends_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    boost_multiplier: z.number().min(1).max(3).default(1.5),
+    is_test: z.boolean().default(false),
+  })
+  .strict()
+  .refine((value) => value.ends_on >= value.starts_on, { message: 'ends_on must not be before starts_on' });
 // JuanderQuest platform staff only (admin_scope = 'platform'), never area admins: perk switches,
 // value overrides, pausing one live perk, and editing a contender's perks before voting opens.
 const requirePlatformStaff = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    if (req.user && await isPlatformStaff(req.user.id)) return next();
-    return res.status(403).json({ success: false, error: { code: 'PLATFORM_STAFF_ONLY', message: 'Only JuanderQuest staff can change JuanChoice perks.' } });
+    if (req.user && (await isPlatformStaff(req.user.id))) return next();
+    return res
+      .status(403)
+      .json({
+        success: false,
+        error: { code: 'PLATFORM_STAFF_ONLY', message: 'Only JuanderQuest staff can change JuanChoice perks.' },
+      });
   } catch {
-    return res.status(503).json({ success: false, error: { code: 'DATABASE_OUTAGE', message: 'Could not verify JuanderQuest staff access.' } });
+    return res
+      .status(503)
+      .json({
+        success: false,
+        error: { code: 'DATABASE_OUTAGE', message: 'Could not verify JuanderQuest staff access.' },
+      });
   }
 };
-const perkControlWrites = rateLimit({ policyId: 'juanchoice:perk-controls', windowMs: 60_000, max: 20, keyStrategy: 'actor' });
-const perkSettingBody = z.object({
-  enabled: z.boolean().optional(), standard_value: z.number().nullable().optional(), festival_value: z.number().nullable().optional(),
-  reason: z.string().trim().min(10).max(500),
-}).strict();
-const suspendBody = z.object({ campaign_id: uuid, candidate_id: uuid, perk_key: z.string().min(2).max(60), reason: z.string().trim().min(10).max(500) }).strict();
+const perkControlWrites = rateLimit({
+  policyId: 'juanchoice:perk-controls',
+  windowMs: 60_000,
+  max: 20,
+  keyStrategy: 'actor',
+});
+const perkSettingBody = z
+  .object({
+    enabled: z.boolean().optional(),
+    standard_value: z.number().nullable().optional(),
+    festival_value: z.number().nullable().optional(),
+    reason: z.string().trim().min(10).max(500),
+  })
+  .strict();
+const suspendBody = z
+  .object({
+    campaign_id: uuid,
+    candidate_id: uuid,
+    perk_key: z.string().min(2).max(60),
+    reason: z.string().trim().min(10).max(500),
+  })
+  .strict();
 const reasonBody = z.object({ reason: z.string().trim().min(10).max(500) }).strict();
-const manifestoBody = z.object({ perk_keys: z.array(z.string().min(2).max(60)).min(1).max(4), mystery_key: z.string().nullable().optional(), reason: z.string().trim().min(10).max(500) }).strict();
-const badRequest = (res: Response, message?: string) => res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST', message: message ?? 'Check the request and include a reason of at least 10 characters.' } });
+const manifestoBody = z
+  .object({
+    perk_keys: z.array(z.string().min(2).max(60)).min(1).max(4),
+    mystery_key: z.string().nullable().optional(),
+    reason: z.string().trim().min(10).max(500),
+  })
+  .strict();
+const badRequest = (res: Response, message?: string) =>
+  res
+    .status(400)
+    .json({
+      success: false,
+      error: {
+        code: 'INVALID_REQUEST',
+        message: message ?? 'Check the request and include a reason of at least 10 characters.',
+      },
+    });
 
-juanChoiceRouter.get('/juanchoice/admin/perk-controls/access', authenticateToken, requireAdmin, async (req: AuthRequest, res) => {
-  try { return res.json({ success: true, data: { platform: await isPlatformStaff(req.user!.id) } }); }
-  catch { return res.json({ success: true, data: { platform: false } }); }
-});
-juanChoiceRouter.get('/juanchoice/admin/perk-controls', authenticateToken, requireAdmin, requirePlatformStaff, async (_req: AuthRequest, res) => {
-  try {
-    res.set('Cache-Control', 'private, no-store');
-    return res.json({ success: true, data: await perkControlState(pool()) });
-  } catch (error) { return failure(res, error); }
-});
-juanChoiceRouter.put('/juanchoice/admin/perk-controls/settings/:key', authenticateToken, requireAdmin, requirePlatformStaff, perkControlWrites, async (req: AuthRequest, res) => {
-  const parsed = perkSettingBody.safeParse(req.body);
-  if (!parsed.success) return badRequest(res);
-  try {
-    return res.json({ success: true, data: await updatePerkSetting({ perkKey: req.params.key, enabled: parsed.data.enabled,
-      standardValue: parsed.data.standard_value, festivalValue: parsed.data.festival_value, reason: parsed.data.reason, actorId: req.user!.id }) });
-  } catch (error) { return failure(res, error); }
-});
-juanChoiceRouter.post('/juanchoice/admin/perk-controls/suspensions', authenticateToken, requireAdmin, requirePlatformStaff, perkControlWrites, async (req: AuthRequest, res) => {
-  const parsed = suspendBody.safeParse(req.body);
-  if (!parsed.success) return badRequest(res);
-  try {
-    return res.status(201).json({ success: true, data: await suspendLivePerk({ campaignId: parsed.data.campaign_id, candidateId: parsed.data.candidate_id,
-      perkKey: parsed.data.perk_key, reason: parsed.data.reason, actorId: req.user!.id }) });
-  } catch (error) { return failure(res, error); }
-});
-juanChoiceRouter.post('/juanchoice/admin/perk-controls/suspensions/:id/lift', authenticateToken, requireAdmin, requirePlatformStaff, perkControlWrites, async (req: AuthRequest, res) => {
-  const id = uuid.safeParse(req.params.id); const parsed = reasonBody.safeParse(req.body);
-  if (!id.success || !parsed.success) return badRequest(res);
-  try { return res.json({ success: true, data: await liftSuspension({ suspensionId: id.data, reason: parsed.data.reason, actorId: req.user!.id }) }); }
-  catch (error) { return failure(res, error); }
-});
-juanChoiceRouter.put('/juanchoice/admin/campaigns/:id/candidates/:candidateId/manifesto', authenticateToken, requireAdmin, requirePlatformStaff, perkControlWrites, async (req: AuthRequest, res) => {
-  const id = uuid.safeParse(req.params.id); const candidateId = uuid.safeParse(req.params.candidateId); const parsed = manifestoBody.safeParse(req.body);
-  if (!id.success || !candidateId.success || !parsed.success) return badRequest(res);
-  try {
-    return res.json({ success: true, data: await editCandidateManifesto({ campaignId: id.data, candidateId: candidateId.data,
-      perkKeys: parsed.data.perk_keys, mysteryKey: parsed.data.mystery_key ?? null, reason: parsed.data.reason, actorId: req.user!.id }) });
-  } catch (error) { return failure(res, error); }
-});
+juanChoiceRouter.get(
+  '/juanchoice/admin/perk-controls/access',
+  authenticateToken,
+  requireAdmin,
+  async (req: AuthRequest, res) => {
+    try {
+      return res.json({ success: true, data: { platform: await isPlatformStaff(req.user!.id) } });
+    } catch {
+      return res.json({ success: true, data: { platform: false } });
+    }
+  },
+);
+juanChoiceRouter.get(
+  '/juanchoice/admin/perk-controls',
+  authenticateToken,
+  requireAdmin,
+  requirePlatformStaff,
+  async (_req: AuthRequest, res) => {
+    try {
+      res.set('Cache-Control', 'private, no-store');
+      return res.json({ success: true, data: await perkControlState(pool()) });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
+juanChoiceRouter.put(
+  '/juanchoice/admin/perk-controls/settings/:key',
+  authenticateToken,
+  requireAdmin,
+  requirePlatformStaff,
+  perkControlWrites,
+  async (req: AuthRequest, res) => {
+    const parsed = perkSettingBody.safeParse(req.body);
+    if (!parsed.success) return badRequest(res);
+    try {
+      return res.json({
+        success: true,
+        data: await updatePerkSetting({
+          perkKey: req.params.key,
+          enabled: parsed.data.enabled,
+          standardValue: parsed.data.standard_value,
+          festivalValue: parsed.data.festival_value,
+          reason: parsed.data.reason,
+          actorId: req.user!.id,
+        }),
+      });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
+juanChoiceRouter.post(
+  '/juanchoice/admin/perk-controls/suspensions',
+  authenticateToken,
+  requireAdmin,
+  requirePlatformStaff,
+  perkControlWrites,
+  async (req: AuthRequest, res) => {
+    const parsed = suspendBody.safeParse(req.body);
+    if (!parsed.success) return badRequest(res);
+    try {
+      return res
+        .status(201)
+        .json({
+          success: true,
+          data: await suspendLivePerk({
+            campaignId: parsed.data.campaign_id,
+            candidateId: parsed.data.candidate_id,
+            perkKey: parsed.data.perk_key,
+            reason: parsed.data.reason,
+            actorId: req.user!.id,
+          }),
+        });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
+juanChoiceRouter.post(
+  '/juanchoice/admin/perk-controls/suspensions/:id/lift',
+  authenticateToken,
+  requireAdmin,
+  requirePlatformStaff,
+  perkControlWrites,
+  async (req: AuthRequest, res) => {
+    const id = uuid.safeParse(req.params.id);
+    const parsed = reasonBody.safeParse(req.body);
+    if (!id.success || !parsed.success) return badRequest(res);
+    try {
+      return res.json({
+        success: true,
+        data: await liftSuspension({ suspensionId: id.data, reason: parsed.data.reason, actorId: req.user!.id }),
+      });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
+juanChoiceRouter.put(
+  '/juanchoice/admin/campaigns/:id/candidates/:candidateId/manifesto',
+  authenticateToken,
+  requireAdmin,
+  requirePlatformStaff,
+  perkControlWrites,
+  async (req: AuthRequest, res) => {
+    const id = uuid.safeParse(req.params.id);
+    const candidateId = uuid.safeParse(req.params.candidateId);
+    const parsed = manifestoBody.safeParse(req.body);
+    if (!id.success || !candidateId.success || !parsed.success) return badRequest(res);
+    try {
+      return res.json({
+        success: true,
+        data: await editCandidateManifesto({
+          campaignId: id.data,
+          candidateId: candidateId.data,
+          perkKeys: parsed.data.perk_keys,
+          mysteryKey: parsed.data.mystery_key ?? null,
+          reason: parsed.data.reason,
+          actorId: req.user!.id,
+        }),
+      });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
 
 juanChoiceRouter.get('/juanchoice/admin/festivals', authenticateToken, requireAdmin, async (_req: AuthRequest, res) => {
   try {
-    const rows = (await pool().query(`SELECT id,name,municipality,to_char(starts_on,'YYYY-MM-DD') AS starts_on,to_char(ends_on,'YYYY-MM-DD') AS ends_on,
-       boost_multiplier,is_test,created_at FROM juanchoice_festivals ORDER BY starts_on DESC, name LIMIT 200`)).rows;
+    const rows = (
+      await pool()
+        .query(`SELECT id,name,municipality,to_char(starts_on,'YYYY-MM-DD') AS starts_on,to_char(ends_on,'YYYY-MM-DD') AS ends_on,
+       boost_multiplier,is_test,created_at FROM juanchoice_festivals ORDER BY starts_on DESC, name LIMIT 200`)
+    ).rows;
     return res.json({ success: true, data: rows });
-  } catch (error) { return failure(res, error); }
+  } catch (error) {
+    return failure(res, error);
+  }
 });
-juanChoiceRouter.post('/juanchoice/admin/festivals', authenticateToken, requireAdmin,
+juanChoiceRouter.post(
+  '/juanchoice/admin/festivals',
+  authenticateToken,
+  requireAdmin,
   rateLimit({ policyId: 'juanchoice:festival-write', windowMs: 60_000, max: 20, keyStrategy: 'actor' }),
   async (req: AuthRequest, res) => {
     const parsed = festivalBody.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST', message: parsed.error.issues[0]?.message } });
+    if (!parsed.success)
+      return res
+        .status(400)
+        .json({ success: false, error: { code: 'INVALID_REQUEST', message: parsed.error.issues[0]?.message } });
     try {
-      const row = (await pool().query(
-        `INSERT INTO juanchoice_festivals(id,name,municipality,starts_on,ends_on,boost_multiplier,is_test,created_by)
+      const row = (
+        await pool().query(
+          `INSERT INTO juanchoice_festivals(id,name,municipality,starts_on,ends_on,boost_multiplier,is_test,created_by)
          VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-        [randomUUID(), parsed.data.name, parsed.data.municipality ?? null, parsed.data.starts_on, parsed.data.ends_on,
-          parsed.data.boost_multiplier, parsed.data.is_test, req.user!.id])).rows[0];
+          [
+            randomUUID(),
+            parsed.data.name,
+            parsed.data.municipality ?? null,
+            parsed.data.starts_on,
+            parsed.data.ends_on,
+            parsed.data.boost_multiplier,
+            parsed.data.is_test,
+            req.user!.id,
+          ],
+        )
+      ).rows[0];
       return res.status(201).json({ success: true, data: row });
-    } catch (error) { return failure(res, error); }
-  });
-juanChoiceRouter.delete('/juanchoice/admin/festivals/:id', authenticateToken, requireAdmin, async (req: AuthRequest, res) => {
-  const id = uuid.safeParse(req.params.id);
-  if (!id.success) return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
-  try {
-    const deleted = await pool().query('DELETE FROM juanchoice_festivals WHERE id=$1', [id.data]);
-    if (!deleted.rowCount) return res.status(404).json({ success: false, error: { code: 'FESTIVAL_NOT_FOUND' } });
-    return res.json({ success: true, data: { deleted: true } });
-  } catch (error) { return failure(res, error); }
-});
-
-juanChoiceRouter.get('/juanchoice/overview', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest,res) => {
-  const region=z.string().regex(/^[a-z0-9-]{2,80}$/).safeParse(req.query.region ?? 'pangasinan');
-  if(!region.success)return res.status(400).json({success:false,error:{code:'INVALID_REGION'}});
-  const scope=req.query.scope;
-  if(scope!==undefined&&scope!=='test')return res.status(400).json({success:false,error:{code:'INVALID_SCOPE'}});
-  if(scope==='test'&&!isAuthorizedQA(req))return res.status(403).json({success:false,error:{code:'FORBIDDEN'}});
-  try {
-    res.set('Cache-Control','private, no-store');
-    if(scope==='test') {
-      res.set('X-Robots-Tag','noindex, nofollow');
-      return res.json({success:true,data:await getMonthlyOverview(region.data,true)});
+    } catch (error) {
+      return failure(res, error);
     }
-    if (env.JUANCHOICE_PRESENTATION_MODE) {
-      res.set('X-Robots-Tag','noindex, nofollow');
-      return res.json({success:true,data:await getPresentationOverview(region.data)});
+  },
+);
+juanChoiceRouter.delete(
+  '/juanchoice/admin/festivals/:id',
+  authenticateToken,
+  requireAdmin,
+  async (req: AuthRequest, res) => {
+    const id = uuid.safeParse(req.params.id);
+    if (!id.success) return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
+    try {
+      const deleted = await pool().query('DELETE FROM juanchoice_festivals WHERE id=$1', [id.data]);
+      if (!deleted.rowCount) return res.status(404).json({ success: false, error: { code: 'FESTIVAL_NOT_FOUND' } });
+      return res.json({ success: true, data: { deleted: true } });
+    } catch (error) {
+      return failure(res, error);
     }
-    return res.json({success:true,data:await getMonthlyOverview(region.data,false)});
-  } catch(error){return failure(res,error);}
-});
+  },
+);
 
-juanChoiceRouter.get('/juanchoice/admin/schedules', authenticateToken, requireAdmin, async (_req:AuthRequest,res) => {
+juanChoiceRouter.get(
+  '/juanchoice/overview',
+  optionalAuthenticateToken,
+  checkQAAuthorization,
+  async (req: AuthRequest, res) => {
+    const region = z
+      .string()
+      .regex(/^[a-z0-9-]{2,80}$/)
+      .safeParse(req.query.region ?? 'pangasinan');
+    if (!region.success) return res.status(400).json({ success: false, error: { code: 'INVALID_REGION' } });
+    const scope = req.query.scope;
+    if (scope !== undefined && scope !== 'test')
+      return res.status(400).json({ success: false, error: { code: 'INVALID_SCOPE' } });
+    if (scope === 'test' && !isAuthorizedQA(req))
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN' } });
+    try {
+      res.set('Cache-Control', 'private, no-store');
+      if (scope === 'test') {
+        res.set('X-Robots-Tag', 'noindex, nofollow');
+        return res.json({ success: true, data: await getMonthlyOverview(region.data, true) });
+      }
+      if (env.JUANCHOICE_PRESENTATION_MODE) {
+        res.set('X-Robots-Tag', 'noindex, nofollow');
+        return res.json({ success: true, data: await getPresentationOverview(region.data) });
+      }
+      return res.json({ success: true, data: await getMonthlyOverview(region.data, false) });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
+
+juanChoiceRouter.get('/juanchoice/admin/schedules', authenticateToken, requireAdmin, async (_req: AuthRequest, res) => {
   try {
-    res.set('Cache-Control','private, no-store');res.set('X-Robots-Tag','noindex, nofollow');
-    const rows=(await pool().query(`SELECT s.*,p.period_start AS latest_period,p.status AS latest_status,p.reason_code
+    res.set('Cache-Control', 'private, no-store');
+    res.set('X-Robots-Tag', 'noindex, nofollow');
+    const rows = (
+      await pool().query(`SELECT s.*,p.period_start AS latest_period,p.status AS latest_status,p.reason_code
       FROM juanchoice_schedules s LEFT JOIN LATERAL
       (SELECT period_start,status,reason_code FROM juanchoice_schedule_periods
        WHERE schedule_id=s.id ORDER BY period_start DESC LIMIT 1) p ON TRUE
-      ORDER BY s.schedule_key,s.is_test LIMIT 50`)).rows;
-    return res.json({success:true,data:{items:rows}});
-  } catch(error){return failure(res,error);}
+      ORDER BY s.schedule_key,s.is_test LIMIT 50`)
+    ).rows;
+    return res.json({ success: true, data: { items: rows } });
+  } catch (error) {
+    return failure(res, error);
+  }
 });
 
-juanChoiceRouter.get('/juanchoice/admin/scheduler', authenticateToken, requireAdmin, (_req:AuthRequest,res) => {
-  res.set('Cache-Control','private, no-store');
-  res.set('X-Robots-Tag','noindex, nofollow');
-  return res.json({success:true,data:getJuanChoiceSchedulerStatus()});
+juanChoiceRouter.get('/juanchoice/admin/scheduler', authenticateToken, requireAdmin, (_req: AuthRequest, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  res.set('X-Robots-Tag', 'noindex, nofollow');
+  return res.json({ success: true, data: getJuanChoiceSchedulerStatus() });
 });
 
-juanChoiceRouter.post('/juanchoice/admin/schedules',authenticateToken,requireAdmin,
-  rateLimit({policyId:'juanchoice:schedule-create',windowMs:60_000,max:5,keyStrategy:'actor'}),
-  async(req:AuthRequest,res)=>{
-    const parsed=monthlyScheduleBody.safeParse(req.body);
-    if(!parsed.success)return res.status(400).json({success:false,error:{code:'INVALID_REQUEST'}});
-    try{return res.status(201).json({success:true,data:await createMonthlySchedule(parsed.data,req.user!.id)});}
-    catch(error){return failure(res,error);}
-  });
-
-juanChoiceRouter.patch('/juanchoice/admin/schedules/:id',authenticateToken,requireAdmin,
-  rateLimit({policyId:'juanchoice:schedule-update',windowMs:60_000,max:10,keyStrategy:'actor'}),
-  async(req:AuthRequest,res)=>{
-    const id=uuid.safeParse(req.params.id);
-    const body=z.object({enabled:z.boolean(),reason:z.string().trim().min(10).max(500)}).strict().safeParse(req.body);
-    if(!id.success||!body.success)return res.status(400).json({success:false,error:{code:'INVALID_REQUEST'}});
+juanChoiceRouter.post(
+  '/juanchoice/admin/schedules',
+  authenticateToken,
+  requireAdmin,
+  rateLimit({ policyId: 'juanchoice:schedule-create', windowMs: 60_000, max: 5, keyStrategy: 'actor' }),
+  async (req: AuthRequest, res) => {
+    const parsed = monthlyScheduleBody.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
     try {
-      const client=await pool().connect();
+      return res.status(201).json({ success: true, data: await createMonthlySchedule(parsed.data, req.user!.id) });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
+
+juanChoiceRouter.patch(
+  '/juanchoice/admin/schedules/:id',
+  authenticateToken,
+  requireAdmin,
+  rateLimit({ policyId: 'juanchoice:schedule-update', windowMs: 60_000, max: 10, keyStrategy: 'actor' }),
+  async (req: AuthRequest, res) => {
+    const id = uuid.safeParse(req.params.id);
+    const body = z
+      .object({ enabled: z.boolean(), reason: z.string().trim().min(10).max(500) })
+      .strict()
+      .safeParse(req.body);
+    if (!id.success || !body.success)
+      return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
+    try {
+      const client = await pool().connect();
       try {
         await client.query('BEGIN');
-        const row=(await client.query('UPDATE juanchoice_schedules SET enabled=$2,updated_at=NOW() WHERE id=$1 RETURNING *',[id.data,body.data.enabled])).rows[0];
-        if(!row){await client.query('ROLLBACK');return res.status(404).json({success:false,error:{code:'SCHEDULE_NOT_FOUND'}});}
-        await client.query(`INSERT INTO juanchoice_schedule_audit(id,schedule_id,actor_kind,actor_id,action,reason_code)
-          VALUES($1,$2,'admin',$3,$4,$5)`,[randomUUID(),id.data,req.user!.id,body.data.enabled?'enabled':'paused',body.data.reason]);
+        const row = (
+          await client.query('UPDATE juanchoice_schedules SET enabled=$2,updated_at=NOW() WHERE id=$1 RETURNING *', [
+            id.data,
+            body.data.enabled,
+          ])
+        ).rows[0];
+        if (!row) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ success: false, error: { code: 'SCHEDULE_NOT_FOUND' } });
+        }
+        await client.query(
+          `INSERT INTO juanchoice_schedule_audit(id,schedule_id,actor_kind,actor_id,action,reason_code)
+          VALUES($1,$2,'admin',$3,$4,$5)`,
+          [randomUUID(), id.data, req.user!.id, body.data.enabled ? 'enabled' : 'paused', body.data.reason],
+        );
         await client.query('COMMIT');
-        return res.json({success:true,data:row});
-      } catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
-    } catch(error){return failure(res,error);}
-  });
+        return res.json({ success: true, data: row });
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
 
-juanChoiceRouter.post('/juanchoice/admin/schedules/reconcile',authenticateToken,requireAdmin,
-  rateLimit({policyId:'juanchoice:schedule-reconcile',windowMs:60_000,max:2,keyStrategy:'actor'}),
-  async(_req:AuthRequest,res)=>{
-    try{res.set('Cache-Control','private, no-store');return res.json({success:true,data:await reconcileMonthlySchedules()});}
-    catch(error){return failure(res,error);}
-  });
+juanChoiceRouter.post(
+  '/juanchoice/admin/schedules/reconcile',
+  authenticateToken,
+  requireAdmin,
+  rateLimit({ policyId: 'juanchoice:schedule-reconcile', windowMs: 60_000, max: 2, keyStrategy: 'actor' }),
+  async (_req: AuthRequest, res) => {
+    try {
+      res.set('Cache-Control', 'private, no-store');
+      return res.json({ success: true, data: await reconcileMonthlySchedules() });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
 
-juanChoiceRouter.post('/juanchoice/supporter-quest/:campaignId/claim',authenticateToken,
-  rateLimit({policyId:'juanchoice:supporter-claim',windowMs:60_000,max:10,keyStrategy:'actor'}),
-  async(req:AuthRequest,res)=>{
-    const id=uuid.safeParse(req.params.campaignId);
-    if(!id.success)return res.status(400).json({success:false,error:{code:'INVALID_ID'}});
-    try{return res.json({success:true,data:await claimSupporterQuest(id.data,req.user!.id)});}
-    catch(error){return failure(res,error);}
-  });
+juanChoiceRouter.post(
+  '/juanchoice/supporter-quest/:campaignId/claim',
+  authenticateToken,
+  rateLimit({ policyId: 'juanchoice:supporter-claim', windowMs: 60_000, max: 10, keyStrategy: 'actor' }),
+  async (req: AuthRequest, res) => {
+    const id = uuid.safeParse(req.params.campaignId);
+    if (!id.success) return res.status(400).json({ success: false, error: { code: 'INVALID_ID' } });
+    try {
+      return res.json({ success: true, data: await claimSupporterQuest(id.data, req.user!.id) });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
 
 juanChoiceRouter.get('/juanchoice/admin/campaigns', authenticateToken, requireAdmin, async (_req: AuthRequest, res) => {
   try {
     res.set('Cache-Control', 'private, no-store');
     res.set('X-Robots-Tag', 'noindex, nofollow');
-    const campaigns = (await pool().query(
-      `SELECT c.*, COALESCE(n.candidate_count,0) AS candidate_count, COALESCE(b.ballot_count,0) AS ballot_count
+    const campaigns = (
+      await pool().query(
+        `SELECT c.*, COALESCE(n.candidate_count,0) AS candidate_count, COALESCE(b.ballot_count,0) AS ballot_count
        FROM juanchoice_campaigns c
        LEFT JOIN (SELECT campaign_id,COUNT(*)::int AS candidate_count FROM juanchoice_candidates GROUP BY campaign_id) n ON n.campaign_id=c.id
        LEFT JOIN (SELECT campaign_id,COUNT(*)::int AS ballot_count FROM juanchoice_ballots GROUP BY campaign_id) b ON b.campaign_id=c.id
-       ORDER BY c.created_at DESC,c.id DESC LIMIT 50`
-    )).rows;
-    return res.json({success:true,data:{items:campaigns}});
-  } catch (error) { return failure(res,error); }
+       ORDER BY c.created_at DESC,c.id DESC LIMIT 50`,
+      )
+    ).rows;
+    return res.json({ success: true, data: { items: campaigns } });
+  } catch (error) {
+    return failure(res, error);
+  }
 });
 
-juanChoiceRouter.get('/juanchoice/admin/campaigns/:id', authenticateToken, requireAdmin, async (req: AuthRequest,res) => {
-  const id = uuid.safeParse(req.params.id);
-  if (!id.success) return res.status(400).json({success:false,error:{code:'INVALID_ID'}});
-  try {
-    res.set('Cache-Control','private, no-store');
-    res.set('X-Robots-Tag','noindex, nofollow');
-    const campaign = (await pool().query('SELECT * FROM juanchoice_campaigns WHERE id=$1',[id.data])).rows[0];
-    if (!campaign) throw new JuanChoiceError('CAMPAIGN_NOT_FOUND',404);
-    const [candidates, counts, audit, result] = await Promise.all([
-      pool().query(`SELECT n.*,s.name AS spot_name,s.municipality,s.status AS spot_status,s.crowd_capacity_band,s.recommendation_suppressed
-                    FROM juanchoice_candidates n JOIN spots s ON s.id=n.spot_id WHERE n.campaign_id=$1 ORDER BY n.created_at,n.id`,[id.data]),
-      pool().query(`SELECT candidate_id,COUNT(*)::int AS votes,COALESCE(SUM(vote_weight),0)::int AS weighted_votes,
+juanChoiceRouter.get(
+  '/juanchoice/admin/campaigns/:id',
+  authenticateToken,
+  requireAdmin,
+  async (req: AuthRequest, res) => {
+    const id = uuid.safeParse(req.params.id);
+    if (!id.success) return res.status(400).json({ success: false, error: { code: 'INVALID_ID' } });
+    try {
+      res.set('Cache-Control', 'private, no-store');
+      res.set('X-Robots-Tag', 'noindex, nofollow');
+      const campaign = (await pool().query('SELECT * FROM juanchoice_campaigns WHERE id=$1', [id.data])).rows[0];
+      if (!campaign) throw new JuanChoiceError('CAMPAIGN_NOT_FOUND', 404);
+      const [candidates, counts, audit, result] = await Promise.all([
+        pool().query(
+          `SELECT n.*,s.name AS spot_name,s.municipality,s.status AS spot_status,s.crowd_capacity_band,s.recommendation_suppressed
+                    FROM juanchoice_candidates n JOIN spots s ON s.id=n.spot_id WHERE n.campaign_id=$1 ORDER BY n.created_at,n.id`,
+          [id.data],
+        ),
+        pool().query(
+          `SELECT candidate_id,COUNT(*)::int AS votes,COALESCE(SUM(vote_weight),0)::int AS weighted_votes,
                     COALESCE(SUM(boost_spent_points),0)::int AS boost_points
-                    FROM juanchoice_ballots WHERE campaign_id=$1 GROUP BY candidate_id`,[id.data]),
-      pool().query('SELECT action,reason,actor_id,created_at FROM juanchoice_campaign_audit WHERE campaign_id=$1 ORDER BY created_at DESC LIMIT 30',[id.data]),
-      pool().query('SELECT * FROM juanchoice_results WHERE campaign_id=$1',[id.data]),
-    ]);
-    const countByCandidate=new Map(counts.rows.map(row=>[row.candidate_id,row]));
-    const sum=(key:string)=>counts.rows.reduce((total,row)=>total+Number(row[key]),0);
-    return res.json({success:true,data:{campaign:{...campaign,ballot_count:sum('votes'),weighted_votes:sum('weighted_votes'),boost_points:sum('boost_points')},
-      candidates:candidates.rows.map(row=>{const count=countByCandidate.get(row.id);return {...row,votes:Number(count?.votes??0),weighted_votes:Number(count?.weighted_votes??0),boost_points:Number(count?.boost_points??0)};}),audit:audit.rows,result:result.rows[0]??null}});
-  } catch (error) { return failure(res,error); }
-});
+                    FROM juanchoice_ballots WHERE campaign_id=$1 GROUP BY candidate_id`,
+          [id.data],
+        ),
+        pool().query(
+          'SELECT action,reason,actor_id,created_at FROM juanchoice_campaign_audit WHERE campaign_id=$1 ORDER BY created_at DESC LIMIT 30',
+          [id.data],
+        ),
+        pool().query('SELECT * FROM juanchoice_results WHERE campaign_id=$1', [id.data]),
+      ]);
+      const countByCandidate = new Map(counts.rows.map((row) => [row.candidate_id, row]));
+      const sum = (key: string) => counts.rows.reduce((total, row) => total + Number(row[key]), 0);
+      return res.json({
+        success: true,
+        data: {
+          campaign: {
+            ...campaign,
+            ballot_count: sum('votes'),
+            weighted_votes: sum('weighted_votes'),
+            boost_points: sum('boost_points'),
+          },
+          candidates: candidates.rows.map((row) => {
+            const count = countByCandidate.get(row.id);
+            return {
+              ...row,
+              votes: Number(count?.votes ?? 0),
+              weighted_votes: Number(count?.weighted_votes ?? 0),
+              boost_points: Number(count?.boost_points ?? 0),
+            };
+          }),
+          audit: audit.rows,
+          result: result.rows[0] ?? null,
+        },
+      });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
 
-juanChoiceRouter.get('/juanchoice/campaigns', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res) => {
-  try {
-    const region = typeof req.query.region === 'string' ? req.query.region : null;
-    const rows = (await pool().query(
-      `SELECT id,slug,region,theme,status,opens_at,closes_at,policy_version FROM juanchoice_campaigns
+juanChoiceRouter.get(
+  '/juanchoice/campaigns',
+  optionalAuthenticateToken,
+  checkQAAuthorization,
+  async (req: AuthRequest, res) => {
+    try {
+      const region = typeof req.query.region === 'string' ? req.query.region : null;
+      const rows = (
+        await pool().query(
+          `SELECT id,slug,region,theme,status,opens_at,closes_at,policy_version FROM juanchoice_campaigns
        WHERE status <> 'draft' AND status <> 'cancelled' AND ($1::text IS NULL OR region = $1)
        AND ($2::boolean OR is_test = FALSE)
        AND ($3::uuid IS NULL OR id = $3) ORDER BY opens_at DESC LIMIT 30`,
-      [region, isAuthorizedQA(req), env.JUANCHOICE_PRESENTATION_MODE ? env.JUANCHOICE_PRESENTATION_CAMPAIGN_ID : null]
-    )).rows;
-    return res.json({ success: true, data: { items: rows } });
-  } catch (error) { return failure(res, error); }
-});
+          [
+            region,
+            isAuthorizedQA(req),
+            env.JUANCHOICE_PRESENTATION_MODE ? env.JUANCHOICE_PRESENTATION_CAMPAIGN_ID : null,
+          ],
+        )
+      ).rows;
+      return res.json({ success: true, data: { items: rows } });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
 
-juanChoiceRouter.get('/juanchoice/campaigns/:id', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res) => {
-  if (!uuid.safeParse(req.params.id).success) return res.status(400).json({ success: false, error: { code: 'INVALID_ID' } });
-  try { return res.json({ success: true, data: await getStandings(String(req.params.id), isAuthorizedQA(req)) }); }
-  catch (error) { return failure(res, error); }
-});
-juanChoiceRouter.get('/juanchoice/campaigns/:id/standings', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res) => {
-  if (!uuid.safeParse(req.params.id).success) return res.status(400).json({ success: false, error: { code: 'INVALID_ID' } });
-  try { return res.json({ success: true, data: await getStandings(String(req.params.id), isAuthorizedQA(req)) }); }
-  catch (error) { return failure(res, error); }
-});
-juanChoiceRouter.get('/juanchoice/campaigns/:id/offers', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res) => {
-  const id = uuid.safeParse(req.params.id);
-  if (!id.success) return res.status(400).json({ success: false, error: { code: 'INVALID_ID' } });
-  try {
-    res.set('Cache-Control', 'public, max-age=60');
-    const offers = await listActiveMerchantOffers(id.data, isAuthorizedQA(req));
-    return res.json({ success: true, data: { items: offers, total: offers.length } });
-  } catch (error) { return failure(res, error); }
-});
+juanChoiceRouter.get(
+  '/juanchoice/campaigns/:id',
+  optionalAuthenticateToken,
+  checkQAAuthorization,
+  async (req: AuthRequest, res) => {
+    if (!uuid.safeParse(req.params.id).success)
+      return res.status(400).json({ success: false, error: { code: 'INVALID_ID' } });
+    try {
+      return res.json({ success: true, data: await getStandings(String(req.params.id), isAuthorizedQA(req)) });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
+juanChoiceRouter.get(
+  '/juanchoice/campaigns/:id/standings',
+  optionalAuthenticateToken,
+  checkQAAuthorization,
+  async (req: AuthRequest, res) => {
+    if (!uuid.safeParse(req.params.id).success)
+      return res.status(400).json({ success: false, error: { code: 'INVALID_ID' } });
+    try {
+      return res.json({ success: true, data: await getStandings(String(req.params.id), isAuthorizedQA(req)) });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
+juanChoiceRouter.get(
+  '/juanchoice/campaigns/:id/offers',
+  optionalAuthenticateToken,
+  checkQAAuthorization,
+  async (req: AuthRequest, res) => {
+    const id = uuid.safeParse(req.params.id);
+    if (!id.success) return res.status(400).json({ success: false, error: { code: 'INVALID_ID' } });
+    try {
+      res.set('Cache-Control', 'public, max-age=60');
+      const offers = await listActiveMerchantOffers(id.data, isAuthorizedQA(req));
+      return res.json({ success: true, data: { items: offers, total: offers.length } });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
 
 juanChoiceRouter.get('/juanchoice/campaigns/:id/me', authenticateToken, async (req: AuthRequest, res) => {
   res.set('Cache-Control', 'private, no-store');
-  if (!uuid.safeParse(req.params.id).success) return res.status(400).json({ success: false, error: { code: 'INVALID_ID' } });
+  if (!uuid.safeParse(req.params.id).success)
+    return res.status(400).json({ success: false, error: { code: 'INVALID_ID' } });
   try {
     const campaignId = String(req.params.id);
     return res.json({ success: true, data: await getMyJuanChoiceCampaignState(campaignId, req.user!.id) });
-  } catch (error) { return failure(res, error); }
+  } catch (error) {
+    return failure(res, error);
+  }
 });
 
-juanChoiceRouter.put('/juanchoice/campaigns/:id/ballot', authenticateToken,
+juanChoiceRouter.put(
+  '/juanchoice/campaigns/:id/ballot',
+  authenticateToken,
   rateLimit({ policyId: 'juanchoice:ballot', windowMs: 60_000, max: 20, keyStrategy: 'actor' }),
   async (req: AuthRequest, res) => {
     const body = ballotBody.safeParse(req.body);
     const key = uuid.safeParse(req.header('Idempotency-Key'));
     const id = uuid.safeParse(req.params.id);
-    if (!body.success || !key.success || !id.success) return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
+    if (!body.success || !key.success || !id.success)
+      return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
     try {
-      const result = await castBallot({ campaignId: id.data, userId: req.user!.id, candidateId: body.data.candidate_id,
-        expectedVersion: body.data.expected_version, idempotencyKey: key.data, targetWeight: body.data.target_weight });
+      const result = await castBallot({
+        campaignId: id.data,
+        userId: req.user!.id,
+        candidateId: body.data.candidate_id,
+        expectedVersion: body.data.expected_version,
+        idempotencyKey: key.data,
+        targetWeight: body.data.target_weight,
+      });
       res.set('Cache-Control', 'private, no-store');
       return res.json({ success: true, data: result });
-    } catch (error) { return failure(res, error); }
-  });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
 
 juanChoiceRouter.post('/juanchoice/admin/campaigns', authenticateToken, requireAdmin, async (req: AuthRequest, res) => {
   const parsed = campaignBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
   const data = parsed.data;
-  if (new Date(data.closes_at) <= new Date(data.opens_at)) return res.status(400).json({ success: false, error: { code: 'INVALID_WINDOW' } });
+  if (new Date(data.closes_at) <= new Date(data.opens_at))
+    return res.status(400).json({ success: false, error: { code: 'INVALID_WINDOW' } });
   try {
     const id = randomUUID();
-    const row = (await pool().query(
-      `INSERT INTO juanchoice_campaigns(
+    const row = (
+      await pool().query(
+        `INSERT INTO juanchoice_campaigns(
          id,slug,region,theme,opens_at,closes_at,is_test,series_key,round_number,counts_for_streak)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [id,data.slug,data.region,data.theme,data.opens_at,data.closes_at,data.is_test,
-        data.series_key ?? null,data.round_number ?? null,data.counts_for_streak]
-    )).rows[0];
+        [
+          id,
+          data.slug,
+          data.region,
+          data.theme,
+          data.opens_at,
+          data.closes_at,
+          data.is_test,
+          data.series_key ?? null,
+          data.round_number ?? null,
+          data.counts_for_streak,
+        ],
+      )
+    ).rows[0];
     return res.status(201).json({ success: true, data: row });
   } catch (error: any) {
     if (error?.code === '23505') return res.status(409).json({ success: false, error: { code: 'CAMPAIGN_EXISTS' } });
     return failure(res, error);
   }
 });
-juanChoiceRouter.post('/juanchoice/admin/campaigns/:id/candidates', authenticateToken, requireAdmin, async (req: AuthRequest, res) => {
-  const id = uuid.safeParse(req.params.id); const parsed = candidateBody.safeParse(req.body);
-  if (!id.success || !parsed.success) return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
-  try {
-    return res.status(201).json({ success: true, data: await addCandidate(id.data,parsed.data.spot_id) });
-  } catch (error: any) {
-    if (error?.code === '23505') return res.status(409).json({ success: false, error: { code: 'CANDIDATE_EXISTS' } });
-    return failure(res,error);
-  }
-});
-juanChoiceRouter.post('/juanchoice/admin/campaigns/:id/offers', authenticateToken, requireAdmin,
-  rateLimit({policyId:'juanchoice:offer-draft-create',windowMs:60_000,max:10,keyStrategy:'actor'}),
+juanChoiceRouter.post(
+  '/juanchoice/admin/campaigns/:id/candidates',
+  authenticateToken,
+  requireAdmin,
   async (req: AuthRequest, res) => {
-  const id = uuid.safeParse(req.params.id); const parsed = merchantOfferBody.safeParse(req.body);
-  if (!id.success || !parsed.success) return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
-  try {
-    const data = parsed.data;
-    return res.status(201).json({ success: true, data: await createMerchantOffer({ campaignId: id.data,
-      merchantId: data.merchant_id, voucherId: data.voucher_id, termsSnapshot: data.terms_snapshot,
-      startsAt: data.starts_at, endsAt: data.ends_at, isTest: data.is_test }) });
-  } catch (error) { return failure(res, error); }
-});
-juanChoiceRouter.post('/juanchoice/admin/campaigns/:id/budget', authenticateToken, requireAdmin,
-  rateLimit({policyId:'juanchoice:budget-draft-create',windowMs:60_000,max:5,keyStrategy:'actor'}),
+    const id = uuid.safeParse(req.params.id);
+    const parsed = candidateBody.safeParse(req.body);
+    if (!id.success || !parsed.success)
+      return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
+    try {
+      return res.status(201).json({ success: true, data: await addCandidate(id.data, parsed.data.spot_id) });
+    } catch (error: any) {
+      if (error?.code === '23505') return res.status(409).json({ success: false, error: { code: 'CANDIDATE_EXISTS' } });
+      return failure(res, error);
+    }
+  },
+);
+juanChoiceRouter.post(
+  '/juanchoice/admin/campaigns/:id/offers',
+  authenticateToken,
+  requireAdmin,
+  rateLimit({ policyId: 'juanchoice:offer-draft-create', windowMs: 60_000, max: 10, keyStrategy: 'actor' }),
   async (req: AuthRequest, res) => {
-  if (!env.JUANCHOICE_ECONOMY_ENABLED) return res.status(503).json({ success: false, error: { code: 'ECONOMY_DISABLED' } });
-  const id = uuid.safeParse(req.params.id); const parsed = promotionBudgetBody.safeParse(req.body);
-  if (!id.success || !parsed.success) return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
-  try { return res.status(201).json({ success: true, data: await createPromotionBudget({ campaignId: id.data,
-    budgetMjdq: parsed.data.budget_mjdq, requestReference: parsed.data.request_reference, isTest: parsed.data.is_test }) }); }
-  catch (error) { return failure(res, error); }
-});
+    const id = uuid.safeParse(req.params.id);
+    const parsed = merchantOfferBody.safeParse(req.body);
+    if (!id.success || !parsed.success)
+      return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
+    try {
+      const data = parsed.data;
+      return res
+        .status(201)
+        .json({
+          success: true,
+          data: await createMerchantOffer({
+            campaignId: id.data,
+            merchantId: data.merchant_id,
+            voucherId: data.voucher_id,
+            termsSnapshot: data.terms_snapshot,
+            startsAt: data.starts_at,
+            endsAt: data.ends_at,
+            isTest: data.is_test,
+          }),
+        });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
+juanChoiceRouter.post(
+  '/juanchoice/admin/campaigns/:id/budget',
+  authenticateToken,
+  requireAdmin,
+  rateLimit({ policyId: 'juanchoice:budget-draft-create', windowMs: 60_000, max: 5, keyStrategy: 'actor' }),
+  async (req: AuthRequest, res) => {
+    if (!env.JUANCHOICE_ECONOMY_ENABLED)
+      return res.status(503).json({ success: false, error: { code: 'ECONOMY_DISABLED' } });
+    const id = uuid.safeParse(req.params.id);
+    const parsed = promotionBudgetBody.safeParse(req.body);
+    if (!id.success || !parsed.success)
+      return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
+    try {
+      return res
+        .status(201)
+        .json({
+          success: true,
+          data: await createPromotionBudget({
+            campaignId: id.data,
+            budgetMjdq: parsed.data.budget_mjdq,
+            requestReference: parsed.data.request_reference,
+            isTest: parsed.data.is_test,
+          }),
+        });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
 
-juanChoiceRouter.patch('/juanchoice/admin/campaigns/:id/candidates/:candidateId', authenticateToken, requireAdmin, async(req:AuthRequest,res)=>{
-  const id=uuid.safeParse(req.params.id), candidateId=uuid.safeParse(req.params.candidateId);
-  const body=z.object({status:z.enum(['eligible','suspended']),reason:z.string().trim().min(10).max(500)}).strict().safeParse(req.body);
-  if(!id.success||!candidateId.success||!body.success)return res.status(400).json({success:false,error:{code:'INVALID_REQUEST'}});
-  try{return res.json({success:true,data:await moderateCandidate(id.data,candidateId.data,body.data.status,req.user!.id,body.data.reason)});}
-  catch(error){return failure(res,error);}
-});
-juanChoiceRouter.post('/juanchoice/admin/campaigns/:id/publish', authenticateToken, requireAdmin, async (req: AuthRequest, res) => {
-  const id = uuid.safeParse(req.params.id);
-  if (!id.success) return res.status(400).json({ success: false, error: { code: 'INVALID_ID' } });
-  try {
-    return res.json({ success: true, data: await publishCampaign(id.data,req.user!.id) });
-  } catch (error) { return failure(res,error); }
-});
-juanChoiceRouter.post('/juanchoice/admin/campaigns/:id/cancel', authenticateToken, requireAdmin, async (req: AuthRequest,res) => {
-  const id = uuid.safeParse(req.params.id);
-  const reason = z.object({reason:z.string().trim().min(10).max(500)}).strict().safeParse(req.body);
-  if (!id.success || !reason.success) return res.status(400).json({ success:false,error:{code:'INVALID_REQUEST'} });
-  try { return res.json({success:true,data:await cancelCampaign(id.data,req.user!.id,reason.data.reason)}); }
-  catch (error) { return failure(res,error); }
-});
-juanChoiceRouter.post('/juanchoice/admin/campaigns/:id/finalize', authenticateToken, requireAdmin, async (req: AuthRequest, res) => {
-  const id = uuid.safeParse(req.params.id);
-  if (!id.success) return res.status(400).json({ success: false, error: { code: 'INVALID_ID' } });
-  try { return res.json({ success: true, data: await finalizeCampaign(id.data,req.user!.id) }); }
-  catch (error) { return failure(res,error); }
-});
+juanChoiceRouter.patch(
+  '/juanchoice/admin/campaigns/:id/candidates/:candidateId',
+  authenticateToken,
+  requireAdmin,
+  async (req: AuthRequest, res) => {
+    const id = uuid.safeParse(req.params.id),
+      candidateId = uuid.safeParse(req.params.candidateId);
+    const body = z
+      .object({ status: z.enum(['eligible', 'suspended']), reason: z.string().trim().min(10).max(500) })
+      .strict()
+      .safeParse(req.body);
+    if (!id.success || !candidateId.success || !body.success)
+      return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
+    try {
+      return res.json({
+        success: true,
+        data: await moderateCandidate(id.data, candidateId.data, body.data.status, req.user!.id, body.data.reason),
+      });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
+juanChoiceRouter.post(
+  '/juanchoice/admin/campaigns/:id/publish',
+  authenticateToken,
+  requireAdmin,
+  async (req: AuthRequest, res) => {
+    const id = uuid.safeParse(req.params.id);
+    if (!id.success) return res.status(400).json({ success: false, error: { code: 'INVALID_ID' } });
+    try {
+      return res.json({ success: true, data: await publishCampaign(id.data, req.user!.id) });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
+juanChoiceRouter.post(
+  '/juanchoice/admin/campaigns/:id/cancel',
+  authenticateToken,
+  requireAdmin,
+  async (req: AuthRequest, res) => {
+    const id = uuid.safeParse(req.params.id);
+    const reason = z
+      .object({ reason: z.string().trim().min(10).max(500) })
+      .strict()
+      .safeParse(req.body);
+    if (!id.success || !reason.success)
+      return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
+    try {
+      return res.json({ success: true, data: await cancelCampaign(id.data, req.user!.id, reason.data.reason) });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
+juanChoiceRouter.post(
+  '/juanchoice/admin/campaigns/:id/finalize',
+  authenticateToken,
+  requireAdmin,
+  async (req: AuthRequest, res) => {
+    const id = uuid.safeParse(req.params.id);
+    if (!id.success) return res.status(400).json({ success: false, error: { code: 'INVALID_ID' } });
+    try {
+      return res.json({ success: true, data: await finalizeCampaign(id.data, req.user!.id) });
+    } catch (error) {
+      return failure(res, error);
+    }
+  },
+);
 
-const assessmentBody = z.object({
-  decision: z.enum(['cleared', 'restricted']),
-  reason: z.string().trim().min(10).max(1000),
-  valid_until: z.string().datetime({ offset: true }),
-  expected_revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-}).strict();
+const assessmentBody = z
+  .object({
+    decision: z.enum(['cleared', 'restricted']),
+    reason: z.string().trim().min(10).max(1000),
+    valid_until: z.string().datetime({ offset: true }),
+    expected_revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();
 
-juanChoiceRouter.get('/juanchoice/admin/campaigns/:id/candidates/:candidateId/promotion-assessment',
-  authenticateToken, requireAdmin, checkQAAuthorization, async (req: AuthRequest, res) => {
+juanChoiceRouter.get(
+  '/juanchoice/admin/campaigns/:id/candidates/:candidateId/promotion-assessment',
+  authenticateToken,
+  requireAdmin,
+  checkQAAuthorization,
+  async (req: AuthRequest, res) => {
     const campaignId = uuid.safeParse(req.params.id);
     const candidateId = uuid.safeParse(req.params.candidateId);
     if (!campaignId.success || !candidateId.success) {
@@ -480,11 +1027,7 @@ juanChoiceRouter.get('/juanchoice/admin/campaigns/:id/candidates/:candidateId/pr
 
       // Evaluator joins campaign, candidate, and spot; validates candidate ownership & scope
       const allowTest = isAuthorizedQA(req) || Boolean(req.user?.role === 'admin');
-      const eligibility = await evaluateCandidatePromotionEligibility(
-        campaignId.data,
-        candidateId.data,
-        allowTest
-      );
+      const eligibility = await evaluateCandidatePromotionEligibility(campaignId.data, candidateId.data, allowTest);
 
       if (eligibility.reason === 'CANDIDATE_NOT_FOUND') {
         return res.status(404).json({
@@ -507,10 +1050,12 @@ juanChoiceRouter.get('/juanchoice/admin/campaigns/:id/candidates/:candidateId/pr
     } catch (error) {
       return failure(res, error);
     }
-  }
+  },
 );
-juanChoiceRouter.post('/juanchoice/admin/campaigns/:id/candidates/:candidateId/promotion-assessment',
-  authenticateToken, requireAdmin,
+juanChoiceRouter.post(
+  '/juanchoice/admin/campaigns/:id/candidates/:candidateId/promotion-assessment',
+  authenticateToken,
+  requireAdmin,
   rateLimit({ policyId: 'juanchoice:promotion-assessment', windowMs: 60_000, max: 20, keyStrategy: 'actor' }),
   async (req: AuthRequest, res) => {
     const campaignId = uuid.safeParse(req.params.id);
@@ -534,5 +1079,5 @@ juanChoiceRouter.post('/juanchoice/admin/campaigns/:id/candidates/:candidateId/p
     } catch (error) {
       return failure(res, error);
     }
-  }
+  },
 );

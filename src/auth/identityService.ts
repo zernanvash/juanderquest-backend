@@ -43,25 +43,37 @@ export class UnifiedIdentityService {
    * Finds an existing auth identity by provider and subject.
    */
   async findIdentity(provider: 'email' | 'wallet' | 'google', subject: string): Promise<AuthIdentityRow | null> {
-    const cleanSubject = provider === 'wallet' ? subject.toLowerCase().trim() : provider === 'email' ? this.normalizeEmail(subject) : subject.trim();
+    const cleanSubject =
+      provider === 'wallet'
+        ? subject.toLowerCase().trim()
+        : provider === 'email'
+          ? this.normalizeEmail(subject)
+          : subject.trim();
     if (this.pool) {
-      const res = await this.pool.query(
-        'SELECT * FROM auth_identities WHERE provider = $1 AND provider_subject = $2',
-        [provider, cleanSubject]
-      );
+      const res = await this.pool.query('SELECT * FROM auth_identities WHERE provider = $1 AND provider_subject = $2', [
+        provider,
+        cleanSubject,
+      ]);
       return res.rows[0] ?? null;
     }
-    const found = this.inMemoryIdentities.find(
-      (i) => i.provider === provider && i.provider_subject === cleanSubject
-    );
+    const found = this.inMemoryIdentities.find((i) => i.provider === provider && i.provider_subject === cleanSubject);
     return found ?? null;
   }
 
   /**
    * Links a provider to an existing user account.
    */
-  async linkIdentity(userId: string, provider: 'email' | 'wallet' | 'google', subject: string): Promise<AuthIdentityRow> {
-    const cleanSubject = provider === 'wallet' ? subject.toLowerCase().trim() : provider === 'email' ? this.normalizeEmail(subject) : subject.trim();
+  async linkIdentity(
+    userId: string,
+    provider: 'email' | 'wallet' | 'google',
+    subject: string,
+  ): Promise<AuthIdentityRow> {
+    const cleanSubject =
+      provider === 'wallet'
+        ? subject.toLowerCase().trim()
+        : provider === 'email'
+          ? this.normalizeEmail(subject)
+          : subject.trim();
     const existing = await this.findIdentity(provider, cleanSubject);
     if (existing) {
       if (existing.user_id === userId) {
@@ -80,7 +92,7 @@ export class UnifiedIdentityService {
         `INSERT INTO auth_identities (id, user_id, provider, provider_subject, created_at, updated_at)
          VALUES ($1, $2, $3, $4, NOW(), NOW())
          RETURNING *`,
-        [id, userId, provider, cleanSubject]
+        [id, userId, provider, cleanSubject],
       );
       return res.rows[0];
     }
@@ -102,7 +114,12 @@ export class UnifiedIdentityService {
    * If the email is unverified, any existing password credential is deleted in the same transaction
    * to prevent squatted password backdoor retainment (Plan 72 Phase 2).
    */
-  async linkGoogleToAccount(userId: string, googleSubject: string, normalizedEmail: string, removePasswordIfUnverified: boolean): Promise<void> {
+  async linkGoogleToAccount(
+    userId: string,
+    googleSubject: string,
+    normalizedEmail: string,
+    removePasswordIfUnverified: boolean,
+  ): Promise<void> {
     const cleanEmail = this.normalizeEmail(normalizedEmail);
     const cleanSubject = googleSubject.trim();
     if (this.pool) {
@@ -116,13 +133,13 @@ export class UnifiedIdentityService {
           `INSERT INTO auth_identities (id, user_id, provider, provider_subject, created_at, updated_at)
            VALUES ($1, $2, 'google', $3, NOW(), NOW())
            ON CONFLICT (provider, provider_subject) DO NOTHING`,
-          [randomUUID(), userId, cleanSubject]
+          [randomUUID(), userId, cleanSubject],
         );
         await client.query(
           `UPDATE account_emails 
            SET is_verified = TRUE, verified_at = NOW(), updated_at = NOW() 
            WHERE normalized_email = $1`,
-          [cleanEmail]
+          [cleanEmail],
         );
         await client.query('COMMIT');
       } catch (err) {
@@ -153,7 +170,7 @@ export class UnifiedIdentityService {
          SET password_hash = EXCLUDED.password_hash,
              salt = EXCLUDED.salt,
              updated_at = NOW()`,
-        [randomUUID(), userId, hash, salt]
+        [randomUUID(), userId, hash, salt],
       );
     } else {
       this.inMemoryPasswords.set(userId, { hash, salt, algorithm: 'scrypt' });
@@ -176,10 +193,9 @@ export class UnifiedIdentityService {
    */
   async verifyUserPassword(userId: string, plainTextPassword: string): Promise<boolean> {
     if (this.pool) {
-      const res = await this.pool.query(
-        'SELECT password_hash, salt FROM password_credentials WHERE user_id = $1',
-        [userId]
-      );
+      const res = await this.pool.query('SELECT password_hash, salt FROM password_credentials WHERE user_id = $1', [
+        userId,
+      ]);
       if (res.rowCount === 0) return false;
       const { password_hash, salt } = res.rows[0];
       return verifyPassword(plainTextPassword, salt, password_hash);
@@ -207,7 +223,7 @@ export class UnifiedIdentityService {
             verified_at = EXCLUDED.verified_at,
             updated_at = NOW()
         RETURNING *`,
-        [id, userId, rawEmail.trim(), normalized, isVerified, isVerified ? now : null]
+        [id, userId, rawEmail.trim(), normalized, isVerified, isVerified ? now : null],
       );
       return res.rows[0];
     }
@@ -241,10 +257,7 @@ export class UnifiedIdentityService {
   async findAccountEmail(rawEmail: string): Promise<AccountEmailRow | null> {
     const normalized = this.normalizeEmail(rawEmail);
     if (this.pool) {
-      const res = await this.pool.query(
-        'SELECT * FROM account_emails WHERE normalized_email = $1',
-        [normalized]
-      );
+      const res = await this.pool.query('SELECT * FROM account_emails WHERE normalized_email = $1', [normalized]);
       return res.rows[0] ?? null;
     }
     return this.inMemoryEmails.find((e) => e.normalized_email === normalized) ?? null;
@@ -260,7 +273,7 @@ export class UnifiedIdentityService {
         `UPDATE account_emails 
          SET is_verified = TRUE, verified_at = NOW(), updated_at = NOW() 
          WHERE normalized_email = $1`,
-        [clean]
+        [clean],
       );
     } else {
       const found = this.inMemoryEmails.find((e) => e.normalized_email === clean);
@@ -276,10 +289,9 @@ export class UnifiedIdentityService {
    */
   async listUserIdentities(userId: string): Promise<AuthIdentityRow[]> {
     if (this.pool) {
-      const res = await this.pool.query(
-        'SELECT * FROM auth_identities WHERE user_id = $1 ORDER BY created_at ASC',
-        [userId]
-      );
+      const res = await this.pool.query('SELECT * FROM auth_identities WHERE user_id = $1 ORDER BY created_at ASC', [
+        userId,
+      ]);
       return res.rows;
     }
     return this.inMemoryIdentities.filter((i) => i.user_id === userId);
@@ -321,7 +333,7 @@ export class UnifiedIdentityService {
              terms_accepted_at = NOW(),
              updated_at = NOW()
          WHERE id = $2`,
-        [termsVersion, userId]
+        [termsVersion, userId],
       );
     }
   }

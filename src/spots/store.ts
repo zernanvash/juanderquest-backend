@@ -6,39 +6,90 @@ import { db } from '../db/index.js';
 import { ensureAreaCache, matchSpotToAreas } from '../maps/areas-service.js';
 import { getPool } from '../db/pool.js';
 
-export type SpotCategory = 'eat_drink' | 'nature_outdoors' | 'culture_heritage' | 'activities_wellness' | 'shopping_local' | 'stay';
+export type SpotCategory =
+  'eat_drink' | 'nature_outdoors' | 'culture_heritage' | 'activities_wellness' | 'shopping_local' | 'stay';
 export type SpotTrust = 'lgu_verified' | 'editorial' | 'open_data' | 'community';
 export type SpotSource = 'lgu' | 'editorial' | 'open_data' | 'community';
 export type { CrowdCapacityBand, CrowdStatus, CrowdConfidence, ActivityType, CrowdMetrics } from './crowd.js';
 import type { CrowdCapacityBand, CrowdStatus, ActivityType } from './crowd.js';
 import { calculateCrowdMetrics } from './crowd.js';
 import { rankExploreSpots, type ExploreListQuery } from './recommender.js';
-interface ActivityEvent { id:string; user_id:string; spot_id:string; activity_type:ActivityType; created_at:string; is_test?: boolean; }
+interface ActivityEvent {
+  id: string;
+  user_id: string;
+  spot_id: string;
+  activity_type: ActivityType;
+  created_at: string;
+  is_test?: boolean;
+}
 
 export interface Spot {
-  id: string; slug: string; name: string; description: string;
-  category: SpotCategory; subcategory: string; tags: string[];
-  municipality: string; address: string; gps_lat: number; gps_lng: number;
-  price_level: number | null; hours: Record<string, string>; amenities: string[];
-  good_for?: string[]; best_time?: string[];
-  image_url: string; asset_ids?: string[]; source_type: SpotSource; source_name: string; source_url?: string;
-  trust_level: SpotTrust; status: 'published' | 'needs_review' | 'unpublished';
-  quest_id?: string; created_by?: string; created_at: string; updated_at: string;
-  crowd_capacity_band?: CrowdCapacityBand; reviewed_by?: string; reviewed_at?: string; recommendation_suppressed?: boolean;
-  town_area_id?: string | null; barangay_area_id?: string | null;
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  category: SpotCategory;
+  subcategory: string;
+  tags: string[];
+  municipality: string;
+  address: string;
+  gps_lat: number;
+  gps_lng: number;
+  price_level: number | null;
+  hours: Record<string, string>;
+  amenities: string[];
+  good_for?: string[];
+  best_time?: string[];
+  image_url: string;
+  asset_ids?: string[];
+  source_type: SpotSource;
+  source_name: string;
+  source_url?: string;
+  trust_level: SpotTrust;
+  status: 'published' | 'needs_review' | 'unpublished';
+  quest_id?: string;
+  created_by?: string;
+  created_at: string;
+  updated_at: string;
+  crowd_capacity_band?: CrowdCapacityBand;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  recommendation_suppressed?: boolean;
+  town_area_id?: string | null;
+  barangay_area_id?: string | null;
   is_test?: boolean;
 }
 
 export interface DiscoveryPreferences {
-  categories: SpotCategory[]; tags: string[]; occasions: string[];
-  price_levels: number[]; radius_km: number; onboarding_state: 'pending' | 'completed' | 'skipped';
+  categories: SpotCategory[];
+  tags: string[];
+  occasions: string[];
+  price_levels: number[];
+  radius_km: number;
+  onboarding_state: 'pending' | 'completed' | 'skipped';
 }
 
 export const taxonomy = [
-  { id: 'eat_drink', label: 'Eat & Drink', subcategories: ['restaurant', 'carinderia', 'cafe', 'bakery', 'street_food', 'bar'] },
-  { id: 'nature_outdoors', label: 'Nature & Outdoors', subcategories: ['beach', 'waterfall', 'cave', 'park', 'trailhead', 'viewpoint'] },
-  { id: 'culture_heritage', label: 'Culture & Heritage', subcategories: ['church', 'museum', 'heritage_site', 'arts_crafts'] },
-  { id: 'activities_wellness', label: 'Activities & Wellness', subcategories: ['sports_venue', 'running_spot', 'gym', 'recreation', 'water_activity'] },
+  {
+    id: 'eat_drink',
+    label: 'Eat & Drink',
+    subcategories: ['restaurant', 'carinderia', 'cafe', 'bakery', 'street_food', 'bar'],
+  },
+  {
+    id: 'nature_outdoors',
+    label: 'Nature & Outdoors',
+    subcategories: ['beach', 'waterfall', 'cave', 'park', 'trailhead', 'viewpoint'],
+  },
+  {
+    id: 'culture_heritage',
+    label: 'Culture & Heritage',
+    subcategories: ['church', 'museum', 'heritage_site', 'arts_crafts'],
+  },
+  {
+    id: 'activities_wellness',
+    label: 'Activities & Wellness',
+    subcategories: ['sports_venue', 'running_spot', 'gym', 'recreation', 'water_activity'],
+  },
   { id: 'shopping_local', label: 'Shopping & Local Finds', subcategories: ['market', 'souvenir', 'local_products'] },
   { id: 'stay', label: 'Stay', subcategories: ['hotel', 'resort', 'homestay', 'campsite'] },
 ] as const;
@@ -50,23 +101,251 @@ const developmentFixturesEnabled = isDevelopmentSeedEnabled({
   seedDevelopmentData: env.SEED_DEVELOPMENT_DATA,
 });
 const seeds: Spot[] = [
-  { id:'spot-hundred-islands',slug:'hundred-islands-national-park',name:'Hundred Islands National Park',description:'Island-hopping, viewpoints, swimming, and family adventures across the iconic Alaminos archipelago.',category:'nature_outdoors',subcategory:'park',tags:['island','family','scenic','water_activity'],municipality:'Alaminos City',address:'Lucap, Alaminos City, Pangasinan',gps_lat:16.2063,gps_lng:119.9706,price_level:2,hours:{daily:'06:00-17:00'},amenities:['parking','restroom','boat_rental'],image_url:'https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?auto=format&fit=crop&w=1200&q=80',source_type:'lgu',source_name:'Alaminos City Tourism',trust_level:'lgu_verified',status:'published',quest_id:'q1111111-1111-1111-1111-111111111111',created_at:now,updated_at:now },
-  { id:'spot-patar',slug:'patar-white-beach',name:'Patar White Beach',description:'A broad public beach known for golden sunsets, limestone scenery, and relaxed group trips.',category:'nature_outdoors',subcategory:'beach',tags:['beach','sunset','friends','scenic'],municipality:'Bolinao',address:'Patar, Bolinao, Pangasinan',gps_lat:16.3204,gps_lng:119.7847,price_level:1,hours:{daily:'05:00-20:00'},amenities:['parking','restroom','food_stalls'],image_url:'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80',source_type:'lgu',source_name:'Bolinao Tourism Office',trust_level:'lgu_verified',status:'published',created_at:now,updated_at:now },
-  { id:'spot-manaoag',slug:'minor-basilica-of-manaoag',name:'Minor Basilica of Our Lady of Manaoag',description:'A major pilgrimage and heritage destination surrounded by local food and souvenir stalls.',category:'culture_heritage',subcategory:'church',tags:['heritage','family','pilgrimage','architecture'],municipality:'Manaoag',address:'Milo St, Manaoag, Pangasinan',gps_lat:16.0436,gps_lng:120.4854,price_level:0,hours:{daily:'05:00-19:00'},amenities:['parking','restroom','wheelchair_accessible'],image_url:'https://images.unsplash.com/photo-1548625361-16a9a087192a?auto=format&fit=crop&w=1200&q=80',source_type:'open_data',source_name:'OpenStreetMap contributors',source_url:'https://www.openstreetmap.org/',trust_level:'open_data',status:'published',created_at:now,updated_at:now },
-  { id:'spot-bangus',slug:'dagupan-bangus-market',name:'Dagupan Bangus Market',description:'Discover fresh Dagupan bangus and local seafood cooking near the city market district.',category:'eat_drink',subcategory:'street_food',tags:['seafood','local_food','market','budget'],municipality:'Dagupan City',address:'Downtown Dagupan City, Pangasinan',gps_lat:16.0431,gps_lng:120.3333,price_level:1,hours:{daily:'05:00-18:00'},amenities:['parking','takeaway'],image_url:'',source_type:'editorial',source_name:'JuanDerQuest Curators',trust_level:'editorial',status:'published',quest_id:'q5555555-5555-5555-5555-555555555555',created_at:now,updated_at:now },
-  { id:'spot-lingayen',slug:'lingayen-baywalk',name:'Lingayen Baywalk',description:'An open waterfront for sunset walks, casual running, cycling, and family recreation.',category:'activities_wellness',subcategory:'running_spot',tags:['running','walking','sunset','family','free'],municipality:'Lingayen',address:'Capitol Beachfront, Lingayen, Pangasinan',gps_lat:16.0218,gps_lng:120.2319,price_level:0,hours:{daily:'04:30-22:00'},amenities:['parking','restroom','wheelchair_accessible'],image_url:'',source_type:'lgu',source_name:'Province of Pangasinan',trust_level:'lgu_verified',status:'published',created_at:now,updated_at:now },
-  { id:'spot-cafe',slug:'third-wave-cafe-dagupan',name:'Third Wave Café Dagupan',description:'A quiet local coffee stop suited for meetups, remote work, and an afternoon break.',category:'eat_drink',subcategory:'cafe',tags:['coffee','quiet','work_friendly','friends'],municipality:'Dagupan City',address:'Arellano Street, Dagupan City, Pangasinan',gps_lat:16.0470,gps_lng:120.3400,price_level:2,hours:{daily:'08:00-21:00'},amenities:['wifi','restroom','power_outlets'],image_url:'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=1200&q=80',source_type:'community',source_name:'JuanDerQuest Community',trust_level:'community',status:'published',created_at:now,updated_at:now },
-  { id:'spot-bolinao-falls',slug:'bolinao-falls-1',name:'Bolinao Falls 1',description:'A forest waterfall and swimming destination popular with adventurous groups.',category:'nature_outdoors',subcategory:'waterfall',tags:['hidden_gem','swimming','friends','adventure'],municipality:'Bolinao',address:'Samang Norte, Bolinao, Pangasinan',gps_lat:16.3377,gps_lng:119.8806,price_level:1,hours:{daily:'07:00-17:00'},amenities:['parking','guide'],image_url:'https://images.unsplash.com/photo-1432405972618-c60b0225b8f9?auto=format&fit=crop&w=1200&q=80',source_type:'open_data',source_name:'OpenStreetMap contributors',source_url:'https://www.openstreetmap.org/',trust_level:'open_data',status:'published',created_at:now,updated_at:now },
-  { id:'spot-capitol',slug:'pangasinan-provincial-capitol',name:'Pangasinan Provincial Capitol',description:'A landmark neoclassical capitol complex with lawns, heritage architecture, and bay access.',category:'culture_heritage',subcategory:'heritage_site',tags:['architecture','history','family','free'],municipality:'Lingayen',address:'Capitol Complex, Lingayen, Pangasinan',gps_lat:16.0232,gps_lng:120.2317,price_level:0,hours:{weekdays:'08:00-17:00'},amenities:['parking','wheelchair_accessible'],image_url:'',source_type:'lgu',source_name:'Province of Pangasinan',trust_level:'lgu_verified',status:'published',created_at:now,updated_at:now },
-  { id:'spot-qa-cove',slug:'qa-tambobong-cove-test',name:'Tambobong White Beach & Colibra (QA Fixture)',description:'Simulated QA test destination for exploring hidden coves and testing preview mode.',category:'nature_outdoors',subcategory:'beach',tags:['hidden_gem','beach','scenic'],municipality:'Dasol',address:'Tambobong, Dasol, Pangasinan',gps_lat:15.9083,gps_lng:119.7892,price_level:1,hours:{daily:'06:00-18:00'},amenities:['boat_rental','restroom'],image_url:'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80',source_type:'community',source_name:'QA Test Fixtures',trust_level:'community',status:'published',is_test:true,quest_id:'qa-quest-tambobong',created_at:now,updated_at:now },
-  { id:'spot-qa-heritage',slug:'qa-lingayen-heritage-test',name:'Lingayen Veterans Memorial (QA Fixture)',description:'Simulated historical attraction for testing quest validation and preview badges.',category:'culture_heritage',subcategory:'heritage_site',tags:['heritage','history','family'],municipality:'Lingayen',address:'Capitol Ground, Lingayen, Pangasinan',gps_lat:16.0225,gps_lng:120.2315,price_level:0,hours:{daily:'08:00-17:00'},amenities:['parking','wheelchair_accessible'],image_url:'https://images.unsplash.com/photo-1548625361-16a9a087192a?auto=format&fit=crop&w=1200&q=80',source_type:'community',source_name:'QA Test Fixtures',trust_level:'community',status:'published',is_test:true,created_at:now,updated_at:now },
+  {
+    id: 'spot-hundred-islands',
+    slug: 'hundred-islands-national-park',
+    name: 'Hundred Islands National Park',
+    description: 'Island-hopping, viewpoints, swimming, and family adventures across the iconic Alaminos archipelago.',
+    category: 'nature_outdoors',
+    subcategory: 'park',
+    tags: ['island', 'family', 'scenic', 'water_activity'],
+    municipality: 'Alaminos City',
+    address: 'Lucap, Alaminos City, Pangasinan',
+    gps_lat: 16.2063,
+    gps_lng: 119.9706,
+    price_level: 2,
+    hours: { daily: '06:00-17:00' },
+    amenities: ['parking', 'restroom', 'boat_rental'],
+    image_url: 'https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Alaminos City Tourism',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    quest_id: 'q1111111-1111-1111-1111-111111111111',
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: 'spot-patar',
+    slug: 'patar-white-beach',
+    name: 'Patar White Beach',
+    description: 'A broad public beach known for golden sunsets, limestone scenery, and relaxed group trips.',
+    category: 'nature_outdoors',
+    subcategory: 'beach',
+    tags: ['beach', 'sunset', 'friends', 'scenic'],
+    municipality: 'Bolinao',
+    address: 'Patar, Bolinao, Pangasinan',
+    gps_lat: 16.3204,
+    gps_lng: 119.7847,
+    price_level: 1,
+    hours: { daily: '05:00-20:00' },
+    amenities: ['parking', 'restroom', 'food_stalls'],
+    image_url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'lgu',
+    source_name: 'Bolinao Tourism Office',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: 'spot-manaoag',
+    slug: 'minor-basilica-of-manaoag',
+    name: 'Minor Basilica of Our Lady of Manaoag',
+    description: 'A major pilgrimage and heritage destination surrounded by local food and souvenir stalls.',
+    category: 'culture_heritage',
+    subcategory: 'church',
+    tags: ['heritage', 'family', 'pilgrimage', 'architecture'],
+    municipality: 'Manaoag',
+    address: 'Milo St, Manaoag, Pangasinan',
+    gps_lat: 16.0436,
+    gps_lng: 120.4854,
+    price_level: 0,
+    hours: { daily: '05:00-19:00' },
+    amenities: ['parking', 'restroom', 'wheelchair_accessible'],
+    image_url: 'https://images.unsplash.com/photo-1548625361-16a9a087192a?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'open_data',
+    source_name: 'OpenStreetMap contributors',
+    source_url: 'https://www.openstreetmap.org/',
+    trust_level: 'open_data',
+    status: 'published',
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: 'spot-bangus',
+    slug: 'dagupan-bangus-market',
+    name: 'Dagupan Bangus Market',
+    description: 'Discover fresh Dagupan bangus and local seafood cooking near the city market district.',
+    category: 'eat_drink',
+    subcategory: 'street_food',
+    tags: ['seafood', 'local_food', 'market', 'budget'],
+    municipality: 'Dagupan City',
+    address: 'Downtown Dagupan City, Pangasinan',
+    gps_lat: 16.0431,
+    gps_lng: 120.3333,
+    price_level: 1,
+    hours: { daily: '05:00-18:00' },
+    amenities: ['parking', 'takeaway'],
+    image_url: '',
+    source_type: 'editorial',
+    source_name: 'JuanDerQuest Curators',
+    trust_level: 'editorial',
+    status: 'published',
+    quest_id: 'q5555555-5555-5555-5555-555555555555',
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: 'spot-lingayen',
+    slug: 'lingayen-baywalk',
+    name: 'Lingayen Baywalk',
+    description: 'An open waterfront for sunset walks, casual running, cycling, and family recreation.',
+    category: 'activities_wellness',
+    subcategory: 'running_spot',
+    tags: ['running', 'walking', 'sunset', 'family', 'free'],
+    municipality: 'Lingayen',
+    address: 'Capitol Beachfront, Lingayen, Pangasinan',
+    gps_lat: 16.0218,
+    gps_lng: 120.2319,
+    price_level: 0,
+    hours: { daily: '04:30-22:00' },
+    amenities: ['parking', 'restroom', 'wheelchair_accessible'],
+    image_url: '',
+    source_type: 'lgu',
+    source_name: 'Province of Pangasinan',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: 'spot-cafe',
+    slug: 'third-wave-cafe-dagupan',
+    name: 'Third Wave Café Dagupan',
+    description: 'A quiet local coffee stop suited for meetups, remote work, and an afternoon break.',
+    category: 'eat_drink',
+    subcategory: 'cafe',
+    tags: ['coffee', 'quiet', 'work_friendly', 'friends'],
+    municipality: 'Dagupan City',
+    address: 'Arellano Street, Dagupan City, Pangasinan',
+    gps_lat: 16.047,
+    gps_lng: 120.34,
+    price_level: 2,
+    hours: { daily: '08:00-21:00' },
+    amenities: ['wifi', 'restroom', 'power_outlets'],
+    image_url: 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'community',
+    source_name: 'JuanDerQuest Community',
+    trust_level: 'community',
+    status: 'published',
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: 'spot-bolinao-falls',
+    slug: 'bolinao-falls-1',
+    name: 'Bolinao Falls 1',
+    description: 'A forest waterfall and swimming destination popular with adventurous groups.',
+    category: 'nature_outdoors',
+    subcategory: 'waterfall',
+    tags: ['hidden_gem', 'swimming', 'friends', 'adventure'],
+    municipality: 'Bolinao',
+    address: 'Samang Norte, Bolinao, Pangasinan',
+    gps_lat: 16.3377,
+    gps_lng: 119.8806,
+    price_level: 1,
+    hours: { daily: '07:00-17:00' },
+    amenities: ['parking', 'guide'],
+    image_url: 'https://images.unsplash.com/photo-1432405972618-c60b0225b8f9?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'open_data',
+    source_name: 'OpenStreetMap contributors',
+    source_url: 'https://www.openstreetmap.org/',
+    trust_level: 'open_data',
+    status: 'published',
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: 'spot-capitol',
+    slug: 'pangasinan-provincial-capitol',
+    name: 'Pangasinan Provincial Capitol',
+    description: 'A landmark neoclassical capitol complex with lawns, heritage architecture, and bay access.',
+    category: 'culture_heritage',
+    subcategory: 'heritage_site',
+    tags: ['architecture', 'history', 'family', 'free'],
+    municipality: 'Lingayen',
+    address: 'Capitol Complex, Lingayen, Pangasinan',
+    gps_lat: 16.0232,
+    gps_lng: 120.2317,
+    price_level: 0,
+    hours: { weekdays: '08:00-17:00' },
+    amenities: ['parking', 'wheelchair_accessible'],
+    image_url: '',
+    source_type: 'lgu',
+    source_name: 'Province of Pangasinan',
+    trust_level: 'lgu_verified',
+    status: 'published',
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: 'spot-qa-cove',
+    slug: 'qa-tambobong-cove-test',
+    name: 'Tambobong White Beach & Colibra (QA Fixture)',
+    description: 'Simulated QA test destination for exploring hidden coves and testing preview mode.',
+    category: 'nature_outdoors',
+    subcategory: 'beach',
+    tags: ['hidden_gem', 'beach', 'scenic'],
+    municipality: 'Dasol',
+    address: 'Tambobong, Dasol, Pangasinan',
+    gps_lat: 15.9083,
+    gps_lng: 119.7892,
+    price_level: 1,
+    hours: { daily: '06:00-18:00' },
+    amenities: ['boat_rental', 'restroom'],
+    image_url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'community',
+    source_name: 'QA Test Fixtures',
+    trust_level: 'community',
+    status: 'published',
+    is_test: true,
+    quest_id: 'qa-quest-tambobong',
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: 'spot-qa-heritage',
+    slug: 'qa-lingayen-heritage-test',
+    name: 'Lingayen Veterans Memorial (QA Fixture)',
+    description: 'Simulated historical attraction for testing quest validation and preview badges.',
+    category: 'culture_heritage',
+    subcategory: 'heritage_site',
+    tags: ['heritage', 'history', 'family'],
+    municipality: 'Lingayen',
+    address: 'Capitol Ground, Lingayen, Pangasinan',
+    gps_lat: 16.0225,
+    gps_lng: 120.2315,
+    price_level: 0,
+    hours: { daily: '08:00-17:00' },
+    amenities: ['parking', 'wheelchair_accessible'],
+    image_url: 'https://images.unsplash.com/photo-1548625361-16a9a087192a?auto=format&fit=crop&w=1200&q=80',
+    source_type: 'community',
+    source_name: 'QA Test Fixtures',
+    trust_level: 'community',
+    status: 'published',
+    is_test: true,
+    created_at: now,
+    updated_at: now,
+  },
 ];
 
-const radians = (value:number) => value * Math.PI / 180;
-export const distanceKm = (aLat:number,aLng:number,bLat:number,bLng:number) => {
-  const dLat=radians(bLat-aLat), dLng=radians(bLng-aLng);
-  const h=Math.sin(dLat/2)**2+Math.cos(radians(aLat))*Math.cos(radians(bLat))*Math.sin(dLng/2)**2;
-  return 6371*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));
+const radians = (value: number) => (value * Math.PI) / 180;
+export const distanceKm = (aLat: number, aLng: number, bLat: number, bLng: number) => {
+  const dLat = radians(bLat - aLat),
+    dLng = radians(bLng - aLng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(radians(aLat)) * Math.cos(radians(bLat)) * Math.sin(dLng / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 };
 
 export class SpotStore {
@@ -80,89 +359,371 @@ export class SpotStore {
   async hydrateFromPg(pool: Pool) {
     this.pg = pool;
     const { rows } = await pool.query('SELECT * FROM spots ORDER BY created_at');
-    if (rows.length) this.spots = rows.map((r:any)=>({...r,tags:r.tags||[],amenities:r.amenities||[],good_for:r.good_for||[],best_time:r.best_time||[],hours:r.hours||{},created_at:new Date(r.created_at).toISOString(),updated_at:new Date(r.updated_at).toISOString()}));
+    if (rows.length)
+      this.spots = rows.map((r: any) => ({
+        ...r,
+        tags: r.tags || [],
+        amenities: r.amenities || [],
+        good_for: r.good_for || [],
+        best_time: r.best_time || [],
+        hours: r.hours || {},
+        created_at: new Date(r.created_at).toISOString(),
+        updated_at: new Date(r.updated_at).toISOString(),
+      }));
     else for (const spot of this.spots) await this.persistSpot(spot);
     const { rows: preferences } = await pool.query('SELECT * FROM discovery_preferences');
-    for (const p of preferences) this.preferences.set(p.user_id, { categories:p.categories||[],tags:p.tags||[],occasions:p.occasions||[],price_levels:p.price_levels||[],radius_km:p.radius_km,onboarding_state:p.onboarding_state });
+    for (const p of preferences)
+      this.preferences.set(p.user_id, {
+        categories: p.categories || [],
+        tags: p.tags || [],
+        occasions: p.occasions || [],
+        price_levels: p.price_levels || [],
+        radius_km: p.radius_km,
+        onboarding_state: p.onboarding_state,
+      });
     const { rows: interactions } = await pool.query('SELECT * FROM spot_interactions');
-    for (const item of interactions) { const values=this.interactions.get(item.user_id)||new Set<string>();values.add(`${item.spot_id}:${item.interaction_type}`);this.interactions.set(item.user_id,values); if(item.created_at)this.interactionTimestamps.set(`${item.user_id}:${item.spot_id}:${item.interaction_type}`,new Date(item.created_at).getTime()); }
-    const { rows: activity } = await pool.query("SELECT id,user_id,spot_id,activity_type,created_at,COALESCE(is_test, FALSE) AS is_test FROM spot_activity_events WHERE created_at >= NOW() - INTERVAL '24 hours'");
-    this.activityEvents = activity.map((item:any)=>({...item,is_test:Boolean(item.is_test),created_at:new Date(item.created_at).toISOString()}));
+    for (const item of interactions) {
+      const values = this.interactions.get(item.user_id) || new Set<string>();
+      values.add(`${item.spot_id}:${item.interaction_type}`);
+      this.interactions.set(item.user_id, values);
+      if (item.created_at)
+        this.interactionTimestamps.set(
+          `${item.user_id}:${item.spot_id}:${item.interaction_type}`,
+          new Date(item.created_at).getTime(),
+        );
+    }
+    const { rows: activity } = await pool.query(
+      "SELECT id,user_id,spot_id,activity_type,created_at,COALESCE(is_test, FALSE) AS is_test FROM spot_activity_events WHERE created_at >= NOW() - INTERVAL '24 hours'",
+    );
+    this.activityEvents = activity.map((item: any) => ({
+      ...item,
+      is_test: Boolean(item.is_test),
+      created_at: new Date(item.created_at).toISOString(),
+    }));
   }
 
   private async persistSpot(s: Spot) {
     if (!this.pg) return;
     try {
-      await this.pg.query(`INSERT INTO spots (id,slug,name,description,category,subcategory,tags,municipality,address,gps_lat,gps_lng,price_level,hours,amenities,good_for,best_time,image_url,source_type,source_name,source_url,trust_level,status,quest_id,created_by,is_test,created_at,updated_at,town_area_id,barangay_area_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,is_test=EXCLUDED.is_test,updated_at=EXCLUDED.updated_at,town_area_id=COALESCE(EXCLUDED.town_area_id, spots.town_area_id),barangay_area_id=COALESCE(EXCLUDED.barangay_area_id, spots.barangay_area_id)`,[s.id,s.slug,s.name,s.description,s.category,s.subcategory,JSON.stringify(s.tags),s.municipality,s.address,s.gps_lat,s.gps_lng,s.price_level,JSON.stringify(s.hours),JSON.stringify(s.amenities),JSON.stringify(s.good_for || []),JSON.stringify(s.best_time || []),s.image_url,s.source_type,s.source_name,s.source_url||null,s.trust_level,s.status,s.quest_id||null,s.created_by||null,Boolean(s.is_test),s.created_at,s.updated_at,s.town_area_id||null,s.barangay_area_id||null]);
+      await this.pg.query(
+        `INSERT INTO spots (id,slug,name,description,category,subcategory,tags,municipality,address,gps_lat,gps_lng,price_level,hours,amenities,good_for,best_time,image_url,source_type,source_name,source_url,trust_level,status,quest_id,created_by,is_test,created_at,updated_at,town_area_id,barangay_area_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,is_test=EXCLUDED.is_test,updated_at=EXCLUDED.updated_at,town_area_id=COALESCE(EXCLUDED.town_area_id, spots.town_area_id),barangay_area_id=COALESCE(EXCLUDED.barangay_area_id, spots.barangay_area_id)`,
+        [
+          s.id,
+          s.slug,
+          s.name,
+          s.description,
+          s.category,
+          s.subcategory,
+          JSON.stringify(s.tags),
+          s.municipality,
+          s.address,
+          s.gps_lat,
+          s.gps_lng,
+          s.price_level,
+          JSON.stringify(s.hours),
+          JSON.stringify(s.amenities),
+          JSON.stringify(s.good_for || []),
+          JSON.stringify(s.best_time || []),
+          s.image_url,
+          s.source_type,
+          s.source_name,
+          s.source_url || null,
+          s.trust_level,
+          s.status,
+          s.quest_id || null,
+          s.created_by || null,
+          Boolean(s.is_test),
+          s.created_at,
+          s.updated_at,
+          s.town_area_id || null,
+          s.barangay_area_id || null,
+        ],
+      );
     } catch {
       // Fallback for partial schemas without area columns
-      await this.pg.query(`INSERT INTO spots (id,slug,name,description,category,subcategory,tags,municipality,address,gps_lat,gps_lng,price_level,hours,amenities,good_for,best_time,image_url,source_type,source_name,source_url,trust_level,status,quest_id,created_by,is_test,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,is_test=EXCLUDED.is_test,updated_at=EXCLUDED.updated_at`,[s.id,s.slug,s.name,s.description,s.category,s.subcategory,JSON.stringify(s.tags),s.municipality,s.address,s.gps_lat,s.gps_lng,s.price_level,JSON.stringify(s.hours),JSON.stringify(s.amenities),JSON.stringify(s.good_for || []),JSON.stringify(s.best_time || []),s.image_url,s.source_type,s.source_name,s.source_url||null,s.trust_level,s.status,s.quest_id||null,s.created_by||null,Boolean(s.is_test),s.created_at,s.updated_at]);
+      await this.pg.query(
+        `INSERT INTO spots (id,slug,name,description,category,subcategory,tags,municipality,address,gps_lat,gps_lng,price_level,hours,amenities,good_for,best_time,image_url,source_type,source_name,source_url,trust_level,status,quest_id,created_by,is_test,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,is_test=EXCLUDED.is_test,updated_at=EXCLUDED.updated_at`,
+        [
+          s.id,
+          s.slug,
+          s.name,
+          s.description,
+          s.category,
+          s.subcategory,
+          JSON.stringify(s.tags),
+          s.municipality,
+          s.address,
+          s.gps_lat,
+          s.gps_lng,
+          s.price_level,
+          JSON.stringify(s.hours),
+          JSON.stringify(s.amenities),
+          JSON.stringify(s.good_for || []),
+          JSON.stringify(s.best_time || []),
+          s.image_url,
+          s.source_type,
+          s.source_name,
+          s.source_url || null,
+          s.trust_level,
+          s.status,
+          s.quest_id || null,
+          s.created_by || null,
+          Boolean(s.is_test),
+          s.created_at,
+          s.updated_at,
+        ],
+      );
     }
   }
 
-  getPreferences(userId:string): DiscoveryPreferences { return this.preferences.get(userId) || {categories:[],tags:[],occasions:[],price_levels:[],radius_km:25,onboarding_state:'pending'}; }
-  setPreferences(userId:string,p:DiscoveryPreferences) { this.preferences.set(userId,p); if(this.pg)this.pg.query(`INSERT INTO discovery_preferences(user_id,categories,tags,occasions,price_levels,radius_km,onboarding_state) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(user_id) DO UPDATE SET categories=$2,tags=$3,occasions=$4,price_levels=$5,radius_km=$6,onboarding_state=$7,updated_at=NOW()`,[userId,JSON.stringify(p.categories),JSON.stringify(p.tags),JSON.stringify(p.occasions),JSON.stringify(p.price_levels),p.radius_km,p.onboarding_state]).catch(()=>{}); return p; }
-  interact(userId:string,spotId:string,type:string,enabled=true,createdAtMs=Date.now()) { const key=`${spotId}:${type}`; const tsKey=`${userId}:${spotId}:${type}`; const set=this.interactions.get(userId)||new Set<string>(); if(enabled){set.add(key);this.interactionTimestamps.set(tsKey,createdAtMs);}else{set.delete(key);this.interactionTimestamps.delete(tsKey);} this.interactions.set(userId,set);if(this.pg){const query=enabled?'INSERT INTO spot_interactions(user_id,spot_id,interaction_type) VALUES($1,$2,$3) ON CONFLICT DO NOTHING':'DELETE FROM spot_interactions WHERE user_id=$1 AND spot_id=$2 AND interaction_type=$3';this.pg.query(query,[userId,spotId,type]).catch(()=>{});} return enabled; }
-  isSaved(userId:string|undefined,spotId:string){return !!userId&&this.interactions.get(userId)?.has(`${spotId}:save`);}
-  isLiked(userId:string|undefined,spotId:string){return !!userId&&this.interactions.get(userId)?.has(`${spotId}:like`);}
-  trend(spotId:string){return this.trendScores().get(spotId)??0;}
+  getPreferences(userId: string): DiscoveryPreferences {
+    return (
+      this.preferences.get(userId) || {
+        categories: [],
+        tags: [],
+        occasions: [],
+        price_levels: [],
+        radius_km: 25,
+        onboarding_state: 'pending',
+      }
+    );
+  }
+  setPreferences(userId: string, p: DiscoveryPreferences) {
+    this.preferences.set(userId, p);
+    if (this.pg)
+      this.pg
+        .query(
+          `INSERT INTO discovery_preferences(user_id,categories,tags,occasions,price_levels,radius_km,onboarding_state) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(user_id) DO UPDATE SET categories=$2,tags=$3,occasions=$4,price_levels=$5,radius_km=$6,onboarding_state=$7,updated_at=NOW()`,
+          [
+            userId,
+            JSON.stringify(p.categories),
+            JSON.stringify(p.tags),
+            JSON.stringify(p.occasions),
+            JSON.stringify(p.price_levels),
+            p.radius_km,
+            p.onboarding_state,
+          ],
+        )
+        .catch(() => {});
+    return p;
+  }
+  interact(userId: string, spotId: string, type: string, enabled = true, createdAtMs = Date.now()) {
+    const key = `${spotId}:${type}`;
+    const tsKey = `${userId}:${spotId}:${type}`;
+    const set = this.interactions.get(userId) || new Set<string>();
+    if (enabled) {
+      set.add(key);
+      this.interactionTimestamps.set(tsKey, createdAtMs);
+    } else {
+      set.delete(key);
+      this.interactionTimestamps.delete(tsKey);
+    }
+    this.interactions.set(userId, set);
+    if (this.pg) {
+      const query = enabled
+        ? 'INSERT INTO spot_interactions(user_id,spot_id,interaction_type) VALUES($1,$2,$3) ON CONFLICT DO NOTHING'
+        : 'DELETE FROM spot_interactions WHERE user_id=$1 AND spot_id=$2 AND interaction_type=$3';
+      this.pg.query(query, [userId, spotId, type]).catch(() => {});
+    }
+    return enabled;
+  }
+  isSaved(userId: string | undefined, spotId: string) {
+    return !!userId && this.interactions.get(userId)?.has(`${spotId}:save`);
+  }
+  isLiked(userId: string | undefined, spotId: string) {
+    return !!userId && this.interactions.get(userId)?.has(`${spotId}:like`);
+  }
+  trend(spotId: string) {
+    return this.trendScores().get(spotId) ?? 0;
+  }
   // One pass over every traveler's interactions; list() used to rescan all travelers per spot.
-  trendScores(){
-    const weights:Record<string,number>={visit:5,directions:3,save:2,like:2,helpful:2,view:.25};const scores=new Map<string,number>();
-    for(const [userId, values] of this.interactions.entries()){if(db.findUserById(userId)?.is_test)continue;
-      for(const key of values){const at=key.lastIndexOf(':');const w=weights[key.slice(at+1)];if(w===undefined)continue;const spotId=key.slice(0,at);scores.set(spotId,(scores.get(spotId)??0)+w);}}
+  trendScores() {
+    const weights: Record<string, number> = { visit: 5, directions: 3, save: 2, like: 2, helpful: 2, view: 0.25 };
+    const scores = new Map<string, number>();
+    for (const [userId, values] of this.interactions.entries()) {
+      if (db.findUserById(userId)?.is_test) continue;
+      for (const key of values) {
+        const at = key.lastIndexOf(':');
+        const w = weights[key.slice(at + 1)];
+        if (w === undefined) continue;
+        const spotId = key.slice(0, at);
+        scores.set(spotId, (scores.get(spotId) ?? 0) + w);
+      }
+    }
     return scores;
   }
-  eventsBySpot(){const bySpot=new Map<string,ActivityEvent[]>();for(const e of this.activityEvents){const list=bySpot.get(e.spot_id);if(list)list.push(e);else bySpot.set(e.spot_id,[e]);}return bySpot;}
+  eventsBySpot() {
+    const bySpot = new Map<string, ActivityEvent[]>();
+    for (const e of this.activityEvents) {
+      const list = bySpot.get(e.spot_id);
+      if (list) list.push(e);
+      else bySpot.set(e.spot_id, [e]);
+    }
+    return bySpot;
+  }
 
-  recordActivity(userId:string,spotId:string,type:ActivityType) {
-    if(!this.spots.some(s=>s.id===spotId))return false;
-    const now=Date.now();const dedupeMs={view:30*60000,directions:2*3600000,save:24*3600000,visit:12*3600000}[type];
-    this.activityEvents=this.activityEvents.filter(e=>now-Date.parse(e.created_at)<=86400000);
-    if(this.activityEvents.some(e=>e.user_id===userId&&e.spot_id===spotId&&e.activity_type===type&&now-Date.parse(e.created_at)<dedupeMs))return false;
-    const isTest = Boolean(db.findUserById(userId)?.is_test || this.spots.find(s=>s.id===spotId)?.is_test);
-    const event:ActivityEvent={id:randomUUID(),user_id:userId,spot_id:spotId,activity_type:type,created_at:new Date(now).toISOString(),is_test:isTest};this.activityEvents.push(event);
-    if(this.pg)this.pg.query('INSERT INTO spot_activity_events(id,user_id,spot_id,activity_type,created_at,is_test) VALUES($1,$2,$3,$4,$5,$6)',[event.id,event.user_id,event.spot_id,event.activity_type,event.created_at,isTest]).catch(()=>{});
+  recordActivity(userId: string, spotId: string, type: ActivityType) {
+    if (!this.spots.some((s) => s.id === spotId)) return false;
+    const now = Date.now();
+    const dedupeMs = { view: 30 * 60000, directions: 2 * 3600000, save: 24 * 3600000, visit: 12 * 3600000 }[type];
+    this.activityEvents = this.activityEvents.filter((e) => now - Date.parse(e.created_at) <= 86400000);
+    if (
+      this.activityEvents.some(
+        (e) =>
+          e.user_id === userId &&
+          e.spot_id === spotId &&
+          e.activity_type === type &&
+          now - Date.parse(e.created_at) < dedupeMs,
+      )
+    )
+      return false;
+    const isTest = Boolean(db.findUserById(userId)?.is_test || this.spots.find((s) => s.id === spotId)?.is_test);
+    const event: ActivityEvent = {
+      id: randomUUID(),
+      user_id: userId,
+      spot_id: spotId,
+      activity_type: type,
+      created_at: new Date(now).toISOString(),
+      is_test: isTest,
+    };
+    this.activityEvents.push(event);
+    if (this.pg)
+      this.pg
+        .query(
+          'INSERT INTO spot_activity_events(id,user_id,spot_id,activity_type,created_at,is_test) VALUES($1,$2,$3,$4,$5,$6)',
+          [event.id, event.user_id, event.spot_id, event.activity_type, event.created_at, isTest],
+        )
+        .catch(() => {});
     return true;
   }
 
-  crowd(spot:Spot,now=Date.now(),bySpot?:Map<string,ActivityEvent[]>) {
-    const events=bySpot?bySpot.get(spot.id)??[]:this.activityEvents.filter(e => e.spot_id === spot.id);
+  crowd(spot: Spot, now = Date.now(), bySpot?: Map<string, ActivityEvent[]>) {
+    const events = bySpot ? (bySpot.get(spot.id) ?? []) : this.activityEvents.filter((e) => e.spot_id === spot.id);
     return calculateCrowdMetrics(events, spot.crowd_capacity_band || 'medium', now);
   }
 
-  alternatives(source:Spot,userId?:string,limit=3) {
-    const prefs=userId?this.getPreferences(userId):undefined;
-    const bySpot=this.eventsBySpot();const now=Date.now();
-    const candidates=this.spots.filter(s=>s.id!==source.id&&s.status==='published'&&!s.recommendation_suppressed&&this.crowd(s,now,bySpot).crowd_status!=='estimated_busy').map(s=>{
-      const shared=s.tags.filter(t=>source.tags.includes(t));const tagScore=shared.length/Math.max(new Set([...source.tags,...s.tags]).size,1);const categoryScore=s.subcategory===source.subcategory?1:s.category===source.category?.65:0;if(!shared.length&&!categoryScore)return null;
-      const distance=distanceKm(source.gps_lat,source.gps_lng,s.gps_lat,s.gps_lng);const trust={lgu_verified:1,editorial:.9,open_data:.75,community:.6}[s.trust_level];const pressure=this.crowd(s,now,bySpot);const pressureScore=pressure.crowd_status==='quiet'?1:pressure.crowd_status==='moderate'?.55:.7;const pref=prefs&&[...prefs.categories,...prefs.tags,...prefs.occasions].some(v=>v===s.category||s.tags.includes(v))?1:0;
-      const distanceScore=Math.max(0,1-distance/500);const score=tagScore*.35+categoryScore*.25+pref*.15+trust*.1+pressureScore*.1+distanceScore*.05;const reasons=[shared.length?`Similar ${shared.slice(0,2).join(' and ').replaceAll('_',' ')}`:`Similar ${s.subcategory.replaceAll('_',' ')}`,pref?'Matches your travel preferences':'Matches this destination',`${s.municipality} alternative`];
-      return {...s,...pressure,distance_km:Number(distance.toFixed(2)),alternative_score:Number(score.toFixed(4)),recommendation_kind:'similar_place',sponsored:false,recommendation_reasons:reasons};
-    }).filter(Boolean) as any[];
-    return candidates.sort((a,b)=>b.alternative_score-a.alternative_score).slice(0,Math.min(limit,5));
+  alternatives(source: Spot, userId?: string, limit = 3) {
+    const prefs = userId ? this.getPreferences(userId) : undefined;
+    const bySpot = this.eventsBySpot();
+    const now = Date.now();
+    const candidates = this.spots
+      .filter(
+        (s) =>
+          s.id !== source.id &&
+          s.status === 'published' &&
+          !s.recommendation_suppressed &&
+          this.crowd(s, now, bySpot).crowd_status !== 'estimated_busy',
+      )
+      .map((s) => {
+        const shared = s.tags.filter((t) => source.tags.includes(t));
+        const tagScore = shared.length / Math.max(new Set([...source.tags, ...s.tags]).size, 1);
+        const categoryScore = s.subcategory === source.subcategory ? 1 : s.category === source.category ? 0.65 : 0;
+        if (!shared.length && !categoryScore) return null;
+        const distance = distanceKm(source.gps_lat, source.gps_lng, s.gps_lat, s.gps_lng);
+        const trust = { lgu_verified: 1, editorial: 0.9, open_data: 0.75, community: 0.6 }[s.trust_level];
+        const pressure = this.crowd(s, now, bySpot);
+        const pressureScore = pressure.crowd_status === 'quiet' ? 1 : pressure.crowd_status === 'moderate' ? 0.55 : 0.7;
+        const pref =
+          prefs &&
+          [...prefs.categories, ...prefs.tags, ...prefs.occasions].some((v) => v === s.category || s.tags.includes(v))
+            ? 1
+            : 0;
+        const distanceScore = Math.max(0, 1 - distance / 500);
+        const score =
+          tagScore * 0.35 +
+          categoryScore * 0.25 +
+          pref * 0.15 +
+          trust * 0.1 +
+          pressureScore * 0.1 +
+          distanceScore * 0.05;
+        const reasons = [
+          shared.length
+            ? `Similar ${shared.slice(0, 2).join(' and ').replaceAll('_', ' ')}`
+            : `Similar ${s.subcategory.replaceAll('_', ' ')}`,
+          pref ? 'Matches your travel preferences' : 'Matches this destination',
+          `${s.municipality} alternative`,
+        ];
+        return {
+          ...s,
+          ...pressure,
+          distance_km: Number(distance.toFixed(2)),
+          alternative_score: Number(score.toFixed(4)),
+          recommendation_kind: 'similar_place',
+          sponsored: false,
+          recommendation_reasons: reasons,
+        };
+      })
+      .filter(Boolean) as any[];
+    return candidates.sort((a, b) => b.alternative_score - a.alternative_score).slice(0, Math.min(limit, 5));
   }
 
-  review(spotId:string,adminId:string,status:'published'|'needs_review'|'unpublished',band:CrowdCapacityBand,suppressed=false){const spot=this.spots.find(s=>s.id===spotId);if(!spot)return undefined;spot.status=status;spot.crowd_capacity_band=band;spot.recommendation_suppressed=suppressed;spot.reviewed_by=adminId;spot.reviewed_at=new Date().toISOString();spot.updated_at=spot.reviewed_at;if(this.pg)this.pg.query('UPDATE spots SET status=$1,crowd_capacity_band=$2,recommendation_suppressed=$3,reviewed_by=$4,reviewed_at=$5,updated_at=$5 WHERE id=$6',[status,band,suppressed,adminId,spot.reviewed_at,spot.id]).catch(()=>{});return spot;}
+  review(
+    spotId: string,
+    adminId: string,
+    status: 'published' | 'needs_review' | 'unpublished',
+    band: CrowdCapacityBand,
+    suppressed = false,
+  ) {
+    const spot = this.spots.find((s) => s.id === spotId);
+    if (!spot) return undefined;
+    spot.status = status;
+    spot.crowd_capacity_band = band;
+    spot.recommendation_suppressed = suppressed;
+    spot.reviewed_by = adminId;
+    spot.reviewed_at = new Date().toISOString();
+    spot.updated_at = spot.reviewed_at;
+    if (this.pg)
+      this.pg
+        .query(
+          'UPDATE spots SET status=$1,crowd_capacity_band=$2,recommendation_suppressed=$3,reviewed_by=$4,reviewed_at=$5,updated_at=$5 WHERE id=$6',
+          [status, band, suppressed, adminId, spot.reviewed_at, spot.id],
+        )
+        .catch(() => {});
+    return spot;
+  }
 
   list(q: ExploreListQuery) {
     return rankExploreSpots(this, q);
   }
 
-  async create(input:Omit<Spot,'id'|'slug'|'source_type'|'source_name'|'trust_level'|'status'|'created_at'|'updated_at'>,userId:string){
-    const timestamp=new Date().toISOString();
-    let baseSlug = input.name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  async create(
+    input: Omit<
+      Spot,
+      'id' | 'slug' | 'source_type' | 'source_name' | 'trust_level' | 'status' | 'created_at' | 'updated_at'
+    >,
+    userId: string,
+  ) {
+    const timestamp = new Date().toISOString();
+    let baseSlug = input.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
     if (!baseSlug) baseSlug = 'destination';
-    let slug = `${baseSlug}-${randomUUID().slice(0,6)}`;
-    while (this.spots.some(s => s.slug === slug)) {
-      slug = `${baseSlug}-${randomUUID().slice(0,8)}`;
+    let slug = `${baseSlug}-${randomUUID().slice(0, 6)}`;
+    while (this.spots.some((s) => s.slug === slug)) {
+      slug = `${baseSlug}-${randomUUID().slice(0, 8)}`;
     }
     await ensureAreaCache(getPool());
     const areaMatch = matchSpotToAreas(input.gps_lat, input.gps_lng, input.municipality);
-    const spot:Spot={...input,id:randomUUID(),slug,source_type:'community',source_name:'JuanDerQuest Community',trust_level:'community',status:'published',crowd_capacity_band:'medium',recommendation_suppressed:false,created_by:userId,created_at:timestamp,updated_at:timestamp,town_area_id:areaMatch.townAreaId,barangay_area_id:areaMatch.barangayAreaId};
+    const spot: Spot = {
+      ...input,
+      id: randomUUID(),
+      slug,
+      source_type: 'community',
+      source_name: 'JuanDerQuest Community',
+      trust_level: 'community',
+      status: 'published',
+      crowd_capacity_band: 'medium',
+      recommendation_suppressed: false,
+      created_by: userId,
+      created_at: timestamp,
+      updated_at: timestamp,
+      town_area_id: areaMatch.townAreaId,
+      barangay_area_id: areaMatch.barangayAreaId,
+    };
     await this.persistSpot(spot);
     this.spots.push(spot);
-    return {spot};
+    return { spot };
   }
 }
 

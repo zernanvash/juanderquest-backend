@@ -10,15 +10,13 @@ describe('Phase 6: Observability, Tracing, and Redaction', () => {
       expect(res.headers['x-request-id']).toBeDefined();
       // Validate UUID v4 structure
       expect(res.headers['x-request-id']).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
       );
     });
 
     it('preserves an existing X-Request-Id provided by upstream reverse proxy or client', async () => {
       const customTraceId = 'trace-client-abc-12345';
-      const res = await request(app)
-        .get('/api/v1/health/live')
-        .set('X-Request-Id', customTraceId);
+      const res = await request(app).get('/api/v1/health/live').set('X-Request-Id', customTraceId);
 
       expect(res.status).toBe(200);
       expect(res.headers['x-request-id']).toBe(customTraceId);

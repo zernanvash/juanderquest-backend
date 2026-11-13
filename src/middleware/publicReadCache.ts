@@ -1,13 +1,7 @@
 import { createHash } from 'crypto';
 import type { NextFunction, Request, Response } from 'express';
 
-const PUBLIC_CACHE_PATHS = new Set([
-  '/spots',
-  '/quests',
-  '/leaderboard',
-  '/juanchoice/spotlight',
-  '/app/version',
-]);
+const PUBLIC_CACHE_PATHS = new Set(['/spots', '/quests', '/leaderboard', '/juanchoice/spotlight', '/app/version']);
 
 export const PUBLIC_READ_CACHE_CONTROL = 'public, max-age=30, stale-while-revalidate=120';
 

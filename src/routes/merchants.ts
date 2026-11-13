@@ -10,7 +10,9 @@ export const merchantsRouter = Router();
 async function requireMerchantOwner(req: AuthRequest, res: Response, next: () => void) {
   const userId = req.user?.id;
   if (!userId) {
-    return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+    return res
+      .status(401)
+      .json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
   }
 
   const membershipInfo = db.getMerchantMembershipForUser(userId);
@@ -30,37 +32,33 @@ async function requireMerchantOwner(req: AuthRequest, res: Response, next: () =>
 }
 
 // GET /api/v1/merchant/me (Caller check merchant status & identity)
-merchantsRouter.get(
-  '/merchant/me',
-  authenticateToken,
-  async (req: AuthRequest, res: Response) => {
-    const userId = req.user!.id;
-    const info = db.getMerchantMembershipForUser(userId);
-    if (!info) {
-      return res.status(200).json({
-        success: true,
-        data: {
-          has_merchant: false,
-          merchant: null,
-          membership: null,
-        },
-      });
-    }
-
+merchantsRouter.get('/merchant/me', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const userId = req.user!.id;
+  const info = db.getMerchantMembershipForUser(userId);
+  if (!info) {
     return res.status(200).json({
       success: true,
       data: {
-        has_merchant: true,
-        merchant: info.merchant,
-        membership: {
-          role: info.membership.role,
-          status: info.membership.status,
-          created_at: info.membership.created_at,
-        },
+        has_merchant: false,
+        merchant: null,
+        membership: null,
       },
     });
   }
-);
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      has_merchant: true,
+      merchant: info.merchant,
+      membership: {
+        role: info.membership.role,
+        status: info.membership.status,
+        created_at: info.membership.created_at,
+      },
+    },
+  });
+});
 
 // GET /api/v1/merchant/dashboard (Setup checklist, truthful counts, and recent activity)
 merchantsRouter.get(
@@ -70,7 +68,7 @@ merchantsRouter.get(
   async (req: AuthRequest, res: Response) => {
     const merchant = (req as any).merchant;
     const products = db.listMerchantProducts(merchant.id, false);
-    const archivedProducts = db.listMerchantProducts(merchant.id, true).filter(p => p.is_archived);
+    const archivedProducts = db.listMerchantProducts(merchant.id, true).filter((p) => p.is_archived);
 
     // Setup checklist calculation
     const hasDescription = Boolean(merchant.description && merchant.description.length > 10);
@@ -87,7 +85,7 @@ merchantsRouter.get(
       { id: 'publish_profile', title: 'Publish merchant showcase profile', completed: isPublished },
     ];
 
-    const completedCount = checklist.filter(c => c.completed).length;
+    const completedCount = checklist.filter((c) => c.completed).length;
 
     return res.status(200).json({
       success: true,
@@ -109,15 +107,16 @@ merchantsRouter.get(
           items: checklist,
           completed_count: completedCount,
           total_count: checklist.length,
-          ready_to_publish: hasContact && (merchant.name.length > 0),
+          ready_to_publish: hasContact && merchant.name.length > 0,
         },
         truthful_notice: {
           mode: 'sovereign_informational',
-          statement: 'Visitor engagement metrics, point staking, and live automated checkout are deferred. All product cards serve as informational local showcases.',
+          statement:
+            'Visitor engagement metrics, point staking, and live automated checkout are deferred. All product cards serve as informational local showcases.',
         },
       },
     });
-  }
+  },
 );
 
 // Profile schemas
@@ -145,7 +144,7 @@ merchantsRouter.get(
       success: true,
       data: merchant,
     });
-  }
+  },
 );
 
 // PATCH /api/v1/merchant/profile (Update owner's merchant profile)
@@ -161,7 +160,7 @@ merchantsRouter.patch(
       success: true,
       data: updated,
     });
-  }
+  },
 );
 
 // POST /api/v1/merchant/profile/publish (Explicit publish action)
@@ -187,7 +186,7 @@ merchantsRouter.post(
       data: updated,
       message: 'Your merchant profile is now visible to Pangasinan travelers.',
     });
-  }
+  },
 );
 
 // POST /api/v1/merchant/profile/unpublish (Revert to draft)
@@ -203,7 +202,7 @@ merchantsRouter.post(
       data: updated,
       message: 'Your merchant profile has been set to draft mode.',
     });
-  }
+  },
 );
 
 // Products schemas
@@ -244,7 +243,7 @@ merchantsRouter.get(
       success: true,
       data: products,
     });
-  }
+  },
 );
 
 // POST /api/v1/merchant/products (Create product)
@@ -271,7 +270,7 @@ merchantsRouter.post(
       success: true,
       data: product,
     });
-  }
+  },
 );
 
 // PATCH /api/v1/merchant/products/:id (Update product)
@@ -297,7 +296,7 @@ merchantsRouter.patch(
       success: true,
       data: updated,
     });
-  }
+  },
 );
 
 // DELETE /api/v1/merchant/products/:id (Archive product)
@@ -322,5 +321,5 @@ merchantsRouter.delete(
       success: true,
       message: 'Product archived successfully.',
     });
-  }
+  },
 );

@@ -35,7 +35,7 @@ describe('Capacity rehearsal wallet reader fixture assembly', () => {
         'guest',
         stub,
         testSecret,
-        100
+        100,
       );
 
       expect(result.seededCount).toBe(0);
@@ -47,11 +47,7 @@ describe('Capacity rehearsal wallet reader fixture assembly', () => {
     it('performs no database interaction even if target count is different', async () => {
       const stub = new RecordingQueryStub();
 
-      const result = await assembleWalletReaderFixtureForHarness(
-        'guest',
-        stub,
-        testSecret
-      );
+      const result = await assembleWalletReaderFixtureForHarness('guest', stub, testSecret);
 
       expect(result.seededCount).toBe(0);
       expect(result.tokens).toEqual([]);
@@ -68,7 +64,7 @@ describe('Capacity rehearsal wallet reader fixture assembly', () => {
         'wallet_alpha',
         stub,
         testSecret,
-        100
+        100,
       );
 
       expect(result.seededCount).toBe(100);
@@ -124,13 +120,13 @@ describe('Capacity rehearsal wallet reader fixture assembly', () => {
     it('rejects targetReaderCount other than 100 for wallet_alpha', async () => {
       const stub = new RecordingQueryStub();
 
-      await expect(
-        assembleWalletReaderFixtureForHarness('wallet_alpha', stub, testSecret, 50)
-      ).rejects.toThrow('Wallet reader fixture assembly requires exactly 100 readers');
+      await expect(assembleWalletReaderFixtureForHarness('wallet_alpha', stub, testSecret, 50)).rejects.toThrow(
+        'Wallet reader fixture assembly requires exactly 100 readers',
+      );
 
-      await expect(
-        assembleWalletReaderFixtureForHarness('wallet_alpha', stub, testSecret, 101)
-      ).rejects.toThrow('Wallet reader fixture assembly requires exactly 100 readers');
+      await expect(assembleWalletReaderFixtureForHarness('wallet_alpha', stub, testSecret, 101)).rejects.toThrow(
+        'Wallet reader fixture assembly requires exactly 100 readers',
+      );
 
       expect(stub.queries).toHaveLength(0);
     });
@@ -138,13 +134,13 @@ describe('Capacity rehearsal wallet reader fixture assembly', () => {
     it('rejects empty or blank JWT secret for wallet_alpha', async () => {
       const stub = new RecordingQueryStub();
 
-      await expect(
-        assembleWalletReaderFixtureForHarness('wallet_alpha', stub, '', 100)
-      ).rejects.toThrow('jwtSecret must be provided for wallet reader fixture assembly');
+      await expect(assembleWalletReaderFixtureForHarness('wallet_alpha', stub, '', 100)).rejects.toThrow(
+        'jwtSecret must be provided for wallet reader fixture assembly',
+      );
 
-      await expect(
-        assembleWalletReaderFixtureForHarness('wallet_alpha', stub, '   ', 100)
-      ).rejects.toThrow('jwtSecret must be provided for wallet reader fixture assembly');
+      await expect(assembleWalletReaderFixtureForHarness('wallet_alpha', stub, '   ', 100)).rejects.toThrow(
+        'jwtSecret must be provided for wallet reader fixture assembly',
+      );
 
       expect(stub.queries).toHaveLength(0);
     });
@@ -153,9 +149,9 @@ describe('Capacity rehearsal wallet reader fixture assembly', () => {
       const stub = new RecordingQueryStub();
       stub.failAtIndex = 5;
 
-      await expect(
-        assembleWalletReaderFixtureForHarness('wallet_alpha', stub, testSecret, 100)
-      ).rejects.toThrow('Failed to insert disposable wallet reader at index 5');
+      await expect(assembleWalletReaderFixtureForHarness('wallet_alpha', stub, testSecret, 100)).rejects.toThrow(
+        'Failed to insert disposable wallet reader at index 5',
+      );
 
       expect(stub.queries).toHaveLength(5);
     });

@@ -56,9 +56,7 @@ router.get('/campaigns/:id/my-status', authenticateToken, (req: AuthRequest, res
     return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Campaign not found.' } });
   }
 
-  const reservation = db.campaign_reservations.find(
-    (r) => r.campaign_id === id && r.user_id === userId
-  );
+  const reservation = db.campaign_reservations.find((r) => r.campaign_id === id && r.user_id === userId);
 
   return res.status(200).json({
     success: true,
@@ -83,7 +81,10 @@ router.get('/campaigns/:id/referral-stats', authenticateToken, (req: AuthRequest
   }
 
   const referrals = db.campaign_reservations.filter(
-    (r) => r.campaign_id === id && (r.referred_by_user_id === userId || (user && r.referred_by_name?.toLowerCase() === user.display_name.toLowerCase()))
+    (r) =>
+      r.campaign_id === id &&
+      (r.referred_by_user_id === userId ||
+        (user && r.referred_by_name?.toLowerCase() === user.display_name.toLowerCase())),
   );
 
   const totalInvited = referrals.length;
@@ -117,79 +118,90 @@ const reserveSlotSchema = z.object({
 });
 
 // Pre-Register / Reserve a participant slot in a campaign (with referral attribution)
-router.post('/campaigns/:id/reserve', authenticateToken, validateRequest(reserveSlotSchema), (req: AuthRequest, res: Response) => {
-  const { id } = req.params;
-  const { ref } = req.body || {};
-  const userId = req.user!.id;
-  const user = db.findUserById(userId);
+router.post(
+  '/campaigns/:id/reserve',
+  authenticateToken,
+  validateRequest(reserveSlotSchema),
+  (req: AuthRequest, res: Response) => {
+    const { id } = req.params;
+    const { ref } = req.body || {};
+    const userId = req.user!.id;
+    const user = db.findUserById(userId);
 
-  const campaign = db.campaigns.find((c) => c.id === id);
-  if (!campaign) {
-    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Campaign not found.' } });
-  }
+    const campaign = db.campaigns.find((c) => c.id === id);
+    if (!campaign) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Campaign not found.' } });
+    }
 
-  // Check if already reserved
-  const existing = db.campaign_reservations.find(
-    (r) => r.campaign_id === id && r.user_id === userId
-  );
+    // Check if already reserved
+    const existing = db.campaign_reservations.find((r) => r.campaign_id === id && r.user_id === userId);
 
-  if (existing) {
-    return res.status(200).json({
+    if (existing) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          message: 'Already reserved.',
+          ticket_code: existing.ticket_code,
+          reservation: existing,
+          campaign,
+        },
+      });
+    }
+
+    if (campaign.reserved_participants >= campaign.max_participants) {
+      return res
+        .status(409)
+        .json({
+          success: false,
+          error: { code: 'CAPACITY_REACHED', message: 'Campaign pre-registration slots are fully reserved.' },
+        });
+    }
+
+    // Resolve referrer if ref is provided
+    let referrerUser = null;
+    if (ref) {
+      const cleanRef = String(ref).trim().toLowerCase();
+      referrerUser = db.users.find(
+        (u) =>
+          u.id === cleanRef ||
+          u.display_name.toLowerCase().replace(/\s+/g, '_') === cleanRef ||
+          u.display_name.toLowerCase() === cleanRef,
+      );
+    }
+
+    const tagPrefix = (campaign.municipality || 'JQ').slice(0, 4).toUpperCase();
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const ticketCode = `TICKET-${tagPrefix}-${randomSuffix}`;
+
+    const newReservation = {
+      id: `res_${Date.now()}`,
+      campaign_id: campaign.id,
+      user_id: userId,
+      user_display_name: user?.display_name || 'Anonymous Scout',
+      referred_by_user_id: referrerUser?.id || null,
+      referred_by_name: referrerUser?.display_name || null,
+      ticket_code: ticketCode,
+      status: 'reserved' as const,
+      created_at: new Date().toISOString(),
+    };
+
+    db.campaign_reservations.push(newReservation);
+    campaign.reserved_participants += 1;
+
+    return res.status(201).json({
       success: true,
       data: {
-        message: 'Already reserved.',
-        ticket_code: existing.ticket_code,
-        reservation: existing,
-        campaign,
+        campaign_id: campaign.id,
+        ticket_code: ticketCode,
+        reservation: newReservation,
+        reserved_participants: campaign.reserved_participants,
+        max_participants: campaign.max_participants,
+        reward_per_participant_mjdq: campaign.reward_per_participant_mjdq,
+        referred_by: referrerUser ? referrerUser.display_name : null,
       },
     });
-  }
-
-  if (campaign.reserved_participants >= campaign.max_participants) {
-    return res.status(409).json({ success: false, error: { code: 'CAPACITY_REACHED', message: 'Campaign pre-registration slots are fully reserved.' } });
-  }
-
-  // Resolve referrer if ref is provided
-  let referrerUser = null;
-  if (ref) {
-    const cleanRef = String(ref).trim().toLowerCase();
-    referrerUser = db.users.find(
-      (u) => u.id === cleanRef || u.display_name.toLowerCase().replace(/\s+/g, '_') === cleanRef || u.display_name.toLowerCase() === cleanRef
-    );
-  }
-
-  const tagPrefix = (campaign.municipality || 'JQ').slice(0, 4).toUpperCase();
-  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-  const ticketCode = `TICKET-${tagPrefix}-${randomSuffix}`;
-
-  const newReservation = {
-    id: `res_${Date.now()}`,
-    campaign_id: campaign.id,
-    user_id: userId,
-    user_display_name: user?.display_name || 'Anonymous Scout',
-    referred_by_user_id: referrerUser?.id || null,
-    referred_by_name: referrerUser?.display_name || null,
-    ticket_code: ticketCode,
-    status: 'reserved' as const,
-    created_at: new Date().toISOString(),
-  };
-
-  db.campaign_reservations.push(newReservation);
-  campaign.reserved_participants += 1;
-
-  return res.status(201).json({
-    success: true,
-    data: {
-      campaign_id: campaign.id,
-      ticket_code: ticketCode,
-      reservation: newReservation,
-      reserved_participants: campaign.reserved_participants,
-      max_participants: campaign.max_participants,
-      reward_per_participant_mjdq: campaign.reward_per_participant_mjdq,
-      referred_by: referrerUser ? referrerUser.display_name : null,
-    },
-  });
-});
+  },
+);
 
 // Claim verified campaign participant reward & trigger referral payout
 router.post('/campaigns/:id/claim', authenticateToken, (req: AuthRequest, res: Response) => {
@@ -207,12 +219,12 @@ router.post('/campaigns/:id/claim', authenticateToken, (req: AuthRequest, res: R
   }
 
   // Check if user already claimed
-  let reservation = db.campaign_reservations.find(
-    (r) => r.campaign_id === id && r.user_id === userId
-  );
+  let reservation = db.campaign_reservations.find((r) => r.campaign_id === id && r.user_id === userId);
 
   if (reservation?.status === 'completed') {
-    return res.status(409).json({ success: false, error: { code: 'ALREADY_CLAIMED', message: 'Campaign reward already claimed.' } });
+    return res
+      .status(409)
+      .json({ success: false, error: { code: 'ALREADY_CLAIMED', message: 'Campaign reward already claimed.' } });
   }
 
   // Mark reservation as completed or create completed record
@@ -286,11 +298,14 @@ router.post('/campaigns/:id/claim', authenticateToken, (req: AuthRequest, res: R
       new_mjdq_balance: user.mjdq_balance,
       new_demo_points: user.demo_points,
       new_scout_reputation: user.scout_reputation,
-      referral_payout: referrerPayout > 0 ? {
-        referrer_id: reservation.referred_by_user_id,
-        referrer_name: referrerName,
-        referral_bounty_mjdq: referrerPayout,
-      } : null,
+      referral_payout:
+        referrerPayout > 0
+          ? {
+              referrer_id: reservation.referred_by_user_id,
+              referrer_name: referrerName,
+              referral_bounty_mjdq: referrerPayout,
+            }
+          : null,
     },
   });
 });
@@ -315,59 +330,65 @@ const createCampaignSchema = z.object({
 });
 
 // Host creates a campaign and locks escrow budget
-router.post('/campaigns', authenticateToken, requireAdmin, validateRequest(createCampaignSchema), (req: AuthRequest, res: Response) => {
-  const {
-    title,
-    category,
-    location_name,
-    municipality,
-    description,
-    event_date,
-    start_date,
-    end_date,
-    total_budget_mjdq,
-    reward_per_participant_mjdq,
-    referral_bounty_mjdq = 0,
-    max_participants,
-    banner_image_url,
-    pre_quest_requirements = [],
-  } = req.body;
+router.post(
+  '/campaigns',
+  authenticateToken,
+  requireAdmin,
+  validateRequest(createCampaignSchema),
+  (req: AuthRequest, res: Response) => {
+    const {
+      title,
+      category,
+      location_name,
+      municipality,
+      description,
+      event_date,
+      start_date,
+      end_date,
+      total_budget_mjdq,
+      reward_per_participant_mjdq,
+      referral_bounty_mjdq = 0,
+      max_participants,
+      banner_image_url,
+      pre_quest_requirements = [],
+    } = req.body;
 
-  const hostId = req.user!.id;
-  const hostName = (req.user as any).email || (req.user as any).displayName || `Host ${hostId.slice(0, 6)}`;
+    const hostId = req.user!.id;
+    const hostName = (req.user as any).email || (req.user as any).displayName || `Host ${hostId.slice(0, 6)}`;
 
-  const newCampaign = {
-    id: `camp_${Date.now()}`,
-    host_id: hostId,
-    host_name: hostName,
-    title,
-    category,
-    location_name,
-    municipality: municipality || location_name.split(',')[0].trim(),
-    banner_image_url: banner_image_url || 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e',
-    description,
-    event_date: event_date || new Date(Date.now() + 14 * 86400000).toISOString(),
-    start_date: start_date || event_date,
-    end_date: end_date || event_date,
-    total_budget_mjdq,
-    reward_per_participant_mjdq,
-    referral_bounty_mjdq,
-    max_participants,
-    reserved_participants: 0,
-    completed_participants: 0,
-    unspent_refund_mjdq: 0,
-    pre_quest_requirements,
-    status: 'active' as const,
-    created_at: new Date().toISOString(),
-  };
+    const newCampaign = {
+      id: `camp_${Date.now()}`,
+      host_id: hostId,
+      host_name: hostName,
+      title,
+      category,
+      location_name,
+      municipality: municipality || location_name.split(',')[0].trim(),
+      banner_image_url: banner_image_url || 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e',
+      description,
+      event_date: event_date || new Date(Date.now() + 14 * 86400000).toISOString(),
+      start_date: start_date || event_date,
+      end_date: end_date || event_date,
+      total_budget_mjdq,
+      reward_per_participant_mjdq,
+      referral_bounty_mjdq,
+      max_participants,
+      reserved_participants: 0,
+      completed_participants: 0,
+      unspent_refund_mjdq: 0,
+      pre_quest_requirements,
+      status: 'active' as const,
+      created_at: new Date().toISOString(),
+    };
 
-  db.campaigns.push(newCampaign);
+    db.campaigns.push(newCampaign);
 
-  return res.status(201).json({
-    success: true,
-    data: newCampaign,
-  });
-});
+    return res.status(201).json({
+      success: true,
+      data: newCampaign,
+    });
+  },
+);
 
 // Host closes campaign and automatically refunds unspent budget
 router.post('/campaigns/:id/close', authenticateToken, requireAdmin, (req: AuthRequest, res: Response) => {
@@ -378,7 +399,8 @@ router.post('/campaigns/:id/close', authenticateToken, requireAdmin, (req: AuthR
     return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Campaign not found.' } });
   }
 
-  const distributed = campaign.completed_participants * (campaign.reward_per_participant_mjdq + (campaign.referral_bounty_mjdq || 0));
+  const distributed =
+    campaign.completed_participants * (campaign.reward_per_participant_mjdq + (campaign.referral_bounty_mjdq || 0));
   const refund = Math.max(0, campaign.total_budget_mjdq - distributed);
 
   campaign.status = 'completed';

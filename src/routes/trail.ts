@@ -22,7 +22,10 @@ const TrailPlanSchema = z.object({
     max_detour_km: z.number().min(1).max(120).optional(),
     preferred_categories: z.array(z.string()).optional(),
     avoid_congested: z.boolean().optional(),
-    via: z.array(z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) })).max(3).optional(),
+    via: z
+      .array(z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }))
+      .max(3)
+      .optional(),
   }),
 });
 

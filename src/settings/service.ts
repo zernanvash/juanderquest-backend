@@ -15,7 +15,7 @@ export class SettingsError extends Error {
     readonly code: string,
     readonly status: number,
     message: string,
-    readonly details?: unknown
+    readonly details?: unknown,
   ) {
     super(message);
     this.name = 'SettingsError';
@@ -56,7 +56,11 @@ export class SettingsService {
   private requirePool(): Pool {
     const pool = this.poolProvider();
     if (!pool) {
-      throw new SettingsError('STORAGE_UNAVAILABLE', 503, 'Settings require durable PostgreSQL storage and are unavailable without it.');
+      throw new SettingsError(
+        'STORAGE_UNAVAILABLE',
+        503,
+        'Settings require durable PostgreSQL storage and are unavailable without it.',
+      );
     }
     return pool;
   }
@@ -64,7 +68,7 @@ export class SettingsService {
   async getSettings(): Promise<SettingsSnapshot> {
     const pool = this.requirePool();
     const { rows } = await pool.query(
-      'SELECT values, revision, updated_by, updated_at FROM system_settings_document WHERE id = 1'
+      'SELECT values, revision, updated_by, updated_at FROM system_settings_document WHERE id = 1',
     );
     const row = rows[0];
     return {
@@ -108,10 +112,10 @@ export class SettingsService {
     try {
       await client.query('BEGIN');
       await client.query(
-        `INSERT INTO system_settings_document (id, values, revision) VALUES (1, '{}'::jsonb, 0) ON CONFLICT (id) DO NOTHING`
+        `INSERT INTO system_settings_document (id, values, revision) VALUES (1, '{}'::jsonb, 0) ON CONFLICT (id) DO NOTHING`,
       );
       const { rows } = await client.query(
-        'SELECT values, revision FROM system_settings_document WHERE id = 1 FOR UPDATE'
+        'SELECT values, revision FROM system_settings_document WHERE id = 1 FOR UPDATE',
       );
       const current = rows[0];
       const currentRevision = Number(current?.revision ?? 0);
@@ -120,7 +124,7 @@ export class SettingsService {
           'REVISION_CONFLICT',
           409,
           'Another editor saved settings since this form was loaded. Review the latest values and apply again.',
-          { revision: currentRevision, values: canonicalSettings(current?.values ?? {}) }
+          { revision: currentRevision, values: canonicalSettings(current?.values ?? {}) },
         );
       }
 
@@ -133,7 +137,7 @@ export class SettingsService {
         `UPDATE system_settings_document
          SET values = $1::jsonb, revision = $2, updated_by = $3, updated_at = NOW()
          WHERE id = 1`,
-        [JSON.stringify(afterValues), nextRevision, params.actorId]
+        [JSON.stringify(afterValues), nextRevision, params.actorId],
       );
 
       await client.query(
@@ -149,7 +153,7 @@ export class SettingsService {
           params.reason ?? null,
           params.requestId ?? null,
           nextRevision,
-        ]
+        ],
       );
 
       await client.query('COMMIT');
@@ -170,7 +174,7 @@ export class SettingsService {
        FROM system_settings_audit
        ORDER BY created_at DESC, revision DESC
        LIMIT $1`,
-      [boundedLimit]
+      [boundedLimit],
     );
     return rows.map((row) => ({
       id: row.id,

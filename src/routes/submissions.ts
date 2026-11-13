@@ -32,7 +32,15 @@ router.post(
   validateRequest(submissionSchema),
   async (req: AuthRequest, res: Response) => {
     const userId = req.user!.id;
-    const { idempotency_key, quest_id, scanned_marker_code, challenge_token, captured_lat, captured_lng, captured_accuracy } = req.body;
+    const {
+      idempotency_key,
+      quest_id,
+      scanned_marker_code,
+      challenge_token,
+      captured_lat,
+      captured_lng,
+      captured_accuracy,
+    } = req.body;
     const submissionInput = {
       idempotency_key,
       user_id: userId,
@@ -61,12 +69,20 @@ router.post(
     } catch (err: any) {
       console.error('[submissions] creation failed:', err);
       if (err?.code === '23505' && err?.constraint === 'idx_submissions_unique_pending') {
-        return res.status(409).json({ success: false,
-          error: { code: 'SUBMISSION_PENDING', message: 'A proof for this quest is already awaiting review.' } });
+        return res
+          .status(409)
+          .json({
+            success: false,
+            error: { code: 'SUBMISSION_PENDING', message: 'A proof for this quest is already awaiting review.' },
+          });
       }
       if (err?.code === '23505' && err?.constraint === 'idx_submissions_challenge_nonce') {
-        return res.status(409).json({ success: false,
-          error: { code: 'CHALLENGE_ALREADY_USED', message: 'This challenge token has already been consumed.' } });
+        return res
+          .status(409)
+          .json({
+            success: false,
+            error: { code: 'CHALLENGE_ALREADY_USED', message: 'This challenge token has already been consumed.' },
+          });
       }
       if (err?.code === '23505' && err?.constraint === 'submissions_idempotency_key_key') {
         try {
@@ -81,10 +97,13 @@ router.post(
       }
       return res.status(503).json({
         success: false,
-        error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable submission storage is unavailable. Please try again later.' },
+        error: {
+          code: 'STORAGE_UNAVAILABLE',
+          message: 'Durable submission storage is unavailable. Please try again later.',
+        },
       });
     }
-  }
+  },
 );
 
 router.get('/submissions', authenticateToken, (req: AuthRequest, res: Response) => {

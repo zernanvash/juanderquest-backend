@@ -21,7 +21,9 @@ describe('Public alpha marketplace safety', () => {
     expect(response.body.success).toBe(true);
     expect(response.body.data.length).toBeGreaterThanOrEqual(3);
     expect(response.body.data.filter((voucher: any) => ['v1', 'v2', 'v3'].includes(voucher.id))).toHaveLength(3);
-    expect(response.body.data.every((voucher: any) => voucher.availability === 'preview' && voucher.redeemable === false)).toBe(true);
+    expect(
+      response.body.data.every((voucher: any) => voucher.availability === 'preview' && voucher.redeemable === false),
+    ).toBe(true);
   });
 
   it('blocks preview and live voucher redemption before authentication or mutation', async () => {
@@ -83,7 +85,10 @@ describe('Fast-alpha launcher JuanChoice flag closure', () => {
       Reflect.set(env, 'JUANCHOICE_WRITES_ENABLED', false);
       Reflect.set(env, 'JUANCHOICE_SCHEDULER_ENABLED', false);
 
-      const adminToken = jwt.sign({ id: 'alpha-admin-test', seed_id: 'alpha-admin-test', role: 'admin' }, env.JWT_SECRET);
+      const adminToken = jwt.sign(
+        { id: 'alpha-admin-test', seed_id: 'alpha-admin-test', role: 'admin' },
+        env.JWT_SECRET,
+      );
 
       const response = await request(app)
         .post('/api/v1/juanchoice/admin/schedules')

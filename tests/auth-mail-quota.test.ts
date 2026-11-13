@@ -25,16 +25,23 @@ describe('auth email limits on the routes', () => {
 
   afterAll(async () => {
     fetchSpy.mockRestore();
-    if (saved.key === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = saved.key;
-    if (saved.cap === undefined) delete process.env.AUTH_MAIL_DAILY_CAP; else process.env.AUTH_MAIL_DAILY_CAP = saved.cap;
+    if (saved.key === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = saved.key;
+    if (saved.cap === undefined) delete process.env.AUTH_MAIL_DAILY_CAP;
+    else process.env.AUTH_MAIL_DAILY_CAP = saved.cap;
     if (testDb) await testDb.close();
   }, 90000);
 
   const resendCalls = () => fetchSpy.mock.calls.filter(([url]) => String(url).includes('api.resend.com'));
 
-  const register = (email: string) => request(app).post('/api/v1/auth/register').send({
-    email, password: 'Password123!Safe', display_name: 'Quota Tester', age_eligibility_declared: true, terms_accepted: true,
-  });
+  const register = (email: string) =>
+    request(app).post('/api/v1/auth/register').send({
+      email,
+      password: 'Password123!Safe',
+      display_name: 'Quota Tester',
+      age_eligibility_declared: true,
+      terms_accepted: true,
+    });
 
   it('a quick resend or reset request sends nothing, keeps the first code, and looks like an unknown address', async () => {
     const email = 'quota.one@example.com';
@@ -43,12 +50,16 @@ describe('auth email limits on the routes', () => {
     expect(resendCalls()).toHaveLength(1);
 
     const resend = await request(app).post('/api/v1/auth/email/resend').send({ email });
-    const resendUnknown = await request(app).post('/api/v1/auth/email/resend').send({ email: 'nobody.here@example.com' });
+    const resendUnknown = await request(app)
+      .post('/api/v1/auth/email/resend')
+      .send({ email: 'nobody.here@example.com' });
     expect(resend.status).toBe(200);
     expect(resend.body).toEqual(resendUnknown.body);
 
     const forgot = await request(app).post('/api/v1/auth/password/forgot').send({ email });
-    const forgotUnknown = await request(app).post('/api/v1/auth/password/forgot').send({ email: 'nobody.here@example.com' });
+    const forgotUnknown = await request(app)
+      .post('/api/v1/auth/password/forgot')
+      .send({ email: 'nobody.here@example.com' });
     expect(forgot.status).toBe(200);
     expect(forgot.body).toEqual(forgotUnknown.body);
 

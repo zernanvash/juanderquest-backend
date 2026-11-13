@@ -44,7 +44,10 @@ const RouteBodySchema = z.object({
   costing: z.enum(['auto', 'pedestrian', 'bicycle', 'motorcycle']).optional().default('auto'),
   avoid_congested: z.boolean().optional().default(true),
   /** Trail navigation: stops between start and end, in order (Plan 64). */
-  via: z.array(z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) })).max(10).optional(),
+  via: z
+    .array(z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }))
+    .max(10)
+    .optional(),
 });
 
 /**

@@ -50,7 +50,9 @@ export async function loadTrailEconomy(client: SettingsClient): Promise<TrailEco
   const stored = canonicalSettings(rows[0]?.values ?? {});
   const result = { ...defaults };
   result.personalGenerationEnabled = stored.trail_personal_generation_enabled === true;
-  for (const [property, key] of Object.entries(keys) as Array<[Exclude<keyof TrailEconomyConfig, 'personalGenerationEnabled'>, string]>) {
+  for (const [property, key] of Object.entries(keys) as Array<
+    [Exclude<keyof TrailEconomyConfig, 'personalGenerationEnabled'>, string]
+  >) {
     const value = Number(stored[key]);
     if (Number.isInteger(value) && value >= 0 && Number.isSafeInteger(value)) result[property] = value;
   }
@@ -60,4 +62,3 @@ export async function loadTrailEconomy(client: SettingsClient): Promise<TrailEco
 export function trailEconomyDefaults(): TrailEconomyConfig {
   return { ...defaults };
 }
-

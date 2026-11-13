@@ -52,7 +52,7 @@ describe('Iteration 20c: AlphaSessionScopeBatcher Middleware Wiring & Fail-Close
       capturedQueryCount++;
       const ids: string[] = params?.[0] ?? [];
       capturedIds = ids;
-      const rows = ids.map(id => ({
+      const rows = ids.map((id) => ({
         id,
         seed_id: `wallet:0x${id}`,
         is_test: false,
@@ -76,7 +76,9 @@ describe('Iteration 20c: AlphaSessionScopeBatcher Middleware Wiring & Fail-Close
       } as any;
       const res = createMockRes();
       let nextCalled = false;
-      const promise = checkQAAuthorization(req, res, () => { nextCalled = true; }).then(() => {
+      const promise = checkQAAuthorization(req, res, () => {
+        nextCalled = true;
+      }).then(() => {
         return { req, res, nextCalled };
       });
       return promise;
@@ -100,7 +102,7 @@ describe('Iteration 20c: AlphaSessionScopeBatcher Middleware Wiring & Fail-Close
     const mockPool = createMockPool(async (sql: string, params?: any[]) => {
       capturedQueryCount++;
       const ids: string[] = params?.[0] ?? [];
-      const rows = ids.map(id => ({
+      const rows = ids.map((id) => ({
         id,
         seed_id: `wallet:0x${id}`,
         is_test: false,
@@ -124,7 +126,9 @@ describe('Iteration 20c: AlphaSessionScopeBatcher Middleware Wiring & Fail-Close
       } as any;
       const res = createMockRes();
       let nextCalled = false;
-      return checkQAAuthorization(req, res, () => { nextCalled = true; }).then(() => ({ req, res, nextCalled }));
+      return checkQAAuthorization(req, res, () => {
+        nextCalled = true;
+      }).then(() => ({ req, res, nextCalled }));
     });
 
     const results = await Promise.all(requests);
@@ -143,7 +147,7 @@ describe('Iteration 20c: AlphaSessionScopeBatcher Middleware Wiring & Fail-Close
     const mockPool = createMockPool(async (sql: string, params?: any[]) => {
       capturedQueryCount++;
       capturedIds = params?.[0] ?? [];
-      const rows = capturedIds.map(id => ({
+      const rows = capturedIds.map((id) => ({
         id,
         seed_id: `wallet:0x${id}`,
         is_test: false,
@@ -167,7 +171,9 @@ describe('Iteration 20c: AlphaSessionScopeBatcher Middleware Wiring & Fail-Close
       } as any;
       const res = createMockRes();
       let nextCalled = false;
-      return checkQAAuthorization(req, res, () => { nextCalled = true; }).then(() => ({ req, res, nextCalled }));
+      return checkQAAuthorization(req, res, () => {
+        nextCalled = true;
+      }).then(() => ({ req, res, nextCalled }));
     };
 
     const results = await Promise.all([makeReq(), makeReq(), makeReq()]);
@@ -208,12 +214,16 @@ describe('Iteration 20c: AlphaSessionScopeBatcher Middleware Wiring & Fail-Close
 
     // Request 1: Active user
     const req1: AuthRequest = {
-      method: 'GET', query: {}, headers: {},
+      method: 'GET',
+      query: {},
+      headers: {},
       user: { id: 'fresh-user-1', seed_id: 'wallet:0xfresh-user-1', role: 'user' },
     } as any;
     const res1 = createMockRes();
     let nextCalled1 = false;
-    await checkQAAuthorization(req1, res1, () => { nextCalled1 = true; });
+    await checkQAAuthorization(req1, res1, () => {
+      nextCalled1 = true;
+    });
 
     expect(nextCalled1).toBe(true);
     expect(req1.isQAAuthorized).toBe(true);
@@ -224,12 +234,16 @@ describe('Iteration 20c: AlphaSessionScopeBatcher Middleware Wiring & Fail-Close
 
     // Request 2: Arrives after prior batch completed
     const req2: AuthRequest = {
-      method: 'GET', query: {}, headers: {},
+      method: 'GET',
+      query: {},
+      headers: {},
       user: { id: 'fresh-user-1', seed_id: 'wallet:0xfresh-user-1', role: 'user' },
     } as any;
     const res2 = createMockRes();
     let nextCalled2 = false;
-    await checkQAAuthorization(req2, res2, () => { nextCalled2 = true; });
+    await checkQAAuthorization(req2, res2, () => {
+      nextCalled2 = true;
+    });
 
     expect(nextCalled2).toBe(true);
     expect(req2.isQAAuthorized).toBe(false); // falls back to live public view (unauthorized synthetic)
@@ -248,13 +262,17 @@ describe('Iteration 20c: AlphaSessionScopeBatcher Middleware Wiring & Fail-Close
     Object.defineProperty(db, 'usersRepo', { value: repoWithPool, configurable: true, writable: true });
 
     const req: AuthRequest = {
-      method: 'GET', query: {}, headers: {},
+      method: 'GET',
+      query: {},
+      headers: {},
       user: { id: 'wallet-err-user', seed_id: 'wallet:0xerr', role: 'user' },
     } as any;
     const res = createMockRes();
     let nextCalled = false;
 
-    await checkQAAuthorization(req, res, () => { nextCalled = true; });
+    await checkQAAuthorization(req, res, () => {
+      nextCalled = true;
+    });
 
     expect(nextCalled).toBe(false);
     expect(res.statusCode).toBe(503);
@@ -294,34 +312,46 @@ describe('Iteration 20c: AlphaSessionScopeBatcher Middleware Wiring & Fail-Close
 
     // Case 1: is_test === true
     const req1: AuthRequest = {
-      method: 'GET', query: {}, headers: {},
+      method: 'GET',
+      query: {},
+      headers: {},
       user: { id: 'test-actor', seed_id: 'wallet:0xtest', role: 'user' },
     } as any;
     const res1 = createMockRes();
     let next1 = false;
-    await checkQAAuthorization(req1, res1, () => { next1 = true; });
+    await checkQAAuthorization(req1, res1, () => {
+      next1 = true;
+    });
     expect(next1).toBe(true);
     expect(req1.isQAAuthorized).toBe(false);
 
     // Case 2: seed_id mismatch
     const req2: AuthRequest = {
-      method: 'GET', query: {}, headers: {},
+      method: 'GET',
+      query: {},
+      headers: {},
       user: { id: 'seed-mismatch', seed_id: 'wallet:0xoriginal', role: 'user' },
     } as any;
     const res2 = createMockRes();
     let next2 = false;
-    await checkQAAuthorization(req2, res2, () => { next2 = true; });
+    await checkQAAuthorization(req2, res2, () => {
+      next2 = true;
+    });
     expect(next2).toBe(true);
     expect(req2.isQAAuthorized).toBe(false);
 
     // Case 3: missing actor
     const req3: AuthRequest = {
-      method: 'GET', query: {}, headers: {},
+      method: 'GET',
+      query: {},
+      headers: {},
       user: { id: 'not-in-db', seed_id: 'wallet:0xmissing', role: 'user' },
     } as any;
     const res3 = createMockRes();
     let next3 = false;
-    await checkQAAuthorization(req3, res3, () => { next3 = true; });
+    await checkQAAuthorization(req3, res3, () => {
+      next3 = true;
+    });
     expect(next3).toBe(true);
     expect(req3.isQAAuthorized).toBe(false);
   });
@@ -345,7 +375,9 @@ describe('Iteration 20c: AlphaSessionScopeBatcher Middleware Wiring & Fail-Close
     Object.defineProperty(db, 'usersRepo', { value: repoPool1, configurable: true, writable: true });
 
     const req1: AuthRequest = {
-      method: 'GET', query: {}, headers: {},
+      method: 'GET',
+      query: {},
+      headers: {},
       user: { id: 'user-p1', seed_id: 'wallet:0xp1', role: 'user' },
     } as any;
     const res1 = createMockRes();
@@ -358,7 +390,9 @@ describe('Iteration 20c: AlphaSessionScopeBatcher Middleware Wiring & Fail-Close
     Object.defineProperty(db, 'usersRepo', { value: repoPool2, configurable: true, writable: true });
 
     const req2: AuthRequest = {
-      method: 'GET', query: {}, headers: {},
+      method: 'GET',
+      query: {},
+      headers: {},
       user: { id: 'user-p2', seed_id: 'wallet:0xp2', role: 'user' },
     } as any;
     const res2 = createMockRes();
@@ -390,7 +424,9 @@ describe('Iteration 20c: AlphaSessionScopeBatcher Middleware Wiring & Fail-Close
     const res = createMockRes();
     let nextCalled = false;
 
-    await checkQAAuthorization(req, res, () => { nextCalled = true; });
+    await checkQAAuthorization(req, res, () => {
+      nextCalled = true;
+    });
 
     expect(nextCalled).toBe(true);
     expect(req.isQAAuthorized).toBe(true);
@@ -427,13 +463,17 @@ describe('Iteration 20c: AlphaSessionScopeBatcher Middleware Wiring & Fail-Close
     });
 
     const req: AuthRequest = {
-      method: 'GET', query: {}, headers: {},
+      method: 'GET',
+      query: {},
+      headers: {},
       user: { id: 'mem-user', seed_id: 'wallet:0xmem', role: 'user' },
     } as any;
     const res = createMockRes();
     let nextCalled = false;
 
-    await checkQAAuthorization(req, res, () => { nextCalled = true; });
+    await checkQAAuthorization(req, res, () => {
+      nextCalled = true;
+    });
 
     expect(findUserSpy).toHaveBeenCalledWith('mem-user');
     expect(nextCalled).toBe(true);
@@ -455,13 +495,17 @@ describe('Iteration 20c: AlphaSessionScopeBatcher Middleware Wiring & Fail-Close
     Object.defineProperty(db, 'usersRepo', { value: repoWithPool, configurable: true, writable: true });
 
     const req: AuthRequest = {
-      method: 'GET', query: {}, headers: {},
+      method: 'GET',
+      query: {},
+      headers: {},
       user: { id: 'user-disabled', seed_id: 'wallet:0xdisabled', role: 'user' },
     } as any;
     const res = createMockRes();
     let nextCalled = false;
 
-    await checkQAAuthorization(req, res, () => { nextCalled = true; });
+    await checkQAAuthorization(req, res, () => {
+      nextCalled = true;
+    });
 
     expect(nextCalled).toBe(true);
     expect(req.isQAAuthorized).toBe(false);

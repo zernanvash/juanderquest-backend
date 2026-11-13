@@ -24,8 +24,8 @@ realPg('Plan 43 Quest Builder & Multi-Task Verification Suite (Real PostgreSQL)'
   const otherUserId = `other-${randomUUID()}`;
 
   const spotId = `spot-${randomUUID()}`;
-  const spotLat = 16.3000;
-  const spotLng = 119.7900;
+  const spotLat = 16.3;
+  const spotLng = 119.79;
   const originalFunding = env.QUEST_FUNDING_ENABLED;
 
   const authorToken = jwt.sign({ id: authorId, seed_id: authorId, role: 'user', typ: 'session' }, env.JWT_SECRET);
@@ -51,7 +51,7 @@ realPg('Plan 43 Quest Builder & Multi-Task Verification Suite (Real PostgreSQL)'
     ]) {
       await fixture.pool.query(
         'INSERT INTO users(id, seed_id, display_name, email, role, demo_points) VALUES($1, $2, $3, $4, $5, $6)',
-        [u.id, u.id, u.name, `${u.id}@example.test`, u.role, 100]
+        [u.id, u.id, u.name, `${u.id}@example.test`, u.role, 100],
       );
       db.users.push({
         id: u.id,
@@ -70,7 +70,7 @@ realPg('Plan 43 Quest Builder & Multi-Task Verification Suite (Real PostgreSQL)'
          status, is_test, recommendation_suppressed, source_type, source_name, created_by)
        VALUES($1::text, $1::text, 'Patar Test Beach', 'A destination for Plan 43 testing.', 'nature_outdoors', 'beach',
          'Bolinao', 'Patar, Bolinao', $2, $3, 'published', false, false, 'community', 'Author', $4)`,
-      [spotId, spotLat, spotLng, authorId]
+      [spotId, spotLat, spotLng, authorId],
     );
     spotStore.spots.push({
       id: spotId,
@@ -110,7 +110,7 @@ realPg('Plan 43 Quest Builder & Multi-Task Verification Suite (Real PostgreSQL)'
               checkpoint_type: 'location',
               verification: {
                 type: 'location',
-                fence: { lat: 16.5000, lng: 119.7900, radius_meters: 100 }, // ~22 km away
+                fence: { lat: 16.5, lng: 119.79, radius_meters: 100 }, // ~22 km away
               },
             },
           ],
@@ -273,7 +273,7 @@ realPg('Plan 43 Quest Builder & Multi-Task Verification Suite (Real PostgreSQL)'
       // Check evidence rows in DB
       const stepsRes = await fixture.pool.query(
         'SELECT step_order, status, required, checkpoint_type FROM quest_step_evidence WHERE attempt_id = $1 ORDER BY step_order ASC',
-        [attemptId]
+        [attemptId],
       );
       expect(stepsRes.rows).toHaveLength(4);
       // In "any" mode, all tasks should be ready immediately!
@@ -298,7 +298,7 @@ realPg('Plan 43 Quest Builder & Multi-Task Verification Suite (Real PostgreSQL)'
 
       const checkRes = await fixture.pool.query(
         'SELECT failed_tries, first_try_at FROM quest_step_evidence WHERE attempt_id = $1 AND step_order = 1',
-        [attemptId]
+        [attemptId],
       );
       expect(checkRes.rows[0].failed_tries).toBe(1);
       expect(checkRes.rows[0].first_try_at).toBeDefined();
@@ -380,9 +380,7 @@ realPg('Plan 43 Quest Builder & Multi-Task Verification Suite (Real PostgreSQL)'
       expect(token).toBeDefined();
 
       // Ensure AR challenge token cannot be accepted as session auth
-      const authProbe = await request(app)
-        .get('/api/v1/users/me/profile')
-        .set('Authorization', `Bearer ${token}`);
+      const authProbe = await request(app).get('/api/v1/users/me/profile').set('Authorization', `Bearer ${token}`);
       expect(authProbe.status).toBe(401);
 
       // Verify AR task with token and fresh GPS
@@ -414,8 +412,8 @@ realPg('Plan 43 Quest Builder & Multi-Task Verification Suite (Real PostgreSQL)'
   describe('Admin Per-Task Review & Attempt Completion', () => {
     it('blocks attempt approval when photo task is still pending review (TASKS_PENDING_REVIEW)', async () => {
       const attemptRes = await fixture.pool.query(
-        "SELECT id FROM quest_attempts WHERE quest_id = $1 AND user_id = $2",
-        [createdQuestId, travelerId]
+        'SELECT id FROM quest_attempts WHERE quest_id = $1 AND user_id = $2',
+        [createdQuestId, travelerId],
       );
       const attemptId = attemptRes.rows[0].id;
 
@@ -432,15 +430,18 @@ realPg('Plan 43 Quest Builder & Multi-Task Verification Suite (Real PostgreSQL)'
 
     it('quest author cannot review tasks on own quest (CREATOR_SELF_ATTEMPT)', async () => {
       const attemptRes = await fixture.pool.query(
-        "SELECT id FROM quest_attempts WHERE quest_id = $1 AND user_id = $2",
-        [createdQuestId, travelerId]
+        'SELECT id FROM quest_attempts WHERE quest_id = $1 AND user_id = $2',
+        [createdQuestId, travelerId],
       );
       const attemptId = attemptRes.rows[0].id;
 
       // Make author an admin in DB as well so requireAdmin passes
       await fixture.pool.query("UPDATE users SET role = 'admin' WHERE id = $1", [authorId]);
       invalidateSessionScopeCache(authorId);
-      const authorAdminToken = jwt.sign({ id: authorId, seed_id: authorId, role: 'admin', typ: 'session' }, env.JWT_SECRET);
+      const authorAdminToken = jwt.sign(
+        { id: authorId, seed_id: authorId, role: 'admin', typ: 'session' },
+        env.JWT_SECRET,
+      );
       const res = await request(app)
         .patch(`/api/v1/admin/quest-attempts/${attemptId}/steps/3`)
         .set('Authorization', `Bearer ${authorAdminToken}`)
@@ -456,8 +457,8 @@ realPg('Plan 43 Quest Builder & Multi-Task Verification Suite (Real PostgreSQL)'
 
     it('admin approves Task 3 via PATCH /admin/quest-attempts/:id/steps/3', async () => {
       const attemptRes = await fixture.pool.query(
-        "SELECT id FROM quest_attempts WHERE quest_id = $1 AND user_id = $2",
-        [createdQuestId, travelerId]
+        'SELECT id FROM quest_attempts WHERE quest_id = $1 AND user_id = $2',
+        [createdQuestId, travelerId],
       );
       const attemptId = attemptRes.rows[0].id;
 
@@ -472,8 +473,8 @@ realPg('Plan 43 Quest Builder & Multi-Task Verification Suite (Real PostgreSQL)'
 
     it('admin approves the attempt and settles rewards once all required tasks are verified', async () => {
       const attemptRes = await fixture.pool.query(
-        "SELECT id FROM quest_attempts WHERE quest_id = $1 AND user_id = $2",
-        [createdQuestId, travelerId]
+        'SELECT id FROM quest_attempts WHERE quest_id = $1 AND user_id = $2',
+        [createdQuestId, travelerId],
       );
       const attemptId = attemptRes.rows[0].id;
 
@@ -529,14 +530,14 @@ realPg('Plan 43 Quest Builder & Multi-Task Verification Suite (Real PostgreSQL)'
         // 2. Seed users & spots
         await migPool.query(
           `INSERT INTO users(id, seed_id, display_name, email, role, demo_points)
-           VALUES ('u-mig-author', 'u-mig-author', 'Mig Author', 'mig@example.test', 'user', 0)`
+           VALUES ('u-mig-author', 'u-mig-author', 'Mig Author', 'mig@example.test', 'user', 0)`,
         );
         await migPool.query(
           `INSERT INTO spots(id, slug, name, description, category, subcategory, municipality, address, gps_lat, gps_lng,
              status, is_test, recommendation_suppressed, source_type, source_name, created_by)
            VALUES
              ('spot-bound-1', 'spot-bound-1', 'Bound Spot 1', 'Desc', 'nature_outdoors', 'beach', 'Bolinao', 'Addr', 16.35, 119.85, 'published', false, false, 'community', 'Author', 'u-mig-author'),
-             ('spot-direct-2', 'spot-direct-2', 'Direct Spot 2', 'Desc', 'nature_outdoors', 'beach', 'Bolinao', 'Addr', 16.36, 119.86, 'published', false, false, 'community', 'Author', 'u-mig-author')`
+             ('spot-direct-2', 'spot-direct-2', 'Direct Spot 2', 'Desc', 'nature_outdoors', 'beach', 'Bolinao', 'Addr', 16.36, 119.86, 'published', false, false, 'community', 'Author', 'u-mig-author')`,
         );
 
         // Quest A: Has quest coordinates (16.35, 119.85), quest marker_code ('QUEST-QR-STICKER-01'), and an active binding to 'spot-bound-1'
@@ -589,13 +590,13 @@ realPg('Plan 43 Quest Builder & Multi-Task Verification Suite (Real PostgreSQL)'
         await migPool.query(
           `INSERT INTO quests(id, title, description, category, location_name, gps_lat, gps_lng, radius_meters, reward_points, marker_code, marker_image_url, author_id, steps)
            VALUES ('quest-mig-a', 'Quest A', 'Desc', 'eco', 'Bolinao', 16.35, 119.85, 100, 50, 'QUEST-QR-STICKER-01', '', 'u-mig-author', $1::jsonb)`,
-          [JSON.stringify(v1StepsQuestA)]
+          [JSON.stringify(v1StepsQuestA)],
         );
 
         await migPool.query(
           `INSERT INTO reviewed_quest_spot_bindings(id, quest_id, spot_id, status, is_test)
            VALUES ($1, 'quest-mig-a', 'spot-bound-1', 'active', false)`,
-          [randomUUID()]
+          [randomUUID()],
         );
 
         // Quest B: Missing quest coordinates (NULL, NULL), blank/null quest marker_code, no binding, and no spot linked -> tests missing-data flags without inventing values
@@ -626,7 +627,7 @@ realPg('Plan 43 Quest Builder & Multi-Task Verification Suite (Real PostgreSQL)'
         await migPool.query(
           `INSERT INTO quests(id, title, description, category, location_name, gps_lat, gps_lng, radius_meters, reward_points, marker_code, marker_image_url, author_id, steps)
            VALUES ('quest-mig-b', 'Quest B', 'Desc', 'eco', 'Nowhere', NULL, NULL, 100, 50, NULL, '', 'u-mig-author', $1::jsonb)`,
-          [JSON.stringify(v1StepsQuestB)]
+          [JSON.stringify(v1StepsQuestB)],
         );
 
         // Quest C: Linked via spots.quest_id ('spot-direct-2') without reviewed_quest_spot_bindings row
@@ -640,7 +641,7 @@ realPg('Plan 43 Quest Builder & Multi-Task Verification Suite (Real PostgreSQL)'
         await migPool.query(
           `INSERT INTO quests(id, title, description, category, location_name, gps_lat, gps_lng, radius_meters, reward_points, marker_code, marker_image_url, author_id, steps)
            VALUES ('quest-mig-c', 'Quest C', 'Desc', 'cultural', 'Bolinao', 16.36, 119.86, 100, 50, 'QUEST-QR-C', '', 'u-mig-author', $1::jsonb)`,
-          [JSON.stringify(v1StepsQuestC)]
+          [JSON.stringify(v1StepsQuestC)],
         );
         await migPool.query(`UPDATE spots SET quest_id = 'quest-mig-c' WHERE id = 'spot-direct-2'`);
 

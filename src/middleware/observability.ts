@@ -49,10 +49,7 @@ export function redactSensitiveData(obj: any): any {
  */
 export function requestTracingMiddleware(req: ObservableRequest, res: Response, next: NextFunction): void {
   const incomingId = req.headers['x-request-id'];
-  const requestId =
-    typeof incomingId === 'string' && incomingId.trim().length > 0
-      ? incomingId.trim()
-      : randomUUID();
+  const requestId = typeof incomingId === 'string' && incomingId.trim().length > 0 ? incomingId.trim() : randomUUID();
 
   req.id = requestId;
   req.startTime = Date.now();

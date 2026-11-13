@@ -11,20 +11,11 @@ describe('Durable Quest Step Evidence & Attempt State Contract (Phase 1-3)', () 
   const travelerUserId = 'traveler-scout-992';
   const otherAdminId = 'admin-scout-993';
 
-  const authorToken = jwt.sign(
-    { id: authorUserId, seed_id: 'author-01', role: 'user' },
-    env.JWT_SECRET
-  );
+  const authorToken = jwt.sign({ id: authorUserId, seed_id: 'author-01', role: 'user' }, env.JWT_SECRET);
 
-  const travelerToken = jwt.sign(
-    { id: travelerUserId, seed_id: 'traveler-01', role: 'user' },
-    env.JWT_SECRET
-  );
+  const travelerToken = jwt.sign({ id: travelerUserId, seed_id: 'traveler-01', role: 'user' }, env.JWT_SECRET);
 
-  const adminToken = jwt.sign(
-    { id: otherAdminId, seed_id: 'admin-01', role: 'admin' },
-    env.JWT_SECRET
-  );
+  const adminToken = jwt.sign({ id: otherAdminId, seed_id: 'admin-01', role: 'admin' }, env.JWT_SECRET);
 
   const testQuestId = `quest-evidence-test-${Date.now()}`;
   const testSpotId = `spot-evidence-test-${Date.now()}`;
@@ -339,7 +330,10 @@ describe('Durable Quest Step Evidence & Attempt State Contract (Phase 1-3)', () 
 
   it('submits photo evidence with SHA-256 fingerprint into pending_review', async () => {
     // 1x1 transparent PNG buffer
-    const pngBuffer = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+    const pngBuffer = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      'base64',
+    );
 
     const res = await request(app)
       .post(`/api/v1/quests/${testQuestId}/steps/3/evidence`)
@@ -395,10 +389,7 @@ describe('Durable Quest Step Evidence & Attempt State Contract (Phase 1-3)', () 
       invalidateSessionScopeCache(travelerUserId);
     }
 
-    const travelerAdminToken = jwt.sign(
-      { id: travelerUserId, seed_id: 'traveler-01', role: 'admin' },
-      env.JWT_SECRET
-    );
+    const travelerAdminToken = jwt.sign({ id: travelerUserId, seed_id: 'traveler-01', role: 'admin' }, env.JWT_SECRET);
 
     const res = await request(app)
       .patch(`/api/v1/admin/quest-attempts/${attemptId}`)

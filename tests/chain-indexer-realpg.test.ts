@@ -8,10 +8,21 @@ const entitlement = h('e');
 const recipient = a('a');
 const distributor = a('b');
 const badge = a('c');
-const block = (number: number, hash: string, parentHash: string, logs: ObservedBlock['logs'] = []): ObservedBlock =>
-  ({ number, hash, parentHash, logs });
-const claim = (txHash: string) => ({ txHash, logIndex: 0, address: distributor,
-  eventName: 'Claimed' as const, entitlement, recipient, amountWei: '2500000000000000000' });
+const block = (number: number, hash: string, parentHash: string, logs: ObservedBlock['logs'] = []): ObservedBlock => ({
+  number,
+  hash,
+  parentHash,
+  logs,
+});
+const claim = (txHash: string) => ({
+  txHash,
+  logIndex: 0,
+  address: distributor,
+  eventName: 'Claimed' as const,
+  entitlement,
+  recipient,
+  amountWei: '2500000000000000000',
+});
 
 class FixtureSource implements ChainSource {
   chainId = 84532;
@@ -23,8 +34,14 @@ class FixtureSource implements ChainSource {
     [12, block(12, h('3'), h('2'))],
     [13, block(13, h('4'), h('3'))],
   ]);
-  async getChainId() { if (this.offline) throw new Error('RPC_OFFLINE'); return this.chainId; }
-  async getLatestBlockNumber() { if (this.offline) throw new Error('RPC_OFFLINE'); return this.latest; }
+  async getChainId() {
+    if (this.offline) throw new Error('RPC_OFFLINE');
+    return this.chainId;
+  }
+  async getLatestBlockNumber() {
+    if (this.offline) throw new Error('RPC_OFFLINE');
+    return this.latest;
+  }
   async getBlock(number: number) {
     if (this.offline) throw new Error('RPC_OFFLINE');
     const result = this.blocks.get(number);
@@ -41,13 +58,22 @@ realPg('dormant Base Sepolia indexer on disposable PostgreSQL', () => {
   beforeEach(async () => {
     fixture = await createTestDb();
     source = new FixtureSource();
-    indexer = new BaseSepoliaIndexer(fixture.pool, source,
-      { tokenDistributor: distributor, badge, confirmations: 1, startBlock: 10 });
-    await fixture.pool.query(`INSERT INTO chain_commands
+    indexer = new BaseSepoliaIndexer(fixture.pool, source, {
+      tokenDistributor: distributor,
+      badge,
+      confirmations: 1,
+      startBlock: 10,
+    });
+    await fixture.pool.query(
+      `INSERT INTO chain_commands
       (id,chain_id,entitlement_id,operation,recipient_address,status,expected_amount_wei)
-      VALUES ('command-1',84532,$1,'test_token_claim',$2,'submitted',2500000000000000000)`, [entitlement, recipient]);
+      VALUES ('command-1',84532,$1,'test_token_claim',$2,'submitted',2500000000000000000)`,
+      [entitlement, recipient],
+    );
   }, 120_000);
-  afterEach(async () => { await fixture?.close(); }, 120_000);
+  afterEach(async () => {
+    await fixture?.close();
+  }, 120_000);
 
   const snapshot = async () => {
     const [cp, events, commands] = await Promise.all([
@@ -113,28 +139,43 @@ realPg('dormant Base Sepolia indexer on disposable PostgreSQL', () => {
     source.blocks.set(11, block(11, h('2'), h('1'), [{ ...claim(h('a')), amountWei: '1' }]));
     await indexer.sync();
     expect((await snapshot()).command).toBe('submitted');
-    await expect(fixture.pool.query(`UPDATE chain_commands SET expected_amount_wei = 1
-      WHERE id = 'command-1'`)).rejects.toThrow('CHAIN_EXPECTATION_IMMUTABLE');
-    await expect(fixture.pool.query(`INSERT INTO chain_commands
+    await expect(
+      fixture.pool.query(`UPDATE chain_commands SET expected_amount_wei = 1
+      WHERE id = 'command-1'`),
+    ).rejects.toThrow('CHAIN_EXPECTATION_IMMUTABLE');
+    await expect(
+      fixture.pool.query(
+        `INSERT INTO chain_commands
       (id,chain_id,entitlement_id,operation,recipient_address,status)
       VALUES ('missing-expectation',84532,$1,'test_token_claim',$2,'queued')`,
-    [h('b'), recipient])).rejects.toThrow('CHAIN_EXPECTATION_REQUIRED');
+        [h('b'), recipient],
+      ),
+    ).rejects.toThrow('CHAIN_EXPECTATION_REQUIRED');
   });
 
   it('ignores untrusted-contract and unanchored historical logs when projecting commands', async () => {
     source.latest = 11;
     await indexer.sync(); // canonical header 10, no claim yet
-    await fixture.pool.query(`INSERT INTO chain_events
+    await fixture.pool.query(
+      `INSERT INTO chain_events
       (id,chain_id,tx_hash,log_index,block_number,block_hash,event_name,payload,canonical,contract_address)
       VALUES ('untrusted-contract',84532,$1,0,10,$2,'Claimed',$3::jsonb,TRUE,$4),
              ('unanchored-log',84532,$5,0,9,$6,'Claimed',$3::jsonb,TRUE,$7)`,
-    [h('8'), h('1'), JSON.stringify({ entitlement, recipient, amountWei: '2500000000000000000' }),
-      a('f'), h('9'), h('9'), distributor]);
+      [
+        h('8'),
+        h('1'),
+        JSON.stringify({ entitlement, recipient, amountWei: '2500000000000000000' }),
+        a('f'),
+        h('9'),
+        h('9'),
+        distributor,
+      ],
+    );
     source.blocks.set(11, block(11, h('2'), h('1')));
     source.latest = 12;
     await indexer.sync();
     expect((await snapshot()).command).toBe('submitted');
-    const events = await fixture.pool.query("SELECT id,canonical FROM chain_events ORDER BY id");
+    const events = await fixture.pool.query('SELECT id,canonical FROM chain_events ORDER BY id');
     expect(events.rows).toEqual([
       { id: 'unanchored-log', canonical: true },
       { id: 'untrusted-contract', canonical: true },
@@ -153,10 +194,13 @@ realPg('dormant Base Sepolia indexer on disposable PostgreSQL', () => {
   });
 
   it('keeps replaced/reverted attempts distinct from canonical claim settlement', async () => {
-    await fixture.pool.query(`INSERT INTO chain_transaction_attempts
+    await fixture.pool.query(
+      `INSERT INTO chain_transaction_attempts
       (id,command_id,chain_id,tx_hash,status) VALUES
       ('attempt-old','command-1',84532,$1,'replaced'),
-      ('attempt-new','command-1',84532,$2,'submitted')`, [h('9'), h('a')]);
+      ('attempt-new','command-1',84532,$2,'submitted')`,
+      [h('9'), h('a')],
+    );
     await indexer.sync();
     const attempts = await fixture.pool.query(`SELECT id,status FROM chain_transaction_attempts ORDER BY id`);
     expect(attempts.rows).toEqual([
@@ -168,13 +212,26 @@ realPg('dormant Base Sepolia indexer on disposable PostgreSQL', () => {
 
   it('recognizes only the allowlisted badge issuance event for badge commands', async () => {
     const badgeEntitlement = h('d');
-    await fixture.pool.query(`INSERT INTO chain_commands
+    await fixture.pool.query(
+      `INSERT INTO chain_commands
       (id,chain_id,entitlement_id,operation,recipient_address,status,expected_token_id)
-      VALUES ('badge-command',84532,$1,'badge_claim',$2,'submitted',77)`, [badgeEntitlement, recipient]);
-    source.blocks.set(12, block(12, h('3'), h('2'), [{
-      txHash: h('8'), logIndex: 1, address: badge,
-      eventName: 'BadgeIssued', entitlement: badgeEntitlement, recipient, tokenId: '77',
-    }]));
+      VALUES ('badge-command',84532,$1,'badge_claim',$2,'submitted',77)`,
+      [badgeEntitlement, recipient],
+    );
+    source.blocks.set(
+      12,
+      block(12, h('3'), h('2'), [
+        {
+          txHash: h('8'),
+          logIndex: 1,
+          address: badge,
+          eventName: 'BadgeIssued',
+          entitlement: badgeEntitlement,
+          recipient,
+          tokenId: '77',
+        },
+      ]),
+    );
     source.latest = 13;
     await indexer.sync();
     const badgeCommand = await fixture.pool.query("SELECT status FROM chain_commands WHERE id='badge-command'");
@@ -185,16 +242,24 @@ realPg('dormant Base Sepolia indexer on disposable PostgreSQL', () => {
   it('allows one worker to resume a durable checkpoint after restart', async () => {
     source.latest = 11;
     await indexer.sync();
-    const restarted = new BaseSepoliaIndexer(fixture.pool, source,
-      { tokenDistributor: distributor, badge, confirmations: 1, startBlock: 10 });
+    const restarted = new BaseSepoliaIndexer(fixture.pool, source, {
+      tokenDistributor: distributor,
+      badge,
+      confirmations: 1,
+      startBlock: 10,
+    });
     source.latest = 13;
     expect(await restarted.sync()).toEqual({ processed: 2, safeHead: 12 });
     expect((await snapshot()).cp[0]).toMatchObject({ block_number: '12', block_hash: h('3') });
   });
 
   it('deduplicates competing workers through the real PostgreSQL checkpoint lock', async () => {
-    const second = new BaseSepoliaIndexer(fixture.pool, source,
-      { tokenDistributor: distributor, badge, confirmations: 1, startBlock: 10 });
+    const second = new BaseSepoliaIndexer(fixture.pool, source, {
+      tokenDistributor: distributor,
+      badge,
+      confirmations: 1,
+      startBlock: 10,
+    });
     const outcomes = await Promise.allSettled([indexer.sync(), second.sync()]);
     expect(outcomes.some((outcome) => outcome.status === 'fulfilled')).toBe(true);
     // A losing first-block racer may fail a unique constraint; a retry must

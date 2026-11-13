@@ -42,18 +42,19 @@ async function tick(): Promise<void> {
     } catch (error) {
       failures++;
       lastFailureAt = new Date().toISOString();
-      console.error('[juanchoice-scheduler]',error);
+      console.error('[juanchoice-scheduler]', error);
     }
   })();
-  try { await running; }
-  finally {
+  try {
+    await running;
+  } finally {
     running = null;
     if (!stopped) {
-      const backoff = Math.min(8, Math.pow(1.5,failures));
-      const jitter = Math.floor(Math.random()*Math.min(1000,env.JUANCHOICE_SCHEDULER_INTERVAL_MS/5));
-      const delayMs = env.JUANCHOICE_SCHEDULER_INTERVAL_MS*backoff+jitter;
-      nextAttemptAt = new Date(Date.now()+delayMs).toISOString();
-      timer = setTimeout(() => void tick(),delayMs);
+      const backoff = Math.min(8, Math.pow(1.5, failures));
+      const jitter = Math.floor(Math.random() * Math.min(1000, env.JUANCHOICE_SCHEDULER_INTERVAL_MS / 5));
+      const delayMs = env.JUANCHOICE_SCHEDULER_INTERVAL_MS * backoff + jitter;
+      nextAttemptAt = new Date(Date.now() + delayMs).toISOString();
+      timer = setTimeout(() => void tick(), delayMs);
       timer.unref?.();
     }
   }
@@ -63,14 +64,14 @@ export function initJuanChoiceScheduler(): void {
   if (!stopped || !env.JUANCHOICE_ENABLED || !env.JUANCHOICE_SCHEDULER_ENABLED) return;
   stopped = false;
   nextAttemptAt = new Date().toISOString();
-  timer = setTimeout(() => void tick(),0);
+  timer = setTimeout(() => void tick(), 0);
   timer.unref?.();
 }
 
-export async function stopJuanChoiceScheduler(timeoutMs=5000): Promise<void> {
+export async function stopJuanChoiceScheduler(timeoutMs = 5000): Promise<void> {
   stopped = true;
   if (timer) clearTimeout(timer);
   timer = null;
   nextAttemptAt = null;
-  if (running) await Promise.race([running,new Promise<void>(resolve => setTimeout(resolve,timeoutMs))]);
+  if (running) await Promise.race([running, new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))]);
 }

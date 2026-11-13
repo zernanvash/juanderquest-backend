@@ -10,7 +10,7 @@ describe('JuanChoice connection acquisition probe helper', () => {
   it('measures elapsed time and records successful Promise connect', async () => {
     const fakeClient = { release: jest.fn() };
     const mockOriginalConnect = jest.fn().mockImplementation(async () => {
-      await new Promise(r => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 20));
       return fakeClient;
     });
 
@@ -38,7 +38,7 @@ describe('JuanChoice connection acquisition probe helper', () => {
   it('measures elapsed time and records failed Promise connect', async () => {
     const expectedError = new Error('Connection timeout exceeded');
     const mockOriginalConnect = jest.fn().mockImplementation(async () => {
-      await new Promise(r => setTimeout(r, 10));
+      await new Promise((r) => setTimeout(r, 10));
       throw expectedError;
     });
 
@@ -59,7 +59,7 @@ describe('JuanChoice connection acquisition probe helper', () => {
     probe.restore();
   });
 
-  it('measures elapsed time and handles callback connect on success', done => {
+  it('measures elapsed time and handles callback connect on success', (done) => {
     const fakeClient = { release: jest.fn() };
     const mockOriginalConnect = jest.fn().mockImplementation((cb: (err: any, client: any, release: any) => void) => {
       setTimeout(() => {
@@ -94,7 +94,7 @@ describe('JuanChoice connection acquisition probe helper', () => {
     });
   });
 
-  it('measures elapsed time and handles callback connect on error without storing error string', done => {
+  it('measures elapsed time and handles callback connect on error without storing error string', (done) => {
     const mockOriginalConnect = jest.fn().mockImplementation((cb: (err: any, client: any, release: any) => void) => {
       setTimeout(() => {
         cb(new Error('Pool exhausted'), undefined, () => {});
@@ -160,9 +160,20 @@ describe('JuanChoice connection acquisition probe helper', () => {
     let resolveFirstConnect!: (client: any) => void;
     let resolveSecondConnect!: (client: any) => void;
 
-    const mockOriginalConnect = jest.fn()
-      .mockImplementationOnce(() => new Promise(res => { resolveFirstConnect = res; }))
-      .mockImplementationOnce(() => new Promise(res => { resolveSecondConnect = res; }));
+    const mockOriginalConnect = jest
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveFirstConnect = res;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveSecondConnect = res;
+          }),
+      );
 
     const pool = { connect: mockOriginalConnect } as unknown as Pool;
     const probe = installAcquisitionProbe(pool);
@@ -215,16 +226,16 @@ describe('JuanChoice connection acquisition probe helper', () => {
 
   it('computes exact percentiles correctly for empty and sorted arrays', () => {
     expect(computePercentile([], 0.95)).toBe(0);
-    expect(computePercentile([10], 0.50)).toBe(10);
+    expect(computePercentile([10], 0.5)).toBe(10);
     expect(computePercentile([10], 0.95)).toBe(10);
-    expect(computePercentile([10, 20, 30, 40, 50, 60, 70, 80, 90, 100], 0.50)).toBe(50);
+    expect(computePercentile([10, 20, 30, 40, 50, 60, 70, 80, 90, 100], 0.5)).toBe(50);
     expect(computePercentile([10, 20, 30, 40, 50, 60, 70, 80, 90, 100], 0.95)).toBe(100);
   });
 
   it('attributes acquisitions in concurrent asynchronous callback contexts to their own phase', async () => {
     let currentAsyncContextPhase: 'mixed_ballot_burst' | 'idle_read' | 'unscoped' = 'unscoped';
     const mockOriginalConnect = jest.fn().mockImplementation(async () => {
-      await new Promise(r => setTimeout(r, 10));
+      await new Promise((r) => setTimeout(r, 10));
       return { release: () => {} };
     });
     const pool = { connect: mockOriginalConnect } as unknown as Pool;

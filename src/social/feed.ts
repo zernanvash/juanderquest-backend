@@ -141,12 +141,7 @@ function mapActivityRow(
   const ageHours = Math.max(0, (nowMs - createdAtMs) / 3_600_000);
   const meritExhaustion = computePlazaMeritExhaustion(ageHours);
   const isPopularBreakout =
-    !isSelf &&
-    !viaFollow &&
-    rivalRank === undefined &&
-    !isSavedSpot &&
-    rawEngagement >= 3 &&
-    meritExhaustion > 0;
+    !isSelf && !viaFollow && rivalRank === undefined && !isSavedSpot && rawEngagement >= 3 && meritExhaustion > 0;
 
   let reason: ActivityReason;
   let reason_label: string | undefined;
@@ -213,15 +208,9 @@ function mapActivityRow(
   };
 }
 
-async function resolveViewerHomeTown(
-  queryable: Queryable,
-  viewerId: string,
-): Promise<string | null> {
+async function resolveViewerHomeTown(queryable: Queryable, viewerId: string): Promise<string | null> {
   try {
-    const { rows } = await queryable.query(
-      'SELECT home_municipality FROM users WHERE id = $1',
-      [viewerId],
-    );
+    const { rows } = await queryable.query('SELECT home_municipality FROM users WHERE id = $1', [viewerId]);
     return (rows[0]?.home_municipality as string | null) ?? null;
   } catch {
     return null;
@@ -414,8 +403,8 @@ export function rankPlazaCandidateRows(
     const isRival = ctx.rivalRanksByUserId.has(row.actor_id);
     const sameHomeTown = Boolean(
       ctx.viewerHomeTown &&
-        row.actor_home_municipality &&
-        row.actor_home_municipality.toLowerCase() === ctx.viewerHomeTown.toLowerCase(),
+      row.actor_home_municipality &&
+      row.actor_home_municipality.toLowerCase() === ctx.viewerHomeTown.toLowerCase(),
     );
 
     if (isSelf) {
@@ -445,11 +434,9 @@ export function rankPlazaCandidateRows(
     }
     if (row.municipality) {
       const muniLower = String(row.municipality).toLowerCase();
-      const matchesHome =
-        ctx.viewerHomeTown !== null && ctx.viewerHomeTown.toLowerCase() === muniLower;
+      const matchesHome = ctx.viewerHomeTown !== null && ctx.viewerHomeTown.toLowerCase() === muniLower;
       const matchesFallbackAffinity =
-        ctx.viewerHomeTown === null &&
-        [...ctx.topAffinityTowns].some((t) => t.toLowerCase() === muniLower);
+        ctx.viewerHomeTown === null && [...ctx.topAffinityTowns].some((t) => t.toLowerCase() === muniLower);
       if (matchesHome || matchesFallbackAffinity) {
         subjectAffinity += 0.3;
       }
@@ -462,10 +449,8 @@ export function rankPlazaCandidateRows(
     }
 
     // 4. Engagement Velocity & Exhaustion Duration
-    const engagementFactor =
-      1 + 0.38 * meritExhaustion * Math.log(1 + rawEngagement);
-    const postExhaustionDamper =
-      rawEngagement >= 3 && meritExhaustion === 0 ? 0.65 : 1.0;
+    const engagementFactor = 1 + 0.38 * meritExhaustion * Math.log(1 + rawEngagement);
+    const postExhaustionDamper = rawEngagement >= 3 && meritExhaustion === 0 ? 0.65 : 1.0;
 
     // 5. Gravity Time Decay
     const gravityDecay = Math.pow(ageHours + 2, 1.35);
@@ -496,10 +481,8 @@ export function rankPlazaCandidateRows(
   const actorCounts = new Map<string, number>();
 
   while (pool.length > 0) {
-    const prevActorId =
-      result.length > 0 ? result[result.length - 1].actor.user_id : null;
-    const hasAlternativeActor =
-      prevActorId !== null && pool.some((c) => c.item.actor.user_id !== prevActorId);
+    const prevActorId = result.length > 0 ? result[result.length - 1].actor.user_id : null;
+    const hasAlternativeActor = prevActorId !== null && pool.some((c) => c.item.actor.user_id !== prevActorId);
 
     let bestIdx = 0;
     let bestEffectiveScore = -Infinity;
@@ -521,8 +504,7 @@ export function rankPlazaCandidateRows(
         effectiveScore > bestEffectiveScore ||
         (effectiveScore === bestEffectiveScore &&
           (cand.createdAtMs > pool[bestIdx].createdAtMs ||
-            (cand.createdAtMs === pool[bestIdx].createdAtMs &&
-              cand.item.id > pool[bestIdx].item.id)))
+            (cand.createdAtMs === pool[bestIdx].createdAtMs && cand.item.id > pool[bestIdx].item.id)))
       ) {
         bestEffectiveScore = effectiveScore;
         bestIdx = i;
@@ -551,10 +533,7 @@ export function clearPlazaFeedCache(): void {
   plazaFeedCache.clear();
 }
 
-export async function getFeed(
-  client: Queryable | null | undefined,
-  input: GetFeedInput,
-): Promise<GetFeedResult> {
+export async function getFeed(client: Queryable | null | undefined, input: GetFeedInput): Promise<GetFeedResult> {
   const queryable = client ?? getPool();
   if (!queryable) {
     return { items: [], next_cursor: null };
@@ -715,8 +694,7 @@ export async function getFeed(
 
   const candidateRes = await queryable.query(candidateSql, [isTest, viewerId]);
   const candidateRows = candidateRes.rows;
-  const oldestCandidate =
-    candidateRows.length > 0 ? candidateRows[candidateRows.length - 1] : null;
+  const oldestCandidate = candidateRows.length > 0 ? candidateRows[candidateRows.length - 1] : null;
 
   async function fetchOlderActivities(
     olderThanDate: Date,
@@ -744,13 +722,7 @@ export async function getFeed(
        ORDER BY a.created_at DESC, a.id DESC
        LIMIT $5
     `;
-    const res = await activeQueryable.query(olderSql, [
-      isTest,
-      viewerId,
-      olderThanDate,
-      olderThanId,
-      fetchLimit + 1,
-    ]);
+    const res = await activeQueryable.query(olderSql, [isTest, viewerId, olderThanDate, olderThanId, fetchLimit + 1]);
     const more = res.rows.length > fetchLimit;
     return {
       rows: more ? res.rows.slice(0, fetchLimit) : res.rows,
@@ -789,18 +761,12 @@ export async function getFeed(
   }
 
   const isTailCursor = Boolean(
-    cursorData &&
-      (cursorData.id.startsWith('tail:') ||
-        !candidateRows.some((r: any) => r.id === cursorData.id)),
+    cursorData && (cursorData.id.startsWith('tail:') || !candidateRows.some((r: any) => r.id === cursorData.id)),
   );
 
   if (isTailCursor && cursorData) {
     const realId = cursorData.id.startsWith('tail:') ? cursorData.id.slice(5) : cursorData.id;
-    const { rows: olderRows, hasMore } = await fetchOlderActivities(
-      cursorData.createdAt,
-      realId,
-      limit,
-    );
+    const { rows: olderRows, hasMore } = await fetchOlderActivities(cursorData.createdAt, realId, limit);
     const items = olderRows.map((r: any) => mapActivityRow(r, viewerId, ctx, nowMs));
     let next_cursor: string | null = null;
     if (hasMore && items.length > 0) {

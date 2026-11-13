@@ -28,7 +28,7 @@ describe('Governance Concurrency & Accounting Fixes (V1–V5)', () => {
       };
 
       await expect(
-        store.recordQuestRewardTx('user_1', 'quest_1', 'sub_1', 10, 'admin_1', failingClient)
+        store.recordQuestRewardTx('user_1', 'quest_1', 'sub_1', 10, 'admin_1', failingClient),
       ).rejects.toThrow('PG_CONNECTION_DROPPED');
     });
 
@@ -39,9 +39,9 @@ describe('Governance Concurrency & Accounting Fixes (V1–V5)', () => {
         query: jest.fn().mockRejectedValue(new Error('PG_DISK_FULL')),
       };
 
-      await expect(
-        store.recordVoucherRedemptionTx('user_1', 10, 'voucher_1', 'rdm_1', failingClient)
-      ).rejects.toThrow('PG_DISK_FULL');
+      await expect(store.recordVoucherRedemptionTx('user_1', 10, 'voucher_1', 'rdm_1', failingClient)).rejects.toThrow(
+        'PG_DISK_FULL',
+      );
     });
 
     it('submissionsService rejects and aborts if commit returns ROLLBACK', async () => {
@@ -64,10 +64,13 @@ describe('Governance Concurrency & Accounting Fixes (V1–V5)', () => {
 
       // Insert pending submission
       const subId = `sub_v1_${Date.now()}`;
-      await testDb.pool.query(`
+      await testDb.pool.query(
+        `
         INSERT INTO submissions (id, user_id, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy, status, idempotency_key, created_at)
         VALUES ($1, 'usr_v1_sub', 'q_v1_sub', 'MK_V1', 16.0, 120.0, 5.0, 'pending', $2, NOW())
-      `, [subId, `idemp_sub_${Date.now()}`]);
+      `,
+        [subId, `idemp_sub_${Date.now()}`],
+      );
 
       // Mock pg Client to simulate COMMIT returning { command: 'ROLLBACK' }
       const realConnect = testDb.pool.connect.bind(testDb.pool);
@@ -92,9 +95,9 @@ describe('Governance Concurrency & Accounting Fixes (V1–V5)', () => {
 
       try {
         // reviewSubmission should fail because commit returned ROLLBACK
-        await expect(
-          submissionsService.reviewSubmission(subId, 'approve', 'usr_admin_v1')
-        ).rejects.toThrow('TRANSACTION_ABORTED: commit returned ROLLBACK');
+        await expect(submissionsService.reviewSubmission(subId, 'approve', 'usr_admin_v1')).rejects.toThrow(
+          'TRANSACTION_ABORTED: commit returned ROLLBACK',
+        );
       } finally {
         spy.mockRestore();
       }
@@ -151,9 +154,9 @@ describe('Governance Concurrency & Accounting Fixes (V1–V5)', () => {
       });
 
       try {
-        await expect(
-          vouchersService.redeemVoucher('v_v1', 'usr_v1_vch', randomUUID())
-        ).rejects.toThrow('TRANSACTION_ABORTED: commit returned ROLLBACK');
+        await expect(vouchersService.redeemVoucher('v_v1', 'usr_v1_vch', randomUUID())).rejects.toThrow(
+          'TRANSACTION_ABORTED: commit returned ROLLBACK',
+        );
       } finally {
         spy.mockRestore();
       }
@@ -288,10 +291,13 @@ describe('Governance Concurrency & Accounting Fixes (V1–V5)', () => {
 
       const largeAmount = 5_000_000_000; // 5 billion > 2^31 - 1
       const ledId = `led_large_${Date.now()}`;
-      await testDb.pool.query(`
+      await testDb.pool.query(
+        `
         INSERT INTO governance_ledger (id, transaction_group_id, type, account, amount_mjdq, reference_type, reference_id, actor_id, metadata, created_at)
         VALUES ($1, 'txg_large', 'large_test', 'treasury', $2, 'test', 'ref_large', 'admin', '{}', NOW())
-      `, [ledId, largeAmount]);
+      `,
+        [ledId, largeAmount],
+      );
 
       await store.hydrateFromPg(testDb.pool);
 
@@ -307,10 +313,13 @@ describe('Governance Concurrency & Accounting Fixes (V1–V5)', () => {
       const overflowId = `led_overflow_${Date.now()}`;
       // Fits within PostgreSQL BIGINT (< 9.22e18) but exceeds JavaScript Number.MAX_SAFE_INTEGER (9.007e15)
       const unsafeJsAmount = '9100000000000000';
-      await testDb.pool.query(`
+      await testDb.pool.query(
+        `
         INSERT INTO governance_ledger (id, transaction_group_id, type, account, amount_mjdq, reference_type, reference_id, actor_id, metadata, created_at)
         VALUES ($1, 'txg_ovf', 'overflow_test', 'treasury', $2, 'test', 'ref_ovf', 'admin', '{}', NOW())
-      `, [overflowId, unsafeJsAmount]);
+      `,
+        [overflowId, unsafeJsAmount],
+      );
 
       await expect(store.hydrateFromPg(testDb.pool)).rejects.toThrow('LEDGER_AMOUNT_OVERFLOW');
     });

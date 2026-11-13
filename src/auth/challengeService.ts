@@ -24,18 +24,21 @@ export interface CreateChallengeResult {
 }
 
 export class AuthChallengeService {
-  private inMemoryChallenges = new Map<string, {
-    id: string;
-    purpose: string;
-    target: string;
-    boundUserId: string | null;
-    codeHash: string;
-    expiresAt: number;
-    attemptCount: number;
-    maxAttempts: number;
-    consumedAt: number | null;
-    metadata: any;
-  }>();
+  private inMemoryChallenges = new Map<
+    string,
+    {
+      id: string;
+      purpose: string;
+      target: string;
+      boundUserId: string | null;
+      codeHash: string;
+      expiresAt: number;
+      attemptCount: number;
+      maxAttempts: number;
+      consumedAt: number | null;
+      metadata: any;
+    }
+  >();
 
   constructor(private pool: Pool | null) {}
 
@@ -47,7 +50,14 @@ export class AuthChallengeService {
    * Creates a single-use purpose-bound challenge (e.g. signup OTP, password reset OTP, wallet challenge).
    */
   async createChallenge(params: {
-    purpose: 'signup_verify' | 'password_reset' | 'password_reset_grant' | 'email_change' | 'wallet_login' | 'wallet_bind' | 'wallet_onboarding_grant';
+    purpose:
+      | 'signup_verify'
+      | 'password_reset'
+      | 'password_reset_grant'
+      | 'email_change'
+      | 'wallet_login'
+      | 'wallet_bind'
+      | 'wallet_onboarding_grant';
     targetIdentifier: string;
     boundUserId?: string | null;
     ttlSeconds?: number;
@@ -68,7 +78,7 @@ export class AuthChallengeService {
         `UPDATE auth_challenges 
          SET consumed_at = NOW() 
          WHERE purpose = $1 AND target_identifier = $2 AND consumed_at IS NULL`,
-        [params.purpose, target]
+        [params.purpose, target],
       );
 
       await this.pool.query(
@@ -85,7 +95,7 @@ export class AuthChallengeService {
           expiresAt.toISOString(),
           params.maxAttempts ?? 5,
           params.metadata ? JSON.stringify(params.metadata) : null,
-        ]
+        ],
       );
     } else {
       // Fallback in-memory
@@ -133,7 +143,7 @@ export class AuthChallengeService {
            WHERE purpose = $1 AND target_identifier = $2 AND consumed_at IS NULL 
            ORDER BY created_at DESC 
            LIMIT 1 FOR UPDATE`,
-          [params.purpose, target]
+          [params.purpose, target],
         );
 
         if (res.rowCount === 0) {
@@ -166,10 +176,7 @@ export class AuthChallengeService {
         // Verify code
         const isMatch = verifyChallengeCode(params.code, row.code_hash, env.JWT_SECRET);
         if (!isMatch) {
-          await client.query(
-            `UPDATE auth_challenges SET attempt_count = attempt_count + 1 WHERE id = $1`,
-            [row.id]
-          );
+          await client.query(`UPDATE auth_challenges SET attempt_count = attempt_count + 1 WHERE id = $1`, [row.id]);
           await client.query('COMMIT');
           return { valid: false, error: 'INVALID_CODE' };
         }
@@ -177,7 +184,7 @@ export class AuthChallengeService {
         // Atomically consume
         await client.query(
           `UPDATE auth_challenges SET consumed_at = NOW(), attempt_count = attempt_count + 1 WHERE id = $1`,
-          [row.id]
+          [row.id],
         );
         await client.query('COMMIT');
 

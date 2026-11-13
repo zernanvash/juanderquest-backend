@@ -33,47 +33,35 @@ describe('Plan 72 Phase 3: Session Epoch Invalidation & Durable Role Verificatio
     const newPassword = 'BrandNewPassword123!';
 
     // Register user
-    const regRes = await request(app)
-      .post('/api/v1/auth/register')
-      .send({
-        email,
-        password: oldPassword,
-        display_name: 'Epoch Tester',
-        age_eligibility_declared: true,
-        terms_accepted: true,
-      });
+    const regRes = await request(app).post('/api/v1/auth/register').send({
+      email,
+      password: oldPassword,
+      display_name: 'Epoch Tester',
+      age_eligibility_declared: true,
+      terms_accepted: true,
+    });
     expect(regRes.status).toBe(201);
     const devCode = regRes.body.data.dev_code;
 
     // Verify email
-    await request(app)
-      .post('/api/v1/auth/email/verify')
-      .send({ email, code: devCode });
+    await request(app).post('/api/v1/auth/email/verify').send({ email, code: devCode });
 
     // Login and get Token 1
-    const login1 = await request(app)
-      .post('/api/v1/auth/login')
-      .send({ email, password: oldPassword });
+    const login1 = await request(app).post('/api/v1/auth/login').send({ email, password: oldPassword });
     expect(login1.status).toBe(200);
     const token1 = login1.body.data.token;
 
     // Verify Token 1 works on /auth/me
-    const me1 = await request(app)
-      .get('/api/v1/auth/me')
-      .set('Authorization', `Bearer ${token1}`);
+    const me1 = await request(app).get('/api/v1/auth/me').set('Authorization', `Bearer ${token1}`);
     expect(me1.status).toBe(200);
 
     // Request password reset OTP
-    const forgotRes = await request(app)
-      .post('/api/v1/auth/password/forgot')
-      .send({ email });
+    const forgotRes = await request(app).post('/api/v1/auth/password/forgot').send({ email });
     expect(forgotRes.status).toBe(200);
     const resetOtp = forgotRes.body.data.dev_code;
 
     // Verify reset code to get reset grant
-    const grantRes = await request(app)
-      .post('/api/v1/auth/password/verify-code')
-      .send({ email, code: resetOtp });
+    const grantRes = await request(app).post('/api/v1/auth/password/verify-code').send({ email, code: resetOtp });
     expect(grantRes.status).toBe(200);
     const grant = grantRes.body.data.reset_grant;
 
@@ -84,23 +72,17 @@ describe('Plan 72 Phase 3: Session Epoch Invalidation & Durable Role Verificatio
     expect(resetRes.status).toBe(200);
 
     // Token 1 MUST now get 401 UNAUTHORIZED
-    const meAfterReset = await request(app)
-      .get('/api/v1/auth/me')
-      .set('Authorization', `Bearer ${token1}`);
+    const meAfterReset = await request(app).get('/api/v1/auth/me').set('Authorization', `Bearer ${token1}`);
     expect(meAfterReset.status).toBe(401);
     expect(meAfterReset.body.error.code).toBe('UNAUTHORIZED');
 
     // Logging in with new password works and returns Token 2
-    const login2 = await request(app)
-      .post('/api/v1/auth/login')
-      .send({ email, password: newPassword });
+    const login2 = await request(app).post('/api/v1/auth/login').send({ email, password: newPassword });
     expect(login2.status).toBe(200);
     const token2 = login2.body.data.token;
 
     // Token 2 works on /auth/me
-    const me2 = await request(app)
-      .get('/api/v1/auth/me')
-      .set('Authorization', `Bearer ${token2}`);
+    const me2 = await request(app).get('/api/v1/auth/me').set('Authorization', `Bearer ${token2}`);
     expect(me2.status).toBe(200);
   });
 
@@ -108,21 +90,17 @@ describe('Plan 72 Phase 3: Session Epoch Invalidation & Durable Role Verificatio
     const email = 'parallel.sessions@example.com';
     const password = 'ParallelPassword123!';
 
-    const regRes = await request(app)
-      .post('/api/v1/auth/register')
-      .send({
-        email,
-        password,
-        display_name: 'Parallel User',
-        age_eligibility_declared: true,
-        terms_accepted: true,
-      });
+    const regRes = await request(app).post('/api/v1/auth/register').send({
+      email,
+      password,
+      display_name: 'Parallel User',
+      age_eligibility_declared: true,
+      terms_accepted: true,
+    });
     expect(regRes.status).toBe(201);
     const devCode = regRes.body.data.dev_code;
 
-    await request(app)
-      .post('/api/v1/auth/email/verify')
-      .send({ email, code: devCode });
+    await request(app).post('/api/v1/auth/email/verify').send({ email, code: devCode });
 
     // Session 1 (e.g. mobile)
     const s1 = await request(app).post('/api/v1/auth/login').send({ email, password });
@@ -157,15 +135,13 @@ describe('Plan 72 Phase 3: Session Epoch Invalidation & Durable Role Verificatio
     const email = 'legacy.token@example.com';
     const password = 'LegacyPassword123!';
 
-    const regRes = await request(app)
-      .post('/api/v1/auth/register')
-      .send({
-        email,
-        password,
-        display_name: 'Legacy User',
-        age_eligibility_declared: true,
-        terms_accepted: true,
-      });
+    const regRes = await request(app).post('/api/v1/auth/register').send({
+      email,
+      password,
+      display_name: 'Legacy User',
+      age_eligibility_declared: true,
+      terms_accepted: true,
+    });
     expect(regRes.status).toBe(201);
     const userId = regRes.body.data.user_id;
 
@@ -193,15 +169,13 @@ describe('Plan 72 Phase 3: Session Epoch Invalidation & Durable Role Verificatio
     const email = 'admin.demoted@example.com';
     const password = 'AdminPassword123!';
 
-    const regRes = await request(app)
-      .post('/api/v1/auth/register')
-      .send({
-        email,
-        password,
-        display_name: 'Staff Admin',
-        age_eligibility_declared: true,
-        terms_accepted: true,
-      });
+    const regRes = await request(app).post('/api/v1/auth/register').send({
+      email,
+      password,
+      display_name: 'Staff Admin',
+      age_eligibility_declared: true,
+      terms_accepted: true,
+    });
     expect(regRes.status).toBe(201);
     const adminId = regRes.body.data.user_id;
 
@@ -216,16 +190,19 @@ describe('Plan 72 Phase 3: Session Epoch Invalidation & Durable Role Verificatio
 
     // Create an author user and a draft quest
     const authorId = `author_${Date.now()}`;
-    await testDb.pool.query(
-      'INSERT INTO users (id, seed_id, display_name, email, role) VALUES ($1, $2, $3, $4, $5)',
-      [authorId, authorId, 'Quest Author', `${authorId}@example.com`, 'user']
-    );
+    await testDb.pool.query('INSERT INTO users (id, seed_id, display_name, email, role) VALUES ($1, $2, $3, $4, $5)', [
+      authorId,
+      authorId,
+      'Quest Author',
+      `${authorId}@example.com`,
+      'user',
+    ]);
 
     const questId = `quest_draft_${Date.now()}`;
     await testDb.pool.query(
       `INSERT INTO quests (id, title, description, category, location_name, gps_lat, gps_lng, radius_meters, reward_points, marker_code, marker_image_url, author_id, status, created_at, updated_at)
        VALUES ($1, 'Top Secret Draft Quest', 'Draft details', 'cultural', 'Lingayen Capitol', 16.0, 120.0, 100, 50, 'MARKER-TOPSECRET', '', $2, 'draft', NOW(), NOW())`,
-      [questId, authorId]
+      [questId, authorId],
     );
     await db.hydrateFromPg(testDb.pool);
 
@@ -266,9 +243,7 @@ describe('Plan 72 Phase 3: Session Epoch Invalidation & Durable Role Verificatio
 
     try {
       invalidateSessionScopeCache();
-      const res = await request(app)
-        .get('/api/v1/auth/me')
-        .set('Authorization', `Bearer ${token}`);
+      const res = await request(app).get('/api/v1/auth/me').set('Authorization', `Bearer ${token}`);
 
       expect(res.status).toBe(503);
       expect(res.body.error.code).toBe('DATABASE_UNAVAILABLE');

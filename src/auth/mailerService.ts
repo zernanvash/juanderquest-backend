@@ -14,8 +14,10 @@ export interface RenderedAuthEmail {
   html: string;
 }
 
-type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string }) =>
-  Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
+type FetchLike = (
+  url: string,
+  init: { method: string; headers: Record<string, string>; body: string },
+) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
 
 const RESEND_URL = 'https://api.resend.com/emails';
 const DEFAULT_FROM = 'JuanDerQuest <noreply@juanderquest.app>';
@@ -49,15 +51,17 @@ export function renderAuthEmail(job: Pick<AuthMailJob, 'templateType' | 'code'>)
   const codeBlock = `<p style="font-size:28px;font-weight:700;letter-spacing:6px;margin:16px 0">${escapeHtml(code)}</p>`;
   const footer = '<p style="color:#666;font-size:12px">If you did not ask for this, you can ignore this email.</p>';
   const wrap = (body: string) =>
-    `<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;color:#222">`
-    + `<h2 style="color:#582F0E">JuanDerQuest</h2>${body}${footer}</div>`;
+    `<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;color:#222">` +
+    `<h2 style="color:#582F0E">JuanDerQuest</h2>${body}${footer}</div>`;
 
   switch (job.templateType) {
     case 'signup_otp':
       return {
         subject: `${code} is your JuanDerQuest verification code`,
         text: `Welcome to JuanDerQuest!\n\nYour verification code is ${code}. It expires in 10 minutes.\n\nIf you did not create an account, you can ignore this email.`,
-        html: wrap(`<p>Welcome to JuanDerQuest! Enter this code to verify your email:</p>${codeBlock}<p>It expires in 10 minutes.</p>`),
+        html: wrap(
+          `<p>Welcome to JuanDerQuest! Enter this code to verify your email:</p>${codeBlock}<p>It expires in 10 minutes.</p>`,
+        ),
       };
     case 'password_reset_otp':
       return {
@@ -69,7 +73,9 @@ export function renderAuthEmail(job: Pick<AuthMailJob, 'templateType' | 'code'>)
       return {
         subject: 'Your JuanDerQuest password was changed',
         text: 'The password on your JuanDerQuest account was just changed. If this was not you, reset your password now.',
-        html: wrap('<p>The password on your JuanDerQuest account was just changed. If this was not you, reset your password now.</p>'),
+        html: wrap(
+          '<p>The password on your JuanDerQuest account was just changed. If this was not you, reset your password now.</p>',
+        ),
       };
   }
 }
@@ -106,7 +112,7 @@ export class AuthMailerService {
            count(*) FILTER (WHERE sent_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')::int AS daily
          FROM auth_mail_outbox
          WHERE status = 'sent' AND sent_at > now() - interval '1 day'`,
-        [email, RECIPIENT_COOLDOWN_SECONDS]
+        [email, RECIPIENT_COOLDOWN_SECONDS],
       );
       ({ recent, hourly, daily } = rows[0]);
     } else {
@@ -120,9 +126,12 @@ export class AuthMailerService {
       daily = sent.filter((r) => r.at >= midnight.getTime()).length;
     }
 
-    if (daily >= dailyCap()) return { allowed: false, reason: 'DAILY_CAP', retryAfterSeconds: secondsUntilUtcMidnight(nowMs) };
-    if (recent > 0) return { allowed: false, reason: 'RECIPIENT_COOLDOWN', retryAfterSeconds: RECIPIENT_COOLDOWN_SECONDS };
-    if (hourly >= RECIPIENT_HOURLY_LIMIT) return { allowed: false, reason: 'RECIPIENT_HOURLY_LIMIT', retryAfterSeconds: 3600 };
+    if (daily >= dailyCap())
+      return { allowed: false, reason: 'DAILY_CAP', retryAfterSeconds: secondsUntilUtcMidnight(nowMs) };
+    if (recent > 0)
+      return { allowed: false, reason: 'RECIPIENT_COOLDOWN', retryAfterSeconds: RECIPIENT_COOLDOWN_SECONDS };
+    if (hourly >= RECIPIENT_HOURLY_LIMIT)
+      return { allowed: false, reason: 'RECIPIENT_HOURLY_LIMIT', retryAfterSeconds: 3600 };
     return { allowed: true };
   }
 
@@ -162,7 +171,7 @@ export class AuthMailerService {
         `INSERT INTO auth_mail_outbox (
           id, recipient_email, template_type, status, retry_count, last_error, sent_at
         ) VALUES ($1, $2, $3, $4, 0, $5, CASE WHEN $6::boolean THEN NOW() END)`,
-        [jobId, cleanEmail, job.templateType, status, lastError, status === 'sent']
+        [jobId, cleanEmail, job.templateType, status, lastError, status === 'sent'],
       );
     } else {
       this.inMemoryOutbox.push({

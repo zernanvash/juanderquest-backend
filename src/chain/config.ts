@@ -1,7 +1,7 @@
 import { env } from '../config/env.js';
 
 export const SUPPORTED_CHAIN_IDS = [80002, 84532] as const;
-export type SupportedChainId = typeof SUPPORTED_CHAIN_IDS[number];
+export type SupportedChainId = (typeof SUPPORTED_CHAIN_IDS)[number];
 
 export interface ChainConfig {
   chainId: SupportedChainId;

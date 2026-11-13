@@ -73,10 +73,7 @@ export function setFcmDryRun(val: boolean): void {
  * Sends a push payload to a set of device tokens via Firebase Cloud Messaging.
  * Never logs raw tokens or service account data.
  */
-export async function sendToTokens(
-  tokens: string[],
-  payload: MulticastPayload,
-): Promise<SendResult> {
+export async function sendToTokens(tokens: string[], payload: MulticastPayload): Promise<SendResult> {
   if (!tokens || tokens.length === 0) {
     return { successCount: 0, failureCount: 0, unregisteredTokens: [] };
   }
@@ -111,10 +108,7 @@ export async function sendToTokens(
     response.responses.forEach((resp: any, idx: number) => {
       if (!resp.success && resp.error) {
         const code = resp.error.code;
-        if (
-          code === 'messaging/registration-token-not-registered' ||
-          code === 'messaging/invalid-registration-token'
-        ) {
+        if (code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token') {
           unregisteredTokens.push(tokens[idx]);
         }
       }

@@ -20,7 +20,7 @@ describe('Android app version gate (426 UPGRADE_REQUIRED)', () => {
         minSupportedVersionCode: 150,
         minSupportedBuildNumber: 150,
         downloadUrl: 'https://api.juanderquest.app/api/v1/app/download',
-      })
+      }),
     );
     process.env.APP_VERSION_FILE = fixturePath;
     resetAppVersionGateCache();
@@ -49,10 +49,7 @@ describe('Android app version gate (426 UPGRADE_REQUIRED)', () => {
   });
 
   it('allows reads from outdated Android builds', async () => {
-    const res = await request(app)
-      .get('/api/v1/spots')
-      .set('X-App-Platform', 'android')
-      .set('X-App-Build', '100');
+    const res = await request(app).get('/api/v1/spots').set('X-App-Platform', 'android').set('X-App-Build', '100');
     expect(res.status).not.toBe(426);
   });
 

@@ -45,10 +45,7 @@ const DEFAULT_PREFERENCES: UserNotificationPreferences = {
   quiet_hours: true,
 };
 
-export async function getUserPreferences(
-  client: Queryable,
-  userId: string,
-): Promise<UserNotificationPreferences> {
+export async function getUserPreferences(client: Queryable, userId: string): Promise<UserNotificationPreferences> {
   const res = await client.query(
     `SELECT push_overtaken, push_friend_activity, push_social, push_weekly_recap, quiet_hours
        FROM user_notification_preferences
@@ -106,11 +103,7 @@ export async function checkDailyCaps(
 /**
  * Enqueues a push delivery, applying user preferences, caps, quiet hours deferral, and collapse batching.
  */
-export async function enqueuePush(
-  client: Queryable,
-  input: EnqueuePushInput,
-  overrideNow?: Date,
-): Promise<string> {
+export async function enqueuePush(client: Queryable, input: EnqueuePushInput, overrideNow?: Date): Promise<string> {
   const now = overrideNow || new Date();
   const pushId = `push_${randomUUID()}`;
 
@@ -120,14 +113,14 @@ export async function enqueuePush(
     input.category === 'account'
       ? true
       : input.category === 'overtaken'
-      ? prefs.push_overtaken
-      : input.category === 'friend_activity'
-      ? prefs.push_friend_activity
-      : input.category === 'social'
-      ? prefs.push_social
-      : input.category === 'weekly_recap'
-      ? prefs.push_weekly_recap
-      : false;
+        ? prefs.push_overtaken
+        : input.category === 'friend_activity'
+          ? prefs.push_friend_activity
+          : input.category === 'social'
+            ? prefs.push_social
+            : input.category === 'weekly_recap'
+              ? prefs.push_weekly_recap
+              : false;
 
   if (!categoryAllowed) {
     await client.query(
@@ -209,11 +202,12 @@ export async function enqueuePush(
     const existing = existingRes.rows[0];
     let names: string[] = [];
     try {
-      names = typeof existing.batch_names === 'string'
-        ? JSON.parse(existing.batch_names)
-        : Array.isArray(existing.batch_names)
-        ? existing.batch_names
-        : [];
+      names =
+        typeof existing.batch_names === 'string'
+          ? JSON.parse(existing.batch_names)
+          : Array.isArray(existing.batch_names)
+            ? existing.batch_names
+            : [];
     } catch {
       names = [];
     }
@@ -268,10 +262,7 @@ export async function enqueueFriendActivityPush(
   activity: EnqueueFriendActivityInput,
   overrideNow?: Date,
 ): Promise<void> {
-  const actorRes = await client.query(
-    'SELECT display_name, is_public FROM users WHERE id = $1',
-    [activity.actor_id],
-  );
+  const actorRes = await client.query('SELECT display_name, is_public FROM users WHERE id = $1', [activity.actor_id]);
   const actor = actorRes.rows[0];
   const actorName = actor && actor.is_public ? actor.display_name : 'Someone';
 

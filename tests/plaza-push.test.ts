@@ -94,45 +94,57 @@ describe('Plan 41 Phase 4: Push Queue, Batching, Caps, Dispatcher & Weekly Recap
       const collapseKey = `social:${userRecipient.id}:2026101714`;
 
       // Cheer 1
-      await enqueuePush(testDb.pool, {
-        userId: userRecipient.id,
-        category: 'social',
-        collapseKey,
-        title: '👏 Cheers!',
-        body: 'Aira Coast cheered your activity.',
-        href: '/plaza?activity=act_test_1',
-        actorName: 'Aira Coast',
-        isTest: false,
-      }, now);
+      await enqueuePush(
+        testDb.pool,
+        {
+          userId: userRecipient.id,
+          category: 'social',
+          collapseKey,
+          title: '👏 Cheers!',
+          body: 'Aira Coast cheered your activity.',
+          href: '/plaza?activity=act_test_1',
+          actorName: 'Aira Coast',
+          isTest: false,
+        },
+        now,
+      );
 
       // Cheer 2
-      await enqueuePush(testDb.pool, {
-        userId: userRecipient.id,
-        category: 'social',
-        collapseKey,
-        title: '👏 Cheers!',
-        body: 'Carlos North cheered your activity.',
-        href: '/plaza?activity=act_test_1',
-        actorName: 'Carlos North',
-        isTest: false,
-      }, now);
+      await enqueuePush(
+        testDb.pool,
+        {
+          userId: userRecipient.id,
+          category: 'social',
+          collapseKey,
+          title: '👏 Cheers!',
+          body: 'Carlos North cheered your activity.',
+          href: '/plaza?activity=act_test_1',
+          actorName: 'Carlos North',
+          isTest: false,
+        },
+        now,
+      );
 
       // Cheer 3
-      await enqueuePush(testDb.pool, {
-        userId: userRecipient.id,
-        category: 'social',
-        collapseKey,
-        title: '👏 Cheers!',
-        body: 'Diane Wave cheered your activity.',
-        href: '/plaza?activity=act_test_1',
-        actorName: 'Diane Wave',
-        isTest: false,
-      }, now);
-
-      const rows = await testDb.pool.query(
-        `SELECT * FROM push_deliveries WHERE user_id = $1 AND collapse_key = $2`,
-        [userRecipient.id, collapseKey],
+      await enqueuePush(
+        testDb.pool,
+        {
+          userId: userRecipient.id,
+          category: 'social',
+          collapseKey,
+          title: '👏 Cheers!',
+          body: 'Diane Wave cheered your activity.',
+          href: '/plaza?activity=act_test_1',
+          actorName: 'Diane Wave',
+          isTest: false,
+        },
+        now,
       );
+
+      const rows = await testDb.pool.query(`SELECT * FROM push_deliveries WHERE user_id = $1 AND collapse_key = $2`, [
+        userRecipient.id,
+        collapseKey,
+      ]);
 
       expect(rows.rows.length).toBe(1);
       const row = rows.rows[0];
@@ -149,16 +161,20 @@ describe('Plan 41 Phase 4: Push Queue, Batching, Caps, Dispatcher & Weekly Recap
       const lateNight = new Date('2026-10-17T14:00:00Z');
       const collapseKey = `social:${userRecipient.id}:2026101722`;
 
-      const pushId = await enqueuePush(testDb.pool, {
-        userId: userRecipient.id,
-        category: 'social',
-        collapseKey,
-        title: '👏 Cheers!',
-        body: 'Late night cheer.',
-        href: '/plaza',
-        actorName: 'Aira Coast',
-        isTest: false,
-      }, lateNight);
+      const pushId = await enqueuePush(
+        testDb.pool,
+        {
+          userId: userRecipient.id,
+          category: 'social',
+          collapseKey,
+          title: '👏 Cheers!',
+          body: 'Late night cheer.',
+          href: '/plaza',
+          actorName: 'Aira Coast',
+          isTest: false,
+        },
+        lateNight,
+      );
 
       const row = (await testDb.pool.query('SELECT * FROM push_deliveries WHERE id = $1', [pushId])).rows[0];
       expect(row.status).toBe('queued');
@@ -195,10 +211,9 @@ describe('Plan 41 Phase 4: Push Queue, Batching, Caps, Dispatcher & Weekly Recap
       expect(row.skip_reason).toBe('PREF_OFF');
 
       // Re-enable
-      await testDb.pool.query(
-        `UPDATE user_notification_preferences SET push_overtaken = true WHERE user_id = $1`,
-        [userRecipient.id],
-      );
+      await testDb.pool.query(`UPDATE user_notification_preferences SET push_overtaken = true WHERE user_id = $1`, [
+        userRecipient.id,
+      ]);
     });
   });
 
@@ -215,15 +230,19 @@ describe('Plan 41 Phase 4: Push Queue, Batching, Caps, Dispatcher & Weekly Recap
       );
 
       // Attempt to enqueue another overtaken push today -> should be skipped with CAP_REACHED
-      const pushOvertaken2 = await enqueuePush(testDb.pool, {
-        userId: userRecipient.id,
-        category: 'overtaken',
-        collapseKey: `overtaken:${userRecipient.id}:20261017_2`,
-        title: "Passed again!",
-        body: 'Another pass',
-        href: '/plaza',
-        isTest: false,
-      }, todayDay);
+      const pushOvertaken2 = await enqueuePush(
+        testDb.pool,
+        {
+          userId: userRecipient.id,
+          category: 'overtaken',
+          collapseKey: `overtaken:${userRecipient.id}:20261017_2`,
+          title: 'Passed again!',
+          body: 'Another pass',
+          href: '/plaza',
+          isTest: false,
+        },
+        todayDay,
+      );
 
       const rOvk = (await testDb.pool.query('SELECT * FROM push_deliveries WHERE id = $1', [pushOvertaken2])).rows[0];
       expect(rOvk.status).toBe('skipped');
@@ -278,7 +297,8 @@ describe('Plan 41 Phase 4: Push Queue, Batching, Caps, Dispatcher & Weekly Recap
       expect(deliv.sent_at).not.toBeNull();
 
       // Verify unregistered device was deactivated
-      const unregDev = (await testDb.pool.query('SELECT * FROM user_devices WHERE token = $1', [tokenUnregistered])).rows[0];
+      const unregDev = (await testDb.pool.query('SELECT * FROM user_devices WHERE token = $1', [tokenUnregistered]))
+        .rows[0];
       expect(unregDev.disabled_at).not.toBeNull();
       expect(unregDev.disabled_reason).toBe('unregistered');
     });
@@ -304,20 +324,19 @@ describe('Plan 41 Phase 4: Push Queue, Batching, Caps, Dispatcher & Weekly Recap
       expect(summary.jobKey).toBe(`recap:${pId}`);
 
       // Verify user received notification
-      const notif = (await testDb.pool.query(
-        `SELECT * FROM user_notifications WHERE user_id = $1 AND kind = 'weekly_recap'`,
-        [userRecipient.id],
-      )).rows[0];
+      const notif = (
+        await testDb.pool.query(`SELECT * FROM user_notifications WHERE user_id = $1 AND kind = 'weekly_recap'`, [
+          userRecipient.id,
+        ])
+      ).rows[0];
 
       expect(notif).toBeDefined();
       expect(notif.title).toBe('Your week on the Plaza');
       expect(notif.message).toContain('You finished #3 (▲2) with 450 pts');
 
       // Verify plaza_job_runs recorded
-      const jobRun = (await testDb.pool.query(
-        'SELECT * FROM plaza_job_runs WHERE job_key = $1',
-        [summary.jobKey],
-      )).rows[0];
+      const jobRun = (await testDb.pool.query('SELECT * FROM plaza_job_runs WHERE job_key = $1', [summary.jobKey]))
+        .rows[0];
       expect(jobRun).toBeDefined();
 
       // Second run should be skipped

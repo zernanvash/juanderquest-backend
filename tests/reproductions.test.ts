@@ -45,8 +45,12 @@ describe('Phase 0 Reproductions: Characterizing Pre-Fix Bugs', () => {
       let nextBCalled = 0;
 
       // Hit limiter A twice (reaches max 2)
-      limiterA(mockReq, createMockRes(), () => { nextACalled++; });
-      limiterA(mockReq, createMockRes(), () => { nextACalled++; });
+      limiterA(mockReq, createMockRes(), () => {
+        nextACalled++;
+      });
+      limiterA(mockReq, createMockRes(), () => {
+        nextACalled++;
+      });
       expect(nextACalled).toBe(2);
 
       // Now hit limiter B for the FIRST time.
@@ -57,7 +61,9 @@ describe('Phase 0 Reproductions: Characterizing Pre-Fix Bugs', () => {
       const strictLimiterC = rateLimit({ windowMs: 60_000, max: 2 });
       const resC = createMockRes();
       let nextCCalled = 0;
-      strictLimiterC(mockReq, resC, () => { nextCCalled++; });
+      strictLimiterC(mockReq, resC, () => {
+        nextCCalled++;
+      });
 
       // In current buggy code, strictLimiterC blocks on the very FIRST call because of hits from limiterA!
       expect(nextCCalled).toBe(0);
@@ -91,11 +97,14 @@ describe('Phase 0 Reproductions: Characterizing Pre-Fix Bugs', () => {
       // Current SQL pattern in db/index.ts line 885:
       // SET bio = COALESCE($2, bio)
       // When client sends updates: { bio: null }, $2 is NULL:
-      await testDb.pool.query(`
+      await testDb.pool.query(
+        `
         UPDATE users
         SET bio = COALESCE($2, bio)
         WHERE id = $1
-      `, ['u_coalesce', null]);
+      `,
+        ['u_coalesce', null],
+      );
 
       const res = await testDb.pool.query('SELECT bio FROM users WHERE id = $1', ['u_coalesce']);
       // Notice: bio was NOT cleared! It is still 'Initial Bio' because COALESCE(null, 'Initial Bio') = 'Initial Bio'!

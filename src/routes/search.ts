@@ -89,7 +89,11 @@ function searchPlaces(query: string, allowTest: boolean = false): PlaceResultIte
   return results.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
 }
 
-async function searchPeople(query: string, isHandleIntent: boolean, allowTest: boolean = false): Promise<PersonResultItem[]> {
+async function searchPeople(
+  query: string,
+  isHandleIntent: boolean,
+  allowTest: boolean = false,
+): Promise<PersonResultItem[]> {
   if (db.usersRepo.getPool()) {
     return await db.usersRepo.searchPeople(query, isHandleIntent, allowTest);
   }
@@ -200,13 +204,9 @@ searchRouter.get(
     }
 
     const type = (typeof req.query.type === 'string' ? req.query.type.toLowerCase() : 'all') as
-      | 'all'
-      | 'places'
-      | 'people'
-      | 'quests';
+      'all' | 'places' | 'people' | 'quests';
     const mode = (typeof req.query.mode === 'string' ? req.query.mode.toLowerCase() : 'preview') as
-      | 'preview'
-      | 'results';
+      'preview' | 'results';
 
     const isHandleIntent = normalized.startsWith('@');
     const cleanTerm = normalized.replace(/^@/, '').trim();
@@ -215,32 +215,110 @@ searchRouter.get(
     const people = type === 'all' || type === 'people' ? await searchPeople(cleanTerm, isHandleIntent, allowTest) : [];
     const quests = type === 'all' || type === 'quests' ? searchQuests(cleanTerm, allowTest) : [];
 
-  // Preview Mode: Compact budget of 8 items maximum, capped at 4 items per group
-  if (mode === 'preview') {
-    const MAX_TOTAL_PREVIEW = 8;
-    const MAX_PER_GROUP = 4;
+    // Preview Mode: Compact budget of 8 items maximum, capped at 4 items per group
+    if (mode === 'preview') {
+      const MAX_TOTAL_PREVIEW = 8;
+      const MAX_PER_GROUP = 4;
 
-    if (type !== 'all') {
-      // Single type preview: capped at 4 items
-      const candidateMap = { places, people, quests };
-      const selected = candidateMap[type] || [];
-      const items = selected.slice(0, MAX_PER_GROUP);
-      const group: SearchGroup = {
-        type,
-        items,
-        has_more: selected.length > MAX_PER_GROUP,
-        total_matches: selected.length,
-      };
+      if (type !== 'all') {
+        // Single type preview: capped at 4 items
+        const candidateMap = { places, people, quests };
+        const selected = candidateMap[type] || [];
+        const items = selected.slice(0, MAX_PER_GROUP);
+        const group: SearchGroup = {
+          type,
+          items,
+          has_more: selected.length > MAX_PER_GROUP,
+          total_matches: selected.length,
+        };
+
+        return res.status(200).json({
+          success: true,
+          data: {
+            groups: [group],
+          },
+          meta: {
+            query: normalized,
+            mode: 'preview',
+            type,
+            ranking_version: 'search-v1',
+            partial: false,
+            unavailable_types: [],
+          },
+        });
+      }
+
+      // All mode: reserve 1 slot for each non-empty group, allocate remainder up to 8 total
+      const candidateGroups = [
+        { type: 'places' as const, candidates: places },
+        { type: 'people' as const, candidates: people },
+        { type: 'quests' as const, candidates: quests },
+      ].filter((g) => g.candidates.length > 0);
+
+      // Intent-aware ordering
+      candidateGroups.sort((a, b) => {
+        if (isHandleIntent) {
+          if (a.type === 'people') return -1;
+          if (b.type === 'people') return 1;
+        }
+        const topA = a.candidates[0]?.score || 0;
+        const topB = b.candidates[0]?.score || 0;
+        if (topB !== topA) return topB - topA;
+        const order = { places: 0, people: 1, quests: 2 };
+        return order[a.type] - order[b.type];
+      });
+
+      const allocatedCounts: Record<string, number> = { places: 0, people: 0, quests: 0 };
+      // Step 1: Reserve 1 slot per non-empty group
+      let totalAllocated = 0;
+      for (const g of candidateGroups) {
+        if (g.candidates.length > 0 && totalAllocated < MAX_TOTAL_PREVIEW) {
+          allocatedCounts[g.type] = 1;
+          totalAllocated += 1;
+        }
+      }
+
+      // Step 2: Allocate remaining slots to highest scoring items up to MAX_PER_GROUP
+      while (totalAllocated < MAX_TOTAL_PREVIEW) {
+        let bestGroup: 'places' | 'people' | 'quests' | null = null;
+        let bestScore = -1;
+
+        for (const g of candidateGroups) {
+          const currentCount = allocatedCounts[g.type];
+          if (currentCount < MAX_PER_GROUP && currentCount < g.candidates.length) {
+            const nextCandidate = g.candidates[currentCount];
+            if (nextCandidate && nextCandidate.score > bestScore) {
+              bestScore = nextCandidate.score;
+              bestGroup = g.type;
+            }
+          }
+        }
+
+        if (!bestGroup) break;
+        allocatedCounts[bestGroup] += 1;
+        totalAllocated += 1;
+      }
+
+      const groups: SearchGroup[] = candidateGroups.map((g) => {
+        const count = allocatedCounts[g.type];
+        const items = g.candidates.slice(0, count);
+        return {
+          type: g.type,
+          items,
+          has_more: g.candidates.length > count,
+          total_matches: g.candidates.length,
+        };
+      });
 
       return res.status(200).json({
         success: true,
         data: {
-          groups: [group],
+          groups,
         },
         meta: {
           query: normalized,
           mode: 'preview',
-          type,
+          type: 'all',
           ranking_version: 'search-v1',
           partial: false,
           unavailable_types: [],
@@ -248,164 +326,100 @@ searchRouter.get(
       });
     }
 
-    // All mode: reserve 1 slot for each non-empty group, allocate remainder up to 8 total
-    const candidateGroups = [
-      { type: 'places' as const, candidates: places },
-      { type: 'people' as const, candidates: people },
-      { type: 'quests' as const, candidates: quests },
-    ].filter((g) => g.candidates.length > 0);
+    // Results Mode: Full Search Results with Cursor Pagination
+    if (type === 'all') {
+      // Return grouped previews of up to 10 items per group
+      const groups: SearchGroup[] = [
+        {
+          type: 'places' as const,
+          items: places.slice(0, 10),
+          has_more: places.length > 10,
+          total_matches: places.length,
+        },
+        {
+          type: 'people' as const,
+          items: people.slice(0, 10),
+          has_more: people.length > 10,
+          total_matches: people.length,
+        },
+        {
+          type: 'quests' as const,
+          items: quests.slice(0, 10),
+          has_more: quests.length > 10,
+          total_matches: quests.length,
+        },
+      ].filter((g) => g.total_matches && g.total_matches > 0);
 
-    // Intent-aware ordering
-    candidateGroups.sort((a, b) => {
-      if (isHandleIntent) {
-        if (a.type === 'people') return -1;
-        if (b.type === 'people') return 1;
-      }
-      const topA = a.candidates[0]?.score || 0;
-      const topB = b.candidates[0]?.score || 0;
-      if (topB !== topA) return topB - topA;
-      const order = { places: 0, people: 1, quests: 2 };
-      return order[a.type] - order[b.type];
-    });
-
-    const allocatedCounts: Record<string, number> = { places: 0, people: 0, quests: 0 };
-    // Step 1: Reserve 1 slot per non-empty group
-    let totalAllocated = 0;
-    for (const g of candidateGroups) {
-      if (g.candidates.length > 0 && totalAllocated < MAX_TOTAL_PREVIEW) {
-        allocatedCounts[g.type] = 1;
-        totalAllocated += 1;
-      }
+      return res.status(200).json({
+        success: true,
+        data: {
+          groups,
+        },
+        meta: {
+          query: normalized,
+          mode: 'results',
+          type: 'all',
+          ranking_version: 'search-v1',
+          partial: false,
+          unavailable_types: [],
+        },
+      });
     }
 
-    // Step 2: Allocate remaining slots to highest scoring items up to MAX_PER_GROUP
-    while (totalAllocated < MAX_TOTAL_PREVIEW) {
-      let bestGroup: 'places' | 'people' | 'quests' | null = null;
-      let bestScore = -1;
+    // Single Type Results Mode with Cursor Pagination
+    const candidateMap = { places, people, quests };
+    const allCandidates = candidateMap[type] || [];
 
-      for (const g of candidateGroups) {
-        const currentCount = allocatedCounts[g.type];
-        if (currentCount < MAX_PER_GROUP && currentCount < g.candidates.length) {
-          const nextCandidate = g.candidates[currentCount];
-          if (nextCandidate && nextCandidate.score > bestScore) {
-            bestScore = nextCandidate.score;
-            bestGroup = g.type;
-          }
+    let offset = 0;
+    if (req.query.cursor && typeof req.query.cursor === 'string') {
+      try {
+        const decoded = JSON.parse(Buffer.from(req.query.cursor, 'base64').toString('utf8'));
+        if (decoded.q !== normalized || decoded.type !== type) {
+          return res.status(400).json({
+            success: false,
+            error: {
+              code: 'INVALID_CURSOR',
+              message: 'Search cursor does not match the provided query or category.',
+            },
+          });
         }
+        offset = typeof decoded.offset === 'number' && decoded.offset >= 0 ? decoded.offset : 0;
+      } catch {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'MALFORMED_CURSOR', message: 'Could not decode search cursor.' },
+        });
       }
-
-      if (!bestGroup) break;
-      allocatedCounts[bestGroup] += 1;
-      totalAllocated += 1;
     }
 
-    const groups: SearchGroup[] = candidateGroups.map((g) => {
-      const count = allocatedCounts[g.type];
-      const items = g.candidates.slice(0, count);
-      return {
-        type: g.type,
-        items,
-        has_more: g.candidates.length > count,
-        total_matches: g.candidates.length,
-      };
-    });
+    const requestedLimit = Number(req.query.limit) || 20;
+    const limit = Math.min(50, Math.max(1, requestedLimit));
+    const pageItems = allCandidates.slice(offset, offset + limit);
+    const hasMore = offset + limit < allCandidates.length;
+
+    let nextCursor: string | null = null;
+    if (hasMore) {
+      nextCursor = Buffer.from(JSON.stringify({ offset: offset + limit, q: normalized, type })).toString('base64');
+    }
 
     return res.status(200).json({
       success: true,
       data: {
-        groups,
-      },
-      meta: {
-        query: normalized,
-        mode: 'preview',
-        type: 'all',
-        ranking_version: 'search-v1',
-        partial: false,
-        unavailable_types: [],
-      },
-    });
-  }
-
-  // Results Mode: Full Search Results with Cursor Pagination
-  if (type === 'all') {
-    // Return grouped previews of up to 10 items per group
-    const groups: SearchGroup[] = [
-      { type: 'places' as const, items: places.slice(0, 10), has_more: places.length > 10, total_matches: places.length },
-      { type: 'people' as const, items: people.slice(0, 10), has_more: people.length > 10, total_matches: people.length },
-      { type: 'quests' as const, items: quests.slice(0, 10), has_more: quests.length > 10, total_matches: quests.length },
-    ].filter((g) => g.total_matches && g.total_matches > 0);
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        groups,
+        items: pageItems,
+        cursor: nextCursor,
+        has_more: hasMore,
+        total_matches: allCandidates.length,
+        offset,
+        limit,
       },
       meta: {
         query: normalized,
         mode: 'results',
-        type: 'all',
+        type,
         ranking_version: 'search-v1',
         partial: false,
         unavailable_types: [],
       },
     });
-  }
-
-  // Single Type Results Mode with Cursor Pagination
-  const candidateMap = { places, people, quests };
-  const allCandidates = candidateMap[type] || [];
-
-  let offset = 0;
-  if (req.query.cursor && typeof req.query.cursor === 'string') {
-    try {
-      const decoded = JSON.parse(Buffer.from(req.query.cursor, 'base64').toString('utf8'));
-      if (decoded.q !== normalized || decoded.type !== type) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: 'INVALID_CURSOR',
-            message: 'Search cursor does not match the provided query or category.',
-          },
-        });
-      }
-      offset = typeof decoded.offset === 'number' && decoded.offset >= 0 ? decoded.offset : 0;
-    } catch {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'MALFORMED_CURSOR', message: 'Could not decode search cursor.' },
-      });
-    }
-  }
-
-  const requestedLimit = Number(req.query.limit) || 20;
-  const limit = Math.min(50, Math.max(1, requestedLimit));
-  const pageItems = allCandidates.slice(offset, offset + limit);
-  const hasMore = offset + limit < allCandidates.length;
-
-  let nextCursor: string | null = null;
-  if (hasMore) {
-    nextCursor = Buffer.from(
-      JSON.stringify({ offset: offset + limit, q: normalized, type })
-    ).toString('base64');
-  }
-
-  return res.status(200).json({
-    success: true,
-    data: {
-      items: pageItems,
-      cursor: nextCursor,
-      has_more: hasMore,
-      total_matches: allCandidates.length,
-      offset,
-      limit,
-    },
-    meta: {
-      query: normalized,
-      mode: 'results',
-      type,
-      ranking_version: 'search-v1',
-      partial: false,
-      unavailable_types: [],
-    },
-  });
-});
+  },
+);

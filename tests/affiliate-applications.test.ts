@@ -11,18 +11,15 @@ describe('Phase 3: Durable Affiliate Application & Admin Review Foundation', () 
 
   const applicantToken = jwt.sign(
     { id: applicantUserId, seed_id: 'merchant-applicant-01', role: 'user' },
-    env.JWT_SECRET
+    env.JWT_SECRET,
   );
 
   const otherApplicantToken = jwt.sign(
     { id: otherApplicantUserId, seed_id: 'merchant-applicant-02', role: 'user' },
-    env.JWT_SECRET
+    env.JWT_SECRET,
   );
 
-  const adminToken = jwt.sign(
-    { id: adminUserId, seed_id: 'admin-1', role: 'admin' },
-    env.JWT_SECRET
-  );
+  const adminToken = jwt.sign({ id: adminUserId, seed_id: 'admin-1', role: 'admin' }, env.JWT_SECRET);
 
   beforeAll(() => {
     // Add applicant user
@@ -101,10 +98,16 @@ describe('Phase 3: Durable Affiliate Application & Admin Review Foundation', () 
       .post('/api/v1/affiliate/applications')
       .set('Authorization', `Bearer ${applicantToken}`)
       .send({
-        business_name: 'Invalid Pin Cafe', category: 'dining', municipality: 'Baguio City',
-        business_province: 'Benguet', gps_lat: 99, gps_lng: 120.596,
-        contact_name: 'Maria Santos', contact_email: 'maria@example.com',
-        contact_phone: '+639171234567', sponsorship_goals: ['storytelling'],
+        business_name: 'Invalid Pin Cafe',
+        category: 'dining',
+        municipality: 'Baguio City',
+        business_province: 'Benguet',
+        gps_lat: 99,
+        gps_lng: 120.596,
+        contact_name: 'Maria Santos',
+        contact_email: 'maria@example.com',
+        contact_phone: '+639171234567',
+        sponsorship_goals: ['storytelling'],
       });
     expect(res.status).toBe(400);
   });
@@ -271,16 +274,33 @@ describe('Phase 3: Durable Affiliate Application & Admin Review Foundation', () 
   });
 
   test('13. Authenticated Philippine place search returns bounded locations and caches repeats', async () => {
-    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify([
-      { name: 'Baguio City', display_name: 'Baguio City, Benguet, Philippines', lat: '16.4023', lon: '120.596', addresstype: 'city' },
-    ]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            {
+              name: 'Baguio City',
+              display_name: 'Baguio City, Benguet, Philippines',
+              lat: '16.4023',
+              lon: '120.596',
+              addresstype: 'city',
+            },
+          ]),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
     try {
       const unauthorized = await request(app).get('/api/v1/affiliate/places?q=Baguio');
       expect(unauthorized.status).toBe(401);
-      const first = await request(app).get('/api/v1/affiliate/places?q=Baguio').set('Authorization', `Bearer ${applicantToken}`);
+      const first = await request(app)
+        .get('/api/v1/affiliate/places?q=Baguio')
+        .set('Authorization', `Bearer ${applicantToken}`);
       expect(first.status).toBe(200);
       expect(first.body.data[0]).toMatchObject({ name: 'Baguio City', lat: 16.4023, lng: 120.596 });
-      const repeat = await request(app).get('/api/v1/affiliate/places?q=Baguio').set('Authorization', `Bearer ${applicantToken}`);
+      const repeat = await request(app)
+        .get('/api/v1/affiliate/places?q=Baguio')
+        .set('Authorization', `Bearer ${applicantToken}`);
       expect(repeat.status).toBe(200);
       expect(fetchSpy).toHaveBeenCalledTimes(1);
     } finally {

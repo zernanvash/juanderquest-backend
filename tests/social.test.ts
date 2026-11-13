@@ -9,23 +9,13 @@ describe('Social Follow Graph & Traveler Discovery API (/api/v1/users)', () => {
   const mariaId = '33333333-3333-3333-3333-333333333333'; // Public user
   const privateId = '44444444-4444-4444-4444-444444444444'; // Private user
 
-  const juanToken = jwt.sign(
-    { id: juanId, seed_id: 'user-1', role: 'user' },
-    env.JWT_SECRET,
-    { expiresIn: '1h' }
-  );
+  const juanToken = jwt.sign({ id: juanId, seed_id: 'user-1', role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
 
-  const mariaToken = jwt.sign(
-    { id: mariaId, seed_id: 'user-2', role: 'user' },
-    env.JWT_SECRET,
-    { expiresIn: '1h' }
-  );
+  const mariaToken = jwt.sign({ id: mariaId, seed_id: 'user-2', role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
 
-  const privateToken = jwt.sign(
-    { id: privateId, seed_id: 'user-3', role: 'user' },
-    env.JWT_SECRET,
-    { expiresIn: '1h' }
-  );
+  const privateToken = jwt.sign({ id: privateId, seed_id: 'user-3', role: 'user' }, env.JWT_SECRET, {
+    expiresIn: '1h',
+  });
 
   describe('GET /api/v1/users (Public Traveler Directory)', () => {
     it('lets a private owner read connections without exposing them publicly', async () => {
@@ -38,8 +28,12 @@ describe('Social Follow Graph & Traveler Discovery API (/api/v1/users)', () => {
         expect(own.headers['cache-control']).toContain('no-store');
         expect((await request(app).get(`/api/v1/users/${privateId}/followers`)).status).toBe(404);
         expect((await request(app).get('/api/v1/users/me/followers')).status).toBe(401);
-        expect((await request(app).get('/api/v1/users/me/following').set('Authorization', `Bearer ${privateToken}`)).status).toBe(200);
-      } finally { db.follows = saved; }
+        expect(
+          (await request(app).get('/api/v1/users/me/following').set('Authorization', `Bearer ${privateToken}`)).status,
+        ).toBe(200);
+      } finally {
+        db.follows = saved;
+      }
     });
     it('returns a list of public travelers with counts and safe identity fields', async () => {
       const res = await request(app).get('/api/v1/users?limit=3');
@@ -78,9 +72,7 @@ describe('Social Follow Graph & Traveler Discovery API (/api/v1/users)', () => {
     });
 
     it('returns own profile including visibility and counts', async () => {
-      const res = await request(app)
-        .get('/api/v1/users/me/profile')
-        .set('Authorization', `Bearer ${juanToken}`);
+      const res = await request(app).get('/api/v1/users/me/profile').set('Authorization', `Bearer ${juanToken}`);
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -127,9 +119,7 @@ describe('Social Follow Graph & Traveler Discovery API (/api/v1/users)', () => {
 
   describe('PUT /api/v1/users/:id/follow & DELETE /api/v1/users/:id/follow', () => {
     it('rejects self-follow with 422 CANNOT_FOLLOW_SELF', async () => {
-      const res = await request(app)
-        .put(`/api/v1/users/${juanId}/follow`)
-        .set('Authorization', `Bearer ${juanToken}`);
+      const res = await request(app).put(`/api/v1/users/${juanId}/follow`).set('Authorization', `Bearer ${juanToken}`);
 
       expect(res.status).toBe(422);
       expect(res.body.error.code).toBe('CANNOT_FOLLOW_SELF');
@@ -188,9 +178,7 @@ describe('Social Follow Graph & Traveler Discovery API (/api/v1/users)', () => {
       expect(relRes2.body.data.is_following).toBe(false);
 
       // Restore Juan following Maria
-      await request(app)
-        .put(`/api/v1/users/${mariaId}/follow`)
-        .set('Authorization', `Bearer ${juanToken}`);
+      await request(app).put(`/api/v1/users/${mariaId}/follow`).set('Authorization', `Bearer ${juanToken}`);
     });
   });
 
@@ -218,9 +206,7 @@ describe('Social Follow Graph & Traveler Discovery API (/api/v1/users)', () => {
     });
 
     it('lists authenticated user outgoing following including unavailable placeholders', async () => {
-      const res = await request(app)
-        .get('/api/v1/users/me/following')
-        .set('Authorization', `Bearer ${privateToken}`);
+      const res = await request(app).get('/api/v1/users/me/following').set('Authorization', `Bearer ${privateToken}`);
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);

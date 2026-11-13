@@ -41,12 +41,7 @@ export function detectValidatedMediaMime(buffer: Buffer): ValidatedMediaMime | n
 
   // MP4 / M4V / QuickTime (ISO Base Media File Format: starts with [length: 4B] followed by 'ftyp')
   // buffer[4..7] is 'ftyp' (0x66, 0x74, 0x79, 0x70)
-  if (
-    buffer[4] === 0x66 &&
-    buffer[5] === 0x74 &&
-    buffer[6] === 0x79 &&
-    buffer[7] === 0x70
-  ) {
+  if (buffer[4] === 0x66 && buffer[5] === 0x74 && buffer[6] === 0x79 && buffer[7] === 0x70) {
     const majorBrand = buffer.toString('ascii', 8, 12);
     if (majorBrand === 'qt  ' || majorBrand === 'moov') {
       return { mime: 'video/quicktime', ext: 'mov', mediaType: 'video' };
@@ -55,12 +50,7 @@ export function detectValidatedMediaMime(buffer: Buffer): ValidatedMediaMime | n
   }
 
   // WebM / Matroska (EBML header: 1A 45 DF A3)
-  if (
-    buffer[0] === 0x1a &&
-    buffer[1] === 0x45 &&
-    buffer[2] === 0xdf &&
-    buffer[3] === 0xa3
-  ) {
+  if (buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3) {
     return { mime: 'video/webm', ext: 'webm', mediaType: 'video' };
   }
 

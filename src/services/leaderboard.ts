@@ -152,8 +152,8 @@ export function computeLeaderboard(options?: {
         metric === 'quests_completed'
           ? item.approvedQuests === prev.approvedQuests
           : metric === 'points'
-          ? item.points === prev.points
-          : item.reputation === prev.reputation;
+            ? item.points === prev.points
+            : item.reputation === prev.reputation;
       if (!sameScore) {
         currentRank = idx + 1;
       }

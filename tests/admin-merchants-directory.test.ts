@@ -100,14 +100,12 @@ describe('Admin merchant directory (read-only inspection)', () => {
         display_order: 1,
         created_at: now,
         updated_at: now,
-      }
+      },
     );
   });
 
   it('lists merchants with minimized owner information and truthful counts', async () => {
-    const response = await request(app)
-      .get('/api/v1/admin/merchants')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const response = await request(app).get('/api/v1/admin/merchants').set('Authorization', `Bearer ${adminToken}`);
 
     expect(response.status).toBe(200);
     const merchant = response.body.data.find((item: { id: string }) => item.id === MERCHANT_ID);
@@ -140,9 +138,7 @@ describe('Admin merchant directory (read-only inspection)', () => {
   });
 
   it('denies non-administrator access and unknown merchants', async () => {
-    const denied = await request(app)
-      .get('/api/v1/admin/merchants')
-      .set('Authorization', `Bearer ${ownerToken}`);
+    const denied = await request(app).get('/api/v1/admin/merchants').set('Authorization', `Bearer ${ownerToken}`);
     expect(denied.status).toBe(403);
 
     const missing = await request(app)

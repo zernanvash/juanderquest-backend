@@ -83,12 +83,7 @@ export interface TrailPlanResponse {
 }
 
 export function isLocationWithinBbox(lat: number, lng: number, bbox: ServiceAreaMetadata['bbox']): boolean {
-  return (
-    lat >= bbox.min_lat &&
-    lat <= bbox.max_lat &&
-    lng >= bbox.min_lng &&
-    lng <= bbox.max_lng
-  );
+  return lat >= bbox.min_lat && lat <= bbox.max_lat && lng >= bbox.min_lng && lng <= bbox.max_lng;
 }
 
 export async function planTrailCorridor(req: TrailPlanRequest): Promise<TrailPlanResponse> {
@@ -125,18 +120,8 @@ export async function planTrailCorridor(req: TrailPlanRequest): Promise<TrailPla
 
   for (const spot of publishedSpots) {
     // Distance from start to spot and spot to end
-    const distFromStart = computeHaversineDistanceKm(
-      req.start.lat,
-      req.start.lng,
-      spot.gps_lat,
-      spot.gps_lng
-    );
-    const distToEnd = computeHaversineDistanceKm(
-      spot.gps_lat,
-      spot.gps_lng,
-      req.end.lat,
-      req.end.lng
-    );
+    const distFromStart = computeHaversineDistanceKm(req.start.lat, req.start.lng, spot.gps_lat, spot.gps_lng);
+    const distToEnd = computeHaversineDistanceKm(spot.gps_lat, spot.gps_lng, req.end.lat, req.end.lng);
 
     // Skip if spot is effectively identical to start or end (< 300m)
     if (distFromStart < 0.3 || distToEnd < 0.3) {
@@ -229,7 +214,11 @@ export async function planTrailCorridor(req: TrailPlanRequest): Promise<TrailPla
 
 // Groups ranked candidates by municipality; the destination's own town is left out
 // (the traveler is already going there). Minutes assume ~45 km/h plus an hour on site.
-export function groupDetourAreas(candidates: CandidateStop[], end: { lat: number; lng: number }, limit = 3): DetourArea[] {
+export function groupDetourAreas(
+  candidates: CandidateStop[],
+  end: { lat: number; lng: number },
+  limit = 3,
+): DetourArea[] {
   const groups = new Map<string, CandidateStop[]>();
   for (const candidate of candidates) {
     const town = candidate.municipality || 'Nearby';
@@ -238,7 +227,9 @@ export function groupDetourAreas(candidates: CandidateStop[], end: { lat: number
   }
   const areas: DetourArea[] = [];
   for (const [municipality, stops] of groups) {
-    const nearDestination = stops.some((stop) => computeHaversineDistanceKm(stop.gps_lat, stop.gps_lng, end.lat, end.lng) < 3);
+    const nearDestination = stops.some(
+      (stop) => computeHaversineDistanceKm(stop.gps_lat, stop.gps_lng, end.lat, end.lng) < 3,
+    );
     if (nearDestination) continue;
     const top = [...stops].sort((a, b) => b.score - a.score || a.detour_km - b.detour_km);
     const highlights = top.slice(0, 3);

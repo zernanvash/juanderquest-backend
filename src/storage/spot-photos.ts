@@ -49,7 +49,7 @@ export class LocalStorageProvider implements SpotPhotoStorageProvider {
     buffer: Buffer,
     mimeType: string,
     extension: string,
-    mediaType: MediaType = 'image'
+    mediaType: MediaType = 'image',
   ): Promise<SpotMediaSaveResult> {
     const dir = this.getUploadDir();
     const cleanExt = extension.replace(/^\.+/, '') || (mediaType === 'video' ? 'mp4' : 'jpg');
@@ -120,7 +120,7 @@ export class AzureBlobStorageProvider implements SpotPhotoStorageProvider {
     buffer: Buffer,
     mimeType: string,
     extension: string,
-    mediaType: MediaType = 'image'
+    mediaType: MediaType = 'image',
   ): Promise<SpotMediaSaveResult> {
     const blobServiceClient = BlobServiceClient.fromConnectionString(this.connectionString);
     const containerClient = blobServiceClient.getContainerClient(this.containerName);

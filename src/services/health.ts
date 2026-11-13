@@ -54,7 +54,11 @@ async function probePostgres(): Promise<void> {
     }
     throw new Error('PostgreSQL pool is not initialized');
   }
-  const result = await withTimeout(pool.query('SELECT COUNT(*)::int AS count FROM schema_migrations'), 1500, 'PostgreSQL readiness check');
+  const result = await withTimeout(
+    pool.query('SELECT COUNT(*)::int AS count FROM schema_migrations'),
+    1500,
+    'PostgreSQL readiness check',
+  );
   const applied = Number(result.rows[0]?.count ?? 0);
   if (applied < MIGRATIONS.length) {
     throw new Error(`Migration ledger incomplete: ${applied}/${MIGRATIONS.length}`);
@@ -92,7 +96,7 @@ export const defaultReadinessProbes: ReadinessProbes = {
 async function runProbe(
   required: boolean,
   dependencyName: string,
-  probe: () => Promise<void>
+  probe: () => Promise<void>,
 ): Promise<DependencyHealth> {
   const startedAt = Date.now();
   try {
@@ -112,9 +116,7 @@ async function runProbe(
   }
 }
 
-export async function buildReadinessReport(
-  probes: ReadinessProbes = defaultReadinessProbes
-): Promise<ReadinessReport> {
+export async function buildReadinessReport(probes: ReadinessProbes = defaultReadinessProbes): Promise<ReadinessReport> {
   const [postgres, valhalla, storage] = await Promise.all([
     runProbe(true, 'PostgreSQL', probes.postgres),
     runProbe(false, 'Valhalla', probes.valhalla),

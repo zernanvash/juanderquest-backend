@@ -115,21 +115,13 @@ export function formatDuration(seconds: number): string {
   return `${hrs} hr${hrs !== 1 ? 's' : ''} ${remainingMins} min${remainingMins !== 1 ? 's' : ''}`;
 }
 
-export function computeHaversineDistanceKm(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number
-): number {
+export function computeHaversineDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371; // Earth radius in km
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return Number((R * c).toFixed(2));
 }
@@ -143,7 +135,8 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
   const avoidCongested = req.avoidCongested !== false;
   const coverage = getValhallaCoverage();
   const [minLng, minLat, maxLng, maxLat] = coverage.bbox;
-  const startCovered = req.startLng >= minLng && req.startLng <= maxLng && req.startLat >= minLat && req.startLat <= maxLat;
+  const startCovered =
+    req.startLng >= minLng && req.startLng <= maxLng && req.startLat >= minLat && req.startLat <= maxLat;
   const endCovered = req.endLng >= minLng && req.endLng <= maxLng && req.endLat >= minLat && req.endLat <= maxLat;
   const via = req.via ?? [];
   const viaCovered = via.every((p) => p.lng >= minLng && p.lng <= maxLng && p.lat >= minLat && p.lat <= maxLat);
@@ -176,7 +169,8 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
         const maxLng = spot.gps_lng + delta;
 
         // Skip if either origin or destination is inside this exact spot (so we don't block the destination itself)
-        const isStartNear = Math.abs(req.startLat - spot.gps_lat) < delta && Math.abs(req.startLng - spot.gps_lng) < delta;
+        const isStartNear =
+          Math.abs(req.startLat - spot.gps_lat) < delta && Math.abs(req.startLng - spot.gps_lng) < delta;
         const isEndNear = Math.abs(req.endLat - spot.gps_lat) < delta && Math.abs(req.endLng - spot.gps_lng) < delta;
 
         if (!isStartNear && !isEndNear) {
@@ -228,7 +222,7 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
       throw new Error(`Valhalla responded with HTTP ${response.status}`);
     }
 
-    const data = await response.json() as any;
+    const data = (await response.json()) as any;
     const trip = data?.trip;
     if (!trip || !trip.legs || trip.legs.length === 0) {
       throw new Error('No valid trip leg returned by Valhalla');
@@ -241,12 +235,14 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
       return i === 0 ? coords : coords.slice(1);
     });
 
-    const maneuvers: RouteManeuver[] = legs.flatMap((leg) => leg.maneuvers || []).map((m: any) => ({
-      instruction: m.instruction || 'Continue on route',
-      streetName: m.street_names ? m.street_names.join(', ') : undefined,
-      distanceMeters: Math.round((m.length || 0) * 1000),
-      timeSeconds: Math.round(m.time || 0),
-    }));
+    const maneuvers: RouteManeuver[] = legs
+      .flatMap((leg) => leg.maneuvers || [])
+      .map((m: any) => ({
+        instruction: m.instruction || 'Continue on route',
+        streetName: m.street_names ? m.street_names.join(', ') : undefined,
+        distanceMeters: Math.round((m.length || 0) * 1000),
+        timeSeconds: Math.round(m.time || 0),
+      }));
 
     const distanceKm = Number((trip.summary?.length || 0).toFixed(2));
     const durationSeconds = Math.round(trip.summary?.time || 0);
@@ -270,7 +266,8 @@ export async function calculateRoute(req: RouteRequest): Promise<RouteResponse> 
     // intentionally not represented as maneuver guidance or turn-by-turn navigation.
     return straightLineFallback(req, costing, {
       code: 'STRAIGHT_LINE_FALLBACK',
-      message: 'Routing is degraded. This is a straight-line distance estimate only; turn-by-turn guidance is unavailable.',
+      message:
+        'Routing is degraded. This is a straight-line distance estimate only; turn-by-turn guidance is unavailable.',
     });
   }
 }
@@ -280,8 +277,17 @@ function straightLineFallback(
   costing: TravelCosting,
   warning: NonNullable<RouteResponse['warning']>,
 ): RouteResponse {
-  const points: [number, number][] = [[req.startLat, req.startLng], ...(req.via ?? []).map((p): [number, number] => [p.lat, p.lng]), [req.endLat, req.endLng]];
-  const directDistance = Number(points.slice(1).reduce((sum, p, i) => sum + computeHaversineDistanceKm(points[i][0], points[i][1], p[0], p[1]), 0).toFixed(2));
+  const points: [number, number][] = [
+    [req.startLat, req.startLng],
+    ...(req.via ?? []).map((p): [number, number] => [p.lat, p.lng]),
+    [req.endLat, req.endLng],
+  ];
+  const directDistance = Number(
+    points
+      .slice(1)
+      .reduce((sum, p, i) => sum + computeHaversineDistanceKm(points[i][0], points[i][1], p[0], p[1]), 0)
+      .toFixed(2),
+  );
   // Retain the legacy estimate for API compatibility; clients must not present it as travel time.
   const speedKmh = costing === 'pedestrian' ? 4.5 : costing === 'bicycle' ? 15 : 45;
   const estimatedSeconds = Math.round((directDistance / speedKmh) * 3600);

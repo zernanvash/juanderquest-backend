@@ -5,20 +5,9 @@ import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { app } from '../src/app.js';
 import { env } from '../src/config/env.js';
-import {
-  computeWeeklyScores,
-  computeHomeTowns,
-  rankRows,
-  getBoard,
-  getTownBoard,
-} from '../src/social/standings.js';
+import { computeWeeklyScores, computeHomeTowns, rankRows, getBoard, getTownBoard } from '../src/social/standings.js';
 import { runStandingsTick } from '../src/social/standingsJob.js';
-import {
-  weekStartUtc,
-  nextWeekStartUtc,
-  weekStartDate,
-  weekId,
-} from '../src/social/time.js';
+import { weekStartUtc, nextWeekStartUtc, weekStartDate, weekId } from '../src/social/time.js';
 
 describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
   let testDb: TestDbInstance;
@@ -88,20 +77,11 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
     role: 'admin',
   };
 
-  const tokenAlpha = jwt.sign(
-    { id: userAlpha.id, seed_id: userAlpha.seed_id, role: 'user' },
-    env.JWT_SECRET,
-  );
+  const tokenAlpha = jwt.sign({ id: userAlpha.id, seed_id: userAlpha.seed_id, role: 'user' }, env.JWT_SECRET);
 
-  const tokenPrivate = jwt.sign(
-    { id: userPrivate.id, seed_id: userPrivate.seed_id, role: 'user' },
-    env.JWT_SECRET,
-  );
+  const tokenPrivate = jwt.sign({ id: userPrivate.id, seed_id: userPrivate.seed_id, role: 'user' }, env.JWT_SECRET);
 
-  const tokenBeta = jwt.sign(
-    { id: userBeta.id, seed_id: userBeta.seed_id, role: 'user' },
-    env.JWT_SECRET,
-  );
+  const tokenBeta = jwt.sign({ id: userBeta.id, seed_id: userBeta.seed_id, role: 'user' }, env.JWT_SECRET);
 
   const fixedNow = new Date('2026-10-14T10:00:00.000Z'); // Wednesday Manila
   const ws = weekStartUtc(fixedNow);
@@ -118,7 +98,18 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
         `INSERT INTO users (id, seed_id, display_name, email, handle, is_public, share_activity, is_test, role, home_municipality)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (id) DO NOTHING`,
-        [u.id, u.seed_id, u.display_name, u.email, u.handle, u.is_public, u.share_activity, u.is_test, u.role, u.home_municipality],
+        [
+          u.id,
+          u.seed_id,
+          u.display_name,
+          u.email,
+          u.handle,
+          u.is_public,
+          u.share_activity,
+          u.is_test,
+          u.role,
+          u.home_municipality,
+        ],
       );
     }
 
@@ -370,10 +361,9 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
       expect(podiumAward.rows.length).toBe(1);
 
       // Check plaza_job_runs entry
-      const jobRun = await testDb.pool.query(
-        'SELECT * FROM plaza_job_runs WHERE job_key = $1',
-        [`finalize:${weekId(fixedNow)}`],
-      );
+      const jobRun = await testDb.pool.query('SELECT * FROM plaza_job_runs WHERE job_key = $1', [
+        `finalize:${weekId(fixedNow)}`,
+      ]);
       expect(jobRun.rows.length).toBe(1);
     });
   });
@@ -384,8 +374,18 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
     beforeAll(() => {
       jest.useFakeTimers({
         now: fixedNow,
-        doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'setTimeout', 'clearTimeout',
-          'setInterval', 'clearInterval', 'queueMicrotask', 'hrtime', 'performance'],
+        doNotFake: [
+          'nextTick',
+          'setImmediate',
+          'clearImmediate',
+          'setTimeout',
+          'clearTimeout',
+          'setInterval',
+          'clearInterval',
+          'queueMicrotask',
+          'hrtime',
+          'performance',
+        ],
       });
     });
     afterAll(() => {
@@ -460,7 +460,10 @@ describe('Plan 41 Phase 2: Standings, Towns & Weekly Job', () => {
         const ids = res.body.data.podium.map((p: any) => p.user_id);
         expect(ids).toContain(userGamma.id);
       } finally {
-        await testDb.pool.query('UPDATE users SET home_municipality = $2 WHERE id = $1', [userGamma.id, 'Dagupan City']);
+        await testDb.pool.query('UPDATE users SET home_municipality = $2 WHERE id = $1', [
+          userGamma.id,
+          'Dagupan City',
+        ]);
       }
     });
 

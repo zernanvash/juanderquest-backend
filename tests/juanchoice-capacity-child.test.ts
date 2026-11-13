@@ -2,7 +2,11 @@ import http from 'node:http';
 import { once } from 'node:events';
 import { fork } from 'node:child_process';
 import path from 'node:path';
-import { validateChildStartConfig, type ChildToParentMessage, type ParentToChildMessage } from '../scripts/juanchoice-capacity-child-client.js';
+import {
+  validateChildStartConfig,
+  type ChildToParentMessage,
+  type ParentToChildMessage,
+} from '../scripts/juanchoice-capacity-child-client.js';
 
 describe('JuanChoice capacity child client loopback test', () => {
   it('validates ChildStartConfig properly and rejects deceptive or invalid configs', () => {
@@ -42,7 +46,7 @@ describe('JuanChoice capacity child client loopback test', () => {
     // readerAuthMode and readerTokens validation tests
     // 1. Unknown / invalid mode
     expect(() => validateChildStartConfig({ ...baseValid, readerAuthMode: 'unknown_mode' })).toThrow(
-      'readerAuthMode must be guest or wallet_alpha'
+      'readerAuthMode must be guest or wallet_alpha',
     );
     expect(() => validateChildStartConfig({ ...baseValid, readerAuthMode: 123 })).toThrow();
 
@@ -52,7 +56,7 @@ describe('JuanChoice capacity child client loopback test', () => {
         ...baseValid,
         readerAuthMode: 'guest',
         readerTokens: ['forbidden-token'],
-      })
+      }),
     ).toThrow('readerTokens must not be non-empty in guest readerAuthMode');
 
     // 3. Guest with valid empty readerTokens or omitted readerTokens
@@ -77,7 +81,7 @@ describe('JuanChoice capacity child client loopback test', () => {
         ...baseValid,
         readerCount: 100,
         readerAuthMode: 'wallet_alpha',
-      })
+      }),
     ).toThrow('readerTokens must be an array of exactly 100 tokens in wallet_alpha readerAuthMode');
 
     // Mismatched token count (e.g. 99 tokens or 101 tokens)
@@ -87,7 +91,7 @@ describe('JuanChoice capacity child client loopback test', () => {
         readerCount: 100,
         readerAuthMode: 'wallet_alpha',
         readerTokens: dummy100Tokens.slice(0, 99),
-      })
+      }),
     ).toThrow('readerTokens must be an array of exactly 100 tokens in wallet_alpha readerAuthMode');
 
     expect(() =>
@@ -96,7 +100,7 @@ describe('JuanChoice capacity child client loopback test', () => {
         readerCount: 100,
         readerAuthMode: 'wallet_alpha',
         readerTokens: [...dummy100Tokens, 'extra-token'],
-      })
+      }),
     ).toThrow('readerTokens must be an array of exactly 100 tokens in wallet_alpha readerAuthMode');
 
     // Mismatched readerCount (e.g. readerCount = 50 or 101)
@@ -106,7 +110,7 @@ describe('JuanChoice capacity child client loopback test', () => {
         readerCount: 50,
         readerAuthMode: 'wallet_alpha',
         readerTokens: dummy100Tokens,
-      })
+      }),
     ).toThrow('readerCount must be exactly 100 in wallet_alpha readerAuthMode');
 
     // Blank / empty string token in wallet_alpha
@@ -118,7 +122,7 @@ describe('JuanChoice capacity child client loopback test', () => {
         readerCount: 100,
         readerAuthMode: 'wallet_alpha',
         readerTokens: dummyWithBlank,
-      })
+      }),
     ).toThrow('Each readerToken must be a non-empty string');
 
     // Ensure sensitive token text is never leaked in error messages
@@ -194,7 +198,7 @@ describe('JuanChoice capacity child client loopback test', () => {
     try {
       const readyDeadline = Date.now() + 5000;
       while (!childReady && Date.now() < readyDeadline) {
-        await new Promise(r => setTimeout(r, 50));
+        await new Promise((r) => setTimeout(r, 50));
       }
       expect(childReady).toBe(true);
 
@@ -238,7 +242,9 @@ describe('JuanChoice capacity child client loopback test', () => {
         let cleanupTimeout: NodeJS.Timeout | undefined;
         await Promise.race([
           exitPromise,
-          new Promise(r => { cleanupTimeout = setTimeout(r, 2000); }),
+          new Promise((r) => {
+            cleanupTimeout = setTimeout(r, 2000);
+          }),
         ]).finally(() => {
           if (cleanupTimeout) clearTimeout(cleanupTimeout);
         });
@@ -301,7 +307,11 @@ describe('JuanChoice capacity child client loopback test', () => {
 
     let childReady = false;
     let childDone = false;
-    let donePayload: { readonly reads: readonly any[]; readonly ballots: readonly any[]; readonly errors: readonly string[] } | null = null;
+    let donePayload: {
+      readonly reads: readonly any[];
+      readonly ballots: readonly any[];
+      readonly errors: readonly string[];
+    } | null = null;
 
     child.on('message', (msg: ChildToParentMessage) => {
       if (msg.type === 'READY') {
@@ -325,7 +335,7 @@ describe('JuanChoice capacity child client loopback test', () => {
       // Wait for READY (bounded 5s)
       const readyDeadline = Date.now() + 5000;
       while (!childReady && Date.now() < readyDeadline) {
-        await new Promise(r => setTimeout(r, 50));
+        await new Promise((r) => setTimeout(r, 50));
       }
       expect(childReady).toBe(true);
 
@@ -374,7 +384,7 @@ describe('JuanChoice capacity child client loopback test', () => {
       }
 
       // Assert phase headers on received requests
-      const ballotRequests = receivedRequests.filter(r => r.method === 'PUT');
+      const ballotRequests = receivedRequests.filter((r) => r.method === 'PUT');
       expect(ballotRequests.length).toBe(2);
       for (const req of ballotRequests) {
         expect(req.benchmarkPhase).toBe('mixed_ballot_burst');
@@ -382,7 +392,7 @@ describe('JuanChoice capacity child client loopback test', () => {
         expect(req.authorization).toBe(`Bearer ${voterToken}`);
       }
 
-      const readRequests = receivedRequests.filter(r => r.method === 'GET');
+      const readRequests = receivedRequests.filter((r) => r.method === 'GET');
       expect(readRequests.length).toBeGreaterThanOrEqual(4); // Initial and second vote waves, 2 readers each.
       // Confirm guest GETs have NO Authorization header
       for (const req of readRequests) {
@@ -395,8 +405,9 @@ describe('JuanChoice capacity child client loopback test', () => {
       for (const req of readRequests.slice(0, 2)) {
         expect(req.benchmarkPhase).toBe('mixed_ballot_burst');
       }
-      expect(readRequests.filter(req => req.benchmarkPhase === 'mixed_ballot_burst')).toHaveLength(4);
-      for (const req of readRequests.slice(2)) expect(['idle_read', 'mixed_ballot_burst']).toContain(req.benchmarkPhase);
+      expect(readRequests.filter((req) => req.benchmarkPhase === 'mixed_ballot_burst')).toHaveLength(4);
+      for (const req of readRequests.slice(2))
+        expect(['idle_read', 'mixed_ballot_burst']).toContain(req.benchmarkPhase);
     } finally {
       if (child.connected) {
         try {
@@ -410,7 +421,9 @@ describe('JuanChoice capacity child client loopback test', () => {
         let cleanupTimeout: NodeJS.Timeout | undefined;
         await Promise.race([
           exitPromise,
-          new Promise(r => { cleanupTimeout = setTimeout(r, 2000); }),
+          new Promise((r) => {
+            cleanupTimeout = setTimeout(r, 2000);
+          }),
         ]).finally(() => {
           if (cleanupTimeout) clearTimeout(cleanupTimeout);
         });
@@ -421,14 +434,16 @@ describe('JuanChoice capacity child client loopback test', () => {
           let killTimeout: NodeJS.Timeout | undefined;
           await Promise.race([
             exitPromise,
-            new Promise(r => { killTimeout = setTimeout(r, 2000); }),
+            new Promise((r) => {
+              killTimeout = setTimeout(r, 2000);
+            }),
           ]).finally(() => {
             if (killTimeout) clearTimeout(killTimeout);
           });
         }
       }
       server.closeAllConnections();
-      await new Promise<void>((resolve, reject) => server.close(err => err ? reject(err) : resolve()));
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     }
   }, 15000);
 
@@ -482,7 +497,11 @@ describe('JuanChoice capacity child client loopback test', () => {
 
     let childReady = false;
     let childDone = false;
-    let donePayload: { readonly reads: readonly any[]; readonly ballots: readonly any[]; readonly errors: readonly string[] } | null = null;
+    let donePayload: {
+      readonly reads: readonly any[];
+      readonly ballots: readonly any[];
+      readonly errors: readonly string[];
+    } | null = null;
 
     child.on('message', (msg: ChildToParentMessage) => {
       if (msg.type === 'READY') {
@@ -505,7 +524,7 @@ describe('JuanChoice capacity child client loopback test', () => {
     try {
       const readyDeadline = Date.now() + 5000;
       while (!childReady && Date.now() < readyDeadline) {
-        await new Promise(r => setTimeout(r, 50));
+        await new Promise((r) => setTimeout(r, 50));
       }
       expect(childReady).toBe(true);
 
@@ -548,7 +567,7 @@ describe('JuanChoice capacity child client loopback test', () => {
       expect(donePayload!.errors.length).toBe(0);
 
       // Verify ballot requests carry the distinct voter tokens
-      const ballotRequests = receivedRequests.filter(r => r.method === 'PUT');
+      const ballotRequests = receivedRequests.filter((r) => r.method === 'PUT');
       expect(ballotRequests.length).toBe(4); // 2 waves * 2 voters
       for (const req of ballotRequests) {
         // Voter index comes from X-Forwarded-For: 10.40.2.${i + 1}
@@ -561,7 +580,7 @@ describe('JuanChoice capacity child client loopback test', () => {
       }
 
       // Verify read requests carry the intended reader token matched strictly in-memory by reader index
-      const readRequests = receivedRequests.filter(r => r.method === 'GET');
+      const readRequests = receivedRequests.filter((r) => r.method === 'GET');
       expect(readRequests.length).toBeGreaterThanOrEqual(200); // at least 2 waves of 100 readers
       for (const req of readRequests) {
         // Reader index comes from X-Forwarded-For: 10.40.1.${i + 1}
@@ -587,7 +606,9 @@ describe('JuanChoice capacity child client loopback test', () => {
         let cleanupTimeout: NodeJS.Timeout | undefined;
         await Promise.race([
           exitPromise,
-          new Promise(r => { cleanupTimeout = setTimeout(r, 2000); }),
+          new Promise((r) => {
+            cleanupTimeout = setTimeout(r, 2000);
+          }),
         ]).finally(() => {
           if (cleanupTimeout) clearTimeout(cleanupTimeout);
         });
@@ -598,14 +619,16 @@ describe('JuanChoice capacity child client loopback test', () => {
           let killTimeout: NodeJS.Timeout | undefined;
           await Promise.race([
             exitPromise,
-            new Promise(r => { killTimeout = setTimeout(r, 2000); }),
+            new Promise((r) => {
+              killTimeout = setTimeout(r, 2000);
+            }),
           ]).finally(() => {
             if (killTimeout) clearTimeout(killTimeout);
           });
         }
       }
       server.closeAllConnections();
-      await new Promise<void>((resolve, reject) => server.close(err => err ? reject(err) : resolve()));
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     }
   }, 15000);
 });

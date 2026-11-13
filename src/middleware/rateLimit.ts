@@ -71,11 +71,7 @@ export function stopRateLimitCleanup(): void {
 // Automatically start background cleanup
 startRateLimitCleanup();
 
-function ensureStoreCapacity(
-  store: Map<string, CounterEntry>,
-  currentTime: number,
-  maxEntries: number
-): boolean {
+function ensureStoreCapacity(store: Map<string, CounterEntry>, currentTime: number, maxEntries: number): boolean {
   if (store.size < maxEntries) {
     return true;
   }

@@ -16,7 +16,12 @@ const service = new CulturalQuizService(repo, progressionRepo);
 // Every quiz write is audited.
 const requireQuizPower = requireAreaAdmin('quests_quizzes');
 const outOfArea = (res: Response) =>
-  res.status(403).json({ success: false, error: { code: 'OUT_OF_AREA', message: 'This destination is outside your assigned area.' } });
+  res
+    .status(403)
+    .json({
+      success: false,
+      error: { code: 'OUT_OF_AREA', message: 'This destination is outside your assigned area.' },
+    });
 
 const quizInScope = (action?: string) => async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -24,27 +29,53 @@ const quizInScope = (action?: string) => async (req: AuthRequest, res: Response,
     const quiz = await repo.findQuizById(req.params.id);
     if (!quiz) {
       if (scope.platform) return next();
-      return res.status(404).json({ success: false, error: { code: 'QUIZ_NOT_FOUND', message: 'Cultural quiz not found.' } });
+      return res
+        .status(404)
+        .json({ success: false, error: { code: 'QUIZ_NOT_FOUND', message: 'Cultural quiz not found.' } });
     }
     if (!spotInScope(scope, 'quests_quizzes', quiz.destination_id)) {
-      return res.status(404).json({ success: false, error: { code: 'QUIZ_NOT_FOUND', message: 'Cultural quiz not found.' } });
+      return res
+        .status(404)
+        .json({ success: false, error: { code: 'QUIZ_NOT_FOUND', message: 'Cultural quiz not found.' } });
     }
     // Moving a draft to another destination needs both the old and the new area.
-    if (req.method === 'PATCH' && req.body?.destination_id && !spotInScope(scope, 'quests_quizzes', req.body.destination_id)) return outOfArea(res);
+    if (
+      req.method === 'PATCH' &&
+      req.body?.destination_id &&
+      !spotInScope(scope, 'quests_quizzes', req.body.destination_id)
+    )
+      return outOfArea(res);
     if (action) {
-      auditOnSuccess(req, res, { action, subjectType: 'cultural_quiz', subjectId: quiz.id, areaId: spotAreaIds(quiz.destination_id)[0] ?? null,
-        before: { status: quiz.status, destination_id: quiz.destination_id } });
+      auditOnSuccess(req, res, {
+        action,
+        subjectType: 'cultural_quiz',
+        subjectId: quiz.id,
+        areaId: spotAreaIds(quiz.destination_id)[0] ?? null,
+        before: { status: quiz.status, destination_id: quiz.destination_id },
+      });
     }
     return next();
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: err?.message || 'Failed to check quiz scope.' } });
+    return res
+      .status(500)
+      .json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: err?.message || 'Failed to check quiz scope.' },
+      });
   }
 };
 
 const quizDraftInScope = (req: AuthRequest, res: Response, next: NextFunction) => {
   const destinationId = typeof req.body?.destination_id === 'string' ? req.body.destination_id : null;
-  if (!req.adminScope!.platform && !spotInScope(req.adminScope!, 'quests_quizzes', destinationId)) return outOfArea(res);
-  if (destinationId) auditOnSuccess(req, res, { action: 'quiz.created', subjectType: 'spot', subjectId: destinationId, areaId: spotAreaIds(destinationId)[0] ?? null });
+  if (!req.adminScope!.platform && !spotInScope(req.adminScope!, 'quests_quizzes', destinationId))
+    return outOfArea(res);
+  if (destinationId)
+    auditOnSuccess(req, res, {
+      action: 'quiz.created',
+      subjectType: 'spot',
+      subjectId: destinationId,
+      areaId: spotAreaIds(destinationId)[0] ?? null,
+    });
   return next();
 };
 
@@ -59,34 +90,41 @@ const createDraftSchema = z.object({
   cooldown_hours: z.number().int().min(1).max(168).default(24),
   host_lines: z.any().optional(),
   theme: z.string().max(50).default('crt'),
-  questions: z.array(
-    z.object({
-      ordinal: z.number().int().min(1).max(5),
-      question_text: z.string().min(3),
-      explanation: z.string().min(3),
-      source_url: z.string().url().optional(),
-      question_type: z.enum(['multiple_choice', 'true_false', 'picture', 'order', 'map_drop']).default('multiple_choice'),
-      media_url: z.string().url().optional().nullable(),
-      hint: z.string().max(500).optional().nullable(),
-      round: z.enum(['main', 'special', 'lightning']).default('main'),
-      answer_payload: z.any().optional().nullable(),
-      options: z.array(
-        z.object({
-          ordinal: z.number().int().min(1).max(4),
-          option_text: z.string().min(1),
-          is_correct: z.boolean(),
-        })
-      ).length(4),
-    })
-  ).length(5),
+  questions: z
+    .array(
+      z.object({
+        ordinal: z.number().int().min(1).max(5),
+        question_text: z.string().min(3),
+        explanation: z.string().min(3),
+        source_url: z.string().url().optional(),
+        question_type: z
+          .enum(['multiple_choice', 'true_false', 'picture', 'order', 'map_drop'])
+          .default('multiple_choice'),
+        media_url: z.string().url().optional().nullable(),
+        hint: z.string().max(500).optional().nullable(),
+        round: z.enum(['main', 'special', 'lightning']).default('main'),
+        answer_payload: z.any().optional().nullable(),
+        options: z
+          .array(
+            z.object({
+              ordinal: z.number().int().min(1).max(4),
+              option_text: z.string().min(1),
+              is_correct: z.boolean(),
+            }),
+          )
+          .length(4),
+      }),
+    )
+    .length(5),
   is_test: z.boolean().optional(),
 });
 
 // GET /api/v1/admin/quizzes - List all quizzes
 router.get('/admin/quizzes', authenticateToken, requireQuizPower, async (req: AuthRequest, res: Response) => {
   try {
-    const list = (await repo.listAllQuizzesForAdmin())
-      .filter((item) => spotInScope(req.adminScope!, 'quests_quizzes', item.quiz.destination_id));
+    const list = (await repo.listAllQuizzesForAdmin()).filter((item) =>
+      spotInScope(req.adminScope!, 'quests_quizzes', item.quiz.destination_id),
+    );
     return res.status(200).json({
       success: true,
       data: list,
@@ -100,207 +138,250 @@ router.get('/admin/quizzes', authenticateToken, requireQuizPower, async (req: Au
 });
 
 // POST /api/v1/admin/quizzes - Create draft quiz
-router.post('/admin/quizzes', authenticateToken, requireQuizPower, quizDraftInScope, async (req: AuthRequest, res: Response) => {
-  const parsed = createDraftSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'VALIDATION_ERROR', message: 'Invalid quiz draft payload.', details: parsed.error.issues },
-    });
-  }
+router.post(
+  '/admin/quizzes',
+  authenticateToken,
+  requireQuizPower,
+  quizDraftInScope,
+  async (req: AuthRequest, res: Response) => {
+    const parsed = createDraftSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid quiz draft payload.', details: parsed.error.issues },
+      });
+    }
 
-  try {
-    const result = await service.createQuizDraft({
-      destinationId: parsed.data.destination_id,
-      title: parsed.data.title,
-      description: parsed.data.description,
-      language: parsed.data.language,
-      radiusMeters: parsed.data.radius_meters,
-      xpReward: parsed.data.xp_reward,
-      timeLimitMinutes: parsed.data.time_limit_minutes,
-      cooldownHours: parsed.data.cooldown_hours,
-      hostLines: parsed.data.host_lines,
-      theme: parsed.data.theme,
-      adminUserId: req.user!.id,
-      isTest: parsed.data.is_test,
-      questions: parsed.data.questions.map((q) => ({
-        ordinal: q.ordinal,
-        questionText: q.question_text,
-        explanation: q.explanation,
-        sourceUrl: q.source_url,
-        questionType: q.question_type,
-        mediaUrl: q.media_url,
-        hint: q.hint,
-        round: q.round,
-        answerPayload: q.answer_payload,
-        options: q.options.map((opt) => ({
-          ordinal: opt.ordinal,
-          optionText: opt.option_text,
-          isCorrect: opt.is_correct,
+    try {
+      const result = await service.createQuizDraft({
+        destinationId: parsed.data.destination_id,
+        title: parsed.data.title,
+        description: parsed.data.description,
+        language: parsed.data.language,
+        radiusMeters: parsed.data.radius_meters,
+        xpReward: parsed.data.xp_reward,
+        timeLimitMinutes: parsed.data.time_limit_minutes,
+        cooldownHours: parsed.data.cooldown_hours,
+        hostLines: parsed.data.host_lines,
+        theme: parsed.data.theme,
+        adminUserId: req.user!.id,
+        isTest: parsed.data.is_test,
+        questions: parsed.data.questions.map((q) => ({
+          ordinal: q.ordinal,
+          questionText: q.question_text,
+          explanation: q.explanation,
+          sourceUrl: q.source_url,
+          questionType: q.question_type,
+          mediaUrl: q.media_url,
+          hint: q.hint,
+          round: q.round,
+          answerPayload: q.answer_payload,
+          options: q.options.map((opt) => ({
+            ordinal: opt.ordinal,
+            optionText: opt.option_text,
+            isCorrect: opt.is_correct,
+          })),
         })),
-      })),
-    });
+      });
 
-    return res.status(201).json({
-      success: true,
-      data: result,
-    });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      error: { code: 'INTERNAL_ERROR', message: err?.message || 'Failed to create quiz draft.' },
-    });
-  }
-});
+      return res.status(201).json({
+        success: true,
+        data: result,
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: err?.message || 'Failed to create quiz draft.' },
+      });
+    }
+  },
+);
 
 // GET /api/v1/admin/quizzes/:id - Admin quiz detail (current version + questions with correctness)
-router.get('/admin/quizzes/:id', authenticateToken, requireQuizPower, quizInScope(), async (req: AuthRequest, res: Response) => {
-  try {
-    const detail = await service.getQuizForAdmin(req.params.id);
-    if (!detail) {
-      return res.status(404).json({
+router.get(
+  '/admin/quizzes/:id',
+  authenticateToken,
+  requireQuizPower,
+  quizInScope(),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const detail = await service.getQuizForAdmin(req.params.id);
+      if (!detail) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'QUIZ_NOT_FOUND', message: 'Cultural quiz not found.' },
+        });
+      }
+      return res.status(200).json({ success: true, data: detail });
+    } catch (err: any) {
+      return res.status(500).json({
         success: false,
-        error: { code: 'QUIZ_NOT_FOUND', message: 'Cultural quiz not found.' },
+        error: { code: 'INTERNAL_ERROR', message: err?.message || 'Failed to load quiz detail.' },
       });
     }
-    return res.status(200).json({ success: true, data: detail });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      error: { code: 'INTERNAL_ERROR', message: err?.message || 'Failed to load quiz detail.' },
-    });
-  }
-});
+  },
+);
 
 // PATCH /api/v1/admin/quizzes/:id - Replace an unpublished draft (published versions are immutable)
-router.patch('/admin/quizzes/:id', authenticateToken, requireQuizPower, quizInScope('quiz.draft_updated'), async (req: AuthRequest, res: Response) => {
-  const parsed = createDraftSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'VALIDATION_ERROR', message: 'Invalid quiz draft payload.', details: parsed.error.issues },
-    });
-  }
+router.patch(
+  '/admin/quizzes/:id',
+  authenticateToken,
+  requireQuizPower,
+  quizInScope('quiz.draft_updated'),
+  async (req: AuthRequest, res: Response) => {
+    const parsed = createDraftSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid quiz draft payload.', details: parsed.error.issues },
+      });
+    }
 
-  try {
-    const result = await service.updateQuizDraft(req.params.id, {
-      destinationId: parsed.data.destination_id,
-      title: parsed.data.title,
-      description: parsed.data.description,
-      language: parsed.data.language,
-      radiusMeters: parsed.data.radius_meters,
-      xpReward: parsed.data.xp_reward,
-      timeLimitMinutes: parsed.data.time_limit_minutes,
-      cooldownHours: parsed.data.cooldown_hours,
-      hostLines: parsed.data.host_lines,
-      theme: parsed.data.theme,
-      adminUserId: req.user!.id,
-      isTest: parsed.data.is_test,
-      questions: parsed.data.questions.map((q) => ({
-        ordinal: q.ordinal,
-        questionText: q.question_text,
-        explanation: q.explanation,
-        sourceUrl: q.source_url,
-        questionType: q.question_type,
-        mediaUrl: q.media_url,
-        hint: q.hint,
-        round: q.round,
-        answerPayload: q.answer_payload,
-        options: q.options.map((opt) => ({
-          ordinal: opt.ordinal,
-          optionText: opt.option_text,
-          isCorrect: opt.is_correct,
+    try {
+      const result = await service.updateQuizDraft(req.params.id, {
+        destinationId: parsed.data.destination_id,
+        title: parsed.data.title,
+        description: parsed.data.description,
+        language: parsed.data.language,
+        radiusMeters: parsed.data.radius_meters,
+        xpReward: parsed.data.xp_reward,
+        timeLimitMinutes: parsed.data.time_limit_minutes,
+        cooldownHours: parsed.data.cooldown_hours,
+        hostLines: parsed.data.host_lines,
+        theme: parsed.data.theme,
+        adminUserId: req.user!.id,
+        isTest: parsed.data.is_test,
+        questions: parsed.data.questions.map((q) => ({
+          ordinal: q.ordinal,
+          questionText: q.question_text,
+          explanation: q.explanation,
+          sourceUrl: q.source_url,
+          questionType: q.question_type,
+          mediaUrl: q.media_url,
+          hint: q.hint,
+          round: q.round,
+          answerPayload: q.answer_payload,
+          options: q.options.map((opt) => ({
+            ordinal: opt.ordinal,
+            optionText: opt.option_text,
+            isCorrect: opt.is_correct,
+          })),
         })),
-      })),
-    });
+      });
 
-    return res.status(200).json({ success: true, data: result });
-  } catch (err: any) {
-    const message: string = err?.message || '';
-    if (message.startsWith('QUIZ_NOT_FOUND')) {
-      return res.status(404).json({
+      return res.status(200).json({ success: true, data: result });
+    } catch (err: any) {
+      const message: string = err?.message || '';
+      if (message.startsWith('QUIZ_NOT_FOUND')) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'QUIZ_NOT_FOUND', message: 'Cultural quiz not found.' },
+        });
+      }
+      if (message.startsWith('QUIZ_IMMUTABLE')) {
+        return res.status(409).json({
+          success: false,
+          error: {
+            code: 'QUIZ_IMMUTABLE',
+            message:
+              'Only draft quizzes can be edited. Published versions are immutable; pause, archive or revoke instead.',
+          },
+        });
+      }
+      return res.status(400).json({
         success: false,
-        error: { code: 'QUIZ_NOT_FOUND', message: 'Cultural quiz not found.' },
+        error: { code: 'UPDATE_FAILED', message: message || 'Failed to update quiz draft.' },
       });
     }
-    if (message.startsWith('QUIZ_IMMUTABLE')) {
-      return res.status(409).json({
-        success: false,
-        error: {
-          code: 'QUIZ_IMMUTABLE',
-          message: 'Only draft quizzes can be edited. Published versions are immutable; pause, archive or revoke instead.',
-        },
-      });
-    }
-    return res.status(400).json({
-      success: false,
-      error: { code: 'UPDATE_FAILED', message: message || 'Failed to update quiz draft.' },
-    });
-  }
-});
+  },
+);
 
 // POST /api/v1/admin/quizzes/:id/publish - Publish quiz
-router.post('/admin/quizzes/:id/publish', authenticateToken, requireQuizPower, quizInScope('quiz.published'), async (req: AuthRequest, res: Response) => {
-  try {
-    const updated = await service.publishQuiz(req.params.id);
-    return res.status(200).json({
-      success: true,
-      data: updated,
-    });
-  } catch (err: any) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'PUBLISH_FAILED', message: err?.message || 'Failed to publish quiz.' },
-    });
-  }
-});
+router.post(
+  '/admin/quizzes/:id/publish',
+  authenticateToken,
+  requireQuizPower,
+  quizInScope('quiz.published'),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const updated = await service.publishQuiz(req.params.id);
+      return res.status(200).json({
+        success: true,
+        data: updated,
+      });
+    } catch (err: any) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'PUBLISH_FAILED', message: err?.message || 'Failed to publish quiz.' },
+      });
+    }
+  },
+);
 
 // POST /api/v1/admin/quizzes/:id/pause - Pause quiz
-router.post('/admin/quizzes/:id/pause', authenticateToken, requireQuizPower, quizInScope('quiz.paused'), async (req: AuthRequest, res: Response) => {
-  try {
-    const updated = await service.setQuizStatus(req.params.id, 'paused');
-    return res.status(200).json({
-      success: true,
-      data: updated,
-    });
-  } catch (err: any) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'UPDATE_FAILED', message: err?.message || 'Failed to pause quiz.' },
-    });
-  }
-});
+router.post(
+  '/admin/quizzes/:id/pause',
+  authenticateToken,
+  requireQuizPower,
+  quizInScope('quiz.paused'),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const updated = await service.setQuizStatus(req.params.id, 'paused');
+      return res.status(200).json({
+        success: true,
+        data: updated,
+      });
+    } catch (err: any) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'UPDATE_FAILED', message: err?.message || 'Failed to pause quiz.' },
+      });
+    }
+  },
+);
 
 // POST /api/v1/admin/quizzes/:id/archive - Archive quiz
-router.post('/admin/quizzes/:id/archive', authenticateToken, requireQuizPower, quizInScope('quiz.archived'), async (req: AuthRequest, res: Response) => {
-  try {
-    const updated = await service.setQuizStatus(req.params.id, 'archived');
-    return res.status(200).json({
-      success: true,
-      data: updated,
-    });
-  } catch (err: any) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'UPDATE_FAILED', message: err?.message || 'Failed to archive quiz.' },
-    });
-  }
-});
+router.post(
+  '/admin/quizzes/:id/archive',
+  authenticateToken,
+  requireQuizPower,
+  quizInScope('quiz.archived'),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const updated = await service.setQuizStatus(req.params.id, 'archived');
+      return res.status(200).json({
+        success: true,
+        data: updated,
+      });
+    } catch (err: any) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'UPDATE_FAILED', message: err?.message || 'Failed to archive quiz.' },
+      });
+    }
+  },
+);
 
 // POST /api/v1/admin/quizzes/:id/revoke - Revoke quiz and active attempts
-router.post('/admin/quizzes/:id/revoke', authenticateToken, requireQuizPower, quizInScope('quiz.revoked'), async (req: AuthRequest, res: Response) => {
-  try {
-    await service.revokeQuiz(req.params.id, req.body.reason || 'Admin safety revocation');
-    return res.status(200).json({
-      success: true,
-      message: 'Quiz revoked and active attempts invalidated.',
-    });
-  } catch (err: any) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'REVOKE_FAILED', message: err?.message || 'Failed to revoke quiz.' },
-    });
-  }
-});
+router.post(
+  '/admin/quizzes/:id/revoke',
+  authenticateToken,
+  requireQuizPower,
+  quizInScope('quiz.revoked'),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      await service.revokeQuiz(req.params.id, req.body.reason || 'Admin safety revocation');
+      return res.status(200).json({
+        success: true,
+        message: 'Quiz revoked and active attempts invalidated.',
+      });
+    } catch (err: any) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'REVOKE_FAILED', message: err?.message || 'Failed to revoke quiz.' },
+      });
+    }
+  },
+);
 
 export default router;

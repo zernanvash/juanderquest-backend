@@ -13,7 +13,10 @@ describe('Admin settings, audit and observation', () => {
   const travelerUserId = 'traveler-settings-1';
 
   const adminToken = jwt.sign({ id: adminUserId, seed_id: 'admin-settings-seed', role: 'admin' }, env.JWT_SECRET);
-  const travelerToken = jwt.sign({ id: travelerUserId, seed_id: 'traveler-settings-seed', role: 'user' }, env.JWT_SECRET);
+  const travelerToken = jwt.sign(
+    { id: travelerUserId, seed_id: 'traveler-settings-seed', role: 'user' },
+    env.JWT_SECRET,
+  );
 
   beforeAll(async () => {
     testDb = await createTestDb();
@@ -26,7 +29,7 @@ describe('Admin settings, audit and observation', () => {
          ($1, 'admin-settings-seed', 'Settings Admin', 'settings-admin@juanderquest.app', 'admin'),
          ($2, 'traveler-settings-seed', 'Settings Traveler', 'settings-traveler@juanderquest.app', 'user')
        ON CONFLICT (id) DO NOTHING`,
-      [adminUserId, travelerUserId]
+      [adminUserId, travelerUserId],
     );
   });
 
@@ -36,9 +39,7 @@ describe('Admin settings, audit and observation', () => {
   });
 
   it('returns canonical defaults with the explicit schema and no secret-bearing keys', async () => {
-    const response = await request(app)
-      .get('/api/v1/admin/settings')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const response = await request(app).get('/api/v1/admin/settings').set('Authorization', `Bearer ${adminToken}`);
 
     expect(response.status).toBe(200);
     expect(response.body.data.revision).toBe(0);
@@ -102,9 +103,7 @@ describe('Admin settings, audit and observation', () => {
     expect(response.body.data.values.quiz_default_radius_meters).toBe(300);
     expect(response.body.data.values.trail_personal_generation_enabled).toBe(true);
 
-    const reloaded = await request(app)
-      .get('/api/v1/admin/settings')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const reloaded = await request(app).get('/api/v1/admin/settings').set('Authorization', `Bearer ${adminToken}`);
     expect(reloaded.body.data.revision).toBe(1);
     expect(reloaded.body.data.values.announcement_message).toBe('Cultural quiz pilot is live.');
   });
@@ -120,9 +119,7 @@ describe('Admin settings, audit and observation', () => {
     expect(stale.body.error.current.revision).toBe(1);
     expect(stale.body.error.current.values.support_contact_email).toBe('tourism@pangasinan.gov.ph');
 
-    const reloaded = await request(app)
-      .get('/api/v1/admin/settings')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const reloaded = await request(app).get('/api/v1/admin/settings').set('Authorization', `Bearer ${adminToken}`);
     expect(reloaded.body.data.values.announcement_message).toBe('Cultural quiz pilot is live.');
   });
 
@@ -138,7 +135,12 @@ describe('Admin settings, audit and observation', () => {
     expect(entry.revision).toBe(1);
     expect(entry.request_id).toBe('req-settings-test-1');
     expect(entry.reason).toBe('Initial support contact for the pilot.');
-    expect(entry.changed_keys).toEqual(['support_contact_email', 'announcement_message', 'quiz_default_radius_meters', 'trail_personal_generation_enabled']);
+    expect(entry.changed_keys).toEqual([
+      'support_contact_email',
+      'announcement_message',
+      'quiz_default_radius_meters',
+      'trail_personal_generation_enabled',
+    ]);
     expect(entry.before_values.quiz_default_radius_meters).toBe(200);
     expect(entry.after_values.quiz_default_radius_meters).toBe(300);
     expect(entry.before_values.trail_personal_generation_enabled).toBe(false);
@@ -147,9 +149,7 @@ describe('Admin settings, audit and observation', () => {
   });
 
   it('serves sanitized read-only system status with no secret values', async () => {
-    const response = await request(app)
-      .get('/api/v1/admin/system/status')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const response = await request(app).get('/api/v1/admin/system/status').set('Authorization', `Bearer ${adminToken}`);
 
     expect(response.status).toBe(200);
     expect(response.body.data.read_only).toBe(true);

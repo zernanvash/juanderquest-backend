@@ -55,7 +55,9 @@ describe('UsersRepository - findAlphaSessionScopesByIds (Iteration 20a)', () => 
 
     expect(mockQuery).toHaveBeenCalledTimes(1);
     const [sql, params] = mockQuery.mock.calls[0];
-    expect(sql).toBe('SELECT id, seed_id, is_test, COALESCE(session_epoch, 0)::int AS session_epoch, role FROM users WHERE id = ANY($1::text[])');
+    expect(sql).toBe(
+      'SELECT id, seed_id, is_test, COALESCE(session_epoch, 0)::int AS session_epoch, role FROM users WHERE id = ANY($1::text[])',
+    );
     expect(params).toEqual([['user-1', 'user-2']]);
   });
 
@@ -82,9 +84,7 @@ describe('UsersRepository - findAlphaSessionScopesByIds (Iteration 20a)', () => 
 
   it('omits missing users from the returned map without throwing', async () => {
     const mockQuery = jest.fn().mockResolvedValue({
-      rows: [
-        { id: 'user-found', seed_id: 'seed-found', is_test: false },
-      ],
+      rows: [{ id: 'user-found', seed_id: 'seed-found', is_test: false }],
     });
     const fakePool = { query: mockQuery } as unknown as Pool;
     const repo = new UsersRepository(fakePool);
@@ -100,7 +100,7 @@ describe('UsersRepository - findAlphaSessionScopesByIds (Iteration 20a)', () => 
     const repo = new UsersRepository(null);
 
     await expect(repo.findAlphaSessionScopesByIds(['user-1'])).rejects.toThrow(
-      'UsersRepository.findAlphaSessionScopesByIds requires an active PostgreSQL pool.'
+      'UsersRepository.findAlphaSessionScopesByIds requires an active PostgreSQL pool.',
     );
   });
 
@@ -109,13 +109,13 @@ describe('UsersRepository - findAlphaSessionScopesByIds (Iteration 20a)', () => 
     const repo = new UsersRepository(fakePool);
 
     await expect(repo.findAlphaSessionScopesByIds([])).rejects.toThrow(
-      'findAlphaSessionScopesByIds requires a nonempty array of user IDs.'
+      'findAlphaSessionScopesByIds requires a nonempty array of user IDs.',
     );
     await expect(repo.findAlphaSessionScopesByIds(null as any)).rejects.toThrow(
-      'findAlphaSessionScopesByIds requires a nonempty array of user IDs.'
+      'findAlphaSessionScopesByIds requires a nonempty array of user IDs.',
     );
     await expect(repo.findAlphaSessionScopesByIds(undefined as any)).rejects.toThrow(
-      'findAlphaSessionScopesByIds requires a nonempty array of user IDs.'
+      'findAlphaSessionScopesByIds requires a nonempty array of user IDs.',
     );
   });
 
@@ -126,7 +126,7 @@ describe('UsersRepository - findAlphaSessionScopesByIds (Iteration 20a)', () => 
 
     const repeatedIds = Array.from({ length: 101 }, () => 'user-repeated-1');
     await expect(repo.findAlphaSessionScopesByIds(repeatedIds)).rejects.toThrow(
-      'findAlphaSessionScopesByIds accepts at most 100 IDs.'
+      'findAlphaSessionScopesByIds accepts at most 100 IDs.',
     );
     expect(mockQuery).not.toHaveBeenCalled();
   });
@@ -171,4 +171,3 @@ describe('UsersRepository - findAlphaSessionScopesByIds (Iteration 20a)', () => 
     await expect(repo.findAlphaSessionScopesByIds(['user-1'])).rejects.toThrow(pgError);
   });
 });
-

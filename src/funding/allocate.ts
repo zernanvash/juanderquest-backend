@@ -10,7 +10,13 @@ export interface FundingAllocation extends FundingCapacity {
 
 /** Fee charged only for a completed reward; whole points round up. */
 export function feeForReward(rewardPoints: number, feeBps: number): number {
-  if (!Number.isSafeInteger(rewardPoints) || rewardPoints < 0 || !Number.isSafeInteger(feeBps) || feeBps < 0 || feeBps > 10_000) {
+  if (
+    !Number.isSafeInteger(rewardPoints) ||
+    rewardPoints < 0 ||
+    !Number.isSafeInteger(feeBps) ||
+    feeBps < 0 ||
+    feeBps > 10_000
+  ) {
     throw new Error('INVALID_FUNDING_FEE_INPUT');
   }
   const numerator = BigInt(rewardPoints) * BigInt(feeBps);
@@ -37,7 +43,12 @@ export function allocatePoints(totalPoints: number, capacities: FundingCapacity[
   let totalCapacity = 0n;
   for (const item of capacities) {
     const createdAt = new Date(item.createdAt).getTime();
-    if (!item.contributionId || ids.has(item.contributionId) || !Number.isSafeInteger(item.availablePoints) || item.availablePoints < 0) {
+    if (
+      !item.contributionId ||
+      ids.has(item.contributionId) ||
+      !Number.isSafeInteger(item.availablePoints) ||
+      item.availablePoints < 0
+    ) {
       throw new Error('INVALID_FUNDING_CAPACITY');
     }
     if (!Number.isFinite(createdAt)) throw new Error('INVALID_FUNDING_CAPACITY');
@@ -70,8 +81,11 @@ export function allocatePoints(totalPoints: number, capacities: FundingCapacity[
       undistributed--;
     }
   }
-  if (undistributed !== 0 || rows.reduce((sum, row) => sum + row.points, 0) !== totalPoints ||
-      rows.some((row) => row.points > row.availablePoints)) {
+  if (
+    undistributed !== 0 ||
+    rows.reduce((sum, row) => sum + row.points, 0) !== totalPoints ||
+    rows.some((row) => row.points > row.availablePoints)
+  ) {
     throw new Error('FUNDING_ALLOCATION_INVARIANT_FAILED');
   }
   return rows.map(({ remainder: _remainder, sortTime: _sortTime, ...row }) => row);

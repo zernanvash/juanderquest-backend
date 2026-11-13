@@ -12,14 +12,15 @@ export interface GoogleProfile {
 }
 
 export type GoogleVerification =
-  | { ok: true; profile: GoogleProfile }
-  | { ok: false; reason: 'UNAVAILABLE' | 'INVALID_GOOGLE_CREDENTIAL' };
+  { ok: true; profile: GoogleProfile } | { ok: false; reason: 'UNAVAILABLE' | 'INVALID_GOOGLE_CREDENTIAL' };
 
 const GOOGLE_ISSUERS = new Set(['accounts.google.com', 'https://accounts.google.com']);
 const DEV_PREFIX = 'dev_google:';
 
 let fetchImpl: typeof fetch = (...args) => fetch(...args);
-export const setGoogleFetch = (impl: typeof fetch) => { fetchImpl = impl; };
+export const setGoogleFetch = (impl: typeof fetch) => {
+  fetchImpl = impl;
+};
 
 /** Local previews and tests may use `dev_google:<email>:<name>`; production never does. */
 export const devGoogleCredentialsEnabled = (): boolean =>
@@ -44,12 +45,15 @@ export async function verifyGoogleCredential(credential: string): Promise<Google
 
   let claims: Record<string, unknown>;
   try {
-    const response = await fetchImpl(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`, {
-      signal: AbortSignal.timeout(5000),
-    });
+    const response = await fetchImpl(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`,
+      {
+        signal: AbortSignal.timeout(5000),
+      },
+    );
     if (response.status >= 500) return { ok: false, reason: 'UNAVAILABLE' };
     if (!response.ok) return { ok: false, reason: 'INVALID_GOOGLE_CREDENTIAL' };
-    claims = await response.json() as Record<string, unknown>;
+    claims = (await response.json()) as Record<string, unknown>;
   } catch {
     return { ok: false, reason: 'UNAVAILABLE' };
   }
@@ -59,10 +63,13 @@ export async function verifyGoogleCredential(credential: string): Promise<Google
   if (
     !GOOGLE_ISSUERS.has(String(claims.iss)) ||
     claims.aud !== env.GOOGLE_CLIENT_ID ||
-    !Number.isFinite(exp) || exp * 1000 <= Date.now() ||
+    !Number.isFinite(exp) ||
+    exp * 1000 <= Date.now() ||
     !verified ||
-    typeof claims.sub !== 'string' || !claims.sub ||
-    typeof claims.email !== 'string' || !claims.email
+    typeof claims.sub !== 'string' ||
+    !claims.sub ||
+    typeof claims.email !== 'string' ||
+    !claims.email
   ) {
     return { ok: false, reason: 'INVALID_GOOGLE_CREDENTIAL' };
   }

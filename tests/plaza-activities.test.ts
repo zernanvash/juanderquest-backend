@@ -78,15 +78,9 @@ describe('Plan 41 Phase 1: Activities, Feed & Producers', () => {
     is_test: true,
   };
 
-  const tokenAlpha = jwt.sign(
-    { id: userAlpha.id, seed_id: userAlpha.seed_id, role: 'user' },
-    env.JWT_SECRET,
-  );
+  const tokenAlpha = jwt.sign({ id: userAlpha.id, seed_id: userAlpha.seed_id, role: 'user' }, env.JWT_SECRET);
 
-  const tokenQA = jwt.sign(
-    { id: userTest.id, seed_id: userTest.seed_id, role: 'qa' },
-    env.JWT_SECRET,
-  );
+  const tokenQA = jwt.sign({ id: userTest.id, seed_id: userTest.seed_id, role: 'qa' }, env.JWT_SECRET);
 
   beforeAll(async () => {
     testDb = await createTestDb();
@@ -99,7 +93,17 @@ describe('Plan 41 Phase 1: Activities, Feed & Producers', () => {
         `INSERT INTO users (id, seed_id, display_name, email, handle, is_public, share_activity, is_test, role)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (id) DO NOTHING`,
-        [u.id, u.seed_id, u.display_name, u.email, u.handle, u.is_public, u.share_activity, u.is_test, (u as any).role || 'user'],
+        [
+          u.id,
+          u.seed_id,
+          u.display_name,
+          u.email,
+          u.handle,
+          u.is_public,
+          u.share_activity,
+          u.is_test,
+          (u as any).role || 'user',
+        ],
       );
     }
 
@@ -165,18 +169,114 @@ describe('Plan 41 Phase 1: Activities, Feed & Producers', () => {
 
     it('asserts idempotency for every producer verb (called twice -> 1 row)', async () => {
       const producers = [
-        { verb: 'quest_completed', key: 'quest_completed:u1:q1', type: 'quest', id: 'q1', title: 'Hundred Islands', href: '/quests/q1', payload: { points: 50 } },
-        { verb: 'town_completed', key: 'town_completed:u1:alaminos', type: 'town', id: 'alaminos', title: 'Alaminos City', href: '/map?area=alaminos', payload: { quests: 3 } },
-        { verb: 'badge_earned', key: 'badge_earned:award-1', type: 'badge', id: 'first_quest', title: 'First Quest', href: '/profile?badge=first_quest', payload: { icon: '🏅' } },
-        { verb: 'trail_completed', key: 'trail_completed:u1:trail-1', type: 'trail', id: 'trail-1', title: 'Coastal Trail', href: '/trail?collection=trail-1', payload: { stops: 4 } },
-        { verb: 'level_up', key: 'level_up:u1:5', type: 'level', id: 'explorer-5', title: 'Level 5 · Pathfinder', href: '/profile', payload: { level: 5, title: 'Pathfinder' } },
-        { verb: 'streak_milestone', key: 'streak_milestone:u1:4', type: 'streak', id: 'juanchoice-4', title: '4-Round Streak', href: '/choice', payload: { rounds: 4 } },
-        { verb: 'rank_top10', key: 'rank_top10:2026-W42:u1', type: 'rank', id: '2026-W42', title: 'Top 10', href: '/plaza?period=weekly', payload: { rank: 7, week: '2026-W42' } },
-        { verb: 'weekly_champion', key: 'weekly_champion:2026-W42:u1', type: 'rank', id: '2026-W42', title: 'Weekly Champion', href: '/plaza?period=weekly', payload: { place: 1, week: '2026-W42' } },
-        { verb: 'spot_posted', key: 'spot_posted:spot-1', type: 'spot', id: 'spot-1', title: 'Lucap Wharf', href: '/spots/lucap-wharf', payload: {} },
-        { verb: 'first_photo', key: 'first_photo:spot-1', type: 'spot', id: 'spot-1', title: 'Lucap Wharf', href: '/spots/lucap-wharf', payload: {} },
-        { verb: 'juanchoice_voted', key: 'juanchoice_voted:camp-1:u1', type: 'campaign', id: 'camp-1', title: 'Best Bangus 2026', href: '/choice', payload: {} },
-        { verb: 'quiz_aced', key: 'quiz_aced:quiz-1:u1', type: 'quiz', id: 'quiz-1', title: 'Pangasinan Salt History', href: '/quizzes/quiz-1', payload: { score: 5, max: 5 } },
+        {
+          verb: 'quest_completed',
+          key: 'quest_completed:u1:q1',
+          type: 'quest',
+          id: 'q1',
+          title: 'Hundred Islands',
+          href: '/quests/q1',
+          payload: { points: 50 },
+        },
+        {
+          verb: 'town_completed',
+          key: 'town_completed:u1:alaminos',
+          type: 'town',
+          id: 'alaminos',
+          title: 'Alaminos City',
+          href: '/map?area=alaminos',
+          payload: { quests: 3 },
+        },
+        {
+          verb: 'badge_earned',
+          key: 'badge_earned:award-1',
+          type: 'badge',
+          id: 'first_quest',
+          title: 'First Quest',
+          href: '/profile?badge=first_quest',
+          payload: { icon: '🏅' },
+        },
+        {
+          verb: 'trail_completed',
+          key: 'trail_completed:u1:trail-1',
+          type: 'trail',
+          id: 'trail-1',
+          title: 'Coastal Trail',
+          href: '/trail?collection=trail-1',
+          payload: { stops: 4 },
+        },
+        {
+          verb: 'level_up',
+          key: 'level_up:u1:5',
+          type: 'level',
+          id: 'explorer-5',
+          title: 'Level 5 · Pathfinder',
+          href: '/profile',
+          payload: { level: 5, title: 'Pathfinder' },
+        },
+        {
+          verb: 'streak_milestone',
+          key: 'streak_milestone:u1:4',
+          type: 'streak',
+          id: 'juanchoice-4',
+          title: '4-Round Streak',
+          href: '/choice',
+          payload: { rounds: 4 },
+        },
+        {
+          verb: 'rank_top10',
+          key: 'rank_top10:2026-W42:u1',
+          type: 'rank',
+          id: '2026-W42',
+          title: 'Top 10',
+          href: '/plaza?period=weekly',
+          payload: { rank: 7, week: '2026-W42' },
+        },
+        {
+          verb: 'weekly_champion',
+          key: 'weekly_champion:2026-W42:u1',
+          type: 'rank',
+          id: '2026-W42',
+          title: 'Weekly Champion',
+          href: '/plaza?period=weekly',
+          payload: { place: 1, week: '2026-W42' },
+        },
+        {
+          verb: 'spot_posted',
+          key: 'spot_posted:spot-1',
+          type: 'spot',
+          id: 'spot-1',
+          title: 'Lucap Wharf',
+          href: '/spots/lucap-wharf',
+          payload: {},
+        },
+        {
+          verb: 'first_photo',
+          key: 'first_photo:spot-1',
+          type: 'spot',
+          id: 'spot-1',
+          title: 'Lucap Wharf',
+          href: '/spots/lucap-wharf',
+          payload: {},
+        },
+        {
+          verb: 'juanchoice_voted',
+          key: 'juanchoice_voted:camp-1:u1',
+          type: 'campaign',
+          id: 'camp-1',
+          title: 'Best Bangus 2026',
+          href: '/choice',
+          payload: {},
+        },
+        {
+          verb: 'quiz_aced',
+          key: 'quiz_aced:quiz-1:u1',
+          type: 'quiz',
+          id: 'quiz-1',
+          title: 'Pangasinan Salt History',
+          href: '/quizzes/quiz-1',
+          payload: { score: 5, max: 5 },
+        },
       ];
 
       for (const p of producers) {
@@ -335,8 +435,7 @@ describe('Plan 41 Phase 1: Activities, Feed & Producers', () => {
     });
 
     it('mixed feed: anonymous visitor receives all public activity with scope forced to mixed', async () => {
-      const res = await request(app)
-        .get('/api/v1/plaza/feed');
+      const res = await request(app).get('/api/v1/plaza/feed');
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -354,8 +453,7 @@ describe('Plan 41 Phase 1: Activities, Feed & Producers', () => {
     });
 
     it('privacy: private profiles and share_activity=false are strictly excluded', async () => {
-      const res = await request(app)
-        .get('/api/v1/plaza/feed?scope=mixed');
+      const res = await request(app).get('/api/v1/plaza/feed?scope=mixed');
 
       expect(res.status).toBe(200);
       const titles = res.body.data.items.map((i: any) => i.subject.title);
@@ -365,8 +463,7 @@ describe('Plan 41 Phase 1: Activities, Feed & Producers', () => {
 
     it('is_test isolation: test activities only return when authorized', async () => {
       // Normal call
-      const normalRes = await request(app)
-        .get('/api/v1/plaza/feed');
+      const normalRes = await request(app).get('/api/v1/plaza/feed');
       expect(normalRes.body.data.items.some((i: any) => i.subject.title === 'QA Simulated Quest')).toBe(false);
 
       // With QA header and QA authenticated token
@@ -380,16 +477,14 @@ describe('Plan 41 Phase 1: Activities, Feed & Producers', () => {
     });
 
     it('keyset cursor pagination: pages without duplicates or gaps', async () => {
-      const page1Res = await request(app)
-        .get('/api/v1/plaza/feed?limit=2');
+      const page1Res = await request(app).get('/api/v1/plaza/feed?limit=2');
 
       expect(page1Res.status).toBe(200);
       expect(page1Res.body.data.items.length).toBe(2);
       expect(page1Res.body.data.next_cursor).toBeTruthy();
 
       const nextCursor = page1Res.body.data.next_cursor;
-      const page2Res = await request(app)
-        .get(`/api/v1/plaza/feed?limit=2&cursor=${encodeURIComponent(nextCursor)}`);
+      const page2Res = await request(app).get(`/api/v1/plaza/feed?limit=2&cursor=${encodeURIComponent(nextCursor)}`);
 
       expect(page2Res.status).toBe(200);
       const page1Ids = page1Res.body.data.items.map((i: any) => i.id);
@@ -402,8 +497,7 @@ describe('Plan 41 Phase 1: Activities, Feed & Producers', () => {
     });
 
     it('malformed cursor returns 400 INVALID_CURSOR', async () => {
-      const res = await request(app)
-        .get('/api/v1/plaza/feed?cursor=not-a-valid-cursor');
+      const res = await request(app).get('/api/v1/plaza/feed?cursor=not-a-valid-cursor');
 
       expect(res.status).toBe(400);
       expect(res.body.success).toBe(false);
@@ -414,8 +508,7 @@ describe('Plan 41 Phase 1: Activities, Feed & Producers', () => {
       const listRes = await request(app).get('/api/v1/plaza/feed?limit=1');
       const item = listRes.body.data.items[0];
 
-      const detailRes = await request(app)
-        .get(`/api/v1/plaza/activities/${item.id}`);
+      const detailRes = await request(app).get(`/api/v1/plaza/activities/${item.id}`);
 
       expect(detailRes.status).toBe(200);
       expect(detailRes.body.success).toBe(true);
@@ -423,8 +516,7 @@ describe('Plan 41 Phase 1: Activities, Feed & Producers', () => {
       expect(detailRes.body.data.verb).toBe(item.verb);
       expect(detailRes.body.data.subject.title).toBe(item.subject.title);
 
-      const notFoundRes = await request(app)
-        .get('/api/v1/plaza/activities/act_nonexistent_id');
+      const notFoundRes = await request(app).get('/api/v1/plaza/activities/act_nonexistent_id');
       expect(notFoundRes.status).toBe(404);
       expect(notFoundRes.body.error.code).toBe('PLAZA_NOT_FOUND');
     });

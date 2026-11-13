@@ -12,12 +12,12 @@ describe('juanchoice capacity rehearsal dormant read-header wiring static contra
   it('verifies readRound request headers spread buildReaderAuthHeaders alongside X-Forwarded-For', () => {
     // Check import
     expect(rehearsalSource).toMatch(
-      /import\s*\{\s*[^}]*\bbuildReaderAuthHeaders\b[^}]*\}\s*from\s*['"]\.\/juanchoice-capacity-reader-headers(?:\.js)?['"]/
+      /import\s*\{\s*[^}]*\bbuildReaderAuthHeaders\b[^}]*\}\s*from\s*['"]\.\/juanchoice-capacity-reader-headers(?:\.js)?['"]/,
     );
 
     // Extract readRound definition
     const readRoundMatch = rehearsalSource.match(
-      /const\s+readRound\s*=\s*\([^)]*\)\s*=>[\s\S]*?(?=\n\s*(?:const\s+[a-zA-Z0-9_$]+\s*=|let\s+[a-zA-Z0-9_$]+\s*=|async\s+function|function|\/\*\*))/
+      /const\s+readRound\s*=\s*\([^)]*\)\s*=>[\s\S]*?(?=\n\s*(?:const\s+[a-zA-Z0-9_$]+\s*=|let\s+[a-zA-Z0-9_$]+\s*=|async\s+function|function|\/\*\*))/,
     );
     expect(readRoundMatch).not.toBeNull();
     const readRoundBlock = readRoundMatch![0];
@@ -27,14 +27,14 @@ describe('juanchoice capacity rehearsal dormant read-header wiring static contra
 
     // Verify buildReaderAuthHeaders is spread in readRound headers with exact arguments
     expect(readRoundBlock).toMatch(
-      /\.\.\.buildReaderAuthHeaders\(\s*readerAuthMode\s*,\s*i\s*,\s*readerTokens\s*,\s*readerCount\s*\)/
+      /\.\.\.buildReaderAuthHeaders\(\s*readerAuthMode\s*,\s*i\s*,\s*readerTokens\s*,\s*readerCount\s*\)/,
     );
   });
 
   it('verifies vote still uses separate tokens[i] and Idempotency-Key', () => {
     // Extract vote definition
     const voteMatch = rehearsalSource.match(
-      /const\s+vote\s*=\s*\([^)]*\)\s*=>[\s\S]*?(?=\n\s*(?:const\s+[a-zA-Z0-9_$]+\s*=|let\s+[a-zA-Z0-9_$]+\s*=|async\s+function|function|\/\*\*))/
+      /const\s+vote\s*=\s*\([^)]*\)\s*=>[\s\S]*?(?=\n\s*(?:const\s+[a-zA-Z0-9_$]+\s*=|let\s+[a-zA-Z0-9_$]+\s*=|async\s+function|function|\/\*\*))/,
     );
     expect(voteMatch).not.toBeNull();
     const voteBlock = voteMatch![0];
@@ -51,7 +51,7 @@ describe('juanchoice capacity rehearsal dormant read-header wiring static contra
 
     // 2. Extract child START message construction block
     const startMsgMatch = rehearsalSource.match(
-      /const\s+startMsg:\s*ParentToChildMessage\s*=\s*\{[\s\S]*?child\.send\(startMsg\);/
+      /const\s+startMsg:\s*ParentToChildMessage\s*=\s*\{[\s\S]*?child\.send\(startMsg\);/,
     );
     expect(startMsgMatch).not.toBeNull();
     const startMsgBlock = startMsgMatch![0];
@@ -61,14 +61,16 @@ describe('juanchoice capacity rehearsal dormant read-header wiring static contra
 
     // 4. Verify readerTokens is conditionally included ONLY for wallet_alpha, and omitted for guest
     expect(startMsgBlock).toMatch(
-      /\.\.\.\(\s*readerAuthMode\s*===\s*['"]wallet_alpha['"]\s*\?\s*\{\s*readerTokens\s*\}\s*:\s*\{\}\s*\)/
+      /\.\.\.\(\s*readerAuthMode\s*===\s*['"]wallet_alpha['"]\s*\?\s*\{\s*readerTokens\s*\}\s*:\s*\{\}\s*\)/,
     );
 
     // 5. Verify separate voter tokens array is passed unchanged
     expect(startMsgBlock).toMatch(/tokens(?:\s*:\s*tokens)?,/);
 
     // 6. Verify fork child environment does not transport JWT secret, DB URL, or tokens
-    const forkMatch = rehearsalSource.match(/const\s+childEnv:\s*NodeJS\.ProcessEnv\s*=\s*\{[\s\S]*?\};\s*childProcess\s*=\s*fork\(/);
+    const forkMatch = rehearsalSource.match(
+      /const\s+childEnv:\s*NodeJS\.ProcessEnv\s*=\s*\{[\s\S]*?\};\s*childProcess\s*=\s*fork\(/,
+    );
     expect(forkMatch).not.toBeNull();
     const childEnvBlock = forkMatch![0];
     expect(childEnvBlock).not.toContain('JWT_SECRET');
@@ -87,16 +89,18 @@ describe('juanchoice capacity rehearsal dormant read-header wiring static contra
     // Note: This is static source-contract evidence, not a runtime failure-injection test.
     // 1. Verify ALPHA_WALLET_SIMULATION_ENABLED is captured in flags snapshot
     expect(rehearsalSource).toMatch(
-      /const\s+flags\s*=\s*\{[\s\S]*?ALPHA_WALLET_SIMULATION_ENABLED:\s*env\.ALPHA_WALLET_SIMULATION_ENABLED[\s\S]*?\};/
+      /const\s+flags\s*=\s*\{[\s\S]*?ALPHA_WALLET_SIMULATION_ENABLED:\s*env\.ALPHA_WALLET_SIMULATION_ENABLED[\s\S]*?\};/,
     );
 
     // 2. Verify conditional enable is applied only if readerAuthMode === 'wallet_alpha'
     expect(rehearsalSource).toMatch(
-      /Object\.assign\(\s*env\s*,\s*\{[\s\S]*?\.\.\.\(\s*readerAuthMode\s*===\s*['"]wallet_alpha['"]\s*\?\s*\{\s*ALPHA_WALLET_SIMULATION_ENABLED:\s*true\s*\}\s*:\s*\{\}\s*\)[\s\S]*?\}\s*\);/
+      /Object\.assign\(\s*env\s*,\s*\{[\s\S]*?\.\.\.\(\s*readerAuthMode\s*===\s*['"]wallet_alpha['"]\s*\?\s*\{\s*ALPHA_WALLET_SIMULATION_ENABLED:\s*true\s*\}\s*:\s*\{\}\s*\)[\s\S]*?\}\s*\);/,
     );
 
     // 3. Verify main finally block restores env from flags
-    const mainFinallyMatch = rehearsalSource.match(/async\s+function\s+main\s*\(\)[\s\S]*?finally\s*\{([\s\S]*?CAPACITY_FIXTURE_CLOSED[\s\S]*?)\}/);
+    const mainFinallyMatch = rehearsalSource.match(
+      /async\s+function\s+main\s*\(\)[\s\S]*?finally\s*\{([\s\S]*?CAPACITY_FIXTURE_CLOSED[\s\S]*?)\}/,
+    );
     expect(mainFinallyMatch).not.toBeNull();
     const finallyBlock = mainFinallyMatch![1];
     expect(finallyBlock).toMatch(/Object\.assign\(\s*env\s*,\s*flags\s*\);/);
@@ -104,25 +108,33 @@ describe('juanchoice capacity rehearsal dormant read-header wiring static contra
 
   it('verifies successful single and batched wallet lookups are counted and profiling is restored', () => {
     expect(rehearsalSource).toMatch(
-      /import\s*\{\s*[^}]*\bisDisposableWalletReaderLookup\b[^}]*\}\s*from\s*['"]\.\/juanchoice-capacity-reader-matcher(?:\.js)?['"]/
+      /import\s*\{\s*[^}]*\bisDisposableWalletReaderLookup\b[^}]*\}\s*from\s*['"]\.\/juanchoice-capacity-reader-matcher(?:\.js)?['"]/,
     );
     expect(rehearsalSource).toContain('countDisposableWalletReaderBatchChecks');
     expect(rehearsalSource).toContain('installPoolQueryProfile');
     expect(rehearsalSource).toMatch(/let\s+walletDurableLookupCount\s*=\s*0;/);
     expect(rehearsalSource).toMatch(/let\s+walletIdentityQueryCount\s*=\s*0;/);
     expect(rehearsalSource).toMatch(/const\s+disposableReaderIds\s*=\s*new\s+Set<string>\(\);/);
-    expect(rehearsalSource).toMatch(/for\s*\(\s*const\s+readerId\s+of\s+readerAssembly\.readerUserIds\s*\)\s*\{\s*disposableReaderIds\.add\(readerId\);\s*\}/);
+    expect(rehearsalSource).toMatch(
+      /for\s*\(\s*const\s+readerId\s+of\s+readerAssembly\.readerUserIds\s*\)\s*\{\s*disposableReaderIds\.add\(readerId\);\s*\}/,
+    );
     expect(rehearsalSource).toMatch(/const\s+restorePoolQuery\s*=\s*installPoolQueryProfile\(fixture\.pool,/);
-    expect(rehearsalSource).toMatch(/isWalletLookup:\s*\(query, values\)\s*=>\s*isDisposableWalletReaderLookup\(query, values, disposableReaderIds\)\s*\|\|\s*countDisposableWalletReaderBatchChecks\(query, values, disposableReaderIds\)\s*>\s*0/);
-    expect(rehearsalSource).toMatch(/onWalletLookup:\s*\(query, values\)\s*=>\s*\{\s*walletDurableLookupCount\s*\+=\s*isDisposableWalletReaderLookup[\s\S]*?countDisposableWalletReaderBatchChecks\(query, values, disposableReaderIds\);\s*walletIdentityQueryCount\+\+;/);
+    expect(rehearsalSource).toMatch(
+      /isWalletLookup:\s*\(query, values\)\s*=>\s*isDisposableWalletReaderLookup\(query, values, disposableReaderIds\)\s*\|\|\s*countDisposableWalletReaderBatchChecks\(query, values, disposableReaderIds\)\s*>\s*0/,
+    );
+    expect(rehearsalSource).toMatch(
+      /onWalletLookup:\s*\(query, values\)\s*=>\s*\{\s*walletDurableLookupCount\s*\+=\s*isDisposableWalletReaderLookup[\s\S]*?countDisposableWalletReaderBatchChecks\(query, values, disposableReaderIds\);\s*walletIdentityQueryCount\+\+;/,
+    );
 
     // Client transaction queries are profiled separately and must not double-count identity lookups.
     const clientQueryMatch = rehearsalSource.match(
-      /fixture\.pool\.on\('acquire'[\s\S]*?client\.query\s*=\s*\(\(\.\.\.args:\s*unknown\[\]\)\s*=>[\s\S]*?\}\)\s*as\s*typeof\s*client\.query;/
+      /fixture\.pool\.on\('acquire'[\s\S]*?client\.query\s*=\s*\(\(\.\.\.args:\s*unknown\[\]\)\s*=>[\s\S]*?\}\)\s*as\s*typeof\s*client\.query;/,
     );
     expect(clientQueryMatch).not.toBeNull();
     expect(clientQueryMatch![0]).not.toContain('walletDurableLookupCount');
-    const mainFinallyMatch = rehearsalSource.match(/async\s+function\s+main\s*\(\)[\s\S]*?finally\s*\{([\s\S]*?CAPACITY_FIXTURE_CLOSED[\s\S]*?)\}/);
+    const mainFinallyMatch = rehearsalSource.match(
+      /async\s+function\s+main\s*\(\)[\s\S]*?finally\s*\{([\s\S]*?CAPACITY_FIXTURE_CLOSED[\s\S]*?)\}/,
+    );
     expect(mainFinallyMatch).not.toBeNull();
     const finallyBlock = mainFinallyMatch![1];
     expect(finallyBlock).toMatch(/restorePoolQuery\(\);/);
@@ -141,7 +153,7 @@ describe('juanchoice capacity rehearsal dormant read-header wiring static contra
     expect(measurementStop).toBeGreaterThan(workloadStart);
     expect(sourceIdentity).toBeGreaterThan(measurementStop);
     expect(rehearsalSource.slice(measurementStop, sourceIdentity)).toMatch(
-      /const requestWindowEventLoopDelay = \{\s*p95Ms: Math\.round\(eventLoopDelay\.percentile\(95\) \/ 1e6\),\s*maxMs: Math\.round\(eventLoopDelay\.max \/ 1e6\),\s*\};/
+      /const requestWindowEventLoopDelay = \{\s*p95Ms: Math\.round\(eventLoopDelay\.percentile\(95\) \/ 1e6\),\s*maxMs: Math\.round\(eventLoopDelay\.max \/ 1e6\),\s*\};/,
     );
     expect(rehearsalSource).toMatch(/event_loop_delay_p95_ms:\s*requestWindowEventLoopDelay\.p95Ms,/);
     expect(rehearsalSource).toMatch(/event_loop_delay_max_ms:\s*requestWindowEventLoopDelay\.maxMs,/);
@@ -149,35 +161,45 @@ describe('juanchoice capacity rehearsal dormant read-header wiring static contra
 
   it('verifies strict acceptance assertions for guest and wallet_alpha modes', () => {
     expect(rehearsalSource).toMatch(
-      /if\s*\(\s*readerAuthMode\s*===\s*['"]guest['"]\s*\)\s*\{\s*assert\.equal\(\s*walletDurableLookupCount\s*,\s*0\s*,\s*['"]wallet_durable_lookup_count must be 0 in guest reader mode['"]\s*\);\s*assert\.equal\(\s*walletIdentityQueryCount\s*,\s*0/
+      /if\s*\(\s*readerAuthMode\s*===\s*['"]guest['"]\s*\)\s*\{\s*assert\.equal\(\s*walletDurableLookupCount\s*,\s*0\s*,\s*['"]wallet_durable_lookup_count must be 0 in guest reader mode['"]\s*\);\s*assert\.equal\(\s*walletIdentityQueryCount\s*,\s*0/,
     );
     expect(rehearsalSource).toMatch(
-      /else\s+if\s*\(\s*readerAuthMode\s*===\s*['"]wallet_alpha['"]\s*\)\s*\{\s*assert\(\s*walletDurableLookupCount\s*>=\s*successfulReads\.length/
+      /else\s+if\s*\(\s*readerAuthMode\s*===\s*['"]wallet_alpha['"]\s*\)\s*\{\s*assert\(\s*walletDurableLookupCount\s*>=\s*successfulReads\.length/,
     );
-    expect(rehearsalSource).toMatch(/walletIdentityQueryCount\s*>\s*0\s*&&\s*walletIdentityQueryCount\s*<=\s*walletDurableLookupCount/);
+    expect(rehearsalSource).toMatch(
+      /walletIdentityQueryCount\s*>\s*0\s*&&\s*walletIdentityQueryCount\s*<=\s*walletDurableLookupCount/,
+    );
   });
 
   it('verifies static wiring contract for ballot admission gate: timer starts before admission, GETs bypass, 0 limit bypasses', () => {
     // 1. Verify ballot admission import and export
-    expect(rehearsalSource).toMatch(/import\s*\{[^}]*\bBallotAdmissionController\b[^}]*\}\s*from\s*['"]\.\/juanchoice-capacity-ballot-admission(?:\.js)?['"]/);
+    expect(rehearsalSource).toMatch(
+      /import\s*\{[^}]*\bBallotAdmissionController\b[^}]*\}\s*from\s*['"]\.\/juanchoice-capacity-ballot-admission(?:\.js)?['"]/,
+    );
     expect(rehearsalSource).toMatch(/export\s*\{\s*[^}]*\bresolveBallotAdmission\b/);
-    expect(rehearsalSource).toMatch(/export\s+const\s+ballotAdmissionLimit\s*:\s*number\s*=\s*resolveBallotAdmission\(/);
+    expect(rehearsalSource).toMatch(
+      /export\s+const\s+ballotAdmissionLimit\s*:\s*number\s*=\s*resolveBallotAdmission\(/,
+    );
 
     // 2. Extract http.createServer block
-    const serverBlockMatch = rehearsalSource.match(/server\s*=\s*http\.createServer\(\(req,\s*res\)\s*=>\s*\{([\s\S]*?)\}\);\s*\n\s*server\.listen/);
+    const serverBlockMatch = rehearsalSource.match(
+      /server\s*=\s*http\.createServer\(\(req,\s*res\)\s*=>\s*\{([\s\S]*?)\}\);\s*\n\s*server\.listen/,
+    );
     expect(serverBlockMatch).not.toBeNull();
     const serverBlock = serverBlockMatch![1];
 
     // 3. Verify ingress timer starts BEFORE any admission queuing
     const ingressPos = serverBlock.indexOf('const ingressAt = performance.now();');
-    const admissionCheckPos = serverBlock.indexOf('if (ballotAdmissionLimit > 0 && isBallotRequest(req.method, req.url))');
+    const admissionCheckPos = serverBlock.indexOf(
+      'if (ballotAdmissionLimit > 0 && isBallotRequest(req.method, req.url))',
+    );
     expect(ingressPos).toBeGreaterThan(-1);
     expect(admissionCheckPos).toBeGreaterThan(-1);
     expect(ingressPos).toBeLessThan(admissionCheckPos);
 
     // 4. Verify GET requests bypass the gate directly into phaseContext.run
     expect(serverBlock).toMatch(
-      /\} else \{\s*phaseContext\.run\(validatedPhase,\s*\(\)\s*=>\s*\{\s*app\(req,\s*res\);\s*\}\);/
+      /\} else \{\s*phaseContext\.run\(validatedPhase,\s*\(\)\s*=>\s*\{\s*app\(req,\s*res\);\s*\}\);/,
     );
 
     // 5. Verify abort controller handles premature close and cleanup

@@ -43,13 +43,15 @@ export const getAlphaSessionScopeBatcher = (pool: Pool): AlphaSessionScopeBatche
   let batcher = batcherRegistry.get(pool);
   if (!batcher) {
     const scopedRepo = new UsersRepository(pool);
-    batcher = new AlphaSessionScopeBatcher(ids => scopedRepo.findAlphaSessionScopesByIds(ids));
+    batcher = new AlphaSessionScopeBatcher((ids) => scopedRepo.findAlphaSessionScopesByIds(ids));
     batcherRegistry.set(pool, batcher);
   }
   return batcher;
 };
 
-export const getSessionScope = async (userId: string): Promise<{ session_epoch: number; role: 'user' | 'admin' | 'area_admin' | 'qa' } | null> => {
+export const getSessionScope = async (
+  userId: string,
+): Promise<{ session_epoch: number; role: 'user' | 'admin' | 'area_admin' | 'qa' } | null> => {
   const cached = sessionScopeCache.get(userId);
   if (cached && Date.now() < cached.expiresAt) {
     return { session_epoch: cached.session_epoch, role: cached.role };
@@ -92,7 +94,10 @@ export const optionalAuthenticateToken = async (req: AuthRequest, res: Response,
     console.error('[auth] optionalAuthenticateToken database error:', err);
     return res.status(503).json({
       success: false,
-      error: { code: 'DATABASE_UNAVAILABLE', message: 'Authentication service temporarily unavailable. Please try again.' },
+      error: {
+        code: 'DATABASE_UNAVAILABLE',
+        message: 'Authentication service temporarily unavailable. Please try again.',
+      },
     });
   }
 };
@@ -113,19 +118,31 @@ export const authenticateToken = async (req: AuthRequest, res: Response, next: N
 
   const user = verifySessionToken(token);
   if (!user) {
-    return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid or expired JWT authentication token.' } });
+    return res
+      .status(401)
+      .json({
+        success: false,
+        error: { code: 'UNAUTHORIZED', message: 'Invalid or expired JWT authentication token.' },
+      });
   }
 
   try {
     const scope = await getSessionScope(user.id);
     if (!scope) {
       clearSessionCookie(res);
-      return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'User account no longer exists.' } });
+      return res
+        .status(401)
+        .json({ success: false, error: { code: 'UNAUTHORIZED', message: 'User account no longer exists.' } });
     }
     const tokenSep = user.sep ?? 0;
     if (tokenSep !== scope.session_epoch) {
       clearSessionCookie(res);
-      return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Session has been revoked or expired. Please sign in again.' } });
+      return res
+        .status(401)
+        .json({
+          success: false,
+          error: { code: 'UNAUTHORIZED', message: 'Session has been revoked or expired. Please sign in again.' },
+        });
     }
     user.role = scope.role;
     req.user = user;
@@ -134,7 +151,10 @@ export const authenticateToken = async (req: AuthRequest, res: Response, next: N
     console.error('[auth] session scope verification database error:', err);
     return res.status(503).json({
       success: false,
-      error: { code: 'DATABASE_UNAVAILABLE', message: 'Authentication service temporarily unavailable. Please try again.' },
+      error: {
+        code: 'DATABASE_UNAVAILABLE',
+        message: 'Authentication service temporarily unavailable. Please try again.',
+      },
     });
   }
 };
@@ -214,7 +234,12 @@ export const checkQAAuthorization = async (req: AuthRequest, res: Response, next
       const batcher = getAlphaSessionScopeBatcher(pool);
       const scope = await batcher.lookup(req.user.id);
       if (db.usersRepo.getPool() !== pool) {
-        return res.status(503).json({ success: false, error: { code: 'DATABASE_OUTAGE', message: 'Wallet session could not be verified.' } });
+        return res
+          .status(503)
+          .json({
+            success: false,
+            error: { code: 'DATABASE_OUTAGE', message: 'Wallet session could not be verified.' },
+          });
       }
       if (!env.ALPHA_WALLET_SIMULATION_ENABLED) {
         return next();
@@ -227,7 +252,9 @@ export const checkQAAuthorization = async (req: AuthRequest, res: Response, next
       res.setHeader('X-Robots-Tag', 'noindex, nofollow');
       return next();
     } catch {
-      return res.status(503).json({ success: false, error: { code: 'DATABASE_OUTAGE', message: 'Wallet session could not be verified.' } });
+      return res
+        .status(503)
+        .json({ success: false, error: { code: 'DATABASE_OUTAGE', message: 'Wallet session could not be verified.' } });
     }
   }
 
@@ -291,10 +318,17 @@ export const requireBoundWallet = async (req: AuthRequest, res: Response, next: 
   try {
     user = db.usersRepo.getPool() ? await db.usersRepo.findById(req.user!.id) : db.findUserById(req.user!.id);
   } catch {
-    return res.status(503).json({ success: false, error: { code: 'DATABASE_OUTAGE', message: 'Account could not be checked. Please try again.' } });
+    return res
+      .status(503)
+      .json({
+        success: false,
+        error: { code: 'DATABASE_OUTAGE', message: 'Account could not be checked. Please try again.' },
+      });
   }
   if (!user) {
-    return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Session account no longer exists.' } });
+    return res
+      .status(401)
+      .json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Session account no longer exists.' } });
   }
   if (!user.wallet_address || !user.wallet_address.trim()) {
     return res.status(403).json({

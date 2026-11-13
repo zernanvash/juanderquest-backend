@@ -28,8 +28,13 @@ describe('wallet cookie session and laptop-alpha simulation boundary', () => {
 
   it('upgrades a legacy bearer into an HttpOnly cookie and restores a session', async () => {
     const agent = request.agent(app);
-    const token = jwt.sign({ id: userId, role: 'user', seed_id: 'wallet:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }, env.JWT_SECRET, { expiresIn: '1h' });
-    const upgraded = await agent.post('/api/v1/auth/session/upgrade')
+    const token = jwt.sign(
+      { id: userId, role: 'user', seed_id: 'wallet:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+      env.JWT_SECRET,
+      { expiresIn: '1h' },
+    );
+    const upgraded = await agent
+      .post('/api/v1/auth/session/upgrade')
       .set('Authorization', `Bearer ${token}`)
       .send({ remember_me: true });
     expect(upgraded.status).toBe(200);
@@ -65,7 +70,11 @@ describe('wallet cookie session and laptop-alpha simulation boundary', () => {
       seed_id: 'wallet:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       is_test: false,
     });
-    const token = jwt.sign({ id: userId, role: 'user', seed_id: 'wallet:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }, env.JWT_SECRET, { expiresIn: '1h' });
+    const token = jwt.sign(
+      { id: userId, role: 'user', seed_id: 'wallet:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+      env.JWT_SECRET,
+      { expiresIn: '1h' },
+    );
     const response = await request(app).get('/api/v1/feed').set('Authorization', `Bearer ${token}`);
     expect(response.status).toBe(200);
     expect(response.headers['x-robots-tag']).toContain('noindex');
@@ -74,7 +83,11 @@ describe('wallet cookie session and laptop-alpha simulation boundary', () => {
 
   it('keeps wallet simulation off by default outside the alpha flag', async () => {
     Reflect.set(env, 'ALPHA_WALLET_SIMULATION_ENABLED', false);
-    const token = jwt.sign({ id: userId, role: 'user', seed_id: 'wallet:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }, env.JWT_SECRET, { expiresIn: '1h' });
+    const token = jwt.sign(
+      { id: userId, role: 'user', seed_id: 'wallet:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+      env.JWT_SECRET,
+      { expiresIn: '1h' },
+    );
     const response = await request(app).get('/api/v1/feed').set('Authorization', `Bearer ${token}`);
     expect(response.status).toBe(200);
     expect(response.headers['x-robots-tag']).toBeUndefined();

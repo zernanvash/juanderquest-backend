@@ -34,16 +34,12 @@ describe('juanchoice capacity CPU profile helper', () => {
 
     it('rejects invalid or typo modes explicitly', () => {
       expect(() => resolveCpuProfileMode('request-window')).toThrow(
-        /JDQ_CAPACITY_CPU_PROFILE must be "request_window" or unset/
+        /JDQ_CAPACITY_CPU_PROFILE must be "request_window" or unset/,
       );
-      expect(() => resolveCpuProfileMode('full')).toThrow(
-        /JDQ_CAPACITY_CPU_PROFILE must be "request_window" or unset/
-      );
-      expect(() => resolveCpuProfileMode('true')).toThrow(
-        /JDQ_CAPACITY_CPU_PROFILE must be "request_window" or unset/
-      );
+      expect(() => resolveCpuProfileMode('full')).toThrow(/JDQ_CAPACITY_CPU_PROFILE must be "request_window" or unset/);
+      expect(() => resolveCpuProfileMode('true')).toThrow(/JDQ_CAPACITY_CPU_PROFILE must be "request_window" or unset/);
       expect(() => resolveCpuProfileMode(' REQUEST_WINDOW ')).toThrow(
-        /JDQ_CAPACITY_CPU_PROFILE must be "request_window" or unset/
+        /JDQ_CAPACITY_CPU_PROFILE must be "request_window" or unset/,
       );
       expect(() => resolveCpuProfileMode('private-value')).not.toThrow('private-value');
     });
@@ -80,7 +76,10 @@ describe('juanchoice capacity CPU profile helper', () => {
     it('executes connect -> enable -> start and stop -> disable -> disconnect in exact deterministic order', async () => {
       const calls: string[] = [];
       const fakeProfile = {
-        nodes: [{ id: 1, callFrame: { functionName: '(root)' } }, { id: 2, callFrame: { functionName: 'app' } }],
+        nodes: [
+          { id: 1, callFrame: { functionName: '(root)' } },
+          { id: 2, callFrame: { functionName: 'app' } },
+        ],
         samples: [1, 2, 2],
         timeDeltas: [100, 200, 200],
       };
@@ -250,7 +249,7 @@ describe('juanchoice capacity CPU profile helper', () => {
 
       const line = formatCpuProfileSummaryLine(dummyArtifact);
       expect(line).toBe(
-        'CAPACITY_CPU_PROFILE mode=request_window path=.local/capacity-cpu-profiles/sample.cpuprofile nodes=142 samples=890 bytes=12345\n'
+        'CAPACITY_CPU_PROFILE mode=request_window path=.local/capacity-cpu-profiles/sample.cpuprofile nodes=142 samples=890 bytes=12345\n',
       );
 
       // Verify no sensitive tokens/secrets

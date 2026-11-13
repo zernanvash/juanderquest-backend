@@ -53,28 +53,19 @@ describe('Public Profile and Privacy Controls API (/api/v1/users)', () => {
   });
 
   describe('PATCH /api/v1/users/me/profile', () => {
-    const token = jwt.sign(
-      { id: publicUserId, seed_id: 'user-1', role: 'user' },
-      env.JWT_SECRET,
-      { expiresIn: '1h' }
-    );
+    const token = jwt.sign({ id: publicUserId, seed_id: 'user-1', role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
 
     it('requires authentication to update profile', async () => {
-      const res = await request(app)
-        .patch('/api/v1/users/me/profile')
-        .send({ bio: 'New bio test' });
+      const res = await request(app).patch('/api/v1/users/me/profile').send({ bio: 'New bio test' });
       expect(res.status).toBe(401);
     });
 
     it('allows authenticated user to update bio, status, and privacy settings', async () => {
-      const res = await request(app)
-        .patch('/api/v1/users/me/profile')
-        .set('Authorization', `Bearer ${token}`)
-        .send({
-          bio: 'Updated traveler bio for testing',
-          status_text: 'Active in Bolinao',
-          is_public: true,
-        });
+      const res = await request(app).patch('/api/v1/users/me/profile').set('Authorization', `Bearer ${token}`).send({
+        bio: 'Updated traveler bio for testing',
+        status_text: 'Active in Bolinao',
+        is_public: true,
+      });
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);

@@ -1,9 +1,5 @@
 import { Router } from 'express';
-import {
-  buildReadinessReport,
-  defaultReadinessProbes,
-  ReadinessProbes,
-} from '../services/health.js';
+import { buildReadinessReport, defaultReadinessProbes, ReadinessProbes } from '../services/health.js';
 import { isServiceReady, isServiceShuttingDown } from '../middleware/readiness.js';
 
 const livenessResponse = () => ({

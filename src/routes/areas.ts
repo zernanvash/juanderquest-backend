@@ -15,9 +15,7 @@ async function queryWithRetry(pool: Pool, text: string, values?: any[], retries 
       lastError = err;
       const msg = err instanceof Error ? err.message.toLowerCase() : '';
       const isTransientTimeout =
-        msg.includes('timeout') ||
-        msg.includes('connection terminated') ||
-        msg.includes('econnreset');
+        msg.includes('timeout') || msg.includes('connection terminated') || msg.includes('econnreset');
       if (!isTransientTimeout || attempt === retries) {
         throw err;
       }
@@ -37,7 +35,10 @@ areasRouter.get('/areas', async (req: Request, res: Response) => {
   const zoomStr = req.query.zoom as string | undefined;
   const zoom = zoomStr ? Number(zoomStr) : 9;
 
-  let minLng = -180, minLat = -90, maxLng = 180, maxLat = 90;
+  let minLng = -180,
+    minLat = -90,
+    maxLng = 180,
+    maxLat = 90;
   if (typeof req.query.bbox === 'string') {
     const parts = req.query.bbox.split(',').map(Number);
     if (parts.length === 4 && parts.every(Number.isFinite)) {
@@ -114,7 +115,7 @@ areasRouter.get('/areas/:id', async (req: Request, res: Response) => {
          LEFT JOIN spots s ON (s.town_area_id = a.id OR s.barangay_area_id = a.id)
          WHERE a.id = $1
          GROUP BY a.id`,
-        [areaId]
+        [areaId],
       );
 
       if (result.rows.length === 0) {
@@ -130,7 +131,9 @@ areasRouter.get('/areas/:id', async (req: Request, res: Response) => {
       const parents: any[] = [];
       let currentParentId = area.parent_id;
       while (currentParentId) {
-        const pRes = await queryWithRetry(pool, `SELECT id, name, level, parent_id FROM admin_areas WHERE id = $1`, [currentParentId]);
+        const pRes = await queryWithRetry(pool, `SELECT id, name, level, parent_id FROM admin_areas WHERE id = $1`, [
+          currentParentId,
+        ]);
         if (pRes.rows.length === 0) break;
         const p = pRes.rows[0];
         parents.unshift({ id: p.id, name: p.name, level: p.level });
@@ -261,7 +264,7 @@ areasRouter.get('/areas/:id/spots', async (req: Request, res: Response) => {
         isProvince
           ? `SELECT COUNT(*) FROM spots WHERE status = 'published' AND NOT is_test`
           : `SELECT COUNT(*) FROM spots WHERE (town_area_id = $1 OR barangay_area_id = $1) AND status = 'published' AND NOT is_test`,
-        isProvince ? [] : [areaId]
+        isProvince ? [] : [areaId],
       );
       const total = Number(countRes.rows[0]?.count || 0);
 
@@ -274,7 +277,7 @@ areasRouter.get('/areas/:id/spots', async (req: Request, res: Response) => {
           : `SELECT * FROM spots WHERE (town_area_id = $1 OR barangay_area_id = $1) AND status = 'published' AND NOT is_test
              ORDER BY created_at DESC
              LIMIT $2 OFFSET $3`,
-        isProvince ? [limit, offset] : [areaId, limit, offset]
+        isProvince ? [limit, offset] : [areaId, limit, offset],
       );
 
       return res.json({
@@ -299,9 +302,11 @@ areasRouter.get('/areas/:id/spots', async (req: Request, res: Response) => {
   // Store in-memory fallback
   const matching = spotStore.spots.filter(
     (s) =>
-      (s.town_area_id === areaId || s.barangay_area_id === areaId || s.municipality.toLowerCase() === areaId.toLowerCase()) &&
+      (s.town_area_id === areaId ||
+        s.barangay_area_id === areaId ||
+        s.municipality.toLowerCase() === areaId.toLowerCase()) &&
       s.status === 'published' &&
-      !s.is_test
+      !s.is_test,
   );
 
   return res.json({

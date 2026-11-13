@@ -82,20 +82,11 @@ describe('Plan 41 Phase 3: Interactions, Comments, Moderation & Preferences', ()
     role: 'admin',
   };
 
-  const tokenAlpha = jwt.sign(
-    { id: userAlpha.id, seed_id: userAlpha.seed_id, role: 'user' },
-    env.JWT_SECRET,
-  );
+  const tokenAlpha = jwt.sign({ id: userAlpha.id, seed_id: userAlpha.seed_id, role: 'user' }, env.JWT_SECRET);
 
-  const tokenBeta = jwt.sign(
-    { id: userBeta.id, seed_id: userBeta.seed_id, role: 'user' },
-    env.JWT_SECRET,
-  );
+  const tokenBeta = jwt.sign({ id: userBeta.id, seed_id: userBeta.seed_id, role: 'user' }, env.JWT_SECRET);
 
-  const tokenPrivate = jwt.sign(
-    { id: userPrivate.id, seed_id: userPrivate.seed_id, role: 'user' },
-    env.JWT_SECRET,
-  );
+  const tokenPrivate = jwt.sign({ id: userPrivate.id, seed_id: userPrivate.seed_id, role: 'user' }, env.JWT_SECRET);
 
   const tokenReporter2 = jwt.sign(
     { id: userReporter2.id, seed_id: userReporter2.seed_id, role: 'user' },
@@ -107,10 +98,7 @@ describe('Plan 41 Phase 3: Interactions, Comments, Moderation & Preferences', ()
     env.JWT_SECRET,
   );
 
-  const tokenAdmin = jwt.sign(
-    { id: userAdmin.id, seed_id: userAdmin.seed_id, role: 'admin' },
-    env.JWT_SECRET,
-  );
+  const tokenAdmin = jwt.sign({ id: userAdmin.id, seed_id: userAdmin.seed_id, role: 'admin' }, env.JWT_SECRET);
 
   let sampleActivityId: string;
 
@@ -178,10 +166,9 @@ describe('Plan 41 Phase 3: Interactions, Comments, Moderation & Preferences', ()
       expect(res2.body.data.cheer_count).toBe(1);
 
       // Check notification sent to Alpha
-      const notifs = await testDb.pool.query(
-        `SELECT * FROM user_notifications WHERE user_id = $1 AND kind = 'cheer'`,
-        [userAlpha.id],
-      );
+      const notifs = await testDb.pool.query(`SELECT * FROM user_notifications WHERE user_id = $1 AND kind = 'cheer'`, [
+        userAlpha.id,
+      ]);
       expect(notifs.rows.length).toBe(1);
       expect(notifs.rows[0].title).toBe('👏 Cheers!');
       expect(notifs.rows[0].message).toContain('Beta Wanderer cheered your Lingayen Capitol Walk.');
@@ -198,10 +185,10 @@ describe('Plan 41 Phase 3: Interactions, Comments, Moderation & Preferences', ()
       expect(res.body.data.cheer_count).toBe(2);
 
       // Check notification
-      const notifs = await testDb.pool.query(
-        `SELECT * FROM user_notifications WHERE user_id = $1 AND event_key = $2`,
-        [userAlpha.id, `cheer:${sampleActivityId}:${userPrivate.id}`],
-      );
+      const notifs = await testDb.pool.query(`SELECT * FROM user_notifications WHERE user_id = $1 AND event_key = $2`, [
+        userAlpha.id,
+        `cheer:${sampleActivityId}:${userPrivate.id}`,
+      ]);
       expect(notifs.rows.length).toBe(1);
       expect(notifs.rows[0].message).toContain('Someone cheered your Lingayen Capitol Walk.');
     });
@@ -341,9 +328,7 @@ describe('Plan 41 Phase 3: Interactions, Comments, Moderation & Preferences', ()
       expect(delRes.body.data.deleted).toBe(true);
 
       // Deleted comment no longer listed
-      const listRes = await request(app)
-        .get(`/api/v1/plaza/activities/${sampleActivityId}/comments`)
-        .expect(200);
+      const listRes = await request(app).get(`/api/v1/plaza/activities/${sampleActivityId}/comments`).expect(200);
 
       expect(listRes.body.data.items.some((c: any) => c.id === delId)).toBe(false);
     });
@@ -380,9 +365,7 @@ describe('Plan 41 Phase 3: Interactions, Comments, Moderation & Preferences', ()
         .expect(200);
 
       // Comment should still be visible (2 reports)
-      let list = await request(app)
-        .get(`/api/v1/plaza/activities/${sampleActivityId}/comments`)
-        .expect(200);
+      let list = await request(app).get(`/api/v1/plaza/activities/${sampleActivityId}/comments`).expect(200);
       let found = list.body.data.items.find((c: any) => c.id === reportCommentId);
       expect(found).toBeDefined();
 
@@ -394,9 +377,7 @@ describe('Plan 41 Phase 3: Interactions, Comments, Moderation & Preferences', ()
         .expect(200);
 
       // Now hidden for normal visitors
-      list = await request(app)
-        .get(`/api/v1/plaza/activities/${sampleActivityId}/comments`)
-        .expect(200);
+      list = await request(app).get(`/api/v1/plaza/activities/${sampleActivityId}/comments`).expect(200);
       found = list.body.data.items.find((c: any) => c.id === reportCommentId);
       expect(found).toBeUndefined();
 
@@ -422,9 +403,7 @@ describe('Plan 41 Phase 3: Interactions, Comments, Moderation & Preferences', ()
       expect(res.body.data.hidden).toBe(true);
 
       // Activity is now 404
-      await request(app)
-        .get(`/api/v1/plaza/activities/${sampleActivityId}`)
-        .expect(404);
+      await request(app).get(`/api/v1/plaza/activities/${sampleActivityId}`).expect(404);
     });
 
     it('admin can list reports and restore/hide comments and activities', async () => {
@@ -521,10 +500,7 @@ describe('Plan 41 Phase 3: Interactions, Comments, Moderation & Preferences', ()
       expect(regRes.body.data.registered).toBe(true);
 
       // Verify in DB
-      const devCheck = await testDb.pool.query(
-        'SELECT * FROM user_devices WHERE token = $1',
-        [tokenStr],
-      );
+      const devCheck = await testDb.pool.query('SELECT * FROM user_devices WHERE token = $1', [tokenStr]);
       expect(devCheck.rows.length).toBe(1);
       expect(devCheck.rows[0].user_id).toBe(userAlpha.id);
 
@@ -537,10 +513,7 @@ describe('Plan 41 Phase 3: Interactions, Comments, Moderation & Preferences', ()
 
       expect(delRes.body.data.removed).toBe(true);
 
-      const devCheckAfter = await testDb.pool.query(
-        'SELECT * FROM user_devices WHERE token = $1',
-        [tokenStr],
-      );
+      const devCheckAfter = await testDb.pool.query('SELECT * FROM user_devices WHERE token = $1', [tokenStr]);
       expect(devCheckAfter.rows.length).toBe(0);
     });
   });

@@ -18,7 +18,7 @@ describe('POST /api/v1/routes with via waypoints (Plan 83a)', () => {
       coordinates: [
         [16.03, 120.33],
         [16.05, 120.35],
-        [16.10, 120.40],
+        [16.1, 120.4],
       ],
       maneuvers: [],
     });
@@ -27,7 +27,7 @@ describe('POST /api/v1/routes with via waypoints (Plan 83a)', () => {
       .post('/api/v1/routes')
       .send({
         start: { lat: 16.03, lng: 120.33 },
-        end: { lat: 16.10, lng: 120.40 },
+        end: { lat: 16.1, lng: 120.4 },
         via: [{ lat: 16.05, lng: 120.35 }],
         costing: 'auto',
         avoid_congested: true,
@@ -39,8 +39,8 @@ describe('POST /api/v1/routes with via waypoints (Plan 83a)', () => {
       expect.objectContaining({
         startLat: 16.03,
         startLng: 120.33,
-        endLat: 16.10,
-        endLng: 120.40,
+        endLat: 16.1,
+        endLng: 120.4,
         costing: 'auto',
         avoidCongested: true,
         via: [{ lat: 16.05, lng: 120.35 }],

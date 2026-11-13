@@ -65,15 +65,7 @@ export function next0800ManilaUtc(now: Date): Date {
   const manilaDate = new Date(manilaTimeMs);
 
   const today08 = new Date(
-    Date.UTC(
-      manilaDate.getUTCFullYear(),
-      manilaDate.getUTCMonth(),
-      manilaDate.getUTCDate(),
-      8,
-      0,
-      0,
-      0
-    )
+    Date.UTC(manilaDate.getUTCFullYear(), manilaDate.getUTCMonth(), manilaDate.getUTCDate(), 8, 0, 0, 0),
   );
   const today08Utc = new Date(today08.getTime() - MANILA_OFFSET_MS);
 
@@ -90,15 +82,7 @@ export function manilaDayStartUtc(now: Date): Date {
   const manilaTimeMs = now.getTime() + MANILA_OFFSET_MS;
   const manilaDate = new Date(manilaTimeMs);
   const today00 = new Date(
-    Date.UTC(
-      manilaDate.getUTCFullYear(),
-      manilaDate.getUTCMonth(),
-      manilaDate.getUTCDate(),
-      0,
-      0,
-      0,
-      0
-    )
+    Date.UTC(manilaDate.getUTCFullYear(), manilaDate.getUTCMonth(), manilaDate.getUTCDate(), 0, 0, 0, 0),
   );
   return new Date(today00.getTime() - MANILA_OFFSET_MS);
 }
@@ -113,4 +97,3 @@ export function prevWeekId(now: Date): string {
 export function manilaDayOfWeek(now: Date): number {
   return new Date(now.getTime() + MANILA_OFFSET_MS).getUTCDay();
 }
-

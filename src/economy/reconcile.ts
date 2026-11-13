@@ -39,13 +39,14 @@ export interface EconomyShadowSummary {
 // Even a clean numeric comparison cannot approve a cutover automatically.
 export function summarizeEconomyReconciliation(report: EconomyReconciliation): EconomyShadowSummary {
   const legacyClassifications: EconomyShadowSummary['legacyClassifications'] = {
-    exact: 0, fractional_remainder: 0, missing_snapshot: 0,
-    invalid_snapshot: 0, mismatch: 0,
+    exact: 0,
+    fractional_remainder: 0,
+    missing_snapshot: 0,
+    invalid_snapshot: 0,
+    mismatch: 0,
   };
   for (const finding of report.legacy) legacyClassifications[finding.classification]++;
-  const legacyNet = report.unbalancedLegacyGroups.reduce(
-    (sum, group) => sum + BigInt(group.netMjdq), 0n
-  );
+  const legacyNet = report.unbalancedLegacyGroups.reduce((sum, group) => sum + BigInt(group.netMjdq), 0n);
   const canonical = {
     legacy: [...report.legacy].sort((a, b) => a.userId.localeCompare(b.userId)),
     unbalancedLegacyGroups: [...report.unbalancedLegacyGroups].sort((a, b) => a.groupId.localeCompare(b.groupId)),
@@ -85,13 +86,17 @@ export async function reconcileEconomy(pool: Pool): Promise<EconomyReconciliatio
     users = isPgMem
       ? await client.query('SELECT id, demo_points FROM users ORDER BY id')
       : await client.query(
-        `SELECT u.id, u.demo_points, gs.data -> 'balances' ->> u.id AS snapshot_mjdq
-         FROM users u LEFT JOIN governance_snapshot gs ON gs.id = 1 ORDER BY u.id`
-      );
+          `SELECT u.id, u.demo_points, gs.data -> 'balances' ->> u.id AS snapshot_mjdq
+         FROM users u LEFT JOIN governance_snapshot gs ON gs.id = 1 ORDER BY u.id`,
+        );
     snapshot = isPgMem ? await client.query('SELECT data FROM governance_snapshot WHERE id = 1') : null;
     ledger = await client.query('SELECT transaction_group_id, amount_mjdq FROM governance_ledger');
-    accounts = await client.query("SELECT id, balance_minor FROM economic_accounts WHERE asset_code = 'EXPLORER_COIN_SIM'");
-    transfers = await client.query("SELECT from_account_id, to_account_id, amount_minor FROM economic_transfers WHERE asset_code = 'EXPLORER_COIN_SIM'");
+    accounts = await client.query(
+      "SELECT id, balance_minor FROM economic_accounts WHERE asset_code = 'EXPLORER_COIN_SIM'",
+    );
+    transfers = await client.query(
+      "SELECT from_account_id, to_account_id, amount_minor FROM economic_transfers WHERE asset_code = 'EXPLORER_COIN_SIM'",
+    );
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -104,20 +109,39 @@ export async function reconcileEconomy(pool: Pool): Promise<EconomyReconciliatio
     const points = BigInt(String(row.demo_points));
     const raw = snapshot ? snapshot.rows[0]?.data?.balances?.[row.id] : row.snapshot_mjdq;
     if (raw === undefined || raw === null) {
-      return { userId: String(row.id), demoPoints: points.toString(), snapshotMjdq: null,
-        classification: 'missing_snapshot' as const, differenceMjdq: null };
+      return {
+        userId: String(row.id),
+        demoPoints: points.toString(),
+        snapshotMjdq: null,
+        classification: 'missing_snapshot' as const,
+        differenceMjdq: null,
+      };
     }
     if (!/^(0|[1-9][0-9]*)$/.test(String(raw))) {
-      return { userId: String(row.id), demoPoints: points.toString(), snapshotMjdq: String(raw),
-        classification: 'invalid_snapshot' as const, differenceMjdq: null };
+      return {
+        userId: String(row.id),
+        demoPoints: points.toString(),
+        snapshotMjdq: String(raw),
+        classification: 'invalid_snapshot' as const,
+        differenceMjdq: null,
+      };
     }
     const mjdq = BigInt(String(raw));
     const expected = points * LEGACY_SCALE;
     const difference = mjdq - expected;
-    const classification = difference === 0n ? 'exact' as const :
-      difference > 0n && difference < LEGACY_SCALE ? 'fractional_remainder' as const : 'mismatch' as const;
-    return { userId: String(row.id), demoPoints: points.toString(),
-      snapshotMjdq: mjdq.toString(), classification, differenceMjdq: difference.toString() };
+    const classification =
+      difference === 0n
+        ? ('exact' as const)
+        : difference > 0n && difference < LEGACY_SCALE
+          ? ('fractional_remainder' as const)
+          : ('mismatch' as const);
+    return {
+      userId: String(row.id),
+      demoPoints: points.toString(),
+      snapshotMjdq: mjdq.toString(),
+      classification,
+      differenceMjdq: difference.toString(),
+    };
   });
 
   const groups = new Map<string, bigint>();
@@ -142,8 +166,9 @@ export async function reconcileEconomy(pool: Pool): Promise<EconomyReconciliatio
     const accountId = String(row.id);
     const stored = BigInt(String(row.balance_minor));
     const reconstructed = derived.get(accountId) ?? 0n;
-    return stored === reconstructed ? [] : [{ accountId, storedMinor: stored.toString(),
-      transferDerivedMinor: reconstructed.toString() }];
+    return stored === reconstructed
+      ? []
+      : [{ accountId, storedMinor: stored.toString(), transferDerivedMinor: reconstructed.toString() }];
   });
   return { legacy, unbalancedLegacyGroups, pilotAccountDrift };
 }

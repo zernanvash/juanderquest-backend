@@ -1,9 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { buildDisposableWalletReaderIdentities } from '../scripts/juanchoice-capacity-reader-identities.js';
-import {
-  seedDisposableWalletReaderFixture,
-  type SqlQueryable,
-} from '../scripts/juanchoice-capacity-reader-fixture.js';
+import { seedDisposableWalletReaderFixture, type SqlQueryable } from '../scripts/juanchoice-capacity-reader-fixture.js';
 
 interface RecordedQuery {
   text: string;
@@ -114,9 +111,9 @@ describe('Disposable wallet reader fixture helper', () => {
       stub.failAtIndex = 4;
       stub.failureError = new Error('simulated connection closed');
 
-      await expect(
-        seedDisposableWalletReaderFixture(stub, identities, testSecret)
-      ).rejects.toThrow('Failed to insert disposable wallet reader at index 4');
+      await expect(seedDisposableWalletReaderFixture(stub, identities, testSecret)).rejects.toThrow(
+        'Failed to insert disposable wallet reader at index 4',
+      );
 
       // Stopped at failure point
       expect(stub.queries).toHaveLength(4);
@@ -147,7 +144,7 @@ describe('Disposable wallet reader fixture helper', () => {
       const stub = new RecordingQueryStub();
       stub.failAtIndex = 1;
       stub.failureError = new Error(
-        `FATAL pg driver error: duplicate key violates constraint with email=${target.email}, seed=${target.seed}, id=${target.id}, secret=${testSecret}`
+        `FATAL pg driver error: duplicate key violates constraint with email=${target.email}, seed=${target.seed}, id=${target.id}, secret=${testSecret}`,
       );
 
       try {
@@ -167,19 +164,19 @@ describe('Disposable wallet reader fixture helper', () => {
     it('rejects invalid pool / query interface', async () => {
       const identities = buildDisposableWalletReaderIdentities(1);
       await expect(
-        seedDisposableWalletReaderFixture(null as unknown as SqlQueryable, identities, testSecret)
+        seedDisposableWalletReaderFixture(null as unknown as SqlQueryable, identities, testSecret),
       ).rejects.toThrow('A valid disposable query interface must be provided');
 
       await expect(
-        seedDisposableWalletReaderFixture({} as unknown as SqlQueryable, identities, testSecret)
+        seedDisposableWalletReaderFixture({} as unknown as SqlQueryable, identities, testSecret),
       ).rejects.toThrow('A valid disposable query interface must be provided');
     });
 
     it('rejects empty or out-of-bounds identities', async () => {
       const stub = new RecordingQueryStub();
-      await expect(
-        seedDisposableWalletReaderFixture(stub, [], testSecret)
-      ).rejects.toThrow('identities must contain between 1 and 100 records');
+      await expect(seedDisposableWalletReaderFixture(stub, [], testSecret)).rejects.toThrow(
+        'identities must contain between 1 and 100 records',
+      );
 
       const overLimit = Array.from({ length: 101 }, (_, i) => ({
         id: `id-${i}`,
@@ -187,22 +184,22 @@ describe('Disposable wallet reader fixture helper', () => {
         email: `id-${i}@example.test`,
         displayName: `Reader ${i}`,
       }));
-      await expect(
-        seedDisposableWalletReaderFixture(stub, overLimit, testSecret)
-      ).rejects.toThrow('identities must contain between 1 and 100 records');
+      await expect(seedDisposableWalletReaderFixture(stub, overLimit, testSecret)).rejects.toThrow(
+        'identities must contain between 1 and 100 records',
+      );
     });
 
     it('rejects empty or invalid JWT secret', async () => {
       const stub = new RecordingQueryStub();
       const identities = buildDisposableWalletReaderIdentities(1);
 
-      await expect(
-        seedDisposableWalletReaderFixture(stub, identities, '')
-      ).rejects.toThrow('testJwtSecret must be a non-empty string');
+      await expect(seedDisposableWalletReaderFixture(stub, identities, '')).rejects.toThrow(
+        'testJwtSecret must be a non-empty string',
+      );
 
-      await expect(
-        seedDisposableWalletReaderFixture(stub, identities, '   ')
-      ).rejects.toThrow('testJwtSecret must be a non-empty string');
+      await expect(seedDisposableWalletReaderFixture(stub, identities, '   ')).rejects.toThrow(
+        'testJwtSecret must be a non-empty string',
+      );
     });
   });
 

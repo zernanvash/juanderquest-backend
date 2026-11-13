@@ -1,12 +1,7 @@
-import {
-  buildReaderAuthHeaders,
-  type ReaderAuthHeaders,
-} from '../scripts/juanchoice-capacity-reader-headers.js';
+import { buildReaderAuthHeaders, type ReaderAuthHeaders } from '../scripts/juanchoice-capacity-reader-headers.js';
 
 describe('juanchoice-capacity-reader-headers', () => {
-  const dummyTokens100 = Object.freeze(
-    Array.from({ length: 100 }, (_, idx) => `test-token-${idx}-${'x'.repeat(20)}`)
-  );
+  const dummyTokens100 = Object.freeze(Array.from({ length: 100 }, (_, idx) => `test-token-${idx}-${'x'.repeat(20)}`));
 
   describe('guest mode', () => {
     it('returns empty headers object regardless of tokens or index', () => {
@@ -42,64 +37,48 @@ describe('juanchoice-capacity-reader-headers', () => {
 
     it('throws on wrong token count', () => {
       const tokens99 = dummyTokens100.slice(0, 99);
-      expect(() => buildReaderAuthHeaders('wallet_alpha', 0, tokens99, 100)).toThrow(
-        'INVALID_READER_TOKENS_COUNT'
-      );
+      expect(() => buildReaderAuthHeaders('wallet_alpha', 0, tokens99, 100)).toThrow('INVALID_READER_TOKENS_COUNT');
 
       const tokens101 = [...dummyTokens100, 'extra-token'];
-      expect(() => buildReaderAuthHeaders('wallet_alpha', 0, tokens101, 100)).toThrow(
-        'INVALID_READER_TOKENS_COUNT'
-      );
+      expect(() => buildReaderAuthHeaders('wallet_alpha', 0, tokens101, 100)).toThrow('INVALID_READER_TOKENS_COUNT');
 
       expect(() => buildReaderAuthHeaders('wallet_alpha', 0, [] as unknown as string[], 100)).toThrow(
-        'INVALID_READER_TOKENS_COUNT'
+        'INVALID_READER_TOKENS_COUNT',
       );
     });
 
     it('throws on wrong expectedReaderCount', () => {
       expect(() => buildReaderAuthHeaders('wallet_alpha', 0, dummyTokens100, 50)).toThrow(
-        'INVALID_EXPECTED_READER_COUNT'
+        'INVALID_EXPECTED_READER_COUNT',
       );
       expect(() => buildReaderAuthHeaders('wallet_alpha', 0, dummyTokens100, 101)).toThrow(
-        'INVALID_EXPECTED_READER_COUNT'
+        'INVALID_EXPECTED_READER_COUNT',
       );
     });
 
     it('throws on out-of-range or non-integer reader indices', () => {
-      expect(() => buildReaderAuthHeaders('wallet_alpha', -1, dummyTokens100, 100)).toThrow(
-        'INVALID_READER_INDEX'
-      );
-      expect(() => buildReaderAuthHeaders('wallet_alpha', 100, dummyTokens100, 100)).toThrow(
-        'INVALID_READER_INDEX'
-      );
-      expect(() => buildReaderAuthHeaders('wallet_alpha', 105, dummyTokens100, 100)).toThrow(
-        'INVALID_READER_INDEX'
-      );
-      expect(() => buildReaderAuthHeaders('wallet_alpha', 0.5, dummyTokens100, 100)).toThrow(
-        'INVALID_READER_INDEX'
-      );
-      expect(() => buildReaderAuthHeaders('wallet_alpha', NaN, dummyTokens100, 100)).toThrow(
-        'INVALID_READER_INDEX'
-      );
+      expect(() => buildReaderAuthHeaders('wallet_alpha', -1, dummyTokens100, 100)).toThrow('INVALID_READER_INDEX');
+      expect(() => buildReaderAuthHeaders('wallet_alpha', 100, dummyTokens100, 100)).toThrow('INVALID_READER_INDEX');
+      expect(() => buildReaderAuthHeaders('wallet_alpha', 105, dummyTokens100, 100)).toThrow('INVALID_READER_INDEX');
+      expect(() => buildReaderAuthHeaders('wallet_alpha', 0.5, dummyTokens100, 100)).toThrow('INVALID_READER_INDEX');
+      expect(() => buildReaderAuthHeaders('wallet_alpha', NaN, dummyTokens100, 100)).toThrow('INVALID_READER_INDEX');
     });
 
     it('throws on missing, empty, or whitespace-only token at the requested index', () => {
       const tokensWithEmpty = [...dummyTokens100];
       tokensWithEmpty[5] = '';
-      expect(() => buildReaderAuthHeaders('wallet_alpha', 5, tokensWithEmpty, 100)).toThrow(
-        'INVALID_READER_TOKEN'
-      );
+      expect(() => buildReaderAuthHeaders('wallet_alpha', 5, tokensWithEmpty, 100)).toThrow('INVALID_READER_TOKEN');
 
       const tokensWithWhitespace = [...dummyTokens100];
       tokensWithWhitespace[12] = '   ';
       expect(() => buildReaderAuthHeaders('wallet_alpha', 12, tokensWithWhitespace, 100)).toThrow(
-        'INVALID_READER_TOKEN'
+        'INVALID_READER_TOKEN',
       );
 
       const tokensWithUndefined = [...dummyTokens100];
       (tokensWithUndefined as unknown as (string | undefined)[])[20] = undefined;
       expect(() => buildReaderAuthHeaders('wallet_alpha', 20, tokensWithUndefined as unknown as string[], 100)).toThrow(
-        'INVALID_READER_TOKEN'
+        'INVALID_READER_TOKEN',
       );
     });
 
@@ -118,9 +97,9 @@ describe('juanchoice-capacity-reader-headers', () => {
     });
 
     it('throws on unrecognized ReaderAuthMode', () => {
-      expect(() =>
-        buildReaderAuthHeaders('unsupported_mode' as unknown as 'guest', 0, dummyTokens100, 100)
-      ).toThrow('INVALID_READER_AUTH_MODE');
+      expect(() => buildReaderAuthHeaders('unsupported_mode' as unknown as 'guest', 0, dummyTokens100, 100)).toThrow(
+        'INVALID_READER_AUTH_MODE',
+      );
     });
   });
 });

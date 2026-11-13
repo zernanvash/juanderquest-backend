@@ -33,12 +33,12 @@ notificationsRouter.get(
           `SELECT n.id, n.kind, n.title, n.message, n.href, n.created_at, n.read_at
              FROM user_notifications n JOIN users u ON u.id = n.user_id AND u.is_test = n.is_test
             WHERE n.user_id = $1 ORDER BY n.created_at DESC, n.id DESC LIMIT $2`,
-          [req.user!.id, req.query.limit]
+          [req.user!.id, req.query.limit],
         ),
         pool.query(
           `SELECT COUNT(*)::int AS count FROM user_notifications n JOIN users u ON u.id = n.user_id AND u.is_test = n.is_test
             WHERE n.user_id = $1 AND n.read_at IS NULL`,
-          [req.user!.id]
+          [req.user!.id],
         ),
       ]);
       res.setHeader('Cache-Control', 'private, no-store');
@@ -56,7 +56,7 @@ notificationsRouter.get(
         error: { code: 'NOTIFICATIONS_UNAVAILABLE', message: 'Notifications are temporarily unavailable.' },
       });
     }
-  }
+  },
 );
 
 const markSchema = z.object({ params: z.object({ id: z.string().uuid() }) });
@@ -73,10 +73,12 @@ notificationsRouter.patch(
         `UPDATE user_notifications n SET read_at = COALESCE(n.read_at, NOW())
           FROM users u WHERE n.id = $1 AND n.user_id = $2 AND u.id = n.user_id AND u.is_test = n.is_test
           RETURNING n.id, n.read_at`,
-        [req.params.id, req.user!.id]
+        [req.params.id, req.user!.id],
       );
       if (!updated.rows[0]) {
-        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Notification not found.' } });
+        return res
+          .status(404)
+          .json({ success: false, error: { code: 'NOT_FOUND', message: 'Notification not found.' } });
       }
       res.setHeader('Cache-Control', 'private, no-store');
       return res.json({ success: true, data: { id: updated.rows[0].id, read_at: updated.rows[0].read_at } });
@@ -87,7 +89,7 @@ notificationsRouter.patch(
         error: { code: 'NOTIFICATIONS_UNAVAILABLE', message: 'Notifications are temporarily unavailable.' },
       });
     }
-  }
+  },
 );
 
 notificationsRouter.post(
@@ -101,7 +103,7 @@ notificationsRouter.post(
       const updated = await pool.query(
         `UPDATE user_notifications n SET read_at = NOW()
           FROM users u WHERE n.user_id = $1 AND n.read_at IS NULL AND u.id = n.user_id AND u.is_test = n.is_test`,
-        [req.user!.id]
+        [req.user!.id],
       );
       res.setHeader('Cache-Control', 'private, no-store');
       return res.json({ success: true, data: { marked_read: updated.rowCount ?? 0 } });
@@ -112,5 +114,5 @@ notificationsRouter.post(
         error: { code: 'NOTIFICATIONS_UNAVAILABLE', message: 'Notifications are temporarily unavailable.' },
       });
     }
-  }
+  },
 );

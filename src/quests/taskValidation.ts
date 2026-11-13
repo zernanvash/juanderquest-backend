@@ -9,8 +9,16 @@ export const PHILIPPINES_BOUNDS = {
 };
 
 export const geoFenceSchema = z.object({
-  lat: z.number().finite().min(PHILIPPINES_BOUNDS.minLat, 'Latitude must be within the Philippines').max(PHILIPPINES_BOUNDS.maxLat, 'Latitude must be within the Philippines'),
-  lng: z.number().finite().min(PHILIPPINES_BOUNDS.minLng, 'Longitude must be within the Philippines').max(PHILIPPINES_BOUNDS.maxLng, 'Longitude must be within the Philippines'),
+  lat: z
+    .number()
+    .finite()
+    .min(PHILIPPINES_BOUNDS.minLat, 'Latitude must be within the Philippines')
+    .max(PHILIPPINES_BOUNDS.maxLat, 'Latitude must be within the Philippines'),
+  lng: z
+    .number()
+    .finite()
+    .min(PHILIPPINES_BOUNDS.minLng, 'Longitude must be within the Philippines')
+    .max(PHILIPPINES_BOUNDS.maxLng, 'Longitude must be within the Philippines'),
   radius_meters: z.number().int().min(30).max(500).default(100),
 });
 
@@ -99,11 +107,12 @@ export function validateTasksWithinDistance(
   tasks: any[],
   destinationLat: number,
   destinationLng: number,
-  maxDistanceKm: number = 5
+  maxDistanceKm: number = 5,
 ): { valid: boolean; error?: string; taskIndex?: number } {
   for (let i = 0; i < tasks.length; i++) {
     const t = tasks[i];
-    const fence = t.verification?.fence || (t.gps_lat != null && t.gps_lng != null ? { lat: t.gps_lat, lng: t.gps_lng } : null);
+    const fence =
+      t.verification?.fence || (t.gps_lat != null && t.gps_lng != null ? { lat: t.gps_lat, lng: t.gps_lng } : null);
     if (fence && typeof fence.lat === 'number' && typeof fence.lng === 'number') {
       const check = withinRadius(fence.lat, fence.lng, destinationLat, destinationLng, maxDistanceKm * 1000, 0);
       if (!check.ok) {

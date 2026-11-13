@@ -9,18 +9,9 @@ describe('Merchant Affiliation Lifecycle & Dashboard Workspace (Phase 1)', () =>
   const adminId = '22222222-2222-2222-2222-222222222222';
   const strangerId = '99999999-9999-9999-9999-999999999999';
 
-  const applicantToken = jwt.sign(
-    { id: applicantId, seed_id: 'merchant-test-owner', role: 'user' },
-    env.JWT_SECRET
-  );
-  const adminToken = jwt.sign(
-    { id: adminId, seed_id: 'admin-reviewer', role: 'admin' },
-    env.JWT_SECRET
-  );
-  const strangerToken = jwt.sign(
-    { id: strangerId, seed_id: 'stranger-user', role: 'user' },
-    env.JWT_SECRET
-  );
+  const applicantToken = jwt.sign({ id: applicantId, seed_id: 'merchant-test-owner', role: 'user' }, env.JWT_SECRET);
+  const adminToken = jwt.sign({ id: adminId, seed_id: 'admin-reviewer', role: 'admin' }, env.JWT_SECRET);
+  const strangerToken = jwt.sign({ id: strangerId, seed_id: 'stranger-user', role: 'user' }, env.JWT_SECRET);
 
   beforeAll(() => {
     db.users.push({
@@ -142,7 +133,9 @@ describe('Merchant Affiliation Lifecycle & Dashboard Workspace (Phase 1)', () =>
 
     expect(patchRes.status).toBe(200);
     expect(patchRes.body.data.status).toBe('needs_changes');
-    expect(patchRes.body.data.applicant_feedback).toBe('Please clarify your wharf stall number so inspectors can locate your shop.');
+    expect(patchRes.body.data.applicant_feedback).toBe(
+      'Please clarify your wharf stall number so inspectors can locate your shop.',
+    );
 
     // Verify detail endpoint audit history
     const detailRes = await request(app)
@@ -169,9 +162,7 @@ describe('Merchant Affiliation Lifecycle & Dashboard Workspace (Phase 1)', () =>
 
   test('6. Admin atomic approval & automatic merchant provisioning', async () => {
     // Before approval: Applicant has no merchant workspace
-    const meBefore = await request(app)
-      .get('/api/v1/merchant/me')
-      .set('Authorization', `Bearer ${applicantToken}`);
+    const meBefore = await request(app).get('/api/v1/merchant/me').set('Authorization', `Bearer ${applicantToken}`);
     expect(meBefore.body.data.has_merchant).toBe(false);
 
     // Admin approves
@@ -186,9 +177,7 @@ describe('Merchant Affiliation Lifecycle & Dashboard Workspace (Phase 1)', () =>
     expect(approveRes.body.data.status).toBe('approved');
 
     // After approval: Applicant has active merchant workspace
-    const meAfter = await request(app)
-      .get('/api/v1/merchant/me')
-      .set('Authorization', `Bearer ${applicantToken}`);
+    const meAfter = await request(app).get('/api/v1/merchant/me').set('Authorization', `Bearer ${applicantToken}`);
     expect(meAfter.body.data.has_merchant).toBe(true);
     expect(meAfter.body.data.membership.role).toBe('owner');
     expect(meAfter.body.data.merchant.name).toBe('Alaminos Island Sweets Hub');
@@ -217,7 +206,7 @@ describe('Merchant Affiliation Lifecycle & Dashboard Workspace (Phase 1)', () =>
       .send({
         name: 'Handcrafted Bocayo (Coconut Candy Tub)',
         description: 'Made from fresh Alaminos coastal coconuts and pure muscovado sugar.',
-        price: 150.00,
+        price: 150.0,
         currency: 'PHP',
       });
     expect(prodRes.status).toBe(201);

@@ -109,8 +109,10 @@ describe('Phase 1: Durable Identity Lifecycle & Persistent Accounts', () => {
 
       const demoId = '11111111-1111-1111-1111-111111111111';
       await usersRepo.findOrCreateBySeedId({
-        id: demoId, seed_id: 'unseeded-demo-user',
-        display_name: 'Durable Demo Traveler', email: 'durable-demo@example.test',
+        id: demoId,
+        seed_id: 'unseeded-demo-user',
+        display_name: 'Durable Demo Traveler',
+        email: 'durable-demo@example.test',
         role: 'user',
       });
       const durable = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'unseeded-demo-user' });
@@ -124,9 +126,7 @@ describe('Phase 1: Durable Identity Lifecycle & Persistent Accounts', () => {
 
   it('returns 401 and clears the cookie when a valid session subject no longer exists', async () => {
     const token = jwt.sign({ id: 'deleted-traveler-1', seed_id: 'guest:deleted', role: 'user' }, env.JWT_SECRET);
-    const response = await request(app)
-      .get('/api/v1/auth/me')
-      .set('Cookie', `jdq_session=${token}`);
+    const response = await request(app).get('/api/v1/auth/me').set('Cookie', `jdq_session=${token}`);
 
     expect(response.status).toBe(401);
     expect(response.body.error.code).toBe('UNAUTHORIZED');
@@ -147,7 +147,7 @@ describe('Phase 1: Durable Identity Lifecycle & Persistent Accounts', () => {
         seed_id: 'wallet:0xfailed',
         display_name: 'Failing Traveler',
         email: 'failed@test.com',
-      })
+      }),
     ).rejects.toThrow('Connection lost to PostgreSQL');
   });
 
@@ -163,12 +163,20 @@ describe('Phase 1: Durable Identity Lifecycle & Persistent Accounts', () => {
     const req: any = { user: { id: 'admin-1', role: 'admin' } };
     const res: any = {
       statusCode: 200,
-      status(code: number) { this.statusCode = code; return this; },
-      json(payload: any) { this.body = payload; return this; },
+      status(code: number) {
+        this.statusCode = code;
+        return this;
+      },
+      json(payload: any) {
+        this.body = payload;
+        return this;
+      },
     };
     let nextCalled = false;
 
-    await requireAdmin(req, res, () => { nextCalled = true; });
+    await requireAdmin(req, res, () => {
+      nextCalled = true;
+    });
 
     expect(nextCalled).toBe(false);
     expect(res.statusCode).toBe(503);
@@ -189,12 +197,20 @@ describe('Phase 1: Durable Identity Lifecycle & Persistent Accounts', () => {
     const req: any = { user: { id: 'deleted-admin', role: 'admin' } };
     const res: any = {
       statusCode: 200,
-      status(code: number) { this.statusCode = code; return this; },
-      json(payload: any) { this.body = payload; return this; },
+      status(code: number) {
+        this.statusCode = code;
+        return this;
+      },
+      json(payload: any) {
+        this.body = payload;
+        return this;
+      },
     };
     let nextCalled = false;
 
-    await requireAdmin(req, res, () => { nextCalled = true; });
+    await requireAdmin(req, res, () => {
+      nextCalled = true;
+    });
 
     expect(nextCalled).toBe(false);
     expect(res.statusCode).toBe(403);
@@ -220,13 +236,21 @@ describe('Phase 1: Durable Identity Lifecycle & Persistent Accounts', () => {
     };
     const res: any = {
       statusCode: 200,
-      status(code: number) { this.statusCode = code; return this; },
-      json(payload: any) { this.body = payload; return this; },
+      status(code: number) {
+        this.statusCode = code;
+        return this;
+      },
+      json(payload: any) {
+        this.body = payload;
+        return this;
+      },
     };
     let nextCalled = false;
 
     res.setHeader = jest.fn();
-    await checkQAAuthorization(req, res, () => { nextCalled = true; });
+    await checkQAAuthorization(req, res, () => {
+      nextCalled = true;
+    });
 
     expect(nextCalled).toBe(false);
     expect(res.statusCode).toBe(503);

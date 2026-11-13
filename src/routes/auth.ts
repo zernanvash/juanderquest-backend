@@ -3,7 +3,12 @@ import { z } from 'zod';
 import { db } from '../db/index.js';
 import { env } from '../config/env.js';
 import { validateRequest } from '../middleware/validate.js';
-import { authenticateToken, optionalAuthenticateToken, AuthRequest, invalidateSessionScopeCache } from '../middleware/auth.js';
+import {
+  authenticateToken,
+  optionalAuthenticateToken,
+  AuthRequest,
+  invalidateSessionScopeCache,
+} from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { randomUUID } from 'crypto';
 import { getAddress, verifyMessage } from 'ethers';
@@ -46,9 +51,7 @@ const findWalletUser = async (address: string): Promise<UserRecord | undefined> 
   }
 
   // 2. Check if an account already exists with seedId
-  const existingBySeed = db.usersRepo.getPool()
-    ? await db.findUserBySeedDurable(seedId)
-    : db.findUserBySeed(seedId);
+  const existingBySeed = db.usersRepo.getPool() ? await db.findUserBySeedDurable(seedId) : db.findUserBySeed(seedId);
 
   if (existingBySeed && !existingBySeed.wallet_address) {
     return await db.bindWalletAddress(existingBySeed.id, address);
@@ -83,14 +86,26 @@ const WALLET_ONBOARDING_TTL_SECONDS = 15 * 60;
  * email and password (or Google). A new wallet, or a legacy wallet-only record,
  * gets a short grant to finish the account with email + password first.
  */
-const walletSignIn = async (res: Response, address: string, rememberMe: boolean, extra: Record<string, unknown> = {}) => {
+const walletSignIn = async (
+  res: Response,
+  address: string,
+  rememberMe: boolean,
+  extra: Record<string, unknown> = {},
+) => {
   const user = await findWalletUser(address);
-  if (user && await db.identityService.hasCompletedCredentials(user.id, user.email)) {
+  if (user && (await db.identityService.hasCompletedCredentials(user.id, user.email))) {
     const token = issueToken(user, rememberMe);
     setSessionCookie(res, token, rememberMe);
     return res.status(200).json({
       success: true,
-      data: { status: 'authenticated', account_completion_required: false, token, user, wallet_address: address, ...extra },
+      data: {
+        status: 'authenticated',
+        account_completion_required: false,
+        token,
+        user,
+        wallet_address: address,
+        ...extra,
+      },
     });
   }
   const grant = randomUUID();
@@ -117,15 +132,17 @@ const walletSignIn = async (res: Response, address: string, rememberMe: boolean,
   });
 };
 
-router.get('/auth/wallet/config', (_req, res) => res.status(200).json({
-  success: true,
-  data: {
-    mode: env.WALLET_AUTH_MODE,
-    guest_login_enabled: env.GUEST_LOGIN_ENABLED,
-    google_client_id: env.GOOGLE_CLIENT_ID || null,
-    google_dev_credentials: devGoogleCredentialsEnabled(),
-  },
-}));
+router.get('/auth/wallet/config', (_req, res) =>
+  res.status(200).json({
+    success: true,
+    data: {
+      mode: env.WALLET_AUTH_MODE,
+      guest_login_enabled: env.GUEST_LOGIN_ENABLED,
+      google_client_id: env.GOOGLE_CLIENT_ID || null,
+      google_dev_credentials: devGoogleCredentialsEnabled(),
+    },
+  }),
+);
 
 // The email budget for the day is used up (see AuthMailerService.checkSendAllowance). This says
 // nothing about any account, so every route may answer it the same way.
@@ -133,7 +150,10 @@ const mailUnavailable = (res: Response, retryAfterSeconds: number) => {
   res.setHeader('Retry-After', String(retryAfterSeconds));
   return res.status(503).json({
     success: false,
-    error: { code: 'EMAIL_TEMPORARILY_UNAVAILABLE', message: 'We cannot send email codes right now. Please try again later.' },
+    error: {
+      code: 'EMAIL_TEMPORARILY_UNAVAILABLE',
+      message: 'We cannot send email codes right now. Please try again later.',
+    },
   });
 };
 
@@ -169,13 +189,17 @@ router.post(
       if (existingIdentity) {
         return res.status(409).json({
           success: false,
-          error: { code: 'EMAIL_ALREADY_EXISTS', message: 'An account with this email address already exists. Please sign in.' },
+          error: {
+            code: 'EMAIL_ALREADY_EXISTS',
+            message: 'An account with this email address already exists. Please sign in.',
+          },
         });
       }
 
       // Check the email budget before creating anything, so a refused sign-up can simply be retried.
       const allowance = await db.mailerService.checkSendAllowance(normalizedEmail);
-      if (!allowance.allowed && allowance.reason === 'DAILY_CAP') return mailUnavailable(res, allowance.retryAfterSeconds);
+      if (!allowance.allowed && allowance.reason === 'DAILY_CAP')
+        return mailUnavailable(res, allowance.retryAfterSeconds);
 
       // 2. Create the user record
       const seedId = `usr-${randomUUID().slice(0, 12)}`;
@@ -228,7 +252,7 @@ router.post(
         error: { code: 'STORAGE_UNAVAILABLE', message: 'Failed to process registration. Please try again.' },
       });
     }
-  }
+  },
 );
 
 router.post(
@@ -241,7 +265,7 @@ router.post(
         code: z.string().trim().length(6),
         remember_me: z.boolean().optional(),
       }),
-    })
+    }),
   ),
   async (req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');
@@ -266,10 +290,14 @@ router.post(
 
       const identity = await db.identityService.findIdentity('email', normalizedEmail);
       if (!identity) {
-        return res.status(404).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'User identity not found.' } });
+        return res
+          .status(404)
+          .json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'User identity not found.' } });
       }
 
-      const user = db.usersRepo.getPool() ? await db.usersRepo.findById(identity.user_id) : db.findUserById(identity.user_id);
+      const user = db.usersRepo.getPool()
+        ? await db.usersRepo.findById(identity.user_id)
+        : db.findUserById(identity.user_id);
       if (!user) {
         return res.status(404).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'User not found.' } });
       }
@@ -284,9 +312,11 @@ router.post(
       });
     } catch (err) {
       console.error('[auth] email verify error:', err);
-      return res.status(503).json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Verification unavailable.' } });
+      return res
+        .status(503)
+        .json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Verification unavailable.' } });
     }
-  }
+  },
 );
 
 router.post(
@@ -301,7 +331,8 @@ router.post(
     try {
       // Checked before the account lookup and before a new code replaces the current one.
       const allowance = await db.mailerService.checkSendAllowance(normalizedEmail);
-      if (!allowance.allowed && allowance.reason === 'DAILY_CAP') return mailUnavailable(res, allowance.retryAfterSeconds);
+      if (!allowance.allowed && allowance.reason === 'DAILY_CAP')
+        return mailUnavailable(res, allowance.retryAfterSeconds);
       const identity = allowance.allowed ? await db.identityService.findIdentity('email', normalizedEmail) : null;
       if (!identity) {
         // Uniform response to prevent enumeration (also when this address was sent a code moments ago)
@@ -334,9 +365,11 @@ router.post(
       });
     } catch (err) {
       console.error('[auth] resend error:', err);
-      return res.status(503).json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Resend service unavailable.' } });
+      return res
+        .status(503)
+        .json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Resend service unavailable.' } });
     }
-  }
+  },
 );
 
 router.post(
@@ -349,7 +382,7 @@ router.post(
         password: z.string().min(1),
         remember_me: z.boolean().optional(),
       }),
-    })
+    }),
   ),
   async (req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');
@@ -382,10 +415,14 @@ router.post(
         });
       }
 
-      const user = db.usersRepo.getPool() ? await db.usersRepo.findById(identity.user_id) : db.findUserById(identity.user_id);
+      const user = db.usersRepo.getPool()
+        ? await db.usersRepo.findById(identity.user_id)
+        : db.findUserById(identity.user_id);
       if (!user) {
         accountLoginThrottle.recordFailure(normalizedEmail);
-        return res.status(401).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'Account no longer exists.' } });
+        return res
+          .status(401)
+          .json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'Account no longer exists.' } });
       }
 
       accountLoginThrottle.recordSuccess(normalizedEmail);
@@ -400,9 +437,11 @@ router.post(
       });
     } catch (err) {
       console.error('[auth] email login error:', err);
-      return res.status(503).json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Login service unavailable.' } });
+      return res
+        .status(503)
+        .json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Login service unavailable.' } });
     }
-  }
+  },
 );
 
 router.post(
@@ -417,7 +456,8 @@ router.post(
     try {
       // Checked before the account lookup and before a new code replaces the current one.
       const allowance = await db.mailerService.checkSendAllowance(normalizedEmail);
-      if (!allowance.allowed && allowance.reason === 'DAILY_CAP') return mailUnavailable(res, allowance.retryAfterSeconds);
+      if (!allowance.allowed && allowance.reason === 'DAILY_CAP')
+        return mailUnavailable(res, allowance.retryAfterSeconds);
       const identity = allowance.allowed ? await db.identityService.findIdentity('email', normalizedEmail) : null;
       if (identity) {
         const challenge = await db.challengeService.createChallenge({
@@ -450,9 +490,11 @@ router.post(
       });
     } catch (err) {
       console.error('[auth] forgot password error:', err);
-      return res.status(503).json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Password recovery unavailable.' } });
+      return res
+        .status(503)
+        .json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Password recovery unavailable.' } });
     }
-  }
+  },
 );
 
 router.post(
@@ -464,7 +506,7 @@ router.post(
         email: z.string().email(),
         code: z.string().trim().length(6),
       }),
-    })
+    }),
   ),
   async (req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');
@@ -501,9 +543,11 @@ router.post(
       });
     } catch (err) {
       console.error('[auth] verify code error:', err);
-      return res.status(503).json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Verification unavailable.' } });
+      return res
+        .status(503)
+        .json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Verification unavailable.' } });
     }
-  }
+  },
 );
 
 router.post(
@@ -515,7 +559,7 @@ router.post(
         reset_grant: z.string().uuid(),
         new_password: z.string().min(8).max(100),
       }),
-    })
+    }),
   ),
   async (req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');
@@ -545,9 +589,11 @@ router.post(
       });
     } catch (err) {
       console.error('[auth] password reset error:', err);
-      return res.status(503).json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Password reset unavailable.' } });
+      return res
+        .status(503)
+        .json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Password reset unavailable.' } });
     }
-  }
+  },
 );
 
 router.post(
@@ -562,7 +608,7 @@ router.post(
         age_eligibility_declared: z.boolean().optional(),
         terms_accepted: z.boolean().optional(),
       }),
-    })
+    }),
   ),
   async (req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');
@@ -571,8 +617,24 @@ router.post(
     const verification = await verifyGoogleCredential(req.body.credential);
     if (!verification.ok) {
       return verification.reason === 'UNAVAILABLE'
-        ? res.status(503).json({ success: false, error: { code: 'GOOGLE_SIGNIN_UNAVAILABLE', message: 'Google sign-in is not available right now. Use email or wallet sign-in.' } })
-        : res.status(401).json({ success: false, error: { code: 'INVALID_GOOGLE_CREDENTIAL', message: 'Google could not confirm this sign-in. Please try again.' } });
+        ? res
+            .status(503)
+            .json({
+              success: false,
+              error: {
+                code: 'GOOGLE_SIGNIN_UNAVAILABLE',
+                message: 'Google sign-in is not available right now. Use email or wallet sign-in.',
+              },
+            })
+        : res
+            .status(401)
+            .json({
+              success: false,
+              error: {
+                code: 'INVALID_GOOGLE_CREDENTIAL',
+                message: 'Google could not confirm this sign-in. Please try again.',
+              },
+            });
     }
     const { profile } = verification;
     const email = db.identityService.normalizeEmail(profile.email);
@@ -585,7 +647,10 @@ router.post(
       const userId = byGoogle?.user_id ?? (await db.identityService.findIdentity('email', email))?.user_id;
       if (userId) {
         user = db.usersRepo.getPool() ? await db.usersRepo.findById(userId) : db.findUserById(userId);
-        if (!user) return res.status(401).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'Account no longer exists.' } });
+        if (!user)
+          return res
+            .status(401)
+            .json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'Account no longer exists.' } });
         if (!byGoogle) {
           // Plan 72 Phase 2: If the account's email is not verified, delete that user's password_credentials row
           // before linking Google and marking the email verified. Whoever created the password never proved they own the email.
@@ -596,7 +661,10 @@ router.post(
         if (req.body.terms_accepted !== true || req.body.age_eligibility_declared !== true) {
           return res.status(400).json({
             success: false,
-            error: { code: 'TERMS_REQUIRED', message: 'Accept the terms and confirm the age requirement to create your account.' },
+            error: {
+              code: 'TERMS_REQUIRED',
+              message: 'Accept the terms and confirm the age requirement to create your account.',
+            },
           });
         }
         user = await db.findOrCreateUserDurable({
@@ -621,12 +689,19 @@ router.post(
       const remember = req.body.remember_me === true;
       const token = issueToken(user, remember);
       setSessionCookie(res, token, remember);
-      return res.status(created ? 201 : 200).json({ success: true, data: { status: 'authenticated', token, user, created } });
+      return res
+        .status(created ? 201 : 200)
+        .json({ success: true, data: { status: 'authenticated', token, user, created } });
     } catch (err) {
       console.error('[auth] google sign-in error:', err);
-      return res.status(503).json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Google sign-in is unavailable. Please try again.' } });
+      return res
+        .status(503)
+        .json({
+          success: false,
+          error: { code: 'STORAGE_UNAVAILABLE', message: 'Google sign-in is unavailable. Please try again.' },
+        });
     }
-  }
+  },
 );
 
 // Authenticated identities endpoint
@@ -639,7 +714,9 @@ router.get('/auth/identities', authenticateToken, async (req: AuthRequest, res: 
       data: { identities },
     });
   } catch (err) {
-    return res.status(503).json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Could not load identities.' } });
+    return res
+      .status(503)
+      .json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Could not load identities.' } });
   }
 });
 
@@ -667,14 +744,29 @@ router.post(
       let user;
       if (req.user) {
         user = db.usersRepo.getPool() ? await db.usersRepo.findById(req.user.id) : db.findUserById(req.user.id);
-        if (!user || user.seed_id !== req.user.seed_id) return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Session account no longer exists.' } });
-        if (!user.seed_id.startsWith('guest:') || user.role !== 'user') return res.status(409).json({ success: false, error: { code: 'SESSION_EXISTS', message: 'Sign out before starting a guest account.' } });
+        if (!user || user.seed_id !== req.user.seed_id)
+          return res
+            .status(401)
+            .json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Session account no longer exists.' } });
+        if (!user.seed_id.startsWith('guest:') || user.role !== 'user')
+          return res
+            .status(409)
+            .json({
+              success: false,
+              error: { code: 'SESSION_EXISTS', message: 'Sign out before starting a guest account.' },
+            });
       } else {
         const identity = randomUUID();
         user = await db.findOrCreateUserDurable({
-          seed_id: `guest:${identity}`, display_name: `Guest ${identity.slice(0, 8)}`,
-          email: `${identity}@guest.invalid`, role: 'user', is_public: false,
-          demo_points: 0, mjdq_balance: 0, jdq_governance_balance: 0, scout_reputation: 0,
+          seed_id: `guest:${identity}`,
+          display_name: `Guest ${identity.slice(0, 8)}`,
+          email: `${identity}@guest.invalid`,
+          role: 'user',
+          is_public: false,
+          demo_points: 0,
+          mjdq_balance: 0,
+          jdq_governance_balance: 0,
+          scout_reputation: 0,
         });
       }
       const remember = req.body.remember_me !== false;
@@ -682,9 +774,14 @@ router.post(
       setSessionCookie(res, token, remember);
       return res.json({ success: true, data: { user, auth_method: 'guest' } });
     } catch {
-      return res.status(503).json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Guest account storage is unavailable. Please try again.' } });
+      return res
+        .status(503)
+        .json({
+          success: false,
+          error: { code: 'STORAGE_UNAVAILABLE', message: 'Guest account storage is unavailable. Please try again.' },
+        });
     }
-  }
+  },
 );
 
 router.post(
@@ -709,13 +806,21 @@ router.post(
     ].join('\n');
     walletChallenges.set(address.toLowerCase(), { nonce, message, expiresAt: Date.now() + WALLET_CHALLENGE_TTL_MS });
     return res.status(200).json({ success: true, data: { message, expires_in_seconds: 300 } });
-  }
+  },
 );
 
 router.post(
   '/auth/wallet/login',
   rateLimit({ policyId: 'auth:wallet-login', windowMs: 60_000, max: 20 }),
-  validateRequest(z.object({ body: z.object({ address: walletAddressSchema, signature: z.string().min(1), remember_me: z.boolean().optional() }) })),
+  validateRequest(
+    z.object({
+      body: z.object({
+        address: walletAddressSchema,
+        signature: z.string().min(1),
+        remember_me: z.boolean().optional(),
+      }),
+    }),
+  ),
   async (req, res) => {
     if (env.WALLET_AUTH_MODE !== 'signature') {
       return res.status(409).json({
@@ -751,13 +856,15 @@ router.post(
         error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable user storage is unavailable. Please try again later.' },
       });
     }
-  }
+  },
 );
 
 router.post(
   '/auth/wallet/local-login',
   rateLimit({ policyId: 'auth:wallet-local-login', windowMs: 60_000, max: 20 }),
-  validateRequest(z.object({ body: z.object({ address: localWalletIdentifierSchema, remember_me: z.boolean().optional() }) })),
+  validateRequest(
+    z.object({ body: z.object({ address: localWalletIdentifierSchema, remember_me: z.boolean().optional() }) }),
+  ),
   async (req, res) => {
     if (
       env.NODE_ENV === 'production' ||
@@ -779,7 +886,7 @@ router.post(
         error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable user storage is unavailable. Please try again later.' },
       });
     }
-  }
+  },
 );
 
 const completeWalletSchema = z.object({
@@ -809,11 +916,20 @@ router.post(
     // Signature mode only ever issues grants for checksummed EVM addresses; local mode uses free-form test identifiers.
     let address = String(req.body.wallet_address).trim();
     if (env.WALLET_AUTH_MODE === 'signature') {
-      try { address = getAddress(address); } catch { return walletCompletionError(res, 400, 'VALIDATION_ERROR', 'A valid EVM wallet address is required'); }
+      try {
+        address = getAddress(address);
+      } catch {
+        return walletCompletionError(res, 400, 'VALIDATION_ERROR', 'A valid EVM wallet address is required');
+      }
     }
     const normalizedEmail = db.identityService.normalizeEmail(email);
     if (db.identityService.isPlaceholderEmail(normalizedEmail)) {
-      return walletCompletionError(res, 400, 'EMAIL_REQUIRED', 'Use a real email address you can sign in and recover your account with.');
+      return walletCompletionError(
+        res,
+        400,
+        'EMAIL_REQUIRED',
+        'Use a real email address you can sign in and recover your account with.',
+      );
     }
 
     try {
@@ -823,40 +939,69 @@ router.post(
         code: address.toLowerCase(),
       });
       if (!grant.valid) {
-        return walletCompletionError(res, 401, 'INVALID_ONBOARDING_GRANT', 'Your wallet check expired. Connect your wallet again to continue.');
+        return walletCompletionError(
+          res,
+          401,
+          'INVALID_ONBOARDING_GRANT',
+          'Your wallet check expired. Connect your wallet again to continue.',
+        );
       }
       const walletUser = await findWalletUser(address);
       if (grant.boundUserId && walletUser?.id !== grant.boundUserId) {
-        return walletCompletionError(res, 409, 'WALLET_ACCOUNT_CHANGED', 'This wallet changed accounts. Connect your wallet again to continue.');
+        return walletCompletionError(
+          res,
+          409,
+          'WALLET_ACCOUNT_CHANGED',
+          'This wallet changed accounts. Connect your wallet again to continue.',
+        );
       }
 
       let user: UserRecord | undefined;
       const emailOwner = await db.identityService.findIdentity('email', normalizedEmail);
       if (emailOwner) {
         // The email already has an account: the wallet joins it only with that account's password.
-        if (!await db.identityService.verifyUserPassword(emailOwner.user_id, password)) {
-          return walletCompletionError(res, 409, 'EMAIL_ALREADY_EXISTS',
-            "This email is already registered. Enter that account's password to link your wallet, or use a different email.");
+        if (!(await db.identityService.verifyUserPassword(emailOwner.user_id, password))) {
+          return walletCompletionError(
+            res,
+            409,
+            'EMAIL_ALREADY_EXISTS',
+            "This email is already registered. Enter that account's password to link your wallet, or use a different email.",
+          );
         }
         if (walletUser && walletUser.id !== emailOwner.user_id) {
-          return walletCompletionError(res, 409, 'WALLET_HAS_OWN_ACCOUNT',
-            'This wallet already has its own JuanderQuest progress. Use a new email to keep that account.');
+          return walletCompletionError(
+            res,
+            409,
+            'WALLET_HAS_OWN_ACCOUNT',
+            'This wallet already has its own JuanderQuest progress. Use a new email to keep that account.',
+          );
         }
-        user = db.usersRepo.getPool() ? await db.usersRepo.findById(emailOwner.user_id) : db.findUserById(emailOwner.user_id);
+        user = db.usersRepo.getPool()
+          ? await db.usersRepo.findById(emailOwner.user_id)
+          : db.findUserById(emailOwner.user_id);
         if (!user) return walletCompletionError(res, 404, 'USER_NOT_FOUND', 'Account not found.');
         if (user.wallet_address && user.wallet_address.toLowerCase() !== address.toLowerCase()) {
-          return walletCompletionError(res, 409, 'ACCOUNT_HAS_OTHER_WALLET',
-            'That account already has a different wallet. Unlink it in Settings first, or use a different email.');
+          return walletCompletionError(
+            res,
+            409,
+            'ACCOUNT_HAS_OTHER_WALLET',
+            'That account already has a different wallet. Unlink it in Settings first, or use a different email.',
+          );
         }
         if (!user.wallet_address) user = await db.bindWalletAddress(user.id, address);
       } else {
         if (!walletUser && (req.body.terms_accepted !== true || req.body.age_eligibility_declared !== true)) {
-          return walletCompletionError(res, 400, 'TERMS_REQUIRED', 'Accept the terms and confirm the age requirement to create your account.');
+          return walletCompletionError(
+            res,
+            400,
+            'TERMS_REQUIRED',
+            'Accept the terms and confirm the age requirement to create your account.',
+          );
         }
         if (walletUser) {
           // Legacy wallet-only account: keep its progress, give it a real email.
-          user = await db.setUserEmail(walletUser.id, normalizedEmail) ?? walletUser;
-          if (display_name) user = await db.updateUserProfile(user.id, { display_name }) ?? user;
+          user = (await db.setUserEmail(walletUser.id, normalizedEmail)) ?? walletUser;
+          if (display_name) user = (await db.updateUserProfile(user.id, { display_name })) ?? user;
         } else {
           user = await createWalletUser(address, normalizedEmail, display_name);
         }
@@ -870,15 +1015,22 @@ router.post(
       const remember = req.body.remember_me === true;
       const token = issueToken(user, remember);
       setSessionCookie(res, token, remember);
-      return res.status(200).json({ success: true, data: { status: 'authenticated', token, user, wallet_address: address } });
+      return res
+        .status(200)
+        .json({ success: true, data: { status: 'authenticated', token, user, wallet_address: address } });
     } catch (err: any) {
       if (err?.code === 'WALLET_ALREADY_BOUND' || err?.code === 'IDENTITY_ALREADY_BOUND' || err?.code === '23505') {
-        return walletCompletionError(res, 409, 'ACCOUNT_CONFLICT', 'This email or wallet is already linked to another account.');
+        return walletCompletionError(
+          res,
+          409,
+          'ACCOUNT_CONFLICT',
+          'This email or wallet is already linked to another account.',
+        );
       }
       console.error('[auth] wallet account completion failed:', err);
       return walletCompletionError(res, 503, 'STORAGE_UNAVAILABLE', 'Account setup is unavailable. Please try again.');
     }
-  }
+  },
 );
 
 router.post(
@@ -969,7 +1121,7 @@ router.post(
         error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable user storage is unavailable. Please try again later.' },
       });
     }
-  }
+  },
 );
 
 router.delete(
@@ -978,9 +1130,7 @@ router.delete(
   authenticateToken,
   async (req: AuthRequest, res: Response) => {
     try {
-      const user = db.usersRepo.getPool()
-        ? await db.usersRepo.findById(req.user!.id)
-        : db.findUserById(req.user!.id);
+      const user = db.usersRepo.getPool() ? await db.usersRepo.findById(req.user!.id) : db.findUserById(req.user!.id);
 
       if (!user) {
         return res.status(404).json({
@@ -1011,7 +1161,7 @@ router.delete(
         error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable user storage is unavailable. Please try again later.' },
       });
     }
-  }
+  },
 );
 
 const loginSchema = z.object({
@@ -1020,102 +1170,109 @@ const loginSchema = z.object({
   }),
 });
 
-router.post('/auth/demo-login', rateLimit({ policyId: 'auth:demo-login', windowMs: 60_000, max: 20 }), validateRequest(loginSchema), async (req, res) => {
-  if (!env.ALLOW_DEMO_LOGIN || (env.NODE_ENV === 'production' && !env.ALPHA_WALLET_SIMULATION_ENABLED)) {
-    return res.status(403).json({
-      success: false,
-      error: {
-        code: 'DEMO_LOGIN_DISABLED',
-        message: 'Demo login is disabled for this environment.',
-      },
-    });
-  }
-
-  const { seed_id } = req.body;
-  let user;
-  try {
-    // Never issue a JWT for a process-local seed when protected routes read
-    // identities from PostgreSQL. A missing durable seed is not a login.
-    user = db.usersRepo.getPool()
-      ? await db.findUserBySeedDurable(seed_id)
-      : db.findUserBySeed(seed_id);
-  } catch {
-    return res.status(503).json({ success: false, error: {
-      code: 'STORAGE_UNAVAILABLE', message: 'Durable user storage is unavailable. Please try again later.',
-    } });
-  }
-
-  // Production hardening (2026-10-17 incident): demo login must never create accounts
-  // or hand out privileged sessions there, even when the flag is switched on for a
-  // presentation. Development keeps the canonical auto-provisioned demo users.
-  const isProduction = env.NODE_ENV === 'production';
-
-  if (!user && !isProduction && (seed_id === 'user-1' || seed_id === 'admin-1')) {
-    try {
-      if (seed_id === 'user-1') {
-        user = await db.findOrCreateUserDurable({
-          id: '11111111-1111-1111-1111-111111111111',
-          seed_id: 'user-1',
-          display_name: 'Juan Dela Cruz',
-          email: 'juan@juanderquest.ph',
-          avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Juan',
-          role: 'user',
-          demo_points: 100,
-          scout_reputation: 250,
-          is_public: true,
-          handle: 'juandelacruz',
-          bio: 'Pangasinan explorer & cultural heritage scout.',
-          status_text: 'Exploring Hundred Islands & Bolinao ðŸŒŠ',
-        });
-      } else if (seed_id === 'admin-1') {
-        user = await db.findOrCreateUserDurable({
-          id: '22222222-2222-2222-2222-222222222222',
-          seed_id: 'admin-1',
-          display_name: 'Tourism Officer Admin',
-          email: 'admin@pangasinan.gov.ph',
-          avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Admin',
-          role: 'admin',
-          demo_points: 0,
-          scout_reputation: 1000,
-          is_public: false,
-        });
-      }
-    } catch (err) {
-      console.warn('[auth] Auto-provision of canonical demo user failed:', err);
+router.post(
+  '/auth/demo-login',
+  rateLimit({ policyId: 'auth:demo-login', windowMs: 60_000, max: 20 }),
+  validateRequest(loginSchema),
+  async (req, res) => {
+    if (!env.ALLOW_DEMO_LOGIN || (env.NODE_ENV === 'production' && !env.ALPHA_WALLET_SIMULATION_ENABLED)) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'DEMO_LOGIN_DISABLED',
+          message: 'Demo login is disabled for this environment.',
+        },
+      });
     }
-  }
 
-  if (!user) {
-    return res.status(404).json({
-      success: false,
-      error: {
-        code: 'NOT_FOUND',
-        message: `Seed user with ID '${seed_id}' not found.`,
+    const { seed_id } = req.body;
+    let user;
+    try {
+      // Never issue a JWT for a process-local seed when protected routes read
+      // identities from PostgreSQL. A missing durable seed is not a login.
+      user = db.usersRepo.getPool() ? await db.findUserBySeedDurable(seed_id) : db.findUserBySeed(seed_id);
+    } catch {
+      return res.status(503).json({
+        success: false,
+        error: {
+          code: 'STORAGE_UNAVAILABLE',
+          message: 'Durable user storage is unavailable. Please try again later.',
+        },
+      });
+    }
+
+    // Production hardening (2026-10-17 incident): demo login must never create accounts
+    // or hand out privileged sessions there, even when the flag is switched on for a
+    // presentation. Development keeps the canonical auto-provisioned demo users.
+    const isProduction = env.NODE_ENV === 'production';
+
+    if (!user && !isProduction && (seed_id === 'user-1' || seed_id === 'admin-1')) {
+      try {
+        if (seed_id === 'user-1') {
+          user = await db.findOrCreateUserDurable({
+            id: '11111111-1111-1111-1111-111111111111',
+            seed_id: 'user-1',
+            display_name: 'Juan Dela Cruz',
+            email: 'juan@juanderquest.ph',
+            avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Juan',
+            role: 'user',
+            demo_points: 100,
+            scout_reputation: 250,
+            is_public: true,
+            handle: 'juandelacruz',
+            bio: 'Pangasinan explorer & cultural heritage scout.',
+            status_text: 'Exploring Hundred Islands & Bolinao ðŸŒŠ',
+          });
+        } else if (seed_id === 'admin-1') {
+          user = await db.findOrCreateUserDurable({
+            id: '22222222-2222-2222-2222-222222222222',
+            seed_id: 'admin-1',
+            display_name: 'Tourism Officer Admin',
+            email: 'admin@pangasinan.gov.ph',
+            avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Admin',
+            role: 'admin',
+            demo_points: 0,
+            scout_reputation: 1000,
+            is_public: false,
+          });
+        }
+      } catch (err) {
+        console.warn('[auth] Auto-provision of canonical demo user failed:', err);
+      }
+    }
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'NOT_FOUND',
+          message: `Seed user with ID '${seed_id}' not found.`,
+        },
+      });
+    }
+
+    if (isProduction && user.role !== 'user') {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'DEMO_LOGIN_RESERVED',
+          message: 'Demo login is limited to traveler accounts.',
+        },
+      });
+    }
+
+    const token = signSessionToken(user);
+    setSessionCookie(res, token, false);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        token,
+        user,
       },
     });
-  }
-
-  if (isProduction && user.role !== 'user') {
-    return res.status(403).json({
-      success: false,
-      error: {
-        code: 'DEMO_LOGIN_RESERVED',
-        message: 'Demo login is limited to traveler accounts.',
-      },
-    });
-  }
-
-  const token = signSessionToken(user);
-  setSessionCookie(res, token, false);
-
-  return res.status(200).json({
-    success: true,
-    data: {
-      token,
-      user,
-    },
-  });
-});
+  },
+);
 
 const simulatedWalletLoginSchema = z.object({
   body: z.object({
@@ -1127,93 +1284,140 @@ const simulatedWalletLoginSchema = z.object({
 // These IDs belong to deterministic development/demo fixtures, not accounts
 // created through simulated login. Never let a public username claim them.
 const reservedSimulatedSeeds = new Set([
-  'user-1', 'user-2', 'user-3', 'admin-1',
-  'coastal', 'maya', 'pao', 'user-coastal', 'user-maya', 'user-pao',
+  'user-1',
+  'user-2',
+  'user-3',
+  'admin-1',
+  'coastal',
+  'maya',
+  'pao',
+  'user-coastal',
+  'user-maya',
+  'user-pao',
 ]);
 
-router.post('/auth/simulated-wallet-login', rateLimit({ policyId: 'auth:simulated-wallet-login', windowMs: 60_000, max: 20 }), validateRequest(simulatedWalletLoginSchema), async (req, res) => {
-  if (env.NODE_ENV === 'production' || (env.NODE_ENV !== 'test' && !env.ALLOW_INSECURE_LOCAL_WALLET_AUTH)) return res.status(403).json({ success: false, error: { code: 'SIMULATED_LOGIN_DISABLED', message: 'Simulated login is unavailable on this server. Connect a wallet instead.' } });
-  const { username } = req.body;
-  const cleanUsername = username.trim();
-  const seedId = `user-${cleanUsername.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+router.post(
+  '/auth/simulated-wallet-login',
+  rateLimit({ policyId: 'auth:simulated-wallet-login', windowMs: 60_000, max: 20 }),
+  validateRequest(simulatedWalletLoginSchema),
+  async (req, res) => {
+    if (env.NODE_ENV === 'production' || (env.NODE_ENV !== 'test' && !env.ALLOW_INSECURE_LOCAL_WALLET_AUTH))
+      return res
+        .status(403)
+        .json({
+          success: false,
+          error: {
+            code: 'SIMULATED_LOGIN_DISABLED',
+            message: 'Simulated login is unavailable on this server. Connect a wallet instead.',
+          },
+        });
+    const { username } = req.body;
+    const cleanUsername = username.trim();
+    const seedId = `user-${cleanUsername.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
 
-  if (reservedSimulatedSeeds.has(cleanUsername.toLowerCase()) || reservedSimulatedSeeds.has(seedId)) {
-    return res.status(403).json({ success: false, error: { code: 'SIMULATED_LOGIN_RESERVED', message: 'Simulated login is unavailable on this server. Connect a wallet instead.' } });
-  }
-
-  // Passwordless by design: anyone who knows a simulated username can enter
-  // that simulated account. Never expose this route on a public host.
-  let user = db.usersRepo.getPool()
-    ? await db.findUserBySeedDurable(seedId)
-    : db.findUserBySeed(seedId);
-
-  if (user && (user.role !== 'user' || Boolean(user.is_test))) {
-    return res.status(403).json({ success: false, error: { code: 'SIMULATED_LOGIN_RESERVED', message: 'Simulated login is unavailable on this server. Connect a wallet instead.' } });
-  }
-
-  if (!user) {
-    try {
-      user = await db.findOrCreateUserDurable({
-        seed_id: seedId,
-        display_name: cleanUsername,
-        email: `${cleanUsername.toLowerCase().replace(/[^a-z0-9]/g, '')}@juanderquest.local`,
-        avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(cleanUsername)}`,
-        role: 'user',
-        demo_points: 100,
-        mjdq_balance: 100000,
-        jdq_governance_balance: 15,
-        scout_reputation: 250,
-        is_public: false,
-        handle: null,
-        bio: null,
-        status_text: null,
-      });
-
-      db.ledger.push({
-        id: `ledg_welcome_${Date.now()}`,
-        user_id: user.id,
-        entry_type: 'poa_reward',
-        mjdq_delta: 100000,
-        jdq_delta: 15,
-        burned_mjdq: 0,
-        description: 'MetaMask Starter Pack: 100,000 mJDQ + 15 JDQ + 250 Scout Rep',
-        created_at: new Date().toISOString(),
-      });
-    } catch (err) {
-      console.error('[auth] durable user creation failed in simulated login:', err);
-      return res.status(503).json({
-        success: false,
-        error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable user storage is unavailable. Please try again later.' },
-      });
+    if (reservedSimulatedSeeds.has(cleanUsername.toLowerCase()) || reservedSimulatedSeeds.has(seedId)) {
+      return res
+        .status(403)
+        .json({
+          success: false,
+          error: {
+            code: 'SIMULATED_LOGIN_RESERVED',
+            message: 'Simulated login is unavailable on this server. Connect a wallet instead.',
+          },
+        });
     }
-  }
 
-  const token = signSessionToken(user);
-  setSessionCookie(res, token, false);
+    // Passwordless by design: anyone who knows a simulated username can enter
+    // that simulated account. Never expose this route on a public host.
+    let user = db.usersRepo.getPool() ? await db.findUserBySeedDurable(seedId) : db.findUserBySeed(seedId);
 
-  const simulatedAddress = `0x${Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join('')}`;
+    if (user && (user.role !== 'user' || Boolean(user.is_test))) {
+      return res
+        .status(403)
+        .json({
+          success: false,
+          error: {
+            code: 'SIMULATED_LOGIN_RESERVED',
+            message: 'Simulated login is unavailable on this server. Connect a wallet instead.',
+          },
+        });
+    }
 
-  return res.status(200).json({
-    success: true,
-    data: {
-      token,
-      user,
-      simulated_wallet_address: simulatedAddress,
-      message: 'Simulated MetaMask Wallet Connected Successfully! Starter Demo Pack Credited.',
-    },
-  });
-});
+    if (!user) {
+      try {
+        user = await db.findOrCreateUserDurable({
+          seed_id: seedId,
+          display_name: cleanUsername,
+          email: `${cleanUsername.toLowerCase().replace(/[^a-z0-9]/g, '')}@juanderquest.local`,
+          avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(cleanUsername)}`,
+          role: 'user',
+          demo_points: 100,
+          mjdq_balance: 100000,
+          jdq_governance_balance: 15,
+          scout_reputation: 250,
+          is_public: false,
+          handle: null,
+          bio: null,
+          status_text: null,
+        });
+
+        db.ledger.push({
+          id: `ledg_welcome_${Date.now()}`,
+          user_id: user.id,
+          entry_type: 'poa_reward',
+          mjdq_delta: 100000,
+          jdq_delta: 15,
+          burned_mjdq: 0,
+          description: 'MetaMask Starter Pack: 100,000 mJDQ + 15 JDQ + 250 Scout Rep',
+          created_at: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error('[auth] durable user creation failed in simulated login:', err);
+        return res.status(503).json({
+          success: false,
+          error: {
+            code: 'STORAGE_UNAVAILABLE',
+            message: 'Durable user storage is unavailable. Please try again later.',
+          },
+        });
+      }
+    }
+
+    const token = signSessionToken(user);
+    setSessionCookie(res, token, false);
+
+    const simulatedAddress = `0x${Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join('')}`;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        token,
+        user,
+        simulated_wallet_address: simulatedAddress,
+        message: 'Simulated MetaMask Wallet Connected Successfully! Starter Demo Pack Credited.',
+      },
+    });
+  },
+);
 
 router.post('/auth/session/upgrade', authenticateToken, async (req: AuthRequest, res: Response) => {
-  if (!req.headers.authorization) return res.status(400).json({ success: false, error: { code: 'BEARER_REQUIRED', message: 'A legacy bearer session is required.' } });
+  if (!req.headers.authorization)
+    return res
+      .status(400)
+      .json({ success: false, error: { code: 'BEARER_REQUIRED', message: 'A legacy bearer session is required.' } });
   try {
     const user = db.usersRepo.getPool() ? await db.usersRepo.findById(req.user!.id) : db.findUserById(req.user!.id);
-    if (!user) return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Session account no longer exists.' } });
+    if (!user)
+      return res
+        .status(401)
+        .json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Session account no longer exists.' } });
     const rememberMe = req.body?.remember_me === true;
     setSessionCookie(res, issueToken(user, rememberMe), rememberMe);
     return res.json({ success: true, data: user });
   } catch {
-    return res.status(503).json({ success: false, error: { code: 'DATABASE_OUTAGE', message: 'Session could not be upgraded.' } });
+    return res
+      .status(503)
+      .json({ success: false, error: { code: 'DATABASE_OUTAGE', message: 'Session could not be upgraded.' } });
   }
 });
 
@@ -1243,14 +1447,19 @@ router.post(
         error: { code: 'DATABASE_UNAVAILABLE', message: 'Failed to revoke sessions. Please try again.' },
       });
     }
-  }
+  },
 );
 
 router.get('/auth/me', authenticateToken, async (req: AuthRequest, res: Response) => {
   const userId = req.user?.id;
   let user;
-  try { user = db.usersRepo.getPool() ? await db.usersRepo.findById(userId!) : db.findUserById(userId!); }
-  catch { return res.status(503).json({ success: false, error: { code: 'DATABASE_OUTAGE', message: 'Session could not be validated.' } }); }
+  try {
+    user = db.usersRepo.getPool() ? await db.usersRepo.findById(userId!) : db.findUserById(userId!);
+  } catch {
+    return res
+      .status(503)
+      .json({ success: false, error: { code: 'DATABASE_OUTAGE', message: 'Session could not be validated.' } });
+  }
 
   if (!user) {
     clearSessionCookie(res);
@@ -1264,13 +1473,13 @@ router.get('/auth/me', authenticateToken, async (req: AuthRequest, res: Response
   }
 
   res.setHeader('Cache-Control', 'private, no-store');
-  const cosmetics=(await safeCosmeticsFor([user.id])).get(user.id);
+  const cosmetics = (await safeCosmeticsFor([user.id])).get(user.id);
   return res.status(200).json({
     success: true,
     data: {
       ...user,
       home_municipality: await getHomeTown(user.id),
-      cosmetics: cosmetics ?? {banner:null,frame:null,title:null,nameColor:null},
+      cosmetics: cosmetics ?? { banner: null, frame: null, title: null, nameColor: null },
     },
   });
 });
@@ -1289,12 +1498,19 @@ const homeTownSchema = z.object({ municipality: z.string().max(80).nullable() })
 router.put('/me/home-town', authenticateToken, async (req: AuthRequest, res: Response) => {
   const parsed = homeTownSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'municipality must be a town name or null.' } });
+    return res
+      .status(400)
+      .json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'municipality must be a town name or null.' },
+      });
   }
   const raw = parsed.data.municipality;
   const town = raw === null || raw.trim() === '' ? null : canonicalTown(raw);
   if (town === undefined) {
-    return res.status(400).json({ success: false, error: { code: 'UNKNOWN_TOWN', message: 'Choose a town in Pangasinan.' } });
+    return res
+      .status(400)
+      .json({ success: false, error: { code: 'UNKNOWN_TOWN', message: 'Choose a town in Pangasinan.' } });
   }
   await setHomeTown(req.user!.id, town);
   return res.json({ success: true, data: { home_municipality: town } });
@@ -1323,7 +1539,9 @@ router.get('/me/tutorials', authenticateToken, async (req: AuthRequest, res: Res
 router.post('/me/tutorials/:key/seen', authenticateToken, async (req: AuthRequest, res: Response) => {
   const key = req.params.key;
   if (!TUTORIAL_KEY.test(key)) {
-    return res.status(400).json({ success: false, error: { code: 'INVALID_TUTORIAL_KEY', message: 'Unknown tutorial.' } });
+    return res
+      .status(400)
+      .json({ success: false, error: { code: 'INVALID_TUTORIAL_KEY', message: 'Unknown tutorial.' } });
   }
   const userId = req.user!.id;
   const seen = await tutorialsSeen(userId);

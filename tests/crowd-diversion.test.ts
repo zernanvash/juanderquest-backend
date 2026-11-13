@@ -23,17 +23,17 @@ describe('crowd diversion recommendations', () => {
 
   test('returns similar reviewed alternatives and excludes suppressed candidates', () => {
     const store = new SpotStore();
-    const source = store.spots.find(spot => spot.slug === 'lingayen-baywalk')!;
+    const source = store.spots.find((spot) => spot.slug === 'lingayen-baywalk')!;
     const alternatives = store.alternatives(source);
-    expect(alternatives.some(spot => spot.slug === 'pangasinan-provincial-capitol')).toBe(true);
-    const candidate = store.spots.find(spot => spot.slug === 'pangasinan-provincial-capitol')!;
+    expect(alternatives.some((spot) => spot.slug === 'pangasinan-provincial-capitol')).toBe(true);
+    const candidate = store.spots.find((spot) => spot.slug === 'pangasinan-provincial-capitol')!;
     candidate.recommendation_suppressed = true;
-    expect(store.alternatives(source).some(spot => spot.id === candidate.id)).toBe(false);
+    expect(store.alternatives(source).some((spot) => spot.id === candidate.id)).toBe(false);
   });
 
   test('ranks catalog-wide quality matches without a local radius ceiling', () => {
     const store = new SpotStore();
-    const source = store.spots.find(spot => spot.slug === 'patar-white-beach')!;
+    const source = store.spots.find((spot) => spot.slug === 'patar-white-beach')!;
     store.spots.push({
       ...source,
       id: 'future-national-beach',
@@ -45,8 +45,7 @@ describe('crowd diversion recommendations', () => {
       quest_id: undefined,
     });
 
-    const recommendation = store.alternatives(source, undefined, 5)
-      .find(spot => spot.id === 'future-national-beach');
+    const recommendation = store.alternatives(source, undefined, 5).find((spot) => spot.id === 'future-national-beach');
     expect(recommendation).toBeDefined();
     expect(recommendation.recommendation_kind).toBe('similar_place');
     expect(recommendation.sponsored).toBe(false);
@@ -54,8 +53,25 @@ describe('crowd diversion recommendations', () => {
 
   test('publishes community contributions immediately', async () => {
     const store = new SpotStore();
-    const result = await store.create({name:'Local Pocket Park',description:'A quiet neighborhood green space.',category:'nature_outdoors',subcategory:'park',tags:['quiet'],municipality:'Dagupan City',address:'Test Street',gps_lat:16.08,gps_lng:120.39,price_level:0,hours:{},amenities:[],image_url:''}, 'user-1');
+    const result = await store.create(
+      {
+        name: 'Local Pocket Park',
+        description: 'A quiet neighborhood green space.',
+        category: 'nature_outdoors',
+        subcategory: 'park',
+        tags: ['quiet'],
+        municipality: 'Dagupan City',
+        address: 'Test Street',
+        gps_lat: 16.08,
+        gps_lng: 120.39,
+        price_level: 0,
+        hours: {},
+        amenities: [],
+        image_url: '',
+      },
+      'user-1',
+    );
     expect(result.spot?.status).toBe('published');
-    expect(store.list({}).some(spot => spot.id === result.spot?.id)).toBe(true);
+    expect(store.list({}).some((spot) => spot.id === result.spot?.id)).toBe(true);
   });
 });

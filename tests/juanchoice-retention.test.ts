@@ -76,14 +76,20 @@ describe('Phase 5: JuanChoice retention and measured conversion', () => {
   });
 
   it('awards a streak milestone only from finalized official history and remains idempotent', async () => {
-    await database.pool.query('INSERT INTO juanchoice_participations(campaign_id,user_id) VALUES($1,$2)', [campaigns[4], userId]);
+    await database.pool.query('INSERT INTO juanchoice_participations(campaign_id,user_id) VALUES($1,$2)', [
+      campaigns[4],
+      userId,
+    ]);
     await database.pool.query(
       `INSERT INTO juanchoice_campaigns(
          id,slug,region,theme,status,opens_at,closes_at,series_key,round_number,counts_for_streak)
        VALUES($1,'ret-round-5','Pangasinan','Round 5','finalized',NOW()-INTERVAL '2 days',NOW()-INTERVAL '1 day','pangasinan-primary',5,TRUE)`,
       [campaigns[5]],
     );
-    await database.pool.query('INSERT INTO juanchoice_participations(campaign_id,user_id) VALUES($1,$2)', [campaigns[5], userId]);
+    await database.pool.query('INSERT INTO juanchoice_participations(campaign_id,user_id) VALUES($1,$2)', [
+      campaigns[5],
+      userId,
+    ]);
     // Round 1, 3, 4, 5 are the four eligible (non-cancelled) official rounds.
     const client = await database.pool.connect();
     try {
@@ -96,10 +102,14 @@ describe('Phase 5: JuanChoice retention and measured conversion', () => {
     } finally {
       client.release();
     }
-    expect((await database.pool.query(
-      "SELECT COUNT(*)::int AS count FROM achievement_awards WHERE user_id=$1 AND achievement_id='civic_regular_voter'",
-      [userId],
-    )).rows[0].count).toBe(1);
+    expect(
+      (
+        await database.pool.query(
+          "SELECT COUNT(*)::int AS count FROM achievement_awards WHERE user_id=$1 AND achievement_id='civic_regular_voter'",
+          [userId],
+        )
+      ).rows[0].count,
+    ).toBe(1);
   });
 
   it('breaks a streak on an unknown round-number gap while preserving the known longest run', async () => {
@@ -109,7 +119,10 @@ describe('Phase 5: JuanChoice retention and measured conversion', () => {
        VALUES($1,'ret-round-8','Pangasinan','Round 8','finalized',NOW()-INTERVAL '1 hour',NOW()-INTERVAL '30 minutes','pangasinan-primary',8,TRUE)`,
       [gapCampaign],
     );
-    await database.pool.query('INSERT INTO juanchoice_participations(campaign_id,user_id) VALUES($1,$2)', [gapCampaign, userId]);
+    await database.pool.query('INSERT INTO juanchoice_participations(campaign_id,user_id) VALUES($1,$2)', [
+      gapCampaign,
+      userId,
+    ]);
     const summary = await getEngagementSummary(userId);
     expect(summary?.streak.current).toBe(1);
     expect(summary?.streak.longest).toBe(4);
@@ -124,48 +137,81 @@ describe('Phase 5: JuanChoice retention and measured conversion', () => {
     );
     expect((await evaluateCommunityGoals()).unlocked).toBe(1);
     expect((await evaluateCommunityGoals()).unlocked).toBe(0);
-    expect((await database.pool.query('SELECT COUNT(*)::int AS count FROM community_goal_unlocks WHERE goal_id=$1', [goalId])).rows[0].count).toBe(1);
-    expect((await database.pool.query('SELECT COUNT(*)::int AS count FROM outbox_events WHERE event_key=$1', [`community-goal:${goalId}`])).rows[0].count).toBe(1);
+    expect(
+      (
+        await database.pool.query('SELECT COUNT(*)::int AS count FROM community_goal_unlocks WHERE goal_id=$1', [
+          goalId,
+        ])
+      ).rows[0].count,
+    ).toBe(1);
+    expect(
+      (
+        await database.pool.query('SELECT COUNT(*)::int AS count FROM outbox_events WHERE event_key=$1', [
+          `community-goal:${goalId}`,
+        ])
+      ).rows[0].count,
+    ).toBe(1);
   });
 
   it('keeps public achievements private by default and exposes them only after owner opt-in', async () => {
     expect((await request(app).get(`/api/v1/users/${userId}/achievements`)).status).toBe(404);
-    const preference = await request(app).put('/api/v1/me/engagement/preferences')
-      .set('Authorization', `Bearer ${token}`).send({ share_achievements: true });
+    const preference = await request(app)
+      .put('/api/v1/me/engagement/preferences')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ share_achievements: true });
     expect(preference.status).toBe(200);
     expect((await request(app).get(`/api/v1/users/${userId}/achievements`)).status).toBe(200);
   });
 
   it('rejects unofficial campaigns that try to claim official series identity at the database boundary', async () => {
-    await expect(database.pool.query(
-      `INSERT INTO juanchoice_campaigns(
+    await expect(
+      database.pool.query(
+        `INSERT INTO juanchoice_campaigns(
          id,slug,region,theme,status,opens_at,closes_at,series_key,round_number,counts_for_streak)
        VALUES($1,'invalid-official-round','Pangasinan','Invalid','draft',NOW(),NOW()+INTERVAL '1 day','pangasinan-primary',6,FALSE)`,
-      [randomUUID()],
-    )).rejects.toBeDefined();
+        [randomUUID()],
+      ),
+    ).rejects.toBeDefined();
   });
 
   it('keeps admin-created merchant offers in draft without verified partner consent', async () => {
-    const draft = await createMerchantOffer({ campaignId: campaigns[0], merchantId: 'm1', voucherId: 'v1',
+    const draft = await createMerchantOffer({
+      campaignId: campaigns[0],
+      merchantId: 'm1',
+      voucherId: 'v1',
       termsSnapshot: { label: 'Pilot offer', redemption: 'merchant validates voucher' },
-      startsAt: new Date(Date.now() - 60_000).toISOString(), endsAt: new Date(Date.now() + 86_400_000).toISOString(), isTest: false });
+      startsAt: new Date(Date.now() - 60_000).toISOString(),
+      endsAt: new Date(Date.now() + 86_400_000).toISOString(),
+      isTest: false,
+    });
     expect(draft.status).toBe('draft');
     expect(draft.partner_consent_at).toBeNull();
     const offers = await listActiveMerchantOffers(campaigns[0]);
     expect(offers).toHaveLength(0);
-    await expect(database.pool.query("UPDATE juanchoice_merchant_offers SET status='approved', partner_consent_at=NOW() WHERE id=$1",[draft.id]))
-      .rejects.toBeDefined();
+    await expect(
+      database.pool.query(
+        "UPDATE juanchoice_merchant_offers SET status='approved', partner_consent_at=NOW() WHERE id=$1",
+        [draft.id],
+      ),
+    ).rejects.toBeDefined();
     const adminToken = jwt.sign({ id: adminId, seed_id: 'ret-admin', role: 'admin' }, env.JWT_SECRET);
     const endpoint = `/api/v1/juanchoice/admin/campaigns/${campaigns[2]}/offers`;
-    const body = { merchant_id:'m1', voucher_id:'v1', terms_snapshot:{label:'Pilot offer'},
-      starts_at:new Date(Date.now()-60_000).toISOString(), ends_at:new Date(Date.now()+86_400_000).toISOString() };
-    const forged = await request(app).post(endpoint).set('Authorization',`Bearer ${adminToken}`)
-      .send({...body,partner_consent:true});
+    const body = {
+      merchant_id: 'm1',
+      voucher_id: 'v1',
+      terms_snapshot: { label: 'Pilot offer' },
+      starts_at: new Date(Date.now() - 60_000).toISOString(),
+      ends_at: new Date(Date.now() + 86_400_000).toISOString(),
+    };
+    const forged = await request(app)
+      .post(endpoint)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ ...body, partner_consent: true });
     expect(forged.status).toBe(400);
-    const created = await request(app).post(endpoint).set('Authorization',`Bearer ${adminToken}`).send(body);
+    const created = await request(app).post(endpoint).set('Authorization', `Bearer ${adminToken}`).send(body);
     expect(created.status).toBe(201);
     expect(created.body.data.status).toBe('draft');
-    expect((await listActiveMerchantOffers(campaigns[2]))).toHaveLength(0);
+    expect(await listActiveMerchantOffers(campaigns[2])).toHaveLength(0);
     expect((await database.pool.query('SELECT COUNT(*)::int AS count FROM governance_ledger')).rows[0].count).toBe(0);
   });
 
@@ -173,20 +219,30 @@ describe('Phase 5: JuanChoice retention and measured conversion', () => {
     const adminToken = jwt.sign({ id: adminId, seed_id: 'ret-admin', role: 'admin' }, env.JWT_SECRET);
     const endpoint = `/api/v1/juanchoice/admin/campaigns/${campaigns[0]}/budget`;
     const requestBody = { budget_mjdq: 1_000, request_reference: 'Draft proposal only' };
-    expect((await request(app).post(endpoint).set('Authorization',`Bearer ${adminToken}`).send(requestBody)).status).toBe(503);
+    expect(
+      (await request(app).post(endpoint).set('Authorization', `Bearer ${adminToken}`).send(requestBody)).status,
+    ).toBe(503);
     const previous = env.JUANCHOICE_ECONOMY_ENABLED;
     (env as any).JUANCHOICE_ECONOMY_ENABLED = true;
     try {
-      const falseApproval = await request(app).post(endpoint).set('Authorization',`Bearer ${adminToken}`)
-        .send({ budget_mjdq:1_000, approval_reference:'Unverified admin claim' });
+      const falseApproval = await request(app)
+        .post(endpoint)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ budget_mjdq: 1_000, approval_reference: 'Unverified admin claim' });
       expect(falseApproval.status).toBe(400);
-      const created = await request(app).post(endpoint).set('Authorization',`Bearer ${adminToken}`).send(requestBody);
+      const created = await request(app).post(endpoint).set('Authorization', `Bearer ${adminToken}`).send(requestBody);
       expect(created.status).toBe(201);
-      expect(created.body.data).toMatchObject({status:'draft',request_reference:'Draft proposal only'});
-      await expect(database.pool.query("UPDATE juanchoice_promotion_budgets SET status='approved' WHERE id=$1",[created.body.data.id]))
-        .rejects.toBeDefined();
-      await expect(database.pool.query('UPDATE juanchoice_promotion_budgets SET reserved_mjdq=1 WHERE id=$1',[created.body.data.id]))
-        .rejects.toBeDefined();
+      expect(created.body.data).toMatchObject({ status: 'draft', request_reference: 'Draft proposal only' });
+      await expect(
+        database.pool.query("UPDATE juanchoice_promotion_budgets SET status='approved' WHERE id=$1", [
+          created.body.data.id,
+        ]),
+      ).rejects.toBeDefined();
+      await expect(
+        database.pool.query('UPDATE juanchoice_promotion_budgets SET reserved_mjdq=1 WHERE id=$1', [
+          created.body.data.id,
+        ]),
+      ).rejects.toBeDefined();
       expect((await database.pool.query('SELECT COUNT(*)::int AS count FROM governance_ledger')).rows[0].count).toBe(0);
     } finally {
       (env as any).JUANCHOICE_ECONOMY_ENABLED = previous;
@@ -221,9 +277,7 @@ describe('Phase 5: JuanChoice retention and measured conversion', () => {
       expect(summary?.streak.current).toBe(0);
       expect(summary?.impact.verified_visits).toBe(0);
 
-      const res = await request(app)
-        .get('/api/v1/me/engagement')
-        .set('Authorization', `Bearer ${token}`);
+      const res = await request(app).get('/api/v1/me/engagement').set('Authorization', `Bearer ${token}`);
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.data.streak.current).toBe(0);

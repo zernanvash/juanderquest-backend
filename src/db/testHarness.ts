@@ -22,33 +22,50 @@ export async function createTestDb(options: { poolMax?: number } = {}): Promise<
     }
     const schema = `jdq_test_${randomUUID().replace(/-/g, '')}`;
     const admin = new Pool({ connectionString: url.toString(), connectionTimeoutMillis: 3000 });
-    try { await admin.query(`CREATE SCHEMA ${schema}`); }
-    catch (error) { await admin.end(); throw error; }
-    const pool = new Pool({ connectionString: url.toString(), options: `-c search_path=${schema}`, max: poolMax, connectionTimeoutMillis: 3000 });
-    try { await applyMigrations(pool); }
-    catch (error) {
+    try {
+      await admin.query(`CREATE SCHEMA ${schema}`);
+    } catch (error) {
+      await admin.end();
+      throw error;
+    }
+    const pool = new Pool({
+      connectionString: url.toString(),
+      options: `-c search_path=${schema}`,
+      max: poolMax,
+      connectionTimeoutMillis: 3000,
+    });
+    try {
+      await applyMigrations(pool);
+    } catch (error) {
       await pool.end();
       await admin.query(`DROP SCHEMA ${schema} CASCADE`);
       await admin.end();
       throw error;
     }
-    return { pool, close: async () => {
-      await pool.end();
-      await admin.query(`DROP SCHEMA ${schema} CASCADE`);
-      await admin.end();
-    } };
+    return {
+      pool,
+      close: async () => {
+        await pool.end();
+        await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+        await admin.end();
+      },
+    };
   }
   const memDb = newDb();
 
   memDb.public.registerFunction({
-    name: 'clock_timestamp', args: [], returns: DataType.timestamptz,
+    name: 'clock_timestamp',
+    args: [],
+    returns: DataType.timestamptz,
     implementation: () => new Date(),
     impure: true,
   });
 
   memDb.public.registerFunction({
-    name: 'jsonb_typeof', args: [DataType.jsonb], returns: DataType.text,
-    implementation: (value: unknown) => Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value,
+    name: 'jsonb_typeof',
+    args: [DataType.jsonb],
+    returns: DataType.text,
+    implementation: (value: unknown) => (Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value),
   });
 
   memDb.public.registerFunction({
@@ -87,12 +104,14 @@ export async function createTestDb(options: { poolMax?: number } = {}): Promise<
   });
 
   memDb.registerLanguage('plpgsql', ({ code }) => () => {
-    const ifExistsMatch = code.match(/IF\s+EXISTS\s*\(\s*([\s\S]+?)\s*\)\s*THEN\s*RAISE\s+EXCEPTION\s+['"]([\s\S]+?)['"]/i);
+    const ifExistsMatch = code.match(
+      /IF\s+EXISTS\s*\(\s*([\s\S]+?)\s*\)\s*THEN\s*RAISE\s+EXCEPTION\s+['"]([\s\S]+?)['"]/i,
+    );
     if (ifExistsMatch) {
       const checkQuery = ifExistsMatch[1];
       const errorMsg = ifExistsMatch[2];
       const result = memDb.public.query(checkQuery);
-      const rows = result ? (result.rows || (Array.isArray(result) ? result : [])) : [];
+      const rows = result ? result.rows || (Array.isArray(result) ? result : []) : [];
       if (rows.length > 0) {
         throw new Error(errorMsg);
       }
@@ -103,7 +122,10 @@ export async function createTestDb(options: { poolMax?: number } = {}): Promise<
     const hasOthersHandler = /WHEN\s+OTHERS/i.test(code);
     const match = code.match(/BEGIN\s+([\s\S]+?)\s+(?:EXCEPTION|END)/i);
     const body = match ? match[1] : code;
-    const statements = body.split(';').map((s) => s.trim()).filter(Boolean);
+    const statements = body
+      .split(';')
+      .map((s) => s.trim())
+      .filter(Boolean);
     for (const stmt of statements) {
       try {
         memDb.public.query(stmt);
@@ -114,9 +136,7 @@ export async function createTestDb(options: { poolMax?: number } = {}): Promise<
         if (hasDuplicateObjectHandler) {
           const msg = (err?.message || '').toLowerCase();
           const isDuplicate =
-            msg.includes('already exists') ||
-            msg.includes('duplicate') ||
-            msg.includes('unique constraint');
+            msg.includes('already exists') || msg.includes('duplicate') || msg.includes('unique constraint');
           if (isDuplicate) {
             continue;
           }
@@ -132,12 +152,15 @@ export async function createTestDb(options: { poolMax?: number } = {}): Promise<
     // pg-mem cannot execute PostgreSQL deferred constraint triggers. This
     // migration is verified by the disposable real-PostgreSQL suite instead;
     // do not pretend the emulator enforces these constraints.
-    if (sql.includes('-- ECONOMY_REAL_PG_HARDENING') ||
-        sql.includes('-- ECONOMY_REAL_PG_AUTHORITY') ||
-        sql.includes('-- ECONOMY_REAL_PG_CORRECTIONS') ||
-        sql.includes('-- ECONOMY_REAL_PG_ACTIVITY') ||
-        sql.includes('-- ECONOMY_REAL_PG_LIFECYCLE') ||
-        sql.includes('-- ECONOMY_REAL_PG_REFUND')) return [];
+    if (
+      sql.includes('-- ECONOMY_REAL_PG_HARDENING') ||
+      sql.includes('-- ECONOMY_REAL_PG_AUTHORITY') ||
+      sql.includes('-- ECONOMY_REAL_PG_CORRECTIONS') ||
+      sql.includes('-- ECONOMY_REAL_PG_ACTIVITY') ||
+      sql.includes('-- ECONOMY_REAL_PG_LIFECYCLE') ||
+      sql.includes('-- ECONOMY_REAL_PG_REFUND')
+    )
+      return [];
     if (sql.includes('-- CHAIN_REAL_PG_INDEXER')) return [];
     // pg-mem cannot ALTER TYPE ... ADD VALUE. Additive enum values guarded by
     // IF NOT EXISTS are treated as no-ops; pg-mem stores enum columns as text.
@@ -145,7 +168,10 @@ export async function createTestDb(options: { poolMax?: number } = {}): Promise<
     if (sql.includes('WITH RECURSIVE area_tree(id, path)')) {
       const root = /FROM admin_areas WHERE id = '([^']+)'/.exec(sql)?.[1];
       if (!root) return [];
-      const rows = memDb.public.query('SELECT id, parent_id FROM admin_areas').rows as Array<{ id: string; parent_id: string | null }>;
+      const rows = memDb.public.query('SELECT id, parent_id FROM admin_areas').rows as Array<{
+        id: string;
+        parent_id: string | null;
+      }>;
       const found = new Set<string>();
       const frontier = [root];
       while (frontier.length) {
@@ -180,7 +206,7 @@ export async function createTestDb(options: { poolMax?: number } = {}): Promise<
     }
     if (sql.includes('SKIP LOCKED')) {
       const res = memDb.public.query(sql.replace(/SKIP\s+LOCKED/gi, ''));
-      return res && typeof res === 'object' && 'rows' in res ? (res as any).rows : (Array.isArray(res) ? res : []);
+      return res && typeof res === 'object' && 'rows' in res ? (res as any).rows : Array.isArray(res) ? res : [];
     }
     return null;
   });

@@ -39,7 +39,8 @@ describe('JuanChoice presentation round v2 renewal and allowlist cutover regress
     // Keep the real predicate for every other name (calling envModule.* here would hit the spy itself).
     const realIsPresentationDatabaseName = envModule.isPresentationDatabaseName;
     jest.spyOn(envModule, 'isPresentationDatabaseName').mockImplementation((db: string, ...rest) => {
-      if (db === currentDb || db === 'juanderquest_presentation_test' || db === 'juanderquest_presentation') return true;
+      if (db === currentDb || db === 'juanderquest_presentation_test' || db === 'juanderquest_presentation')
+        return true;
       return realIsPresentationDatabaseName(db, ...rest);
     });
 
@@ -55,13 +56,18 @@ describe('JuanChoice presentation round v2 renewal and allowlist cutover regress
     });
 
     // Seed 4 editorial spots
-    const spotIds = ['spot-cabongaoan-beach', 'spot-cape-bolinao-lighthouse', 'spot-tambobong-beach', 'spot-tondol-beach'];
+    const spotIds = [
+      'spot-cabongaoan-beach',
+      'spot-cape-bolinao-lighthouse',
+      'spot-tambobong-beach',
+      'spot-tondol-beach',
+    ];
     for (const spotId of spotIds) {
       await fixture.pool.query(
         `INSERT INTO spots(id, slug, name, description, category, subcategory, municipality, address, gps_lat, gps_lng, status, is_test, recommendation_suppressed, source_type, source_name)
          VALUES($1, $2, $3, 'Test spot description', 'nature_outdoors', 'beach', 'Test Muni', 'Test Addr', 16.0, 120.0, 'published', false, false, 'editorial', 'Editorial')
          ON CONFLICT (id) DO NOTHING`,
-        [spotId, spotId, spotId]
+        [spotId, spotId, spotId],
       );
     }
 
@@ -70,7 +76,7 @@ describe('JuanChoice presentation round v2 renewal and allowlist cutover regress
       `INSERT INTO users(id, seed_id, display_name, email, role, is_test, created_at)
        VALUES ($1, 'guest-1', 'Guest 1', $2, 'user', false, NOW()),
               ($3, 'guest-2', 'Guest 2', $4, 'user', false, NOW())`,
-      [guest1Id, `${guest1Id}@example.test`, guest2Id, `${guest2Id}@example.test`]
+      [guest1Id, `${guest1Id}@example.test`, guest2Id, `${guest2Id}@example.test`],
     );
 
     // Seed Round 1
@@ -78,14 +84,14 @@ describe('JuanChoice presentation round v2 renewal and allowlist cutover regress
       `INSERT INTO juanchoice_campaigns(id, slug, region, theme, status, opens_at, closes_at, is_test, policy_version)
        VALUES($1, 'juanchoice-coastal-demo-2026-10', 'pangasinan', 'Coastal Discoveries Round 1', 'voting',
               NOW() - INTERVAL '1 day', NOW() + INTERVAL '1 day', false, 'juanchoice-pilot-v1')`,
-      [campaign1Id]
+      [campaign1Id],
     );
 
     candidate1Id = randomUUID();
     await fixture.pool.query(
       `INSERT INTO juanchoice_candidates(id, campaign_id, spot_id, status, is_test)
        VALUES($1, $2, 'spot-tondol-beach', 'eligible', false)`,
-      [candidate1Id, campaign1Id]
+      [candidate1Id, campaign1Id],
     );
   }, 120_000);
 
@@ -119,29 +125,25 @@ describe('JuanChoice presentation round v2 renewal and allowlist cutover regress
     expect(vote1.body.data.ballot.candidate_id).toBe(candidate1Id);
 
     // Verify ballot and progression in DB
-    const preCount = await fixture.pool.query(
-      'SELECT count(*) FROM juanchoice_ballots WHERE campaign_id = $1',
-      [campaign1Id]
-    );
+    const preCount = await fixture.pool.query('SELECT count(*) FROM juanchoice_ballots WHERE campaign_id = $1', [
+      campaign1Id,
+    ]);
     expect(parseInt(preCount.rows[0].count, 10)).toBe(1);
 
     // 3. Simulate seed-presentation-round-v2:
     // Mark Round 1 as closed and insert Round 2
-    await fixture.pool.query(
-      "UPDATE juanchoice_campaigns SET status = 'closed' WHERE id = $1",
-      [campaign1Id]
-    );
+    await fixture.pool.query("UPDATE juanchoice_campaigns SET status = 'closed' WHERE id = $1", [campaign1Id]);
     await fixture.pool.query(
       `INSERT INTO juanchoice_campaigns(id, slug, region, theme, status, opens_at, closes_at, is_test, policy_version)
        VALUES($1, 'juanchoice-coastal-demo-2026-10-v2', 'pangasinan', 'Coastal Discoveries Round 2', 'voting',
               NOW() - INTERVAL '1 hour', NOW() + INTERVAL '2 days', false, 'juanchoice-pilot-v1')`,
-      [campaign2Id]
+      [campaign2Id],
     );
     candidate2Id = randomUUID();
     await fixture.pool.query(
       `INSERT INTO juanchoice_candidates(id, campaign_id, spot_id, status, is_test)
        VALUES($1, $2, 'spot-cabongaoan-beach', 'eligible', false)`,
-      [candidate2Id, campaign2Id]
+      [candidate2Id, campaign2Id],
     );
 
     // 4. Before allowlist switch, API still points to campaign1Id:
@@ -182,16 +184,14 @@ describe('JuanChoice presentation round v2 renewal and allowlist cutover regress
     expect(voteRound2.body.data.ballot.candidate_id).toBe(candidate2Id);
 
     // 6. Verify audit fidelity: Round 1 ballots and events are completely preserved!
-    const round1Ballots = await fixture.pool.query(
-      'SELECT count(*) FROM juanchoice_ballots WHERE campaign_id = $1',
-      [campaign1Id]
-    );
+    const round1Ballots = await fixture.pool.query('SELECT count(*) FROM juanchoice_ballots WHERE campaign_id = $1', [
+      campaign1Id,
+    ]);
     expect(parseInt(round1Ballots.rows[0].count, 10)).toBe(1);
 
-    const round2Ballots = await fixture.pool.query(
-      'SELECT count(*) FROM juanchoice_ballots WHERE campaign_id = $1',
-      [campaign2Id]
-    );
+    const round2Ballots = await fixture.pool.query('SELECT count(*) FROM juanchoice_ballots WHERE campaign_id = $1', [
+      campaign2Id,
+    ]);
     expect(parseInt(round2Ballots.rows[0].count, 10)).toBe(1);
 
     // Total ballots is now 2 across both rounds, zero loss

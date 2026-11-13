@@ -2,13 +2,7 @@ import { randomUUID } from 'crypto';
 import { runIsolatedProducer, type Queryable } from './activity.js';
 import { enqueuePush } from '../push/enqueue.js';
 
-export type NotificationKind =
-  | 'follow'
-  | 'cheer'
-  | 'comment'
-  | 'overtaken'
-  | 'weekly_recap'
-  | 'weekly_champion';
+export type NotificationKind = 'follow' | 'cheer' | 'comment' | 'overtaken' | 'weekly_recap' | 'weekly_champion';
 
 export interface NotifyInput {
   userId: string;
@@ -40,16 +34,7 @@ export async function notify(client: Queryable, input: NotifyInput): Promise<str
      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      ON CONFLICT (user_id, event_key) DO NOTHING
      RETURNING id`,
-    [
-      notifId,
-      input.userId,
-      input.eventKey,
-      input.kind,
-      title,
-      input.message,
-      input.href,
-      Boolean(input.isTest),
-    ],
+    [notifId, input.userId, input.eventKey, input.kind, title, input.message, input.href, Boolean(input.isTest)],
   );
 
   if (!res.rows.length || res.rows[0].id !== notifId) {

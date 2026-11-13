@@ -36,10 +36,7 @@ export class AlphaSessionScopeBatcher {
   private inFlightCallers: PendingCaller[] = [];
   private isClosed: boolean = false;
 
-  constructor(
-    queryFn: AlphaBatchQueryFn,
-    options: AlphaSessionScopeBatcherOptions = {}
-  ) {
+  constructor(queryFn: AlphaBatchQueryFn, options: AlphaSessionScopeBatcherOptions = {}) {
     if (typeof queryFn !== 'function') {
       throw new Error('AlphaSessionScopeBatcher requires a valid query function.');
     }

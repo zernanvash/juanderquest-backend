@@ -153,7 +153,9 @@ describe('Phase 2: Rate Limiter Policy Separation & Actor Budgeting', () => {
 
     // Request 1: Allowed
     let called = false;
-    limiter(req, createMockRes(), () => { called = true; });
+    limiter(req, createMockRes(), () => {
+      called = true;
+    });
     expect(called).toBe(true);
 
     // Request 2 (within window): Blocked
@@ -167,7 +169,9 @@ describe('Phase 2: Rate Limiter Policy Separation & Actor Budgeting', () => {
     // Request 3 (after window): Allowed again
     let calledAfterReset = false;
     const resReset = createMockRes();
-    limiter(req, resReset, () => { calledAfterReset = true; });
+    limiter(req, resReset, () => {
+      calledAfterReset = true;
+    });
     expect(calledAfterReset).toBe(true);
     expect(resReset.statusCode).toBe(200);
   });

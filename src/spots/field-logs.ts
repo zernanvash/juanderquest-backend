@@ -1,13 +1,7 @@
 import { randomUUID } from 'crypto';
 
-export type FieldLogTag = 
-  | 'local_tip' 
-  | 'gear_alert' 
-  | 'tide_condition' 
-  | 'food_find' 
-  | 'heritage' 
-  | 'eco_watch' 
-  | 'general';
+export type FieldLogTag =
+  'local_tip' | 'gear_alert' | 'tide_condition' | 'food_find' | 'heritage' | 'eco_watch' | 'general';
 
 export interface SpotFieldLog {
   id: string;
@@ -30,7 +24,7 @@ export interface SpotFieldLog {
   is_verified_visit?: boolean;
 }
 
-export type SpotReportReason = 
+export type SpotReportReason =
   | 'inaccurate_location'
   | 'site_closed_or_hazard'
   | 'misleading_photo'
@@ -59,7 +53,8 @@ const SEED_LOGS: SpotFieldLog[] = [
     author_badge: 'Verified Scout • Lvl 4',
     author_avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
     tag: 'local_tip',
-    content: 'Rent the kayak at Governor Island early morning! 🚣🌊 The hidden cave connection to Virgin Island is calmest before 9:00 AM before tour boat swells pick up. Absolutely breathtaking! ✨',
+    content:
+      'Rent the kayak at Governor Island early morning! 🚣🌊 The hidden cave connection to Virgin Island is calmest before 9:00 AM before tour boat swells pick up. Absolutely breathtaking! ✨',
     location_pin: {
       name: 'Governor Island Kayak Dock, Alaminos',
       lat: 16.2023,
@@ -78,7 +73,8 @@ const SEED_LOGS: SpotFieldLog[] = [
     author_name: 'Scout Ben',
     author_badge: 'Pangasinan Pioneer',
     tag: 'gear_alert',
-    content: 'Definitely bring aqua reef shoes! 👟 The limestone steps near Quezon Island view deck can be sharp when wet from high tide spray. 🌊',
+    content:
+      'Definitely bring aqua reef shoes! 👟 The limestone steps near Quezon Island view deck can be sharp when wet from high tide spray. 🌊',
     location_pin: {
       name: 'Quezon Island View Deck, Alaminos',
     },
@@ -96,7 +92,8 @@ const SEED_LOGS: SpotFieldLog[] = [
     author_name: 'Scout Franco',
     author_badge: 'Coastal Scout • Lvl 3',
     tag: 'tide_condition',
-    content: 'Golden hour sunset peaks at 5:45 PM. Low tide reveals natural tidal pools on the southern coral shelf where colorful hermit crabs and small reef fish gather.',
+    content:
+      'Golden hour sunset peaks at 5:45 PM. Low tide reveals natural tidal pools on the southern coral shelf where colorful hermit crabs and small reef fish gather.',
     helpful_count: 19,
     helpful_user_ids: ['u-auto-04', 'u-auto-05', 'u-auto-06'],
     created_at: '2026-10-01T14:20:00Z',
@@ -109,7 +106,8 @@ const SEED_LOGS: SpotFieldLog[] = [
     author_name: 'Scout Celine',
     author_badge: 'Conservation Guardian',
     tag: 'eco_watch',
-    content: 'Please carry all single-use plastics and drink containers back to the main parking lot disposal bins. Let’s keep Bolinao’s creamy sand clean for nesting turtles!',
+    content:
+      'Please carry all single-use plastics and drink containers back to the main parking lot disposal bins. Let’s keep Bolinao’s creamy sand clean for nesting turtles!',
     helpful_count: 14,
     helpful_user_ids: ['u-auto-07'],
     created_at: '2026-10-02T09:00:00Z',
@@ -124,7 +122,8 @@ const SEED_LOGS: SpotFieldLog[] = [
     author_name: 'Scout Diego',
     author_badge: 'Heritage Scout • Lvl 5',
     tag: 'food_find',
-    content: 'Freshly grilled hot Tupig wrapped in scorched banana leaves is available right outside the north gate (₱10 each). Pairs amazingly with hot Kapeng Barako!',
+    content:
+      'Freshly grilled hot Tupig wrapped in scorched banana leaves is available right outside the north gate (₱10 each). Pairs amazingly with hot Kapeng Barako!',
     helpful_count: 24,
     helpful_user_ids: ['u-auto-08', 'u-auto-09'],
     created_at: '2026-10-03T11:45:00Z',
@@ -139,7 +138,8 @@ const SEED_LOGS: SpotFieldLog[] = [
     author_name: 'Scout Ella',
     author_badge: 'Wilderness Explorer',
     tag: 'gear_alert',
-    content: 'Life vests are strictly required for cliff jumping into the freshwater pool (₱50 rental at entrance). The spring water is approx 18-20ft deep and invigoratingly cold!',
+    content:
+      'Life vests are strictly required for cliff jumping into the freshwater pool (₱50 rental at entrance). The spring water is approx 18-20ft deep and invigoratingly cold!',
     helpful_count: 13,
     helpful_user_ids: ['u-auto-10'],
     created_at: '2026-10-04T08:10:00Z',
@@ -154,7 +154,8 @@ const SEED_LOGS: SpotFieldLog[] = [
     author_name: 'Patricia Santos',
     author_badge: 'Tourism Officer',
     tag: 'heritage',
-    content: 'The Capitol baywalk features historical bronze plaques detailing the 1945 Allied landing. Best jogged from 5:00 AM to 6:30 AM before the coastal sun heats up.',
+    content:
+      'The Capitol baywalk features historical bronze plaques detailing the 1945 Allied landing. Best jogged from 5:00 AM to 6:30 AM before the coastal sun heats up.',
     helpful_count: 17,
     helpful_user_ids: ['u-auto-11', 'u-auto-12'],
     created_at: '2026-10-04T16:00:00Z',
@@ -188,7 +189,7 @@ class FieldLogStore {
     isVerifiedVisit = false,
     imageUrl?: string,
     locationPin?: { name: string; lat?: number; lng?: number },
-    authorAvatar?: string
+    authorAvatar?: string,
   ): SpotFieldLog {
     const log: SpotFieldLog = {
       id: `log-${randomUUID().slice(0, 8)}`,
@@ -239,7 +240,7 @@ class FieldLogStore {
     reason: SpotReportReason,
     userId?: string,
     reporterName?: string,
-    details?: string
+    details?: string,
   ): SpotReport {
     const report: SpotReport = {
       id: `rep-${randomUUID().slice(0, 8)}`,

@@ -26,11 +26,12 @@ function formatBatchedContent(row: any): { title: string; body: string } {
 
   let names: string[] = [];
   try {
-    names = typeof row.batch_names === 'string'
-      ? JSON.parse(row.batch_names)
-      : Array.isArray(row.batch_names)
-      ? row.batch_names
-      : [];
+    names =
+      typeof row.batch_names === 'string'
+        ? JSON.parse(row.batch_names)
+        : Array.isArray(row.batch_names)
+          ? row.batch_names
+          : [];
   } catch {
     names = [];
   }
@@ -59,10 +60,7 @@ function formatBatchedContent(row: any): { title: string; body: string } {
  * Dispatches due queued push notifications.
  * Implements atomic claim with SKIP LOCKED (falling back gracefully for pg-mem).
  */
-export async function dispatchDuePushes(
-  client: Queryable,
-  options: DispatchOptions = {},
-): Promise<DispatchSummary> {
+export async function dispatchDuePushes(client: Queryable, options: DispatchOptions = {}): Promise<DispatchSummary> {
   const limit = options.limit ?? 100;
   const fcm = options.fcmSender ?? sendToTokens;
   const now = options.now ?? new Date();
@@ -130,16 +128,15 @@ export async function dispatchDuePushes(
       row.category === 'overtaken'
         ? prefs.push_overtaken
         : row.category === 'friend_activity'
-        ? prefs.push_friend_activity
-        : row.category === 'social'
-        ? prefs.push_social
-        : prefs.push_weekly_recap;
+          ? prefs.push_friend_activity
+          : row.category === 'social'
+            ? prefs.push_social
+            : prefs.push_weekly_recap;
 
     if (!categoryAllowed) {
-      await client.query(
-        "UPDATE push_deliveries SET status = 'skipped', skip_reason = 'PREF_OFF' WHERE id = $1",
-        [row.id],
-      );
+      await client.query("UPDATE push_deliveries SET status = 'skipped', skip_reason = 'PREF_OFF' WHERE id = $1", [
+        row.id,
+      ]);
       summary.skipped++;
       continue;
     }
@@ -154,26 +151,23 @@ export async function dispatchDuePushes(
       (row.category === 'social' && catSent >= 4);
 
     if (overCap) {
-      await client.query(
-        "UPDATE push_deliveries SET status = 'skipped', skip_reason = 'CAP_REACHED' WHERE id = $1",
-        [row.id],
-      );
+      await client.query("UPDATE push_deliveries SET status = 'skipped', skip_reason = 'CAP_REACHED' WHERE id = $1", [
+        row.id,
+      ]);
       summary.skipped++;
       continue;
     }
 
     // 3. Load active user devices
-    const devRes = await client.query(
-      'SELECT token FROM user_devices WHERE user_id = $1 AND disabled_at IS NULL',
-      [row.user_id],
-    );
+    const devRes = await client.query('SELECT token FROM user_devices WHERE user_id = $1 AND disabled_at IS NULL', [
+      row.user_id,
+    ]);
 
     const tokens = devRes.rows.map((r: any) => r.token);
     if (!tokens.length) {
-      await client.query(
-        "UPDATE push_deliveries SET status = 'skipped', skip_reason = 'NO_DEVICE' WHERE id = $1",
-        [row.id],
-      );
+      await client.query("UPDATE push_deliveries SET status = 'skipped', skip_reason = 'NO_DEVICE' WHERE id = $1", [
+        row.id,
+      ]);
       summary.skipped++;
       continue;
     }
@@ -184,10 +178,10 @@ export async function dispatchDuePushes(
       row.category === 'overtaken'
         ? 'plaza_competition'
         : row.category === 'friend_activity'
-        ? 'plaza_friends'
-        : row.category === 'social'
-        ? 'plaza_social'
-        : 'plaza_recap';
+          ? 'plaza_friends'
+          : row.category === 'social'
+            ? 'plaza_social'
+            : 'plaza_recap';
 
     const sendRes = await fcm(tokens, {
       title,
@@ -214,17 +208,14 @@ export async function dispatchDuePushes(
     }
 
     if (sendRes.successCount > 0) {
-      await client.query(
-        "UPDATE push_deliveries SET status = 'sent', sent_at = NOW() WHERE id = $1",
-        [row.id],
-      );
+      await client.query("UPDATE push_deliveries SET status = 'sent', sent_at = NOW() WHERE id = $1", [row.id]);
       summary.sent++;
     } else {
       if (Number(row.attempts) >= 5) {
-        await client.query(
-          "UPDATE push_deliveries SET status = 'failed', last_error = $1 WHERE id = $2",
-          [sendRes.transientError || 'All tokens failed', row.id],
-        );
+        await client.query("UPDATE push_deliveries SET status = 'failed', last_error = $1 WHERE id = $2", [
+          sendRes.transientError || 'All tokens failed',
+          row.id,
+        ]);
         summary.failed++;
       } else {
         const delayMinutes = Math.pow(2, Number(row.attempts));
@@ -254,9 +245,7 @@ export async function runPushDispatcherTick(): Promise<void> {
   const client = await pool.connect();
   let locked = false;
   try {
-    const lockRes = await client.query('SELECT pg_try_advisory_lock($1) AS acquired', [
-      PLAZA_PUSH_DISPATCHER_LOCK_KEY,
-    ]);
+    const lockRes = await client.query('SELECT pg_try_advisory_lock($1) AS acquired', [PLAZA_PUSH_DISPATCHER_LOCK_KEY]);
     locked = Boolean(lockRes.rows[0]?.acquired);
     if (!locked) return;
 

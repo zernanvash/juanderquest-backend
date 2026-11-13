@@ -41,7 +41,9 @@ describe('development authentication safety', () => {
     Reflect.set(env, 'WALLET_AUTH_MODE', 'local');
     Reflect.set(env, 'ALLOW_INSECURE_LOCAL_WALLET_AUTH', false);
     const local = await request(app).post('/api/v1/auth/wallet/local-login').send({ address: 'dev-wallet-1' });
-    const simulated = await request(app).post('/api/v1/auth/simulated-wallet-login').send({ username: 'Traveler', password: 'anything' });
+    const simulated = await request(app)
+      .post('/api/v1/auth/simulated-wallet-login')
+      .send({ username: 'Traveler', password: 'anything' });
     expect(local.status).toBe(403);
     expect(simulated.status).toBe(403);
   });
@@ -50,7 +52,8 @@ describe('development authentication safety', () => {
     Reflect.set(env, 'NODE_ENV', 'development');
     Reflect.set(env, 'ALLOW_INSECURE_LOCAL_WALLET_AUTH', true);
     for (const username of ['admin-1', 'user-1', 'user-2', 'user-3', 'coastal', 'maya', 'pao']) {
-      const response = await request(app).post('/api/v1/auth/simulated-wallet-login')
+      const response = await request(app)
+        .post('/api/v1/auth/simulated-wallet-login')
         .send({ username, password: 'ignored-password' });
       expect(response.status).toBe(403);
       expect(response.body.error.code).toBe('SIMULATED_LOGIN_RESERVED');
@@ -86,10 +89,24 @@ describe('production demo login hardening', () => {
   const travelerSeed = `rel-traveler-${stamp}`;
 
   beforeAll(() => {
-    db.users.push({ id: `${adminSeed}-id`, seed_id: adminSeed, display_name: 'Rel Admin', email: `${adminSeed}@x.test`,
-      role: 'admin', demo_points: 0, is_test: false } as any);
-    db.users.push({ id: `${travelerSeed}-id`, seed_id: travelerSeed, display_name: 'Rel Traveler', email: `${travelerSeed}@x.test`,
-      role: 'user', demo_points: 0, is_test: false } as any);
+    db.users.push({
+      id: `${adminSeed}-id`,
+      seed_id: adminSeed,
+      display_name: 'Rel Admin',
+      email: `${adminSeed}@x.test`,
+      role: 'admin',
+      demo_points: 0,
+      is_test: false,
+    } as any);
+    db.users.push({
+      id: `${travelerSeed}-id`,
+      seed_id: travelerSeed,
+      display_name: 'Rel Traveler',
+      email: `${travelerSeed}@x.test`,
+      role: 'user',
+      demo_points: 0,
+      is_test: false,
+    } as any);
   });
   afterEach(() => {
     for (const [key, value] of Object.entries(original)) Reflect.set(env, key, value);

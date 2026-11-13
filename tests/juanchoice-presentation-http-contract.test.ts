@@ -42,7 +42,8 @@ describe('JuanChoice presentation HTTP contracts (Cookies, Exact-Origin CSRF, Wr
     // Keep the real predicate for every other name (calling envModule.* here would hit the spy itself).
     const realIsPresentationDatabaseName = envModule.isPresentationDatabaseName;
     jest.spyOn(envModule, 'isPresentationDatabaseName').mockImplementation((db: string, ...rest) => {
-      if (db === currentDb || db === 'juanderquest_presentation_test' || db === 'juanderquest_presentation') return true;
+      if (db === currentDb || db === 'juanderquest_presentation_test' || db === 'juanderquest_presentation')
+        return true;
       return realIsPresentationDatabaseName(db, ...rest);
     });
 
@@ -67,7 +68,7 @@ describe('JuanChoice presentation HTTP contracts (Cookies, Exact-Origin CSRF, Wr
     await fixture.pool.query(
       `INSERT INTO spots(id, slug, name, description, category, subcategory, municipality, address, gps_lat, gps_lng, status, is_test, recommendation_suppressed, source_type, source_name)
        VALUES('spot-cabongaoan-beach', 'spot-cabongaoan-beach', 'Cabongaoan Beach', 'Test spot description', 'nature_outdoors', 'beach', 'Burgos', 'Burgos, Pangasinan', 16.0, 120.0, 'published', false, false, 'editorial', 'Editorial')
-       ON CONFLICT (id) DO NOTHING`
+       ON CONFLICT (id) DO NOTHING`,
     );
 
     // Seed test campaign
@@ -75,21 +76,21 @@ describe('JuanChoice presentation HTTP contracts (Cookies, Exact-Origin CSRF, Wr
       `INSERT INTO juanchoice_campaigns(id, slug, region, theme, status, opens_at, closes_at, is_test, policy_version)
        VALUES($1, 'juanchoice-presentation-demo', 'pangasinan', 'Presentation Demo', 'voting',
               NOW() - INTERVAL '1 hour', NOW() + INTERVAL '1 day', false, 'juanchoice-pilot-v1')`,
-      [campaignId]
+      [campaignId],
     );
 
     candidateId = randomUUID();
     await fixture.pool.query(
       `INSERT INTO juanchoice_candidates(id, campaign_id, spot_id, status, is_test)
        VALUES($1, $2, 'spot-cabongaoan-beach', 'eligible', false)`,
-      [candidateId, campaignId]
+      [candidateId, campaignId],
     );
 
     testUserId = randomUUID();
     await fixture.pool.query(
       `INSERT INTO users(id, seed_id, display_name, email, role, is_test, created_at)
        VALUES ($1, 'guest-test', 'Guest Test', 'guest-test@example.test', 'user', false, NOW())`,
-      [testUserId]
+      [testUserId],
     );
   }, 60000);
 
@@ -108,9 +109,7 @@ describe('JuanChoice presentation HTTP contracts (Cookies, Exact-Origin CSRF, Wr
       env.JDQ_PRESENTATION_PROFILE = 'public';
       env.CORS_ORIGIN = 'https://presentation.juanderquest.app';
 
-      const res = await request(app)
-        .post('/api/v1/auth/guest-login')
-        .send({ remember_me: true });
+      const res = await request(app).post('/api/v1/auth/guest-login').send({ remember_me: true });
 
       expect(res.status).toBe(200);
       const rawCookies = res.headers['set-cookie'];
@@ -136,9 +135,7 @@ describe('JuanChoice presentation HTTP contracts (Cookies, Exact-Origin CSRF, Wr
       env.JDQ_PRESENTATION_PROFILE = 'local';
       env.CORS_ORIGIN = 'http://127.0.0.1:3200';
 
-      const res = await request(app)
-        .post('/api/v1/auth/guest-login')
-        .send({ remember_me: false });
+      const res = await request(app).post('/api/v1/auth/guest-login').send({ remember_me: false });
 
       expect(res.status).toBe(200);
       const rawCookies = res.headers['set-cookie'];
@@ -249,9 +246,7 @@ describe('JuanChoice presentation HTTP contracts (Cookies, Exact-Origin CSRF, Wr
       expect(voteRes.body.error.code).toBe('WRITES_DISABLED');
 
       // 2. Guest login remains operational (HTTP 200)
-      const guestRes = await request(app)
-        .post('/api/v1/auth/guest-login')
-        .send({ remember_me: false });
+      const guestRes = await request(app).post('/api/v1/auth/guest-login').send({ remember_me: false });
 
       expect(guestRes.status).toBe(200);
       expect(guestRes.body.data.user).toBeDefined();

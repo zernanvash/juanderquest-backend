@@ -15,10 +15,7 @@ export interface FeedItem extends Spot {
 }
 
 // Applies municipal diversity spacing: at most 2 consecutive items from the same municipality
-export function applyMunicipalDiversity<T extends { municipality: string }>(
-  items: T[],
-  maxConsecutive = 2
-): T[] {
+export function applyMunicipalDiversity<T extends { municipality: string }>(items: T[], maxConsecutive = 2): T[] {
   if (items.length <= maxConsecutive) return [...items];
 
   const pool = [...items];
@@ -31,9 +28,7 @@ export function applyMunicipalDiversity<T extends { municipality: string }>(
     const len = result.length;
     if (
       len >= maxConsecutive &&
-      result
-        .slice(len - maxConsecutive)
-        .every((item) => item.municipality === pool[candidateIdx].municipality)
+      result.slice(len - maxConsecutive).every((item) => item.municipality === pool[candidateIdx].municipality)
     ) {
       // Find the first item from a DIFFERENT municipality
       const avoidMuni = pool[candidateIdx].municipality;
@@ -51,7 +46,8 @@ export function applyMunicipalDiversity<T extends { municipality: string }>(
 
 feedRouter.get('/feed', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res: Response) => {
   const userId = req.user?.id;
-  const actorId = req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
+  const actorId =
+    req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
   const prefs = userId ? spotStore.getPreferences(userId) : undefined;
   const hasUserPrefs =
     Boolean(prefs) &&
@@ -63,7 +59,7 @@ feedRouter.get('/feed', optionalAuthenticateToken, checkQAAuthorization, (req: A
 
   // 1. Eligible Published & Non-suppressed Spots (strictly excluding synthetic test data unless authorized QA)
   const eligibleSpots = spotStore.spots.filter(
-    (s) => s.status === 'published' && !s.recommendation_suppressed && (allowQA || !s.is_test)
+    (s) => s.status === 'published' && !s.recommendation_suppressed && (allowQA || !s.is_test),
   );
 
   // 2. Score Spots with Persisted Signals
@@ -159,12 +155,20 @@ feedRouter.get('/feed', optionalAuthenticateToken, checkQAAuthorization, (req: A
   const limit = Math.min(50, Math.max(1, Math.floor(requestedLimit)));
   let page;
   try {
-    page = rankedFeedPage(diversifiedItems, JSON.stringify([userId || 'guest', allowQA ? 'qa' : 'public']),
-      typeof req.query.cursor === 'string' ? req.query.cursor : undefined, limit);
+    page = rankedFeedPage(
+      diversifiedItems,
+      JSON.stringify([userId || 'guest', allowQA ? 'qa' : 'public']),
+      typeof req.query.cursor === 'string' ? req.query.cursor : undefined,
+      limit,
+    );
   } catch {
-    return res.status(400).json({ success: false, error: {
-      code: 'INVALID_CURSOR', message: 'This feed session has expired. Refresh to start a new feed.',
-    } });
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: 'INVALID_CURSOR',
+        message: 'This feed session has expired. Refresh to start a new feed.',
+      },
+    });
   }
   res.setHeader('Cache-Control', 'private, no-store');
   if (allowQA) {

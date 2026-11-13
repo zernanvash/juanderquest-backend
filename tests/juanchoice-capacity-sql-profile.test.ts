@@ -16,7 +16,8 @@ describe('capacity SQL profile pool-query wrapper', () => {
     const ids = ['reader-a', 'reader-b'];
     const allowed = new Set(ids);
     const query = jest.fn((_sql: string, values: unknown[]) =>
-      values[0] === 'fail' ? Promise.reject(new Error('outage')) : Promise.resolve({ rows: [] }));
+      values[0] === 'fail' ? Promise.reject(new Error('outage')) : Promise.resolve({ rows: [] }),
+    );
     const pool = { query } as unknown as Pool;
     let identityChecks = 0;
     let identityQueries = 0;
@@ -40,7 +41,9 @@ describe('capacity SQL profile pool-query wrapper', () => {
   it('profiles promise success/failure once and preserves results and errors', async () => {
     const failure = new Error('expected test failure');
     const result = { rows: [{ value: 1 }] };
-    const original = jest.fn((_sql: string) => _sql === 'SELECT fail' ? Promise.reject(failure) : Promise.resolve(result));
+    const original = jest.fn((_sql: string) =>
+      _sql === 'SELECT fail' ? Promise.reject(failure) : Promise.resolve(result),
+    );
     const pool = { query: original } as unknown as Pool;
     const records: Array<{ sql: string; success: boolean; elapsed: number }> = [];
     let lookups = 0;
@@ -48,15 +51,18 @@ describe('capacity SQL profile pool-query wrapper', () => {
       isActive: () => true,
       record: (query, elapsed, success) => records.push({ sql: sqlShape(query), success, elapsed }),
       isWalletLookup: (query) => query === 'SELECT ok',
-      onWalletLookup: () => { lookups++; },
+      onWalletLookup: () => {
+        lookups++;
+      },
     });
 
     expect(await pool.query('SELECT ok')).toBe(result);
     await expect(pool.query('SELECT fail')).rejects.toBe(failure);
-    expect(records.map(row => [row.sql, row.success])).toEqual([
-      ['SELECT ok', true], ['SELECT fail', false],
+    expect(records.map((row) => [row.sql, row.success])).toEqual([
+      ['SELECT ok', true],
+      ['SELECT fail', false],
     ]);
-    expect(records.every(row => Number.isFinite(row.elapsed) && row.elapsed >= 0)).toBe(true);
+    expect(records.every((row) => Number.isFinite(row.elapsed) && row.elapsed >= 0)).toBe(true);
     expect(lookups).toBe(1);
     restore();
     expect(pool.query).toBe(original);
@@ -65,7 +71,12 @@ describe('capacity SQL profile pool-query wrapper', () => {
   it('profiles callback success/failure once and preserves callback context, result and error', () => {
     const failure = new Error('expected callback failure');
     const result = { rows: [{ value: 2 }] };
-    const original = jest.fn(function (this: unknown, sql: string, _values: unknown[], callback: (...args: unknown[]) => void) {
+    const original = jest.fn(function (
+      this: unknown,
+      sql: string,
+      _values: unknown[],
+      callback: (...args: unknown[]) => void,
+    ) {
       callback.call(this, sql === 'SELECT fail' ? failure : null, sql === 'SELECT fail' ? undefined : result);
       return 'callback-return';
     });
@@ -76,7 +87,9 @@ describe('capacity SQL profile pool-query wrapper', () => {
       isActive: () => true,
       record: (_query, elapsed, success) => records.push({ success, elapsed }),
       isWalletLookup: (_query, values) => Array.isArray(values) && values[0] === 'wallet-reader',
-      onWalletLookup: () => { lookups++; },
+      onWalletLookup: () => {
+        lookups++;
+      },
     });
     const callback = jest.fn(function (this: unknown, error: unknown, value: unknown) {
       expect(this).toBe(pool);
@@ -85,9 +98,12 @@ describe('capacity SQL profile pool-query wrapper', () => {
 
     expect(Reflect.apply(pool.query, pool, ['SELECT ok', ['wallet-reader'], callback])).toBe('callback-return');
     expect(Reflect.apply(pool.query, pool, ['SELECT fail', ['wallet-reader'], callback])).toBe('callback-return');
-    expect(callback.mock.calls).toEqual([[null, result], [failure, undefined]]);
-    expect(records.map(row => row.success)).toEqual([true, false]);
-    expect(records.every(row => Number.isFinite(row.elapsed) && row.elapsed >= 0)).toBe(true);
+    expect(callback.mock.calls).toEqual([
+      [null, result],
+      [failure, undefined],
+    ]);
+    expect(records.map((row) => row.success)).toEqual([true, false]);
+    expect(records.every((row) => Number.isFinite(row.elapsed) && row.elapsed >= 0)).toBe(true);
     expect(lookups).toBe(1);
     restore();
   });
@@ -98,26 +114,34 @@ describe('capacity SQL profile pool-query wrapper', () => {
     const records: string[] = [];
     const restore = installPoolQueryProfile(pool, {
       isActive: () => false,
-      record: query => { records.push(sqlShape(query)); },
+      record: (query) => {
+        records.push(sqlShape(query));
+      },
       isWalletLookup: () => true,
-      onWalletLookup: () => { throw new Error('should not count inactive lookups'); },
+      onWalletLookup: () => {
+        throw new Error('should not count inactive lookups');
+      },
     });
     await pool.query('SELECT id FROM users WHERE id = $1', ['secret-user-id']);
     expect(records).toEqual([]);
-    expect(sqlShape({ text: 'SELECT id FROM users WHERE id = $1', values: ['secret-user-id'] }))
-      .toBe('SELECT id FROM users WHERE id = $1');
+    expect(sqlShape({ text: 'SELECT id FROM users WHERE id = $1', values: ['secret-user-id'] })).toBe(
+      'SELECT id FROM users WHERE id = $1',
+    );
     restore();
   });
 });
 
 describe('read query focus reporting', () => {
-
   it('classifies exact known read query shapes accurately', () => {
     const walletSql = 'SELECT id, seed_id, is_test FROM users WHERE id = ANY($1::text[])';
-    const campaignSql = "SELECT id,slug,region,theme,status,opens_at,closes_at,is_test,policy_version FROM juanchoice_campaigns WHERE id = $1 AND status <> 'draft' AND ($2::boolean OR is_test = FALSE)";
-    const standingsSql = "SELECT c.id AS candidate_id, c.spot_id, s.slug AS spot_slug, s.name AS spot_name, COUNT(b.user_id)::int AS votes FROM juanchoice_candidates c JOIN spots s ON s.id = c.spot_id LEFT JOIN juanchoice_ballots b ON b.campaign_id = c.campaign_id AND b.candidate_id = c.id WHERE c.campaign_id = $1 AND c.status = 'eligible' AND c.is_test = $2 AND s.is_test = $2 AND s.status = 'published' AND s.recommendation_suppressed = FALSE GROUP BY c.id,c.spot_id,s.slug,s.name ORDER BY votes DESC,c.id";
-    const overviewScheduleSql = "SELECT id,region_key,display_region,timezone,enabled FROM juanchoice_schedules WHERE region_key=$1 AND is_test=$2 ORDER BY created_at,id LIMIT 1";
-    const currentPeriodSql = "SELECT c.id,c.slug,c.region,c.theme,c.status,c.opens_at,c.closes_at,c.policy_version,p.period_start FROM juanchoice_schedule_periods p JOIN juanchoice_campaigns c ON c.id=p.campaign_id WHERE p.schedule_id=$1 AND p.status='prepared' AND c.status IN ('scheduled','voting') AND p.opens_at <= $2 AND p.closes_at > $2 ORDER BY p.period_start DESC,p.id DESC LIMIT 1";
+    const campaignSql =
+      "SELECT id,slug,region,theme,status,opens_at,closes_at,is_test,policy_version FROM juanchoice_campaigns WHERE id = $1 AND status <> 'draft' AND ($2::boolean OR is_test = FALSE)";
+    const standingsSql =
+      "SELECT c.id AS candidate_id, c.spot_id, s.slug AS spot_slug, s.name AS spot_name, COUNT(b.user_id)::int AS votes FROM juanchoice_candidates c JOIN spots s ON s.id = c.spot_id LEFT JOIN juanchoice_ballots b ON b.campaign_id = c.campaign_id AND b.candidate_id = c.id WHERE c.campaign_id = $1 AND c.status = 'eligible' AND c.is_test = $2 AND s.is_test = $2 AND s.status = 'published' AND s.recommendation_suppressed = FALSE GROUP BY c.id,c.spot_id,s.slug,s.name ORDER BY votes DESC,c.id";
+    const overviewScheduleSql =
+      'SELECT id,region_key,display_region,timezone,enabled FROM juanchoice_schedules WHERE region_key=$1 AND is_test=$2 ORDER BY created_at,id LIMIT 1';
+    const currentPeriodSql =
+      "SELECT c.id,c.slug,c.region,c.theme,c.status,c.opens_at,c.closes_at,c.policy_version,p.period_start FROM juanchoice_schedule_periods p JOIN juanchoice_campaigns c ON c.id=p.campaign_id WHERE p.schedule_id=$1 AND p.status='prepared' AND c.status IN ('scheduled','voting') AND p.opens_at <= $2 AND p.closes_at > $2 ORDER BY p.period_start DESC,p.id DESC LIMIT 1";
     const previousPeriodSql = `SELECT c.id AS campaign_id,c.theme,p.period_start,p.opens_at,p.closes_at,
          r.finalized_at,r.valid_ballots,r.co_winner_ids,r.standings
        FROM juanchoice_schedule_periods p JOIN juanchoice_campaigns c ON c.id=p.campaign_id`;
@@ -130,23 +154,27 @@ describe('read query focus reporting', () => {
     expect(classifyReadQueryShape(sqlShape(previousPeriodSql))?.key).toBe('monthly_overview_previous_period');
 
     // Ballot write query or unrelated query must return null
-    expect(classifyReadQueryShape('INSERT INTO juanchoice_ballots(campaign_id,user_id,candidate_id,version,is_test) VALUES($1,$2,$3,$4,$5)')).toBeNull();
+    expect(
+      classifyReadQueryShape(
+        'INSERT INTO juanchoice_ballots(campaign_id,user_id,candidate_id,version,is_test) VALUES($1,$2,$3,$4,$5)',
+      ),
+    ).toBeNull();
     expect(classifyReadQueryShape('SELECT clock_timestamp() AS now')).toBeNull();
     expect(classifyReadQueryShape('COMMIT')).toBeNull();
   });
 
   it('computes percentiles correctly without fabricating samples', () => {
-    expect(computePercentile([], 0.50)).toBe(0);
+    expect(computePercentile([], 0.5)).toBe(0);
     expect(computePercentile([], 0.95)).toBe(0);
 
     const single = [100];
-    expect(computePercentile(single, 0.50)).toBe(100);
+    expect(computePercentile(single, 0.5)).toBe(100);
     expect(computePercentile(single, 0.95)).toBe(100);
 
     // 10 samples: 10, 20, 30, ..., 100
     const ten = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
     // p50: index Math.min(9, Math.ceil(10 * 0.50) - 1) = index 4 -> 50
-    expect(computePercentile(ten, 0.50)).toBe(50);
+    expect(computePercentile(ten, 0.5)).toBe(50);
     // p95: index Math.min(9, Math.ceil(10 * 0.95) - 1) = index Math.min(9, 10 - 1) = index 9 -> 100
     expect(computePercentile(ten, 0.95)).toBe(100);
   });
@@ -156,13 +184,25 @@ describe('read query focus reporting', () => {
     const errors = new Map<string, number>();
 
     // Add wallet query under pool_query
-    timings.set('pool_query|SELECT id, seed_id, is_test FROM users WHERE id = ANY($1::text[])', [50, 100, 250, 75, 125]);
+    timings.set(
+      'pool_query|SELECT id, seed_id, is_test FROM users WHERE id = ANY($1::text[])',
+      [50, 100, 250, 75, 125],
+    );
     // Add campaign lookup under pool_query
-    timings.set("pool_query|SELECT id,slug,region,theme,status,opens_at,closes_at,is_test,policy_version FROM juanchoice_campaigns WHERE id = $1 AND status <> 'draft' AND ($2::boolean OR is_test = FALSE)", [40, 80, 120]);
-    errors.set("pool_query|SELECT id,slug,region,theme,status,opens_at,closes_at,is_test,policy_version FROM juanchoice_campaigns WHERE id = $1 AND status <> 'draft' AND ($2::boolean OR is_test = FALSE)", 1);
+    timings.set(
+      "pool_query|SELECT id,slug,region,theme,status,opens_at,closes_at,is_test,policy_version FROM juanchoice_campaigns WHERE id = $1 AND status <> 'draft' AND ($2::boolean OR is_test = FALSE)",
+      [40, 80, 120],
+    );
+    errors.set(
+      "pool_query|SELECT id,slug,region,theme,status,opens_at,closes_at,is_test,policy_version FROM juanchoice_campaigns WHERE id = $1 AND status <> 'draft' AND ($2::boolean OR is_test = FALSE)",
+      1,
+    );
 
     // Add ballot write under transaction_client_query (must be ignored)
-    timings.set('transaction_client_query|INSERT INTO juanchoice_ballots(campaign_id,user_id,candidate_id,version,is_test) VALUES($1,$2,$3,$4,$5)', [10, 15, 20]);
+    timings.set(
+      'transaction_client_query|INSERT INTO juanchoice_ballots(campaign_id,user_id,candidate_id,version,is_test) VALUES($1,$2,$3,$4,$5)',
+      [10, 15, 20],
+    );
 
     const report = buildReadQueryFocusReport(timings, errors);
 
@@ -191,8 +231,8 @@ describe('read query focus reporting', () => {
     expect(report[1].max_ms).toBe(250);
 
     // Missing shapes (e.g. standings_aggregate, monthly_overview_*) must NOT produce fabricated zero entries
-    expect(report.find(r => r.key === 'standings_aggregate')).toBeUndefined();
-    expect(report.find(r => r.key === 'monthly_overview_schedule')).toBeUndefined();
+    expect(report.find((r) => r.key === 'standings_aggregate')).toBeUndefined();
+    expect(report.find((r) => r.key === 'monthly_overview_schedule')).toBeUndefined();
   });
 
   it('reports client_callback_query path with client_callback_elapsed scope alongside pool_query', () => {
@@ -226,7 +266,12 @@ describe('instrumentCallbackClientQuery harness helper', () => {
   it('profiles callback success once and preserves context, args and return value', () => {
     const sql = 'SELECT id, seed_id, is_test FROM users WHERE id = ANY($1::text[])';
     const clientResult = { rows: [{ id: 'user-1' }] };
-    const originalQuery = jest.fn(function (this: unknown, _text: string, _values: unknown[], cb: (...args: unknown[]) => void) {
+    const originalQuery = jest.fn(function (
+      this: unknown,
+      _text: string,
+      _values: unknown[],
+      cb: (...args: unknown[]) => void,
+    ) {
       cb.call(this, null, clientResult);
       return 'query-handle';
     });
@@ -356,7 +401,9 @@ describe('instrumentCallbackClientQuery harness helper', () => {
     let recordedQuery: unknown;
     instrumentCallbackClientQuery(fakeClient, {
       isActive: () => true,
-      record: (q) => { recordedQuery = q; },
+      record: (q) => {
+        recordedQuery = q;
+      },
     });
 
     const callback = jest.fn();

@@ -30,7 +30,11 @@ export interface TrailProblem {
   costing?: TrailCosting;
 }
 
-export interface TrailLeg { minutes: number; km: number; approximate: boolean }
+export interface TrailLeg {
+  minutes: number;
+  km: number;
+  approximate: boolean;
+}
 export type TrailLegLookup = (from: string, to: string) => TrailLeg | undefined;
 
 export interface TrailSolution {
@@ -43,7 +47,13 @@ export interface TrailSolution {
   ms: number;
 }
 
-export const DEFAULT_SIGNAL_WEIGHTS = Object.freeze({ quality: 0.2, popularity: 0.25, trend: 0.2, fit: 0.3, novelty: 0.05 });
+export const DEFAULT_SIGNAL_WEIGHTS = Object.freeze({
+  quality: 0.2,
+  popularity: 0.25,
+  trend: 0.2,
+  fit: 0.3,
+  novelty: 0.05,
+});
 
 export interface SpotSignalInput {
   spotId: string;
@@ -64,5 +74,13 @@ export interface SpotSignalInput {
   title?: string;
 }
 
-export interface TrailSignalRequest { themes?: string[]; goodFor?: string[]; trendThemes?: Array<{ label?: string; categories?: string[]; good_for?: string[]; weight?: number }> }
-export interface TrailSignal { spotId: string; components: { quality: number; popularity: number; trend: number; fit: number; novelty: number }; value: number }
+export interface TrailSignalRequest {
+  themes?: string[];
+  goodFor?: string[];
+  trendThemes?: Array<{ label?: string; categories?: string[]; good_for?: string[]; weight?: number }>;
+}
+export interface TrailSignal {
+  spotId: string;
+  components: { quality: number; popularity: number; trend: number; fit: number; novelty: number };
+  value: number;
+}

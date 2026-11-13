@@ -62,8 +62,12 @@ class AmoyFixtureSource implements ChainSource {
     });
   }
 
-  async getChainId() { return this.chainId; }
-  async getLatestBlockNumber() { return this.latest; }
+  async getChainId() {
+    return this.chainId;
+  }
+  async getLatestBlockNumber() {
+    return this.latest;
+  }
   async getBlock(number: number) {
     const b = this.blocks.get(number);
     if (!b) throw new Error('BLOCK_NOT_FOUND');
@@ -97,10 +101,10 @@ realPg('ChainIndexer — Polygon Amoy Role & Pause Projections (WP3)', () => {
     expect(res.processed).toBe(2);
 
     const auditRows = await fixture.pool.query(
-      'SELECT action, wallet_address, contract_address, tx_hash, block_number FROM chain_wallet_audit WHERE chain_id = 80002 ORDER BY block_number ASC, action ASC'
+      'SELECT action, wallet_address, contract_address, tx_hash, block_number FROM chain_wallet_audit WHERE chain_id = 80002 ORDER BY block_number ASC, action ASC',
     );
     expect(auditRows.rows.length).toBe(4);
-    const actions = auditRows.rows.map(r => r.action);
+    const actions = auditRows.rows.map((r) => r.action);
     expect(actions).toContain('RoleGranted');
     expect(actions).toContain('Paused');
     expect(actions).toContain('Unpaused');
@@ -131,22 +135,33 @@ realPg('ChainIndexer — Polygon Amoy Role & Pause Projections (WP3)', () => {
     await indexer.sync(10);
 
     const auditRows = await fixture.pool.query(
-      'SELECT action FROM chain_wallet_audit WHERE chain_id = 80002 AND block_number = 50776901'
+      'SELECT action FROM chain_wallet_audit WHERE chain_id = 80002 AND block_number = 50776901',
     );
     // Events from old block 50776901 must be purged
     expect(auditRows.rows.length).toBe(0);
   });
 
   it('rejects role events from a contract that is not ours, and pause events not from the distributor', async () => {
-    const options = { chainId: 80002, tokenDistributor: distributor, badge, token, confirmations: 1, startBlock: 50776900 };
+    const options = {
+      chainId: 80002,
+      tokenDistributor: distributor,
+      badge,
+      token,
+      confirmations: 1,
+      startBlock: 50776900,
+    };
 
     const foreignRole = new AmoyFixtureSource();
     foreignRole.blocks.get(50776900)!.logs[0].address = a('9');
-    await expect(new ChainIndexer(fixture.pool, foreignRole, options).sync(10)).rejects.toThrow('INVALID_CHAIN_LOG_ROLE');
+    await expect(new ChainIndexer(fixture.pool, foreignRole, options).sync(10)).rejects.toThrow(
+      'INVALID_CHAIN_LOG_ROLE',
+    );
 
     const badgePause = new AmoyFixtureSource();
     badgePause.blocks.get(50776900)!.logs[1].address = badge;
-    await expect(new ChainIndexer(fixture.pool, badgePause, options).sync(10)).rejects.toThrow('INVALID_CHAIN_LOG_PAUSE');
+    await expect(new ChainIndexer(fixture.pool, badgePause, options).sync(10)).rejects.toThrow(
+      'INVALID_CHAIN_LOG_PAUSE',
+    );
 
     const audit = await fixture.pool.query('SELECT count(*)::int AS n FROM chain_wallet_audit');
     expect(audit.rows[0].n).toBe(0);

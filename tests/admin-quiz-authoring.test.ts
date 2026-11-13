@@ -39,7 +39,10 @@ describe('Admin quiz authoring: detail, draft update, immutable published versio
   const travelerUserId = 'traveler-quiz-authoring-1';
 
   const adminToken = jwt.sign({ id: adminUserId, seed_id: 'admin-quiz-authoring-seed', role: 'admin' }, env.JWT_SECRET);
-  const travelerToken = jwt.sign({ id: travelerUserId, seed_id: 'traveler-quiz-authoring-seed', role: 'user' }, env.JWT_SECRET);
+  const travelerToken = jwt.sign(
+    { id: travelerUserId, seed_id: 'traveler-quiz-authoring-seed', role: 'user' },
+    env.JWT_SECRET,
+  );
 
   const destinationId = 'spot-authoring-quiz-test';
 
@@ -54,7 +57,7 @@ describe('Admin quiz authoring: detail, draft update, immutable published versio
          ($1, 'admin-quiz-authoring-seed', 'Admin Author', 'authoring-admin@juanderquest.app', 'admin'),
          ($2, 'traveler-quiz-authoring-seed', 'Traveler One', 'authoring-traveler@juanderquest.app', 'user')
        ON CONFLICT (id) DO NOTHING`,
-      [adminUserId, travelerUserId]
+      [adminUserId, travelerUserId],
     );
 
     await testDb.pool.query(
@@ -66,7 +69,7 @@ describe('Admin quiz authoring: detail, draft update, immutable published versio
          'nature_outdoors', 'beach', 'Bolinao', 'Test Road, Bolinao, Pangasinan',
          16.32, 119.78, 1, 'lgu', 'Bolinao Tourism', 'lgu_verified', 'published'
        ) ON CONFLICT (id) DO NOTHING`,
-      [destinationId]
+      [destinationId],
     );
   });
 

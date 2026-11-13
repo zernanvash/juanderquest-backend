@@ -30,7 +30,7 @@ export class ProgressionRepository {
        WHERE quest_id = $1 AND status = 'active'
        ORDER BY created_at DESC
        LIMIT 1`,
-      [questId]
+      [questId],
     );
 
     if (!rows.length) return null;
@@ -49,10 +49,7 @@ export class ProgressionRepository {
     };
   }
 
-  async recordVerifiedVisit(
-    visit: Omit<VerifiedVisit, 'created_at'>,
-    client: PoolClient
-  ): Promise<VerifiedVisit> {
+  async recordVerifiedVisit(visit: Omit<VerifiedVisit, 'created_at'>, client: PoolClient): Promise<VerifiedVisit> {
     const { rows } = await client.query(
       `INSERT INTO verified_visits (
          id, user_id, spot_id, binding_id, municipality_id, source_submission_id,
@@ -73,15 +70,17 @@ export class ProgressionRepository {
         visit.is_test,
         visit.revoked_at || null,
         visit.revocation_reason || null,
-      ]
+      ],
     );
 
-    const r = rows.length > 0
-      ? rows[0]
-      : (await client.query(
-          'SELECT * FROM verified_visits WHERE source_submission_id = $1',
-          [visit.source_submission_id]
-        )).rows[0];
+    const r =
+      rows.length > 0
+        ? rows[0]
+        : (
+            await client.query('SELECT * FROM verified_visits WHERE source_submission_id = $1', [
+              visit.source_submission_id,
+            ])
+          ).rows[0];
 
     if (r?.revoked_at) {
       throw new Error('VISIT_REVOKED: Existing verified visit for this submission has been revoked.');
@@ -106,7 +105,7 @@ export class ProgressionRepository {
 
   async recordProgressionEvent(
     event: Omit<ProgressionEvent, 'created_at'>,
-    client: PoolClient
+    client: PoolClient,
   ): Promise<ProgressionEvent | null> {
     if (!Number.isSafeInteger(event.delta)) {
       throw new Error('INVALID_EVENT_DELTA: Delta must be a safe integer.');
@@ -116,10 +115,9 @@ export class ProgressionRepository {
     await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [event.user_id]);
 
     if (event.reversal_of) {
-      const { rows: origRows } = await client.query(
-        'SELECT * FROM progression_events WHERE id = $1 FOR UPDATE',
-        [event.reversal_of]
-      );
+      const { rows: origRows } = await client.query('SELECT * FROM progression_events WHERE id = $1 FOR UPDATE', [
+        event.reversal_of,
+      ]);
       if (!origRows.length) {
         throw new Error('REVERSAL_TARGET_NOT_FOUND');
       }
@@ -161,7 +159,7 @@ export class ProgressionRepository {
         event.earned_at,
         event.is_test,
         event.reversal_of || null,
-      ]
+      ],
     );
 
     if (rows.length === 0 || rows[0].id !== event.id) {
@@ -188,7 +186,7 @@ export class ProgressionRepository {
   async updateProgressionTotals(
     userId: string,
     deltas: { explorerXp?: number; civicXp?: number; civicStamps?: number },
-    client: PoolClient
+    client: PoolClient,
   ): Promise<ProgressionTotals> {
     // Lock user row first for consistent lock hierarchy
     await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [userId]);
@@ -204,7 +202,7 @@ export class ProgressionRepository {
     // Atomically validate that resulting totals will not exceed the safe integer bound
     const { rows: curRows } = await client.query(
       'SELECT explorer_xp, civic_xp, civic_stamps FROM progression_totals WHERE user_id = $1 FOR UPDATE',
-      [userId]
+      [userId],
     );
 
     const maxSafe = BigInt(Number.MAX_SAFE_INTEGER);
@@ -217,11 +215,16 @@ export class ProgressionRepository {
     const nextStamps = curStamps + BigInt(stampDelta);
 
     if (
-      nextExp > maxSafe || nextExp < 0n ||
-      nextCiv > maxSafe || nextCiv < 0n ||
-      nextStamps > maxSafe || nextStamps < 0n
+      nextExp > maxSafe ||
+      nextExp < 0n ||
+      nextCiv > maxSafe ||
+      nextCiv < 0n ||
+      nextStamps > maxSafe ||
+      nextStamps < 0n
     ) {
-      throw new Error('TOTALS_OUT_OF_BOUNDS: Progression totals exceed JavaScript safe integer range [0, 9007199254740991].');
+      throw new Error(
+        'TOTALS_OUT_OF_BOUNDS: Progression totals exceed JavaScript safe integer range [0, 9007199254740991].',
+      );
     }
 
     const { rows } = await client.query(
@@ -234,7 +237,7 @@ export class ProgressionRepository {
          last_event_at = NOW(),
          updated_at = NOW()
        RETURNING *`,
-      [userId, expDelta, civDelta, stampDelta]
+      [userId, expDelta, civDelta, stampDelta],
     );
 
     const r = rows[0];
@@ -243,9 +246,15 @@ export class ProgressionRepository {
     const stamps = Number(r.civic_stamps);
 
     if (
-      !Number.isSafeInteger(exp) || exp > Number.MAX_SAFE_INTEGER || exp < 0 ||
-      !Number.isSafeInteger(civ) || civ > Number.MAX_SAFE_INTEGER || civ < 0 ||
-      !Number.isSafeInteger(stamps) || stamps > Number.MAX_SAFE_INTEGER || stamps < 0
+      !Number.isSafeInteger(exp) ||
+      exp > Number.MAX_SAFE_INTEGER ||
+      exp < 0 ||
+      !Number.isSafeInteger(civ) ||
+      civ > Number.MAX_SAFE_INTEGER ||
+      civ < 0 ||
+      !Number.isSafeInteger(stamps) ||
+      stamps > Number.MAX_SAFE_INTEGER ||
+      stamps < 0
     ) {
       throw new Error('TOTALS_OUT_OF_BOUNDS: Resulting totals exceed safe integer range.');
     }
@@ -296,7 +305,7 @@ export class ProgressionRepository {
        FROM progression_events
        WHERE user_id = $1 AND is_test = (SELECT is_test FROM users WHERE id = $1)
        GROUP BY track, award_kind`,
-      [userId]
+      [userId],
     );
 
     let explorerXp = 0;
@@ -325,7 +334,7 @@ export class ProgressionRepository {
          civic_stamps = EXCLUDED.civic_stamps,
          updated_at = NOW()
        RETURNING *`,
-      [userId, explorerXp, civicXp, civicStamps]
+      [userId, explorerXp, civicXp, civicStamps],
     );
 
     const r = upsertRes.rows[0];
@@ -334,9 +343,15 @@ export class ProgressionRepository {
     const stamps = Number(r.civic_stamps);
 
     if (
-      !Number.isSafeInteger(exp) || exp > Number.MAX_SAFE_INTEGER || exp < 0 ||
-      !Number.isSafeInteger(civ) || civ > Number.MAX_SAFE_INTEGER || civ < 0 ||
-      !Number.isSafeInteger(stamps) || stamps > Number.MAX_SAFE_INTEGER || stamps < 0
+      !Number.isSafeInteger(exp) ||
+      exp > Number.MAX_SAFE_INTEGER ||
+      exp < 0 ||
+      !Number.isSafeInteger(civ) ||
+      civ > Number.MAX_SAFE_INTEGER ||
+      civ < 0 ||
+      !Number.isSafeInteger(stamps) ||
+      stamps > Number.MAX_SAFE_INTEGER ||
+      stamps < 0
     ) {
       throw new Error('TOTALS_OUT_OF_BOUNDS: Rebuilt totals exceed safe integer range.');
     }
@@ -355,10 +370,7 @@ export class ProgressionRepository {
     const executor = this.getExecutor(client);
     if (!executor) return null;
 
-    const { rows } = await executor.query(
-      'SELECT * FROM progression_totals WHERE user_id = $1',
-      [userId]
-    );
+    const { rows } = await executor.query('SELECT * FROM progression_totals WHERE user_id = $1', [userId]);
 
     if (!rows.length) {
       return {
@@ -393,7 +405,7 @@ export class ProgressionRepository {
   async getVerifiedVisitsForUser(
     userId: string,
     options: { limit?: number; offset?: number; allowTest?: boolean } = {},
-    client?: QueryExecutor
+    client?: QueryExecutor,
   ): Promise<VerifiedVisit[]> {
     const executor = this.getExecutor(client);
     if (!executor) return [];
@@ -424,24 +436,27 @@ export class ProgressionRepository {
 
   async awardAchievement(
     award: Omit<AchievementAward, 'created_at'>,
-    client: PoolClient
+    client: PoolClient,
   ): Promise<AchievementAward | null> {
-    const { rows: defRows } = await client.query(
-      'SELECT * FROM achievement_definitions WHERE id = $1',
-      [award.achievement_id]
-    );
+    const { rows: defRows } = await client.query('SELECT * FROM achievement_definitions WHERE id = $1', [
+      award.achievement_id,
+    ]);
     const def = defRows[0];
     const criteriaVersion = award.criteria_version || def?.criteria_version || 'v1';
     const evidenceVersion = award.evidence_version || 'v1';
-    const criteriaSnapshot = award.criteria_snapshot || (def ? {
-      track: def.track,
-      title: def.title,
-      description: def.description,
-      badge_icon: def.badge_icon,
-      category: def.category,
-      threshold: def.threshold,
-      criteria_version: def.criteria_version,
-    } : {});
+    const criteriaSnapshot =
+      award.criteria_snapshot ||
+      (def
+        ? {
+            track: def.track,
+            title: def.title,
+            description: def.description,
+            badge_icon: def.badge_icon,
+            category: def.category,
+            threshold: def.threshold,
+            criteria_version: def.criteria_version,
+          }
+        : {});
 
     const { rows } = await client.query(
       `INSERT INTO achievement_awards (
@@ -462,12 +477,15 @@ export class ProgressionRepository {
         JSON.stringify(criteriaSnapshot),
         award.awarded_at || new Date().toISOString(),
         Boolean(award.is_test),
-      ]
+      ],
     );
 
     if (!rows.length) return null;
     const r = rows[0];
-    const snap = typeof r.criteria_snapshot === 'string' ? JSON.parse(r.criteria_snapshot) : (r.criteria_snapshot || criteriaSnapshot);
+    const snap =
+      typeof r.criteria_snapshot === 'string'
+        ? JSON.parse(r.criteria_snapshot)
+        : r.criteria_snapshot || criteriaSnapshot;
 
     // P3 / P4: social activity for badge_earned / trail_completed
     await runIsolatedProducer(client, '[social:producer] Failed to record badge/trail activity:', async () => {
@@ -525,26 +543,24 @@ export class ProgressionRepository {
       revocation_reason: r.revocation_reason,
       is_test: Boolean(r.is_test),
       created_at: new Date(r.created_at).toISOString(),
-      definition: def ? {
-        id: def.id,
-        track: snap.track ?? def.track,
-        title: snap.title ?? def.title,
-        description: snap.description ?? def.description,
-        badge_icon: snap.badge_icon ?? def.badge_icon,
-        category: snap.category ?? def.category,
-        threshold: snap.threshold !== undefined ? Number(snap.threshold) : Number(def.threshold),
-        criteria_version: snap.criteria_version ?? def.criteria_version,
-        is_active: Boolean(def.is_active),
-        created_at: new Date(r.awarded_at).toISOString(),
-      } : undefined,
+      definition: def
+        ? {
+            id: def.id,
+            track: snap.track ?? def.track,
+            title: snap.title ?? def.title,
+            description: snap.description ?? def.description,
+            badge_icon: snap.badge_icon ?? def.badge_icon,
+            category: snap.category ?? def.category,
+            threshold: snap.threshold !== undefined ? Number(snap.threshold) : Number(def.threshold),
+            criteria_version: snap.criteria_version ?? def.criteria_version,
+            is_active: Boolean(def.is_active),
+            created_at: new Date(r.awarded_at).toISOString(),
+          }
+        : undefined,
     };
   }
 
-  async getAwardsForUser(
-    userId: string,
-    allowTest = false,
-    client?: QueryExecutor
-  ): Promise<AchievementAward[]> {
+  async getAwardsForUser(userId: string, allowTest = false, client?: QueryExecutor): Promise<AchievementAward[]> {
     const executor = this.getExecutor(client);
     if (!executor) return [];
 
@@ -600,7 +616,7 @@ export class ProgressionRepository {
     if (!executor) return [];
 
     const { rows } = await executor.query(
-      `SELECT * FROM achievement_definitions WHERE is_active = TRUE ORDER BY track, id`
+      `SELECT * FROM achievement_definitions WHERE is_active = TRUE ORDER BY track, id`,
     );
 
     return rows.map((r: any) => ({
@@ -619,13 +635,13 @@ export class ProgressionRepository {
 
   async insertOutboxEvent(
     event: { id: string; event_key: string; event_type: string; payload: any },
-    client: PoolClient
+    client: PoolClient,
   ): Promise<void> {
     await client.query(
       `INSERT INTO outbox_events (id, event_key, event_type, payload, status, next_attempt_at)
        VALUES ($1, $2, $3, $4, 'pending', NOW())
        ON CONFLICT (event_key) DO NOTHING`,
-      [event.id, event.event_key, event.event_type, JSON.stringify(event.payload)]
+      [event.id, event.event_key, event.event_type, JSON.stringify(event.payload)],
     );
   }
 
@@ -633,7 +649,7 @@ export class ProgressionRepository {
     batchSize: number,
     leaseSeconds: number,
     leaseOwner: string,
-    client?: QueryExecutor
+    client?: QueryExecutor,
   ): Promise<OutboxEvent[]> {
     const executor = this.getExecutor(client);
     if (!executor) return [];
@@ -648,7 +664,7 @@ export class ProgressionRepository {
            lease_expires_at = NULL
        WHERE status = 'processing'
          AND lease_expires_at <= NOW()
-         AND attempts >= max_attempts`
+         AND attempts >= max_attempts`,
     );
 
     // 2. Generate per-claim token and fenced owner
@@ -676,7 +692,7 @@ export class ProgressionRepository {
          FOR UPDATE SKIP LOCKED
        )
        RETURNING *`,
-      [fencedOwner, claimToken, leaseSeconds, batchSize]
+      [fencedOwner, claimToken, leaseSeconds, batchSize],
     );
 
     return rows.map((r: any) => ({
@@ -701,7 +717,7 @@ export class ProgressionRepository {
     id: string,
     leaseOwner: string,
     client?: QueryExecutor,
-    claimToken?: string | null
+    claimToken?: string | null,
   ): Promise<boolean> {
     const executor = this.getExecutor(client);
     if (!executor) return false;
@@ -721,9 +737,7 @@ export class ProgressionRepository {
       return false;
     }
 
-    const effectiveCompoundOwner = resolvedOwner.includes(':')
-      ? resolvedOwner
-      : `${resolvedOwner}:${resolvedToken}`;
+    const effectiveCompoundOwner = resolvedOwner.includes(':') ? resolvedOwner : `${resolvedOwner}:${resolvedToken}`;
 
     const { rowCount } = await executor.query(
       `UPDATE outbox_events
@@ -736,7 +750,7 @@ export class ProgressionRepository {
          AND status = 'processing'
          AND lease_owner = $2
          AND claim_token = $3::uuid`,
-      [id, effectiveCompoundOwner, resolvedToken]
+      [id, effectiveCompoundOwner, resolvedToken],
     );
 
     return (rowCount ?? 0) > 0;
@@ -748,7 +762,7 @@ export class ProgressionRepository {
     error: string,
     retryDelaySeconds: number,
     client?: QueryExecutor,
-    claimToken?: string | null
+    claimToken?: string | null,
   ): Promise<boolean> {
     const executor = this.getExecutor(client);
     if (!executor) return false;
@@ -766,9 +780,7 @@ export class ProgressionRepository {
       return false;
     }
 
-    const effectiveCompoundOwner = resolvedOwner.includes(':')
-      ? resolvedOwner
-      : `${resolvedOwner}:${resolvedToken}`;
+    const effectiveCompoundOwner = resolvedOwner.includes(':') ? resolvedOwner : `${resolvedOwner}:${resolvedToken}`;
 
     const { rowCount } = await executor.query(
       `UPDATE outbox_events
@@ -782,13 +794,17 @@ export class ProgressionRepository {
          AND status = 'processing'
          AND lease_owner = $4
          AND claim_token = $5::uuid`,
-      [id, error, retryDelaySeconds, effectiveCompoundOwner, resolvedToken]
+      [id, error, retryDelaySeconds, effectiveCompoundOwner, resolvedToken],
     );
 
     return (rowCount ?? 0) > 0;
   }
 
-  async getCuratedCollections(userId?: string, allowTest = false, client?: QueryExecutor): Promise<CuratedCollection[]> {
+  async getCuratedCollections(
+    userId?: string,
+    allowTest = false,
+    client?: QueryExecutor,
+  ): Promise<CuratedCollection[]> {
     const executor = this.getExecutor(client);
     if (!executor) return [];
 
@@ -811,7 +827,7 @@ export class ProgressionRepository {
       const visitsRes = await executor.query(
         `SELECT DISTINCT spot_id FROM verified_visits
          WHERE user_id = $1 AND revoked_at IS NULL AND ($2::boolean = TRUE OR is_test = FALSE)`,
-        [userId, allowTest]
+        [userId, allowTest],
       );
       visitedSpotIds = new Set(visitsRes.rows.map((r: any) => r.spot_id));
     }
@@ -863,7 +879,7 @@ export class ProgressionRepository {
       `SELECT COUNT(DISTINCT municipality_id) AS lgu_count
        FROM verified_visits
        WHERE user_id = $1 AND municipality_id IS NOT NULL AND revoked_at IS NULL AND ($2::boolean = TRUE OR is_test = FALSE)`,
-      [userId, allowTest]
+      [userId, allowTest],
     );
 
     return Number(rows[0]?.lgu_count || 0);
@@ -873,9 +889,7 @@ export class ProgressionRepository {
     const executor = this.getExecutor(client);
     if (!executor) return 48;
 
-    const { rows } = await executor.query(
-      `SELECT COUNT(*) AS total FROM municipalities WHERE is_active = TRUE`
-    );
+    const { rows } = await executor.query(`SELECT COUNT(*) AS total FROM municipalities WHERE is_active = TRUE`);
 
     return Number(rows[0]?.total || 48);
   }
@@ -895,15 +909,14 @@ export class ProgressionRepository {
     // 1. Direct match by ID or exact Name
     const { rows: direct } = await executor.query(
       `SELECT id FROM municipalities WHERE id = $1 OR LOWER(name) = $2 LIMIT 1`,
-      [normalized.replace(/\s+/g, '_'), normalized]
+      [normalized.replace(/\s+/g, '_'), normalized],
     );
     if (direct.length) return direct[0].id;
 
     // 2. Strip city suffix match (e.g. "Alaminos" -> "Alaminos City", "Dagupan" -> "Dagupan City", "San Carlos" -> "San Carlos City")
-    const { rows: stripped } = await executor.query(
-      `SELECT id FROM municipalities WHERE LOWER(name) LIKE $1 LIMIT 1`,
-      [`${strippedCity}%`]
-    );
+    const { rows: stripped } = await executor.query(`SELECT id FROM municipalities WHERE LOWER(name) LIKE $1 LIMIT 1`, [
+      `${strippedCity}%`,
+    ]);
     if (stripped.length) return stripped[0].id;
 
     return null;

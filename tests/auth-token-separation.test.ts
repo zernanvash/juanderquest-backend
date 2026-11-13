@@ -21,7 +21,9 @@ describe('session and quest challenge token boundaries', () => {
     expect(required.status).toBe(401);
     expect(required.body.error.code).toBe('UNAUTHORIZED');
 
-    const optional = await request(app).get('/api/v1/quests?include_test=true').set('Authorization', `Bearer ${challenge}`);
+    const optional = await request(app)
+      .get('/api/v1/quests?include_test=true')
+      .set('Authorization', `Bearer ${challenge}`);
     expect(optional.status).toBe(403);
     expect(optional.body.error.code).toBe('UNAUTHORIZED_QA_MODE');
   });
@@ -31,20 +33,33 @@ describe('session and quest challenge token boundaries', () => {
     const baseQuest = db.quests.find((item) => item.status !== 'draft')!;
     const quest = { ...baseQuest, id: 'token-boundary-quest', marker_code: 'TOKEN-BOUNDARY-MARKER' };
     db.quests.push(quest);
-    const result = await request(app).post('/api/v1/submissions')
+    const result = await request(app)
+      .post('/api/v1/submissions')
       .set('Authorization', `Bearer ${session}`)
-      .send({ idempotency_key: 'd54f2f5b-ccdb-4f6b-a4cd-811c44b342fe', quest_id: quest.id,
-        challenge_token: session, captured_lat: quest.gps_lat, captured_lng: quest.gps_lng, captured_accuracy: 5 });
+      .send({
+        idempotency_key: 'd54f2f5b-ccdb-4f6b-a4cd-811c44b342fe',
+        quest_id: quest.id,
+        challenge_token: session,
+        captured_lat: quest.gps_lat,
+        captured_lng: quest.gps_lng,
+        captured_accuracy: 5,
+      });
     expect(result.status).toBe(401);
     expect(result.body.error.code).toBe('INVALID_CHALLENGE');
     db.quests = db.quests.filter((item) => item.id !== quest.id);
   });
 
   it('rejects non-HS256 and alg:none tokens', () => {
-    const noneToken = `${Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url')}.${Buffer.from(JSON.stringify({
-      id: user.id, seed_id: user.seed_id, role: user.role,
-    })).toString('base64url')}.`;
-    const wrongAlgorithm = jwt.sign({ id: user.id, seed_id: user.seed_id, role: user.role }, 'unused-secret', { algorithm: 'HS384' });
+    const noneToken = `${Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url')}.${Buffer.from(
+      JSON.stringify({
+        id: user.id,
+        seed_id: user.seed_id,
+        role: user.role,
+      }),
+    ).toString('base64url')}.`;
+    const wrongAlgorithm = jwt.sign({ id: user.id, seed_id: user.seed_id, role: user.role }, 'unused-secret', {
+      algorithm: 'HS384',
+    });
     expect(verifySessionToken(noneToken)).toBeNull();
     expect(verifySessionToken(wrongAlgorithm)).toBeNull();
   });

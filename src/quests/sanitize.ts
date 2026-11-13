@@ -27,8 +27,10 @@ export function sanitizeAttemptSnapshot<T extends QuestAttemptRow>(attempt: T): 
   if (!Array.isArray(rows) || snapshot.length === 0) return { ...attempt, steps_snapshot: snapshot };
   const steps = rows.map((row: any) => {
     if (row?.verification) return row;
-    const def: any = snapshot.find((item: any) =>
-      (row?.task_key && item.key === row.task_key) || (item.step_order ?? item.order) === row?.step_order);
+    const def: any = snapshot.find(
+      (item: any) =>
+        (row?.task_key && item.key === row.task_key) || (item.step_order ?? item.order) === row?.step_order,
+    );
     return def?.verification ? { ...row, verification: def.verification } : row;
   });
   return { ...attempt, steps_snapshot: snapshot, steps } as T;

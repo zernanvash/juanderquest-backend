@@ -8,8 +8,7 @@ describe('live ranked feed pagination', () => {
     const third = rankedFeedPage([{ id: 'new' }, { id: 'a' }, { id: 'b' }], 'guest', second.cursor, 1);
     expect(third.items).toEqual([{ id: 'b' }]);
     expect(third.has_more).toBe(false);
-    expect(rankedFeedPage([{ id: 'later' }, { id: 'b' }], 'guest', third.cursor, 1).items)
-      .toEqual([{ id: 'later' }]);
+    expect(rankedFeedPage([{ id: 'later' }, { id: 'b' }], 'guest', third.cursor, 1).items).toEqual([{ id: 'later' }]);
   });
   it('replays an already served page and rejects another account cursor', () => {
     const ranked = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];

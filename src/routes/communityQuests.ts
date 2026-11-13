@@ -13,8 +13,13 @@ const feedbackSchema = z.object({
 
 router.get('/community-quests/:id', (req, res) => {
   const proposal = governanceStore.getProposal(req.params.id);
-  if (!proposal || !['scheduled', 'active', 'feedback', 'payout_pending', 'disputed', 'completed'].includes(proposal.state)) {
-    res.status(404).json({ success: false, error: { code: 'COMMUNITY_QUEST_NOT_FOUND', message: 'Community Quest not found.' } });
+  if (
+    !proposal ||
+    !['scheduled', 'active', 'feedback', 'payout_pending', 'disputed', 'completed'].includes(proposal.state)
+  ) {
+    res
+      .status(404)
+      .json({ success: false, error: { code: 'COMMUNITY_QUEST_NOT_FOUND', message: 'Community Quest not found.' } });
     return;
   }
   res.json({ success: true, data: proposal });
@@ -25,7 +30,8 @@ router.post('/community-quests/:id/feedback', authenticateToken, (_req: AuthRequ
     success: false,
     error: {
       code: 'FEATURE_RETIRED',
-      message: 'Community quest feedback voting has been retired. JuanChoice (/choice) is the active community voting engine.',
+      message:
+        'Community quest feedback voting has been retired. JuanChoice (/choice) is the active community voting engine.',
     },
   });
 });

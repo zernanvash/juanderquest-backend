@@ -13,7 +13,13 @@ import {
 } from './time.js';
 
 export class StampsError extends Error {
-  constructor(readonly code: string, readonly status: number, message: string) { super(message); }
+  constructor(
+    readonly code: string,
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 interface Db {
@@ -127,19 +133,15 @@ async function withTransaction<T>(pool: Pool, work: (client: PoolClient) => Prom
 }
 
 async function lockBalance(client: PoolClient, userId: string): Promise<number> {
-  await client.query(
-    'INSERT INTO stamp_balances(user_id, balance) VALUES($1, 0) ON CONFLICT (user_id) DO NOTHING',
-    [userId],
-  );
+  await client.query('INSERT INTO stamp_balances(user_id, balance) VALUES($1, 0) ON CONFLICT (user_id) DO NOTHING', [
+    userId,
+  ]);
   const result = await client.query('SELECT balance FROM stamp_balances WHERE user_id = $1 FOR UPDATE', [userId]);
   return Number(result.rows[0]?.balance ?? 0);
 }
 
 async function ensureStreakRow(client: PoolClient, userId: string): Promise<void> {
-  await client.query(
-    'INSERT INTO user_streaks(user_id) VALUES($1) ON CONFLICT (user_id) DO NOTHING',
-    [userId],
-  );
+  await client.query('INSERT INTO user_streaks(user_id) VALUES($1) ON CONFLICT (user_id) DO NOTHING', [userId]);
 }
 
 async function lockStreak(client: PoolClient, userId: string): Promise<StreakRow> {
@@ -198,10 +200,10 @@ async function awardStampsWithLock(client: PoolClient, input: StampAwardInput): 
   );
   if (!inserted.rowCount) return { awarded: 0, capped: false, inserted: false };
   if (awarded > 0) {
-    await client.query(
-      'UPDATE stamp_balances SET balance = balance + $2, updated_at = NOW() WHERE user_id = $1',
-      [input.userId, awarded],
-    );
+    await client.query('UPDATE stamp_balances SET balance = balance + $2, updated_at = NOW() WHERE user_id = $1', [
+      input.userId,
+      awarded,
+    ]);
   }
   return { awarded, capped, inserted: true };
 }
@@ -250,8 +252,14 @@ async function ensureDailyAssignments(client: PoolClient, userId: string, manila
   );
   const rows = missions.rows as DailyMissionRow[];
   const rank = (mission: DailyMissionRow) => hashKey(`${userId}|${manilaDate}|${mission.id}`);
-  const atHome = rows.filter((m) => !m.on_site).sort((a, b) => rank(a).localeCompare(rank(b))).slice(0, 2);
-  const onSite = rows.filter((m) => m.on_site).sort((a, b) => rank(a).localeCompare(rank(b))).slice(0, 1);
+  const atHome = rows
+    .filter((m) => !m.on_site)
+    .sort((a, b) => rank(a).localeCompare(rank(b)))
+    .slice(0, 2);
+  const onSite = rows
+    .filter((m) => m.on_site)
+    .sort((a, b) => rank(a).localeCompare(rank(b)))
+    .slice(0, 1);
   for (const mission of [...atHome, ...onSite]) {
     await client.query(
       `INSERT INTO user_daily_missions(user_id, manila_date, mission_id, progress, target)
@@ -368,10 +376,10 @@ export async function claimDaily(pool: Pool, userId: string, options: ClaimDaily
     }
     await lockBalance(client, userId);
     const settings = await loadRewardSettings(client);
-    const existing = await client.query(
-      'SELECT 1 FROM daily_claims WHERE user_id = $1 AND manila_date = $2',
-      [userId, date],
-    );
+    const existing = await client.query('SELECT 1 FROM daily_claims WHERE user_id = $1 AND manila_date = $2', [
+      userId,
+      date,
+    ]);
     if (existing.rowCount) {
       return { ...(await claimSnapshot(client, userId, date, week, settings)), replayed: true };
     }
@@ -383,7 +391,9 @@ export async function claimDaily(pool: Pool, userId: string, options: ClaimDaily
       [userId, date],
     );
     const cycleDay = previous.rows[0]
-      ? (Number(previous.rows[0].cycle_day) >= 7 ? 1 : Number(previous.rows[0].cycle_day) + 1)
+      ? Number(previous.rows[0].cycle_day) >= 7
+        ? 1
+        : Number(previous.rows[0].cycle_day) + 1
       : 1;
     const nominalStamps = dayStampsFor(cycleDay, settings);
     let current = 1;
@@ -424,15 +434,29 @@ export async function claimDaily(pool: Pool, userId: string, options: ClaimDaily
       [userId, date, cycleDay, nominalStamps],
     );
     await awardStampsWithLock(client, {
-      userId, amount: nominalStamps, source: 'daily_claim', sourceKey: date,
-      manilaDate: date, weekId: week, reason: 'daily_claim', isTest: eligibility.isTest, settings,
+      userId,
+      amount: nominalStamps,
+      source: 'daily_claim',
+      sourceKey: date,
+      manilaDate: date,
+      weekId: week,
+      reason: 'daily_claim',
+      isTest: eligibility.isTest,
+      settings,
     });
     // Plan 65: a reigning daily_stamp_bonus adds stamps as its own ledger row, still inside the weekly cap.
-    const stampBonus = await perkBonus(client, eligibility.isTest, perk => perk.key === 'daily_stamp_bonus');
+    const stampBonus = await perkBonus(client, eligibility.isTest, (perk) => perk.key === 'daily_stamp_bonus');
     if (stampBonus.value > 0) {
       await awardStampsWithLock(client, {
-        userId, amount: Math.round(stampBonus.value), source: 'juanchoice_perk', sourceKey: `daily:${date}`,
-        manilaDate: date, weekId: week, reason: 'juanchoice_daily_bonus', isTest: eligibility.isTest, settings,
+        userId,
+        amount: Math.round(stampBonus.value),
+        source: 'juanchoice_perk',
+        sourceKey: `daily:${date}`,
+        manilaDate: date,
+        weekId: week,
+        reason: 'juanchoice_daily_bonus',
+        isTest: eligibility.isTest,
+        settings,
       });
     }
     return { ...(await claimSnapshot(client, userId, date, week, settings)), replayed: false };
@@ -460,10 +484,10 @@ export async function getDailyState(pool: Pool, userId: string, options: { now?:
         ORDER BY dm.on_site ASC, dm.id ASC`,
       [userId, date],
     );
-    const qotd = await client.query(
-      'SELECT 1 FROM qotd_answers WHERE user_id = $1 AND manila_date = $2',
-      [userId, date],
-    );
+    const qotd = await client.query('SELECT 1 FROM qotd_answers WHERE user_id = $1 AND manila_date = $2', [
+      userId,
+      date,
+    ]);
     return {
       ...snapshot,
       missions: missions.rows.map((row: any) => ({
@@ -487,12 +511,7 @@ export interface MissionEventOptions {
   sourceKey: string;
 }
 
-export async function recordMissionEvent(
-  pool: Pool,
-  userId: string,
-  kind: string,
-  options: MissionEventOptions,
-) {
+export async function recordMissionEvent(pool: Pool, userId: string, kind: string, options: MissionEventOptions) {
   const now = options.now ?? new Date();
   const date = manilaDateString(now);
   const week = manilaWeekId(date);
@@ -607,7 +626,10 @@ export async function spendStamps(
     if (replay.rowCount) {
       const streak = await readStreak(client, userId);
       return {
-        item, price: settings.shieldPrice, balance, shields_held: streak.shields_held,
+        item,
+        price: settings.shieldPrice,
+        balance,
+        shields_held: streak.shields_held,
         replayed: true,
       };
     }
@@ -628,10 +650,10 @@ export async function spendStamps(
     if (!inserted.rowCount) {
       return { item, price: settings.shieldPrice, balance, shields_held: streak.shields_held, replayed: true };
     }
-    await client.query(
-      'UPDATE stamp_balances SET balance = balance - $2, updated_at = NOW() WHERE user_id = $1',
-      [userId, settings.shieldPrice],
-    );
+    await client.query('UPDATE stamp_balances SET balance = balance - $2, updated_at = NOW() WHERE user_id = $1', [
+      userId,
+      settings.shieldPrice,
+    ]);
     await client.query(
       'UPDATE user_streaks SET shields_held = shields_held + 1, updated_at = NOW() WHERE user_id = $1',
       [userId],
@@ -693,10 +715,7 @@ export async function ensureQuestionOfTheDay(client: Db, date: string): Promise<
      ON CONFLICT (manila_date) DO NOTHING`,
     [date],
   );
-  const result = await client.query(
-    'SELECT question_id FROM question_of_the_day WHERE manila_date = $1',
-    [date],
-  );
+  const result = await client.query('SELECT question_id FROM question_of_the_day WHERE manila_date = $1', [date]);
   return result.rows[0]?.question_id ?? null;
 }
 
@@ -726,11 +745,7 @@ async function qotdPayload(client: Db, questionId: string) {
   };
 }
 
-export async function getQuestionOfTheDay(
-  pool: Pool,
-  userId: string | null,
-  options: { now?: Date } = {},
-) {
+export async function getQuestionOfTheDay(pool: Pool, userId: string | null, options: { now?: Date } = {}) {
   const now = options.now ?? new Date();
   const date = manilaDateString(now);
   return withTransaction(pool, async (client) => {
@@ -740,7 +755,8 @@ export async function getQuestionOfTheDay(
     }
     const question = await qotdPayload(client, questionId);
     if (!question) return { date, question: null, answered: false, answer: null };
-    let answer: null | { correct: boolean; option_id: string; explanation: string | null; source_url: string | null } = null;
+    let answer: null | { correct: boolean; option_id: string; explanation: string | null; source_url: string | null } =
+      null;
     if (userId) {
       const answered = await client.query(
         'SELECT selected_option_id, correct FROM qotd_answers WHERE user_id = $1 AND manila_date = $2',
@@ -787,7 +803,7 @@ export async function answerQuestionOfTheDay(
       [optionId, questionId],
     );
     const selected = option.rows[0];
-    if (!selected) throw new StampsError('INVALID_OPTION', 400, 'That option does not belong to today\'s question.');
+    if (!selected) throw new StampsError('INVALID_OPTION', 400, "That option does not belong to today's question.");
     const inserted = await client.query(
       `INSERT INTO qotd_answers(user_id, manila_date, selected_option_id, correct)
        VALUES($1, $2, $3, $4)
@@ -796,16 +812,13 @@ export async function answerQuestionOfTheDay(
       [userId, date, selected.id, Boolean(selected.is_correct)],
     );
     if (!inserted.rowCount) {
-      throw new StampsError('ALREADY_ANSWERED', 409, 'You already answered today\'s question.');
+      throw new StampsError('ALREADY_ANSWERED', 409, "You already answered today's question.");
     }
     const correctOption = await client.query(
       'SELECT id FROM qotd_options WHERE question_id = $1 AND is_correct = TRUE LIMIT 1',
       [questionId],
     );
-    const detail = await client.query(
-      'SELECT explanation, source_url FROM qotd_questions WHERE id = $1',
-      [questionId],
-    );
+    const detail = await client.query('SELECT explanation, source_url FROM qotd_questions WHERE id = $1', [questionId]);
     return {
       date,
       correct: Boolean(selected.is_correct),
@@ -822,8 +835,12 @@ export async function listDailyMissions(pool: Pool) {
     'SELECT id, kind, title, stamps, on_site, active FROM daily_missions ORDER BY on_site ASC, id ASC',
   );
   return result.rows.map((row: any) => ({
-    id: row.id, kind: row.kind, title: row.title, stamps: Number(row.stamps),
-    on_site: Boolean(row.on_site), active: Boolean(row.active),
+    id: row.id,
+    kind: row.kind,
+    title: row.title,
+    stamps: Number(row.stamps),
+    on_site: Boolean(row.on_site),
+    active: Boolean(row.active),
   }));
 }
 
@@ -843,8 +860,12 @@ export async function upsertDailyMission(
   );
   const row = result.rows[0];
   return {
-    id: row.id, kind: row.kind, title: row.title, stamps: Number(row.stamps),
-    on_site: Boolean(row.on_site), active: Boolean(row.active),
+    id: row.id,
+    kind: row.kind,
+    title: row.title,
+    stamps: Number(row.stamps),
+    on_site: Boolean(row.on_site),
+    active: Boolean(row.active),
   };
 }
 
@@ -918,9 +939,7 @@ async function qotdQuestionWithOptions(client: Db, id: string) {
 }
 
 export async function listQotdPoolQuestions(pool: Pool) {
-  const questions = await pool.query(
-    `SELECT id FROM qotd_questions ORDER BY created_at DESC, id ASC`,
-  );
+  const questions = await pool.query(`SELECT id FROM qotd_questions ORDER BY created_at DESC, id ASC`);
   return Promise.all(questions.rows.map((row: any) => qotdQuestionWithOptions(pool, row.id)));
 }
 
@@ -957,8 +976,14 @@ export async function updateQotdQuestion(pool: Pool, id: string, patch: QotdQues
               active = COALESCE($6, active),
               updated_at = NOW()
         WHERE id = $1`,
-      [id, patch.question_text ?? null, patch.explanation ?? null,
-        patch.source_url !== undefined, patch.source_url ?? null, patch.active ?? null],
+      [
+        id,
+        patch.question_text ?? null,
+        patch.explanation ?? null,
+        patch.source_url !== undefined,
+        patch.source_url ?? null,
+        patch.active ?? null,
+      ],
     );
     if (patch.options) {
       await client.query('DELETE FROM qotd_options WHERE question_id = $1', [id]);
@@ -975,10 +1000,7 @@ export async function updateQotdQuestion(pool: Pool, id: string, patch: QotdQues
 }
 
 export async function scheduleQuestionOfTheDay(pool: Pool, date: string, questionId: string) {
-  const question = await pool.query(
-    'SELECT id FROM qotd_questions WHERE id = $1 AND active = TRUE',
-    [questionId],
-  );
+  const question = await pool.query('SELECT id FROM qotd_questions WHERE id = $1 AND active = TRUE', [questionId]);
   if (!question.rowCount) {
     throw new StampsError('INVALID_QUESTION', 400, 'Pick an active question from the QotD pool.');
   }
@@ -997,7 +1019,9 @@ export async function listQotdCandidates(pool: Pool, limit = 50) {
     [Math.min(Math.max(limit, 1), 100)],
   );
   return result.rows.map((row: any) => ({
-    id: row.id, question_text: row.question_text, active: Boolean(row.active),
+    id: row.id,
+    question_text: row.question_text,
+    active: Boolean(row.active),
   }));
 }
 

@@ -43,9 +43,7 @@ export class JsonRpcChainSource implements ChainSource {
       this.badge = (badge || '').toLowerCase();
       this.timeoutMs = 5000;
     } else {
-      this.urls = typeof optionsOrUrl.rpcUrls === 'string'
-        ? parseRpcUrls(optionsOrUrl.rpcUrls)
-        : optionsOrUrl.rpcUrls;
+      this.urls = typeof optionsOrUrl.rpcUrls === 'string' ? parseRpcUrls(optionsOrUrl.rpcUrls) : optionsOrUrl.rpcUrls;
       if (this.urls.length === 0) {
         throw new Error('CHAIN_RPC_URLS must contain at least one valid RPC URL');
       }
@@ -100,7 +98,7 @@ export class JsonRpcChainSource implements ChainSource {
       if (this.token) addresses.push(this.token);
 
       const logPromises = addresses.map((addr) =>
-        provider.getLogs({ blockHash: block.hash ?? undefined, address: addr })
+        provider.getLogs({ blockHash: block.hash ?? undefined, address: addr }),
       );
       const logBatches = await Promise.all(logPromises);
       const rawLogs = logBatches.flat().sort((a, b) => a.index - b.index);

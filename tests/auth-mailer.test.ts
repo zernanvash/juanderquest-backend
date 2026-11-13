@@ -35,14 +35,20 @@ describe('AuthMailerService (Resend)', () => {
 
   it('records a failure without throwing when Resend refuses', async () => {
     process.env.RESEND_API_KEY = 'test-key';
-    const mailer = new AuthMailerService(null, async () => ({ ok: false, status: 403, text: async () => 'domain not verified' }));
+    const mailer = new AuthMailerService(null, async () => ({
+      ok: false,
+      status: 403,
+      text: async () => 'domain not verified',
+    }));
     const result = await mailer.queueAuthEmail(job);
     expect(result.delivered).toBe(false);
   });
 
   it('records a failure without throwing when the request errors', async () => {
     process.env.RESEND_API_KEY = 'test-key';
-    const mailer = new AuthMailerService(null, async () => { throw new Error('offline'); });
+    const mailer = new AuthMailerService(null, async () => {
+      throw new Error('offline');
+    });
     await expect(mailer.queueAuthEmail(job)).resolves.toMatchObject({ delivered: false });
   });
 
@@ -69,16 +75,26 @@ describe('AuthMailerService (Resend)', () => {
 describe('AuthMailerService send limits', () => {
   const saved = { key: process.env.RESEND_API_KEY, cap: process.env.AUTH_MAIL_DAILY_CAP };
   afterEach(() => {
-    if (saved.key === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = saved.key;
-    if (saved.cap === undefined) delete process.env.AUTH_MAIL_DAILY_CAP; else process.env.AUTH_MAIL_DAILY_CAP = saved.cap;
+    if (saved.key === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = saved.key;
+    if (saved.cap === undefined) delete process.env.AUTH_MAIL_DAILY_CAP;
+    else process.env.AUTH_MAIL_DAILY_CAP = saved.cap;
   });
 
   const setup = () => {
     let clock = Date.parse('2026-10-30T10:00:00Z');
     const fetchImpl = jest.fn(async () => ({ ok: true, status: 200, text: async () => '{}' }));
     const mailer = new AuthMailerService(null, fetchImpl as any, () => clock);
-    const send = (email: string) => mailer.queueAuthEmail({ id: 'x', recipientEmail: email, templateType: 'signup_otp', code: '111111' });
-    return { mailer, fetchImpl, send, advance: (seconds: number) => { clock += seconds * 1000; } };
+    const send = (email: string) =>
+      mailer.queueAuthEmail({ id: 'x', recipientEmail: email, templateType: 'signup_otp', code: '111111' });
+    return {
+      mailer,
+      fetchImpl,
+      send,
+      advance: (seconds: number) => {
+        clock += seconds * 1000;
+      },
+    };
   };
 
   it('allows one email per recipient per minute', async () => {
@@ -86,7 +102,11 @@ describe('AuthMailerService send limits', () => {
     const { mailer, fetchImpl, send, advance } = setup();
     expect((await send('a@example.com')).delivered).toBe(true);
     advance(30);
-    expect(await mailer.checkSendAllowance('A@example.com ')).toEqual({ allowed: false, reason: 'RECIPIENT_COOLDOWN', retryAfterSeconds: 60 });
+    expect(await mailer.checkSendAllowance('A@example.com ')).toEqual({
+      allowed: false,
+      reason: 'RECIPIENT_COOLDOWN',
+      retryAfterSeconds: 60,
+    });
     expect((await send('a@example.com')).delivered).toBe(false);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect((await send('b@example.com')).delivered).toBe(true);
@@ -101,7 +121,10 @@ describe('AuthMailerService send limits', () => {
       expect((await send('a@example.com')).delivered).toBe(true);
       advance(61);
     }
-    expect(await mailer.checkSendAllowance('a@example.com')).toMatchObject({ allowed: false, reason: 'RECIPIENT_HOURLY_LIMIT' });
+    expect(await mailer.checkSendAllowance('a@example.com')).toMatchObject({
+      allowed: false,
+      reason: 'RECIPIENT_HOURLY_LIMIT',
+    });
     advance(3600);
     expect((await send('a@example.com')).delivered).toBe(true);
   });

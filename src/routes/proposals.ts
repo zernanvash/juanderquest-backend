@@ -32,10 +32,13 @@ const voteSchema = z.object({
 
 function sendGovernanceError(res: Response, error: unknown) {
   const code = error instanceof Error ? error.message : 'INTERNAL_ERROR';
-  const status = code.includes('NOT_FOUND') ? 404
-    : ['INSUFFICIENT_JDQ', 'ALREADY_VOTED', 'IDEMPOTENCY_CONFLICT', 'INVALID_TRANSITION'].includes(code) ? 409
-    : ['NOT_ELIGIBLE', 'VOTES_PAUSED', 'FINANCIAL_ACTIVITY_PAUSED'].includes(code) ? 403
-    : 422;
+  const status = code.includes('NOT_FOUND')
+    ? 404
+    : ['INSUFFICIENT_JDQ', 'ALREADY_VOTED', 'IDEMPOTENCY_CONFLICT', 'INVALID_TRANSITION'].includes(code)
+      ? 409
+      : ['NOT_ELIGIBLE', 'VOTES_PAUSED', 'FINANCIAL_ACTIVITY_PAUSED'].includes(code)
+        ? 403
+        : 422;
   res.status(status).json({ success: false, error: { code, message: code.replaceAll('_', ' ').toLowerCase() } });
 }
 

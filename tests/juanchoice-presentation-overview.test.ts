@@ -31,7 +31,8 @@ describe('JuanChoice presentation overview contract', () => {
     // Keep the real predicate for every other name (calling envModule.* here would hit the spy itself).
     const realIsPresentationDatabaseName = envModule.isPresentationDatabaseName;
     jest.spyOn(envModule, 'isPresentationDatabaseName').mockImplementation((db: string, ...rest) => {
-      if (db === currentDb || db === 'juanderquest_presentation_test' || db === 'juanderquest_presentation') return true;
+      if (db === currentDb || db === 'juanderquest_presentation_test' || db === 'juanderquest_presentation')
+        return true;
       return realIsPresentationDatabaseName(db, ...rest);
     });
 
@@ -40,7 +41,7 @@ describe('JuanChoice presentation overview contract', () => {
       `INSERT INTO spots(id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,source_type,source_name,is_test)
        VALUES ($1,$2,'Demo Spot 1','Desc','nature_outdoors','beach','Bolinao','Bolinao',16,120,'lgu','LGU',false),
               ($3,$4,'Demo Spot 2','Desc','nature_outdoors','beach','Bolinao','Bolinao',16,120,'lgu','LGU',false)`,
-      [spotId1, spotId1, spotId2, spotId2]
+      [spotId1, spotId1, spotId2, spotId2],
     );
   });
 
@@ -94,7 +95,7 @@ describe('JuanChoice presentation overview contract', () => {
     await fixture.pool.query(
       `INSERT INTO juanchoice_campaigns(id, slug, region, theme, status, opens_at, closes_at, is_test, series_key, round_number, counts_for_streak)
        VALUES ($1, 'demo-presentation-round', 'Pangasinan', 'Coastal Heritage', 'voting', NOW() - INTERVAL '1 hour', NOW() + INTERVAL '2 hours', false, NULL, NULL, false)`,
-      [presentationCampaignId]
+      [presentationCampaignId],
     );
 
     env.JUANCHOICE_PRESENTATION_MODE = true;
@@ -121,7 +122,7 @@ describe('JuanChoice presentation overview contract', () => {
     await fixture.pool.query(
       `INSERT INTO juanchoice_campaigns(id, slug, region, theme, status, opens_at, closes_at, is_test, series_key, round_number, counts_for_streak)
        VALUES ($1, 'demo-future-round', 'Pangasinan', 'Culinary Flavors', 'scheduled', NOW() + INTERVAL '2 hours', NOW() + INTERVAL '10 hours', false, NULL, NULL, false)`,
-      [presentationCampaignId]
+      [presentationCampaignId],
     );
 
     env.JUANCHOICE_PRESENTATION_MODE = true;
@@ -143,7 +144,7 @@ describe('JuanChoice presentation overview contract', () => {
     await fixture.pool.query(
       `INSERT INTO juanchoice_campaigns(id, slug, region, theme, status, opens_at, closes_at, is_test, series_key, round_number, counts_for_streak)
        VALUES ($1, 'demo-unreviewed-round', 'Pangasinan', 'Unreviewed', 'draft', NOW() + INTERVAL '2 hours', NOW() + INTERVAL '10 hours', false, NULL, NULL, false)`,
-      [presentationCampaignId]
+      [presentationCampaignId],
     );
     env.JUANCHOICE_PRESENTATION_MODE = true;
     const res = await request(app).get('/api/v1/juanchoice/overview');
@@ -159,11 +160,11 @@ describe('JuanChoice presentation overview contract', () => {
     await fixture.pool.query(
       `INSERT INTO juanchoice_campaigns(id, slug, region, theme, status, opens_at, closes_at, is_test, series_key, round_number, counts_for_streak)
        VALUES ($1, 'demo-past-round', 'Pangasinan', 'Island Wonders', 'finalized', NOW() - INTERVAL '5 hours', NOW() - INTERVAL '1 hour', false, NULL, NULL, false)`,
-      [presentationCampaignId]
+      [presentationCampaignId],
     );
     await fixture.pool.query(
       `INSERT INTO juanchoice_candidates(id, campaign_id, spot_id, is_test) VALUES ($1, $2, $3, false)`,
-      [candidateId1, presentationCampaignId, spotId1]
+      [candidateId1, presentationCampaignId, spotId1],
     );
     await fixture.pool.query(
       `INSERT INTO juanchoice_results(campaign_id, standings, co_winner_ids, valid_ballots, policy_version)
@@ -172,7 +173,7 @@ describe('JuanChoice presentation overview contract', () => {
         presentationCampaignId,
         JSON.stringify([{ candidate_id: candidateId1, spot_id: spotId1, spot_name: 'Demo Spot 1', votes: 5 }]),
         JSON.stringify([candidateId1]),
-      ]
+      ],
     );
 
     env.JUANCHOICE_PRESENTATION_MODE = true;
@@ -195,12 +196,12 @@ describe('JuanChoice presentation overview contract', () => {
     await fixture.pool.query(
       `INSERT INTO juanchoice_campaigns(id, slug, region, theme, status, opens_at, closes_at, is_test, series_key, round_number, counts_for_streak)
        VALUES ($1, 'demo-closed-round', 'Pangasinan', 'Closed Demo', 'closed', NOW() - INTERVAL '5 hours', NOW() - INTERVAL '1 hour', false, NULL, NULL, false)`,
-      [presentationCampaignId]
+      [presentationCampaignId],
     );
     await fixture.pool.query(
       `INSERT INTO juanchoice_results(campaign_id, standings, co_winner_ids, valid_ballots, policy_version)
        VALUES ($1, '[]'::jsonb, '[]'::jsonb, 0, 'juanchoice-pilot-v1')`,
-      [presentationCampaignId]
+      [presentationCampaignId],
     );
     env.JUANCHOICE_PRESENTATION_MODE = true;
     const res = await request(app).get('/api/v1/juanchoice/overview');
@@ -214,7 +215,7 @@ describe('JuanChoice presentation overview contract', () => {
     await fixture.pool.query(
       `INSERT INTO juanchoice_campaigns(id, slug, region, theme, status, opens_at, closes_at, is_test, series_key, round_number, counts_for_streak)
        VALUES ($1, 'demo-presentation-round', 'Pangasinan', 'Coastal Heritage', 'voting', NOW() - INTERVAL '1 hour', NOW() + INTERVAL '2 hours', false, NULL, NULL, false)`,
-      [presentationCampaignId]
+      [presentationCampaignId],
     );
 
     env.JUANCHOICE_PRESENTATION_MODE = true;
@@ -234,7 +235,7 @@ describe('JuanChoice presentation overview contract', () => {
     await fixture.pool.query(
       `INSERT INTO juanchoice_campaigns(id, slug, region, theme, status, opens_at, closes_at, is_test, series_key, round_number, counts_for_streak)
        VALUES ($1, 'demo-round', 'Pangasinan', 'Heritage', 'voting', NOW() - INTERVAL '1 hour', NOW() + INTERVAL '2 hours', false, NULL, NULL, false)`,
-      [presentationCampaignId]
+      [presentationCampaignId],
     );
 
     env.JUANCHOICE_PRESENTATION_MODE = true;
@@ -255,7 +256,7 @@ describe('JuanChoice presentation overview contract', () => {
     await fixture.pool.query(
       `INSERT INTO juanchoice_campaigns(id, slug, region, theme, status, opens_at, closes_at, is_test, series_key, round_number, counts_for_streak)
        VALUES ($1, 'other-round', 'Pangasinan', 'Heritage', 'voting', NOW() - INTERVAL '1 hour', NOW() + INTERVAL '2 hours', false, NULL, NULL, false)`,
-      [otherCampaignId]
+      [otherCampaignId],
     );
 
     env.JUANCHOICE_PRESENTATION_MODE = true;
@@ -276,7 +277,7 @@ describe('JuanChoice presentation overview contract', () => {
     await fixture.pool.query(
       `INSERT INTO juanchoice_campaigns(id, slug, region, theme, status, opens_at, closes_at, is_test, series_key, round_number, counts_for_streak)
        VALUES ($1, 'test-round', 'Pangasinan', 'Heritage', 'voting', NOW() - INTERVAL '1 hour', NOW() + INTERVAL '2 hours', true, NULL, NULL, false)`,
-      [presentationCampaignId]
+      [presentationCampaignId],
     );
 
     env.JUANCHOICE_PRESENTATION_MODE = true;
@@ -294,7 +295,7 @@ describe('JuanChoice presentation overview contract', () => {
     await fixture.pool.query(
       `INSERT INTO juanchoice_campaigns(id, slug, region, theme, status, opens_at, closes_at, is_test, series_key, round_number, counts_for_streak)
        VALUES ($1, 'official-round', 'Pangasinan', 'Heritage', 'voting', NOW() - INTERVAL '1 hour', NOW() + INTERVAL '2 hours', false, 'pangasinan-primary', 1, true)`,
-      [presentationCampaignId]
+      [presentationCampaignId],
     );
 
     env.JUANCHOICE_PRESENTATION_MODE = true;
@@ -312,17 +313,17 @@ describe('JuanChoice presentation overview contract', () => {
     await fixture.pool.query(
       `INSERT INTO juanchoice_campaigns(id, slug, region, theme, status, opens_at, closes_at, is_test, series_key, round_number, counts_for_streak)
        VALUES ($1, 'scheduled-round', 'Pangasinan', 'Heritage', 'voting', NOW() - INTERVAL '1 hour', NOW() + INTERVAL '2 hours', false, NULL, NULL, false)`,
-      [presentationCampaignId]
+      [presentationCampaignId],
     );
     const scheduleRes = await fixture.pool.query(
       `INSERT INTO juanchoice_schedules(id, schedule_key, region_key, display_region, timezone, enabled, effective_period, themes, is_test)
        VALUES ($1, 'pangasinan-monthly', 'pangasinan', 'Pangasinan', 'Asia/Manila', true, '2026-10-01', '[]'::jsonb, false) RETURNING id`,
-      [randomUUID()]
+      [randomUUID()],
     );
     await fixture.pool.query(
       `INSERT INTO juanchoice_schedule_periods(id, schedule_id, period_start, opens_at, closes_at, campaign_id, status)
        VALUES ($1, $2, '2026-10-01', NOW() - INTERVAL '1 hour', NOW() + INTERVAL '2 hours', $3, 'prepared')`,
-      [randomUUID(), scheduleRes.rows[0].id, presentationCampaignId]
+      [randomUUID(), scheduleRes.rows[0].id, presentationCampaignId],
     );
 
     env.JUANCHOICE_PRESENTATION_MODE = true;
@@ -348,7 +349,7 @@ describe('JuanChoice presentation overview contract', () => {
     await fixture.pool.query(
       `INSERT INTO users(id, seed_id, display_name, email, role, is_test)
        VALUES ($1, $2, 'QA Tester', 'qa@juanderquest.test', 'qa', false)`,
-      [qaUserId, qaUserId]
+      [qaUserId, qaUserId],
     );
 
     const token = jwt.sign({ id: qaUserId, seed_id: qaUserId, role: 'qa' }, env.JWT_SECRET);

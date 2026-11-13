@@ -156,9 +156,7 @@ describe('Unified Search API (GET /api/v1/search)', () => {
     });
 
     it('rejects mismatched cursor with 400 INVALID_CURSOR', async () => {
-      const validCursor = Buffer.from(
-        JSON.stringify({ offset: 2, q: 'an', type: 'places' })
-      ).toString('base64');
+      const validCursor = Buffer.from(JSON.stringify({ offset: 2, q: 'an', type: 'places' })).toString('base64');
 
       const res = await request(app).get('/api/v1/search').query({
         q: 'bolinao', // different query than cursor

@@ -39,17 +39,9 @@ describe('Phase 4: Durable Social Queries, Keyset Pagination, and Profile PATCH 
     is_public: true,
   };
 
-  const tokenA = jwt.sign(
-    { id: userA.id, seed_id: userA.seed_id, role: 'user' },
-    env.JWT_SECRET,
-    { expiresIn: '1h' }
-  );
+  const tokenA = jwt.sign({ id: userA.id, seed_id: userA.seed_id, role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
 
-  const tokenB = jwt.sign(
-    { id: userB.id, seed_id: userB.seed_id, role: 'user' },
-    env.JWT_SECRET,
-    { expiresIn: '1h' }
-  );
+  const tokenB = jwt.sign({ id: userB.id, seed_id: userB.seed_id, role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
 
   beforeAll(async () => {
     testDb = await createTestDb();
@@ -118,12 +110,9 @@ describe('Phase 4: Durable Social Queries, Keyset Pagination, and Profile PATCH 
 
     it('rejects duplicate handle claims with 409 HANDLE_TAKEN', async () => {
       // User B tries to claim User A's handle
-      const res = await request(app)
-        .patch('/api/v1/users/me/profile')
-        .set('Authorization', `Bearer ${tokenB}`)
-        .send({
-          handle: userA.handle,
-        });
+      const res = await request(app).patch('/api/v1/users/me/profile').set('Authorization', `Bearer ${tokenB}`).send({
+        handle: userA.handle,
+      });
 
       expect(res.status).toBe(409);
       expect(res.body.success).toBe(false);
@@ -168,9 +157,7 @@ describe('Phase 4: Durable Social Queries, Keyset Pagination, and Profile PATCH 
 
     it('allows private user to read their own profile, followers, and following with no-store cache headers', async () => {
       // User B reading their own profile
-      const ownProfile = await request(app)
-        .get('/api/v1/users/me/profile')
-        .set('Authorization', `Bearer ${tokenB}`);
+      const ownProfile = await request(app).get('/api/v1/users/me/profile').set('Authorization', `Bearer ${tokenB}`);
 
       expect(ownProfile.status).toBe(200);
       expect(ownProfile.body.data.id).toBe(userB.id);
@@ -262,7 +249,9 @@ describe('Phase 4: Durable Social Queries, Keyset Pagination, and Profile PATCH 
       const idsPage1 = page1.body.data.items.map((u: any) => u.id);
 
       // Page 2 using cursor
-      const page2 = await request(app).get(`/api/v1/users/${userA.id}/followers?limit=2&cursor=${encodeURIComponent(cursor)}`);
+      const page2 = await request(app).get(
+        `/api/v1/users/${userA.id}/followers?limit=2&cursor=${encodeURIComponent(cursor)}`,
+      );
       expect(page2.status).toBe(200);
       expect(page2.body.data.items.length).toBe(1);
       const idsPage2 = page2.body.data.items.map((u: any) => u.id);

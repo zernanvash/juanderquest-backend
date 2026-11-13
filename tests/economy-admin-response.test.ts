@@ -14,7 +14,7 @@ describe('admin pilot award response', () => {
       },
     });
     const route = (adminRouter as any).stack.find(
-      (layer: any) => layer.route?.path === '/admin/submissions/:id' && layer.route?.methods?.patch
+      (layer: any) => layer.route?.path === '/admin/submissions/:id' && layer.route?.methods?.patch,
     );
     expect(route).toBeDefined();
     const handler = route.route.stack[route.route.stack.length - 1].handle;
@@ -30,8 +30,11 @@ describe('admin pilot award response', () => {
       expect(res.json).toHaveBeenCalledWith({
         success: true,
         data: {
-          id: 'reviewed-sub', status: 'approved', awarded_points: 0,
-          awarded_explorer_coins: '100', explorer_coin_transaction_id: 'committed-transfer',
+          id: 'reviewed-sub',
+          status: 'approved',
+          awarded_points: 0,
+          awarded_explorer_coins: '100',
+          explorer_coin_transaction_id: 'committed-transfer',
         },
       });
     } finally {

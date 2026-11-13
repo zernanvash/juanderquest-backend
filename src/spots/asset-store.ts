@@ -42,7 +42,7 @@ export class SpotAssetStore {
   async createPendingAsset(
     userId: string,
     saveResult: SpotMediaSaveResult,
-    providerName: 'local' | 'azure'
+    providerName: 'local' | 'azure',
   ): Promise<SpotAssetRecord> {
     const id = randomUUID();
     const timestamp = new Date().toISOString();
@@ -84,7 +84,7 @@ export class SpotAssetStore {
           record.spot_id,
           record.created_at,
           record.updated_at,
-        ]
+        ],
       );
     }
 
@@ -134,10 +134,12 @@ export class SpotAssetStore {
       attachedRecords.push(asset);
 
       if (this.pg) {
-        await this.pg.query(
-          `UPDATE spot_assets SET status = $1, spot_id = $2, updated_at = $3 WHERE id = $4`,
-          [asset.status, asset.spot_id, asset.updated_at, asset.id]
-        );
+        await this.pg.query(`UPDATE spot_assets SET status = $1, spot_id = $2, updated_at = $3 WHERE id = $4`, [
+          asset.status,
+          asset.spot_id,
+          asset.updated_at,
+          asset.id,
+        ]);
       }
     }
 

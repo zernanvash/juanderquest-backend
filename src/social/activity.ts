@@ -18,16 +18,7 @@ export type ActivityVerb =
   | 'quiz_aced';
 
 export type ActivitySubjectType =
-  | 'quest'
-  | 'trail'
-  | 'town'
-  | 'badge'
-  | 'level'
-  | 'streak'
-  | 'rank'
-  | 'spot'
-  | 'campaign'
-  | 'quiz';
+  'quest' | 'trail' | 'town' | 'badge' | 'level' | 'streak' | 'rank' | 'spot' | 'campaign' | 'quiz';
 
 export interface RecordActivityInput {
   eventKey: string;
@@ -64,7 +55,7 @@ export interface Queryable {
 export async function runIsolatedProducer(
   client: Queryable | null | undefined,
   label: string,
-  producer: () => Promise<void>
+  producer: () => Promise<void>,
 ): Promise<void> {
   let savepoint = false;
   if (client) {

@@ -58,27 +58,24 @@ export function signSessionToken(
 }
 
 export function signQuestChallenge(input: Omit<QuestChallengeClaims, 'sub' | 'typ'>, expiresInSec = 600): string {
-  return jwt.sign(
-    { sub: CHALLENGE_TYP, typ: CHALLENGE_TYP, ...input },
-    env.JWT_SECRET,
-    { algorithm: 'HS256', expiresIn: expiresInSec },
-  );
+  return jwt.sign({ sub: CHALLENGE_TYP, typ: CHALLENGE_TYP, ...input }, env.JWT_SECRET, {
+    algorithm: 'HS256',
+    expiresIn: expiresInSec,
+  });
 }
 
 export function signQuestArChallenge(input: Omit<QuestArChallengeClaims, 'sub' | 'typ'>, expiresInSec = 600): string {
-  return jwt.sign(
-    { sub: AR_CHALLENGE_TYP, typ: AR_CHALLENGE_TYP, ...input },
-    env.JWT_SECRET,
-    { algorithm: 'HS256', expiresIn: expiresInSec },
-  );
+  return jwt.sign({ sub: AR_CHALLENGE_TYP, typ: AR_CHALLENGE_TYP, ...input }, env.JWT_SECRET, {
+    algorithm: 'HS256',
+    expiresIn: expiresInSec,
+  });
 }
 
 export function signQuestQrPass(input: Omit<QuestQrPassClaims, 'sub' | 'typ'>, expiresInSec = 600): string {
-  return jwt.sign(
-    { sub: QR_PASS_TYP, typ: QR_PASS_TYP, ...input },
-    env.JWT_SECRET,
-    { algorithm: 'HS256', expiresIn: expiresInSec },
-  );
+  return jwt.sign({ sub: QR_PASS_TYP, typ: QR_PASS_TYP, ...input }, env.JWT_SECRET, {
+    algorithm: 'HS256',
+    expiresIn: expiresInSec,
+  });
 }
 
 // SESSIONS_VALID_AFTER signs everyone out at once (owner 2026-10-29, after Plan 67 made
@@ -95,7 +92,15 @@ export function verifySessionToken(token: string): SessionClaims | null {
     if (!decoded || typeof decoded === 'string') return null;
     const claims = decoded as JwtPayload & Record<string, unknown>;
     // TODO(2026-10-23): require typ === 'session' after the longest legacy session expires.
-    if ((claims.typ !== undefined && claims.typ !== SESSION_TYP) || claims.sub === CHALLENGE_TYP || claims.sub === AR_CHALLENGE_TYP || claims.typ === AR_CHALLENGE_TYP || claims.sub === QR_PASS_TYP || claims.typ === QR_PASS_TYP) return null;
+    if (
+      (claims.typ !== undefined && claims.typ !== SESSION_TYP) ||
+      claims.sub === CHALLENGE_TYP ||
+      claims.sub === AR_CHALLENGE_TYP ||
+      claims.typ === AR_CHALLENGE_TYP ||
+      claims.sub === QR_PASS_TYP ||
+      claims.typ === QR_PASS_TYP
+    )
+      return null;
     if (typeof claims.id !== 'string' || claims.id.length === 0) return null;
     if (typeof claims.seed_id !== 'string' || !validRole(claims.role)) return null;
     if (issuedBeforeCutoff(claims.iat)) return null;
@@ -112,8 +117,13 @@ export function verifyQuestChallengeToken(token: string): QuestChallengeClaims |
     if (!decoded || typeof decoded === 'string') return null;
     const claims = decoded as JwtPayload & Record<string, unknown>;
     if (claims.sub !== CHALLENGE_TYP || (claims.typ !== undefined && claims.typ !== CHALLENGE_TYP)) return null;
-    if (typeof claims.user_id !== 'string' || typeof claims.quest_id !== 'string' ||
-        typeof claims.nonce !== 'string' || claims.nonce.length === 0) return null;
+    if (
+      typeof claims.user_id !== 'string' ||
+      typeof claims.quest_id !== 'string' ||
+      typeof claims.nonce !== 'string' ||
+      claims.nonce.length === 0
+    )
+      return null;
     return claims as unknown as QuestChallengeClaims;
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) throw error;
@@ -127,9 +137,15 @@ export function verifyQuestArChallengeToken(token: string): QuestArChallengeClai
     if (!decoded || typeof decoded === 'string') return null;
     const claims = decoded as JwtPayload & Record<string, unknown>;
     if (claims.sub !== AR_CHALLENGE_TYP || (claims.typ !== undefined && claims.typ !== AR_CHALLENGE_TYP)) return null;
-    if (typeof claims.user_id !== 'string' || typeof claims.quest_id !== 'string' ||
-        typeof claims.attempt_id !== 'string' || typeof claims.task_key !== 'string' ||
-        typeof claims.nonce !== 'string' || claims.nonce.length === 0) return null;
+    if (
+      typeof claims.user_id !== 'string' ||
+      typeof claims.quest_id !== 'string' ||
+      typeof claims.attempt_id !== 'string' ||
+      typeof claims.task_key !== 'string' ||
+      typeof claims.nonce !== 'string' ||
+      claims.nonce.length === 0
+    )
+      return null;
     return claims as unknown as QuestArChallengeClaims;
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) throw error;
@@ -144,9 +160,16 @@ export function verifyQuestQrPassToken(token: string): QuestQrPassClaims | null 
     if (!decoded || typeof decoded === 'string') return null;
     const claims = decoded as JwtPayload & Record<string, unknown>;
     if (claims.sub !== QR_PASS_TYP || (claims.typ !== undefined && claims.typ !== QR_PASS_TYP)) return null;
-    if (typeof claims.user_id !== 'string' || typeof claims.quest_id !== 'string' ||
-        typeof claims.attempt_id !== 'string' || typeof claims.step_order !== 'number' ||
-        typeof claims.task_key !== 'string' || typeof claims.nonce !== 'string' || claims.nonce.length === 0) return null;
+    if (
+      typeof claims.user_id !== 'string' ||
+      typeof claims.quest_id !== 'string' ||
+      typeof claims.attempt_id !== 'string' ||
+      typeof claims.step_order !== 'number' ||
+      typeof claims.task_key !== 'string' ||
+      typeof claims.nonce !== 'string' ||
+      claims.nonce.length === 0
+    )
+      return null;
     return claims as unknown as QuestQrPassClaims;
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) throw error;

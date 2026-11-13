@@ -104,10 +104,14 @@ describe('Merchant affiliation durability (parent-first transactions)', () => {
 
     const application = await db.createAffiliateApplication(applicationPayload('durable-user-1'));
 
-    const { rows: applications } = await pool.query('SELECT * FROM merchant_affiliate_applications WHERE id = $1', [application.id]);
+    const { rows: applications } = await pool.query('SELECT * FROM merchant_affiliate_applications WHERE id = $1', [
+      application.id,
+    ]);
     expect(applications).toHaveLength(1);
 
-    const { rows: audits } = await pool.query('SELECT * FROM merchant_application_audits WHERE application_id = $1', [application.id]);
+    const { rows: audits } = await pool.query('SELECT * FROM merchant_application_audits WHERE application_id = $1', [
+      application.id,
+    ]);
     expect(audits).toHaveLength(1);
     expect(audits[0].to_status).toBe('received');
     expect(db.getApplicationAudits(application.id)).toHaveLength(1);
@@ -141,17 +145,21 @@ describe('Merchant affiliation durability (parent-first transactions)', () => {
     });
     expect(approved?.status).toBe('approved');
 
-    const { rows: merchants } = await pool.query('SELECT * FROM merchants WHERE source_application_id = $1', [application.id]);
+    const { rows: merchants } = await pool.query('SELECT * FROM merchants WHERE source_application_id = $1', [
+      application.id,
+    ]);
     expect(merchants).toHaveLength(1);
 
-    const { rows: memberships } = await pool.query('SELECT * FROM merchant_memberships WHERE merchant_id = $1', [merchants[0].id]);
+    const { rows: memberships } = await pool.query('SELECT * FROM merchant_memberships WHERE merchant_id = $1', [
+      merchants[0].id,
+    ]);
     expect(memberships).toHaveLength(1);
     expect(memberships[0].user_id).toBe('durable-user-3');
     expect(memberships[0].role).toBe('owner');
 
     const { rows: audits } = await pool.query(
       "SELECT * FROM merchant_application_audits WHERE application_id = $1 AND to_status = 'approved'",
-      [application.id]
+      [application.id],
     );
     expect(audits).toHaveLength(1);
   });
@@ -168,7 +176,7 @@ describe('Merchant affiliation durability (parent-first transactions)', () => {
     db.attachDurabilityPool(brokenPool);
 
     await expect(
-      db.updateAffiliateApplicationStatus(application.id, { status: 'approved', reviewer_id: 'admin-durability-2' })
+      db.updateAffiliateApplicationStatus(application.id, { status: 'approved', reviewer_id: 'admin-durability-2' }),
     ).rejects.toMatchObject({ code: 'STORAGE_UNAVAILABLE' });
 
     expect(db.findAffiliateApplicationById(application.id)?.status).toBe('received');

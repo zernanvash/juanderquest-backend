@@ -14,14 +14,16 @@ export async function lockGovernanceSnapshot(client: Client): Promise<ReturnType
     const { rows } = await client.query('SELECT id, demo_points FROM users');
     snapshot.balances = Object.fromEntries(rows.map((user: any) => [user.id, Number(user.demo_points) * 1000]));
     snapshot.issuedMjdq = rows.reduce((sum: number, user: any) => sum + Number(user.demo_points) * 1000, 0);
-    await client.query('UPDATE governance_snapshot SET data = $1, updated_at = NOW() WHERE id = 1', [JSON.stringify(snapshot)]);
+    await client.query('UPDATE governance_snapshot SET data = $1, updated_at = NOW() WHERE id = 1', [
+      JSON.stringify(snapshot),
+    ]);
   }
   return snapshot;
 }
 
 // Preserve sub-point mJDQ from payouts; demo_points is the whole-point projection.
 export function authoritativeBalance(points: number, previousMjdq = 0): number {
-  const balance = Number(points) * 1000 + previousMjdq % 1000;
+  const balance = Number(points) * 1000 + (previousMjdq % 1000);
   if (!Number.isSafeInteger(balance) || balance < 0) throw new Error('INVALID_GOVERNANCE_BALANCE');
   return balance;
 }

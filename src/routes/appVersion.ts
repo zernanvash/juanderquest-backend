@@ -4,7 +4,8 @@ import path from 'path';
 import { execSync } from 'child_process';
 
 export const appVersionRouter = Router();
-const LATEST_ANDROID_APK = 'https://github.com/zernanvash/juanderquest-mobile/releases/latest/download/juanderquest-latest.apk';
+const LATEST_ANDROID_APK =
+  'https://github.com/zernanvash/juanderquest-mobile/releases/latest/download/juanderquest-latest.apk';
 
 export interface ContentManifestMetadata {
   version: string;
@@ -117,7 +118,8 @@ export const getLatestAppVersion = (): AppVersionData => {
       const fileName = parsed.fileName || `juanderquest-alpha-${commit}.apk`;
       const isForce = Boolean(parsed.forceUpdate);
       const minSupported = typeof parsed.minSupportedVersionCode === 'number' ? parsed.minSupportedVersionCode : 1;
-      const minimumBase = typeof parsed.minimumBaseVersionCode === 'number' ? parsed.minimumBaseVersionCode : minSupported;
+      const minimumBase =
+        typeof parsed.minimumBaseVersionCode === 'number' ? parsed.minimumBaseVersionCode : minSupported;
 
       return {
         schemaVersion: typeof parsed.schemaVersion === 'number' ? parsed.schemaVersion : 1,
@@ -137,15 +139,21 @@ export const getLatestAppVersion = (): AppVersionData => {
         sha256: parsed.sha256,
         sizeBytes: typeof parsed.sizeBytes === 'number' ? parsed.sizeBytes : undefined,
         signingKeyGeneration: typeof parsed.signingKeyGeneration === 'number' ? parsed.signingKeyGeneration : undefined,
-        legacyInstallRequiresReinstall: typeof parsed.legacyInstallRequiresReinstall === 'boolean' ? parsed.legacyInstallRequiresReinstall : undefined,
+        legacyInstallRequiresReinstall:
+          typeof parsed.legacyInstallRequiresReinstall === 'boolean'
+            ? parsed.legacyInstallRequiresReinstall
+            : undefined,
         buildNumber: typeof parsed.buildNumber === 'number' ? parsed.buildNumber : undefined,
-        minSupportedBuildNumber: typeof parsed.minSupportedBuildNumber === 'number' ? parsed.minSupportedBuildNumber : undefined,
-        content: parsed.content ? {
-          version: String(parsed.content.version || ''),
-          manifestUrl: String(parsed.content.manifestUrl || ''),
-          signature: parsed.content.signature ? String(parsed.content.signature) : undefined,
-          publishedAt: parsed.content.publishedAt ? String(parsed.content.publishedAt) : undefined,
-        } : undefined,
+        minSupportedBuildNumber:
+          typeof parsed.minSupportedBuildNumber === 'number' ? parsed.minSupportedBuildNumber : undefined,
+        content: parsed.content
+          ? {
+              version: String(parsed.content.version || ''),
+              manifestUrl: String(parsed.content.manifestUrl || ''),
+              signature: parsed.content.signature ? String(parsed.content.signature) : undefined,
+              publishedAt: parsed.content.publishedAt ? String(parsed.content.publishedAt) : undefined,
+            }
+          : undefined,
       };
     }
   } catch (error) {
@@ -199,4 +207,3 @@ appVersionRouter.get('/app/latest', (_req: Request, res: Response) => {
 });
 
 export default appVersionRouter;
-

@@ -57,8 +57,13 @@ describe('Phase 3: Atomic Submission, Review and Redemption Lifecycle', () => {
 
   describe('Submissions Idempotency and Conflict Detection', () => {
     beforeEach(async () => {
-      await testDb.pool.query('DELETE FROM submissions WHERE user_id = $1 AND quest_id = $2', ['usr_alice_tx', 'q_active_tx']);
-      db.submissions = db.submissions.filter((submission) => !(submission.user_id === 'usr_alice_tx' && submission.quest_id === 'q_active_tx'));
+      await testDb.pool.query('DELETE FROM submissions WHERE user_id = $1 AND quest_id = $2', [
+        'usr_alice_tx',
+        'q_active_tx',
+      ]);
+      db.submissions = db.submissions.filter(
+        (submission) => !(submission.user_id === 'usr_alice_tx' && submission.quest_id === 'q_active_tx'),
+      );
     });
 
     it('creates submission, and safely replays when receiving the same idempotency key with identical payload', async () => {
@@ -115,8 +120,13 @@ describe('Phase 3: Atomic Submission, Review and Redemption Lifecycle', () => {
 
   describe('Atomic Review Transitions and Anti-Double-Award Invariants', () => {
     beforeEach(async () => {
-      await testDb.pool.query('DELETE FROM submissions WHERE user_id = $1 AND quest_id = $2', ['usr_alice_tx', 'q_active_tx']);
-      db.submissions = db.submissions.filter((submission) => !(submission.user_id === 'usr_alice_tx' && submission.quest_id === 'q_active_tx'));
+      await testDb.pool.query('DELETE FROM submissions WHERE user_id = $1 AND quest_id = $2', [
+        'usr_alice_tx',
+        'q_active_tx',
+      ]);
+      db.submissions = db.submissions.filter(
+        (submission) => !(submission.user_id === 'usr_alice_tx' && submission.quest_id === 'q_active_tx'),
+      );
     });
 
     it('concurrent approves award points only once, and second review call replays with awarded_points = 0', async () => {
@@ -151,8 +161,9 @@ describe('Phase 3: Atomic Submission, Review and Redemption Lifecycle', () => {
       // Verify PostgreSQL user balance: 100 + 50 = 150
       const userRes = await testDb.pool.query('SELECT demo_points FROM users WHERE id = $1', ['usr_alice_tx']);
       expect(userRes.rows[0].demo_points).toBe(150);
-      expect((await reconcileEconomy(testDb.pool)).legacy.find((row) => row.userId === 'usr_alice_tx')?.classification)
-        .toBe('exact');
+      expect(
+        (await reconcileEconomy(testDb.pool)).legacy.find((row) => row.userId === 'usr_alice_tx')?.classification,
+      ).toBe('exact');
     });
 
     it('rejects terminal state transitions (approve after reject) with 409 STATE_CONFLICT', async () => {
@@ -185,10 +196,13 @@ describe('Phase 3: Atomic Submission, Review and Redemption Lifecycle', () => {
 
     it('retains inactive quests in history and review calculations without turning into Unknown Quest', async () => {
       const histId = `sub_hist_${Date.now()}`;
-      await testDb.pool.query(`
+      await testDb.pool.query(
+        `
         INSERT INTO submissions (id, idempotency_key, user_id, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy, status)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'approved')
-      `, [histId, randomUUID(), 'usr_alice_tx', 'q_inactive_tx', 'MARKER_INACTIVE', 16.3842, 119.8936, 5.0]);
+      `,
+        [histId, randomUUID(), 'usr_alice_tx', 'q_inactive_tx', 'MARKER_INACTIVE', 16.3842, 119.8936, 5.0],
+      );
 
       await db.hydrateFromPg(testDb.pool);
 
@@ -274,7 +288,10 @@ describe('Phase 3: Atomic Submission, Review and Redemption Lifecycle', () => {
       expect(userRes.rows[0].demo_points).toBe(420);
 
       // In database, exactly one row exists in redemptions for (user_id, voucher_id)
-      const redRes = await testDb.pool.query('SELECT * FROM redemptions WHERE user_id = $1 AND voucher_id = $2', ['usr_alice_tx', 'v_cost_80_a']);
+      const redRes = await testDb.pool.query('SELECT * FROM redemptions WHERE user_id = $1 AND voucher_id = $2', [
+        'usr_alice_tx',
+        'v_cost_80_a',
+      ]);
       expect(redRes.rows).toHaveLength(1);
     });
 
@@ -310,7 +327,9 @@ describe('Phase 3: Atomic Submission, Review and Redemption Lifecycle', () => {
       const snapRes = await testDb.pool.query('SELECT data FROM governance_snapshot WHERE id = 1');
       expect(snapRes.rows.length).toBeGreaterThan(0);
       const snapData = snapRes.rows[0].data;
-      expect(snapData.ledger.some((e: any) => e.type === 'voucher_redemption_debit' && e.reference_id === 'v_cost_80_a')).toBe(true);
+      expect(
+        snapData.ledger.some((e: any) => e.type === 'voucher_redemption_debit' && e.reference_id === 'v_cost_80_a'),
+      ).toBe(true);
     });
 
     it('deducts voucher points exactly once across SQL, in-memory, and governance store (never twice)', async () => {
@@ -337,8 +356,9 @@ describe('Phase 3: Atomic Submission, Review and Redemption Lifecycle', () => {
 
       // Governance store balance must match (20 * 1,000 = 20,000 mJDQ)
       expect(governanceStore.balanceOf('usr_alice_tx')).toBe(20_000);
-      expect((await reconcileEconomy(testDb.pool)).legacy.find((row) => row.userId === 'usr_alice_tx')?.classification)
-        .toBe('exact');
+      expect(
+        (await reconcileEconomy(testDb.pool)).legacy.find((row) => row.userId === 'usr_alice_tx')?.classification,
+      ).toBe('exact');
     });
 
     it('ensures governance rollback cleans up ledger entries and does not share mutated arrays', async () => {
@@ -357,7 +377,7 @@ describe('Phase 3: Atomic Submission, Review and Redemption Lifecycle', () => {
           'sub_failing_tx',
           100,
           'admin_id',
-          failingClient as any
+          failingClient as any,
         );
       } catch {
         governanceStore.restore(snapshot);
@@ -382,7 +402,10 @@ describe('Phase 3: Atomic Submission, Review and Redemption Lifecycle', () => {
         `);
 
         // Verify 2 rows exist
-        const beforeCount = await testDb.pool.query('SELECT COUNT(*)::text as cnt FROM redemptions WHERE user_id = $1', ['usr_alice_tx']);
+        const beforeCount = await testDb.pool.query(
+          'SELECT COUNT(*)::text as cnt FROM redemptions WHERE user_id = $1',
+          ['usr_alice_tx'],
+        );
         expect(beforeCount.rows[0].cnt).toBe('2');
 
         // Run preflight check
@@ -405,12 +428,16 @@ describe('Phase 3: Atomic Submission, Review and Redemption Lifecycle', () => {
         await expect(testDb.pool.query(preflightSql)).rejects.toThrow('Migration 010 aborted');
 
         // Verify zero auto-deletion: both records must still be present!
-        const afterCount = await testDb.pool.query('SELECT COUNT(*)::text as cnt FROM redemptions WHERE user_id = $1', ['usr_alice_tx']);
+        const afterCount = await testDb.pool.query('SELECT COUNT(*)::text as cnt FROM redemptions WHERE user_id = $1', [
+          'usr_alice_tx',
+        ]);
         expect(afterCount.rows[0].cnt).toBe('2');
       } finally {
         // Cleanup and re-establish constraint
         await testDb.pool.query('DELETE FROM redemptions WHERE user_id = $1', ['usr_alice_tx']);
-        await testDb.pool.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_redemptions_user_voucher ON redemptions(user_id, voucher_id);');
+        await testDb.pool.query(
+          'CREATE UNIQUE INDEX IF NOT EXISTS uq_redemptions_user_voucher ON redemptions(user_id, voucher_id);',
+        );
       }
     });
   });

@@ -9,7 +9,10 @@ describe('Voucher conflict recovery uses the rolled-back connection', () => {
     let replayReads = 0;
     let rolledBack = false;
     const query = jest.fn(async (sql: string) => {
-      if (sql === 'ROLLBACK') { rolledBack = true; return { rows: [] }; }
+      if (sql === 'ROLLBACK') {
+        rolledBack = true;
+        return { rows: [] };
+      }
       if (sql.includes('FROM governance_snapshot')) return { rows: [{ data: { controls: {} } }] };
       if (sql.includes('FOR UPDATE')) return { rows: [{ demo_points: 100 }] };
       if (sql.includes('idempotency_key =')) {

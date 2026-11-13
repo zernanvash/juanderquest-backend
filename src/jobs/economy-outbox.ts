@@ -22,7 +22,9 @@ export async function drainEconomicOutbox(): Promise<number> {
       if (await outbox.complete(claim, CONSUMER_KEY)) completed++;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      try { await outbox.fail(claim, reason); } catch (failure) {
+      try {
+        await outbox.fail(claim, reason);
+      } catch (failure) {
         console.error('[economy-outbox] failure transition unavailable', failure);
       }
     }
@@ -35,9 +37,13 @@ export function initEconomicOutboxWorker(): void {
   timer = setInterval(() => {
     if (processing) return;
     processing = true;
-    void drainEconomicOutbox().catch((error) => {
-      console.error('[economy-outbox] batch unavailable', error);
-    }).finally(() => { processing = false; });
+    void drainEconomicOutbox()
+      .catch((error) => {
+        console.error('[economy-outbox] batch unavailable', error);
+      })
+      .finally(() => {
+        processing = false;
+      });
   }, INTERVAL_MS);
   timer.unref();
 }

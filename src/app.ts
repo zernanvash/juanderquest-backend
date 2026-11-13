@@ -76,12 +76,21 @@ app.use(express.json());
 // Cookie-authenticated mutations must originate from an approved web origin.
 // Bearer clients (including Flutter) are unaffected; SameSite is defense in depth.
 app.use('/api/v1', (req, res, next) => {
-  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method) || req.headers.authorization || !req.headers.cookie) return next();
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method) || req.headers.authorization || !req.headers.cookie)
+    return next();
   const origin = req.headers.origin;
-  const allowed = env.CORS_ORIGIN === '*'
-    ? env.NODE_ENV !== 'production' && (origin === 'http://localhost:3000' || origin === 'http://127.0.0.1:3000')
-    : Array.isArray(parseCorsOrigin(env.CORS_ORIGIN)) && (parseCorsOrigin(env.CORS_ORIGIN) as string[]).includes(origin || '');
-  if (!allowed) return res.status(403).json({ success: false, error: { code: 'INVALID_ORIGIN', message: 'Cookie-authenticated request origin is not allowed.' } });
+  const allowed =
+    env.CORS_ORIGIN === '*'
+      ? env.NODE_ENV !== 'production' && (origin === 'http://localhost:3000' || origin === 'http://127.0.0.1:3000')
+      : Array.isArray(parseCorsOrigin(env.CORS_ORIGIN)) &&
+        (parseCorsOrigin(env.CORS_ORIGIN) as string[]).includes(origin || '');
+  if (!allowed)
+    return res
+      .status(403)
+      .json({
+        success: false,
+        error: { code: 'INVALID_ORIGIN', message: 'Cookie-authenticated request origin is not allowed.' },
+      });
   next();
 });
 

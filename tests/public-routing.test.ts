@@ -4,7 +4,7 @@ import { spotStore } from '../src/spots/store.js';
 
 describe('public resource routing', () => {
   it('resolves the same published spot through its immutable ID and legacy slug', async () => {
-    const spot = spotStore.spots.find(item => item.status === 'published' && !item.is_test);
+    const spot = spotStore.spots.find((item) => item.status === 'published' && !item.is_test);
     expect(spot).toBeDefined();
     const byId = await request(app).get(`/api/v1/spots/${spot!.id}`);
     const bySlug = await request(app).get(`/api/v1/spots/${spot!.slug}`);

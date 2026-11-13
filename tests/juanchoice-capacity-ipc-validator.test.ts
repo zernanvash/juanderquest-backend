@@ -19,7 +19,7 @@ describe('JuanChoice capacity parent IPC validator and failure handling', () => 
         { reqId: 'req-1', kind: 'overview', status: 200, totalClientMs: 42.5 },
         VALID_READ_KINDS,
         seen,
-        'read'
+        'read',
       );
       expect(sample.reqId).toBe('req-1');
       expect(sample.kind).toBe('overview');
@@ -31,26 +31,104 @@ describe('JuanChoice capacity parent IPC validator and failure handling', () => 
     it('rejects sample with empty reqId or missing fields', () => {
       const seen = new Set<string>();
       expect(() => validateSanitizedSample(null, VALID_READ_KINDS, seen, 'read')).toThrow();
-      expect(() => validateSanitizedSample({ reqId: '', kind: 'overview', status: 200, totalClientMs: 10 }, VALID_READ_KINDS, seen, 'read')).toThrow();
-      expect(() => validateSanitizedSample({ reqId: 123, kind: 'overview', status: 200, totalClientMs: 10 }, VALID_READ_KINDS, seen, 'read')).toThrow();
-      expect(() => validateSanitizedSample({ reqId: 'r1', kind: 'invalid_kind', status: 200, totalClientMs: 10 }, VALID_READ_KINDS, seen, 'read')).toThrow();
-      expect(() => validateSanitizedSample({ reqId: 'r1', kind: 'overview', status: '200', totalClientMs: 10 }, VALID_READ_KINDS, seen, 'read')).toThrow();
-      expect(() => validateSanitizedSample({ reqId: 'r1', kind: 'overview', status: -1, totalClientMs: 10 }, VALID_READ_KINDS, seen, 'read')).toThrow();
-      expect(() => validateSanitizedSample({ reqId: 'r1', kind: 'overview', status: 600, totalClientMs: 10 }, VALID_READ_KINDS, seen, 'read')).toThrow();
-      expect(() => validateSanitizedSample({ reqId: 'r1', kind: 'overview', status: 200, totalClientMs: -5 }, VALID_READ_KINDS, seen, 'read')).toThrow();
-      expect(() => validateSanitizedSample({ reqId: 'r1', kind: 'overview', status: 200, totalClientMs: Infinity }, VALID_READ_KINDS, seen, 'read')).toThrow();
-      expect(() => validateSanitizedSample({ reqId: 'r1', kind: 'overview', status: 200, totalClientMs: NaN }, VALID_READ_KINDS, seen, 'read')).toThrow();
+      expect(() =>
+        validateSanitizedSample(
+          { reqId: '', kind: 'overview', status: 200, totalClientMs: 10 },
+          VALID_READ_KINDS,
+          seen,
+          'read',
+        ),
+      ).toThrow();
+      expect(() =>
+        validateSanitizedSample(
+          { reqId: 123, kind: 'overview', status: 200, totalClientMs: 10 },
+          VALID_READ_KINDS,
+          seen,
+          'read',
+        ),
+      ).toThrow();
+      expect(() =>
+        validateSanitizedSample(
+          { reqId: 'r1', kind: 'invalid_kind', status: 200, totalClientMs: 10 },
+          VALID_READ_KINDS,
+          seen,
+          'read',
+        ),
+      ).toThrow();
+      expect(() =>
+        validateSanitizedSample(
+          { reqId: 'r1', kind: 'overview', status: '200', totalClientMs: 10 },
+          VALID_READ_KINDS,
+          seen,
+          'read',
+        ),
+      ).toThrow();
+      expect(() =>
+        validateSanitizedSample(
+          { reqId: 'r1', kind: 'overview', status: -1, totalClientMs: 10 },
+          VALID_READ_KINDS,
+          seen,
+          'read',
+        ),
+      ).toThrow();
+      expect(() =>
+        validateSanitizedSample(
+          { reqId: 'r1', kind: 'overview', status: 600, totalClientMs: 10 },
+          VALID_READ_KINDS,
+          seen,
+          'read',
+        ),
+      ).toThrow();
+      expect(() =>
+        validateSanitizedSample(
+          { reqId: 'r1', kind: 'overview', status: 200, totalClientMs: -5 },
+          VALID_READ_KINDS,
+          seen,
+          'read',
+        ),
+      ).toThrow();
+      expect(() =>
+        validateSanitizedSample(
+          { reqId: 'r1', kind: 'overview', status: 200, totalClientMs: Infinity },
+          VALID_READ_KINDS,
+          seen,
+          'read',
+        ),
+      ).toThrow();
+      expect(() =>
+        validateSanitizedSample(
+          { reqId: 'r1', kind: 'overview', status: 200, totalClientMs: NaN },
+          VALID_READ_KINDS,
+          seen,
+          'read',
+        ),
+      ).toThrow();
     });
 
     it('rejects duplicate reqId within the same category or across reads and ballots', () => {
       const seen = new Set<string>();
-      validateSanitizedSample({ reqId: 'shared-uuid', kind: 'overview', status: 200, totalClientMs: 10 }, VALID_READ_KINDS, seen, 'read');
+      validateSanitizedSample(
+        { reqId: 'shared-uuid', kind: 'overview', status: 200, totalClientMs: 10 },
+        VALID_READ_KINDS,
+        seen,
+        'read',
+      );
       expect(() =>
-        validateSanitizedSample({ reqId: 'shared-uuid', kind: 'standings', status: 200, totalClientMs: 15 }, VALID_READ_KINDS, seen, 'read')
+        validateSanitizedSample(
+          { reqId: 'shared-uuid', kind: 'standings', status: 200, totalClientMs: 15 },
+          VALID_READ_KINDS,
+          seen,
+          'read',
+        ),
       ).toThrow(/duplicate reqId/);
 
       expect(() =>
-        validateSanitizedSample({ reqId: 'shared-uuid', kind: '0', status: 200, totalClientMs: 25 }, VALID_BALLOT_KINDS, seen, 'ballot')
+        validateSanitizedSample(
+          { reqId: 'shared-uuid', kind: '0', status: 200, totalClientMs: 25 },
+          VALID_BALLOT_KINDS,
+          seen,
+          'ballot',
+        ),
       ).toThrow(/duplicate reqId/);
     });
 
@@ -153,7 +231,7 @@ describe('JuanChoice capacity parent IPC validator and failure handling', () => 
       try {
         const readyDeadline = Date.now() + 5000;
         while (!childReady && Date.now() < readyDeadline) {
-          await new Promise(r => setTimeout(r, 50));
+          await new Promise((r) => setTimeout(r, 50));
         }
         expect(childReady).toBe(true);
 
@@ -175,7 +253,7 @@ describe('JuanChoice capacity parent IPC validator and failure handling', () => 
 
         // Race child exit against 4s timeout (well below capacity workload timeout)
         let timeoutHandle: NodeJS.Timeout | undefined;
-        const timeoutPromise = new Promise<'timeout'>(r => {
+        const timeoutPromise = new Promise<'timeout'>((r) => {
           timeoutHandle = setTimeout(() => r('timeout'), 4000);
         });
 
@@ -193,11 +271,15 @@ describe('JuanChoice capacity parent IPC validator and failure handling', () => 
         expect(childErrors).toContain('CHILD_REPORTED_ERROR');
       } finally {
         if (child.exitCode === null && child.signalCode === null) {
-          try { child.kill('SIGTERM'); } catch {}
+          try {
+            child.kill('SIGTERM');
+          } catch {}
           let cleanupTimeout: NodeJS.Timeout | undefined;
           await Promise.race([
             exitPromise,
-            new Promise(r => { cleanupTimeout = setTimeout(r, 1000); }),
+            new Promise((r) => {
+              cleanupTimeout = setTimeout(r, 1000);
+            }),
           ]).finally(() => {
             if (cleanupTimeout) clearTimeout(cleanupTimeout);
           });
@@ -242,7 +324,7 @@ describe('JuanChoice capacity parent IPC validator and failure handling', () => 
       try {
         const readyDeadline = Date.now() + 5000;
         while (!childReady && Date.now() < readyDeadline) {
-          await new Promise(r => setTimeout(r, 50));
+          await new Promise((r) => setTimeout(r, 50));
         }
         expect(childReady).toBe(true);
 
@@ -250,7 +332,7 @@ describe('JuanChoice capacity parent IPC validator and failure handling', () => 
         child.disconnect();
 
         let timeoutHandle: NodeJS.Timeout | undefined;
-        const timeoutPromise = new Promise<'timeout'>(r => {
+        const timeoutPromise = new Promise<'timeout'>((r) => {
           timeoutHandle = setTimeout(() => r('timeout'), 4000);
         });
 
@@ -266,11 +348,15 @@ describe('JuanChoice capacity parent IPC validator and failure handling', () => 
         expect(errors).toContain('CHILD_DISCONNECT_BEFORE_VALID_DONE');
       } finally {
         if (child.exitCode === null && child.signalCode === null) {
-          try { child.kill('SIGTERM'); } catch {}
+          try {
+            child.kill('SIGTERM');
+          } catch {}
           let cleanupTimeout: NodeJS.Timeout | undefined;
           await Promise.race([
             exitPromise,
-            new Promise(r => { cleanupTimeout = setTimeout(r, 1000); }),
+            new Promise((r) => {
+              cleanupTimeout = setTimeout(r, 1000);
+            }),
           ]).finally(() => {
             if (cleanupTimeout) clearTimeout(cleanupTimeout);
           });

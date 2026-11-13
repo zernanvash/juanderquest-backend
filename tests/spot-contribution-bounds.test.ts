@@ -27,10 +27,7 @@ describe('Spot contribution coordinate bounds (Philippine-wide)', () => {
   });
 
   it('accepts a valid non-Pangasinan Philippine coordinate', async () => {
-    const res = await request(app)
-      .post('/api/v1/spots')
-      .set('Authorization', `Bearer ${token}`)
-      .send(basePayload());
+    const res = await request(app).post('/api/v1/spots').set('Authorization', `Bearer ${token}`).send(basePayload());
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
     expect(res.body.data.id).toBeDefined();

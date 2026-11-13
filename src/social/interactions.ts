@@ -65,10 +65,10 @@ export async function cheer(
   const act = actRes.rows[0];
 
   // Check if already cheered
-  const existingCheer = await client.query(
-    'SELECT 1 FROM social_cheers WHERE activity_id = $1 AND user_id = $2',
-    [activityId, viewerId],
-  );
+  const existingCheer = await client.query('SELECT 1 FROM social_cheers WHERE activity_id = $1 AND user_id = $2', [
+    activityId,
+    viewerId,
+  ]);
 
   if (existingCheer.rows.length > 0) {
     return {
@@ -92,14 +92,11 @@ export async function cheer(
     [activityId],
   );
 
-  const updatedCount = Number(updateRes.rows[0]?.cheer_count ?? (Number(act.cheer_count) + 1));
+  const updatedCount = Number(updateRes.rows[0]?.cheer_count ?? Number(act.cheer_count) + 1);
 
   // Notify activity owner if not self
   if (viewerId !== act.actor_id) {
-    const viewerRes = await client.query(
-      'SELECT display_name, is_public FROM users WHERE id = $1',
-      [viewerId],
-    );
+    const viewerRes = await client.query('SELECT display_name, is_public FROM users WHERE id = $1', [viewerId]);
     const viewer = viewerRes.rows[0];
     const actorName = viewer && viewer.is_public ? viewer.display_name : 'Someone';
 
@@ -191,10 +188,10 @@ export async function hideActivity(
   activityId: string,
   isTest: boolean,
 ): Promise<{ hidden: boolean }> {
-  const actRes = await client.query(
-    'SELECT id, actor_id FROM social_activities WHERE id = $1 AND is_test = $2',
-    [activityId, isTest],
-  );
+  const actRes = await client.query('SELECT id, actor_id FROM social_activities WHERE id = $1 AND is_test = $2', [
+    activityId,
+    isTest,
+  ]);
 
   if (!actRes.rows.length) {
     throw new PlazaError('PLAZA_NOT_FOUND', 404, 'Activity not found.');
@@ -297,10 +294,7 @@ export async function addComment(
     [commentId, activityId, viewerId, body, idempotencyKey, isTest],
   );
 
-  await client.query(
-    'UPDATE social_activities SET comment_count = comment_count + 1 WHERE id = $1',
-    [activityId],
-  );
+  await client.query('UPDATE social_activities SET comment_count = comment_count + 1 WHERE id = $1', [activityId]);
 
   // Notify activity owner if not self
   if (viewerId !== act.actor_id) {
@@ -376,10 +370,9 @@ export async function deleteComment(
 
   if (!com.deleted_at) {
     await client.query('UPDATE social_comments SET deleted_at = NOW() WHERE id = $1', [commentId]);
-    await client.query(
-      'UPDATE social_activities SET comment_count = GREATEST(0, comment_count - 1) WHERE id = $1',
-      [com.activity_id],
-    );
+    await client.query('UPDATE social_activities SET comment_count = GREATEST(0, comment_count - 1) WHERE id = $1', [
+      com.activity_id,
+    ]);
   }
 
   return { deleted: true };
@@ -455,10 +448,7 @@ export interface ListCommentsResult {
 /**
  * Lists visible comments for an activity, in ascending chronological order.
  */
-export async function listComments(
-  client: Queryable,
-  input: ListCommentsInput,
-): Promise<ListCommentsResult> {
+export async function listComments(client: Queryable, input: ListCommentsInput): Promise<ListCommentsResult> {
   const viewerId = input.viewerId ?? null;
   const isTest = Boolean(input.isTest);
   const limit = Math.min(50, Math.max(1, input.limit ?? 20));
@@ -713,4 +703,3 @@ export async function adminModerateActivity(
     return res.rows[0];
   }
 }
-

@@ -1,13 +1,6 @@
 import { getPool } from '../db/pool.js';
 import type { Queryable } from './activity.js';
-import {
-  weekStartUtc,
-  nextWeekStartUtc,
-  weekStartDate,
-  prevWeekId,
-  manilaHour,
-  manilaDayOfWeek,
-} from './time.js';
+import { weekStartUtc, nextWeekStartUtc, weekStartDate, prevWeekId, manilaHour, manilaDayOfWeek } from './time.js';
 import { notify } from './notify.js';
 
 export const PLAZA_WEEKLY_RECAP_LOCK_KEY = 410042;
@@ -23,11 +16,7 @@ export interface RecapSummary {
  * Runs the weekly recap job.
  * Condition: Monday in Manila, hour >= 9, job has not run for previous week.
  */
-export async function runWeeklyRecap(
-  client: Queryable,
-  overrideNow?: Date,
-  forceRun = false,
-): Promise<RecapSummary> {
+export async function runWeeklyRecap(client: Queryable, overrideNow?: Date, forceRun = false): Promise<RecapSummary> {
   const now = overrideNow || new Date();
   const day = manilaDayOfWeek(now);
   const hour = manilaHour(now);
@@ -212,9 +201,7 @@ export async function runWeeklyRecapTick(): Promise<void> {
   const client = await pool.connect();
   let locked = false;
   try {
-    const lockRes = await client.query('SELECT pg_try_advisory_lock($1) AS acquired', [
-      PLAZA_WEEKLY_RECAP_LOCK_KEY,
-    ]);
+    const lockRes = await client.query('SELECT pg_try_advisory_lock($1) AS acquired', [PLAZA_WEEKLY_RECAP_LOCK_KEY]);
     locked = Boolean(lockRes.rows[0]?.acquired);
     if (!locked) return;
 
@@ -234,9 +221,12 @@ export async function runWeeklyRecapTick(): Promise<void> {
 export function startWeeklyRecapJob(): void {
   if (recapJobTimer) return;
   // Checks every 10 minutes
-  recapJobTimer = setInterval(() => {
-    void runWeeklyRecapTick();
-  }, 10 * 60 * 1000);
+  recapJobTimer = setInterval(
+    () => {
+      void runWeeklyRecapTick();
+    },
+    10 * 60 * 1000,
+  );
   // Never keep the process alive on its own (graceful shutdown, test runners).
   recapJobTimer.unref?.();
 

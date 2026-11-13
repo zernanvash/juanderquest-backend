@@ -47,15 +47,21 @@ describe('Plan 72 review: signing in again after revoke-all', () => {
     const first = await walletLogin(wallet);
     expect(first.body.data.status).toBe('requires_account_completion');
     const done = await request(app).post('/api/v1/auth/wallet/complete-registration').send({
-      age_eligibility_declared: true, terms_accepted: true,
-      wallet_onboarding_grant: first.body.data.wallet_onboarding_grant, wallet_address: wallet.address,
-      email, password, display_name: 'Relogin Scout',
+      age_eligibility_declared: true,
+      terms_accepted: true,
+      wallet_onboarding_grant: first.body.data.wallet_onboarding_grant,
+      wallet_address: wallet.address,
+      email,
+      password,
+      display_name: 'Relogin Scout',
     });
     expect(done.status).toBe(200);
     const oldToken = done.body.data.token as string;
     expect((await me(oldToken)).status).toBe(200);
 
-    const revoke = await request(app).post('/api/v1/auth/sessions/revoke-all').set('Authorization', `Bearer ${oldToken}`);
+    const revoke = await request(app)
+      .post('/api/v1/auth/sessions/revoke-all')
+      .set('Authorization', `Bearer ${oldToken}`);
     expect(revoke.status).toBe(200);
     expect((await me(oldToken)).status).toBe(401);
 

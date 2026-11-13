@@ -22,7 +22,7 @@ export class VouchersService {
   async redeemVoucher(
     voucherId: string,
     userId: string,
-    idempotencyKey: string
+    idempotencyKey: string,
   ): Promise<ServiceResult<{ redemption: RedemptionRow; replayed: boolean }>> {
     const pool = getPool();
 
@@ -39,7 +39,7 @@ export class VouchersService {
         // 2. Lock user account & verify point balance FIRST (serializes all redemptions for this user)
         const { rows: userRows } = await client.query(
           'SELECT demo_points,is_test FROM users WHERE id = $1 FOR UPDATE',
-          [userId]
+          [userId],
         );
         if (!userRows.length) {
           await client.query('ROLLBACK');
@@ -54,7 +54,7 @@ export class VouchersService {
         // 3. Idempotency check under the user lock
         const { rows: existingRows } = await client.query(
           'SELECT * FROM redemptions WHERE user_id = $1 AND idempotency_key = $2',
-          [userId, idempotencyKey]
+          [userId, idempotencyKey],
         );
         if (existingRows.length > 0) {
           const existing = existingRows[0];
@@ -82,7 +82,7 @@ export class VouchersService {
         // 4. One redemption per voucher per user rule under the user lock
         const { rows: userVoucherRows } = await client.query(
           'SELECT 1 FROM redemptions WHERE user_id = $1 AND voucher_id = $2 LIMIT 1',
-          [userId, voucherId]
+          [userId, voucherId],
         );
         if (userVoucherRows.length > 0) {
           await client.query('ROLLBACK');
@@ -97,7 +97,7 @@ export class VouchersService {
         const { rows: voucherRows } = await client.query(
           `SELECT v.*,m.id AS owner_merchant_id,m.is_test AS merchant_is_test FROM vouchers v
             JOIN merchants m ON m.id=v.merchant_id WHERE v.id = $1 AND v.is_active = TRUE`,
-          [voucherId]
+          [voucherId],
         );
         if (!voucherRows.length) {
           await client.query('ROLLBACK');
@@ -111,7 +111,11 @@ export class VouchersService {
 
         if (voucher.availability === 'preview') {
           await client.query('ROLLBACK');
-          return { success:false,statusCode:409,error:{code:'NOT_REDEEMABLE',message:'This partner offer is coming soon.'} };
+          return {
+            success: false,
+            statusCode: 409,
+            error: { code: 'NOT_REDEEMABLE', message: 'This partner offer is coming soon.' },
+          };
         }
 
         if (user.demo_points < voucher.cost_points) {
@@ -133,7 +137,7 @@ export class VouchersService {
             `INSERT INTO redemptions (id, voucher_id, user_id, code, cost_points, idempotency_key, created_at)
              VALUES ($1, $2, $3, $4, $5, $6, NOW())
              RETURNING *`,
-            [redemptionId, voucherId, userId, code, voucher.cost_points, idempotencyKey]
+            [redemptionId, voucherId, userId, code, voucher.cost_points, idempotencyKey],
           );
           createdRows = insertResult.rows;
         } catch (insertErr: any) {
@@ -145,14 +149,18 @@ export class VouchersService {
             // acquiring another pool connection here can deadlock a saturated pool.
             const { rows: recheckIdemp } = await client.query(
               'SELECT * FROM redemptions WHERE user_id = $1 AND idempotency_key = $2',
-              [userId, idempotencyKey]
+              [userId, idempotencyKey],
             );
             if (recheckIdemp.length > 0) {
               if (recheckIdemp[0].voucher_id !== voucherId) {
-                return { success: false, statusCode: 409, error: {
-                  code: 'IDEMPOTENCY_CONFLICT',
-                  message: 'This idempotency key was already used for a different voucher redemption.',
-                } };
+                return {
+                  success: false,
+                  statusCode: 409,
+                  error: {
+                    code: 'IDEMPOTENCY_CONFLICT',
+                    message: 'This idempotency key was already used for a different voucher redemption.',
+                  },
+                };
               }
               return {
                 success: true,
@@ -187,40 +195,76 @@ export class VouchersService {
 
         // 7. Deduct traveler points and optionally route the matching amount to the merchant.
         const settings = await client.query('SELECT values FROM system_settings_document WHERE id=1');
-        const voucherIncomeEnabled = env.QUEST_FUNDING_ENABLED && Boolean(canonicalSettings(settings.rows[0]?.values ?? {}).voucher_income_enabled);
+        const voucherIncomeEnabled =
+          env.QUEST_FUNDING_ENABLED &&
+          Boolean(canonicalSettings(settings.rows[0]?.values ?? {}).voucher_income_enabled);
         let newDemoPoints: number;
         let govResult: any = null;
         let fundingGroup: any;
         if (voucherIncomeEnabled) {
           if (Boolean(user.is_test) !== Boolean(voucher.merchant_is_test)) {
             await client.query('ROLLBACK');
-            return { success:false,statusCode:409,error:{code:'SCOPE_MISMATCH',message:'Voucher and traveler environments do not match.'} };
+            return {
+              success: false,
+              statusCode: 409,
+              error: { code: 'SCOPE_MISMATCH', message: 'Voucher and traveler environments do not match.' },
+            };
           }
           await client.query(
             `INSERT INTO points_accounts(id,kind,merchant_id,is_test) VALUES($1,'merchant',$2,$3) ON CONFLICT(id) DO NOTHING`,
-            [`merchant:${voucher.owner_merchant_id}`,voucher.owner_merchant_id,voucher.merchant_is_test]);
-          const creditId=`mpc_${randomUUID()}`;
+            [`merchant:${voucher.owner_merchant_id}`, voucher.owner_merchant_id, voucher.merchant_is_test],
+          );
+          const creditId = `mpc_${randomUUID()}`;
           await client.query(
             `INSERT INTO merchant_point_credits(id,merchant_id,source,points,reference,actor_id,idempotency_key,ledger_group_id)
              VALUES($1,$2,'voucher_income',$3,$4,$5,$6,$1)`,
-            [creditId,voucher.owner_merchant_id,voucher.cost_points,`redemption:${redemption.id}`,userId,`voucher_income:${idempotencyKey}`]);
-          fundingGroup=await movePoints(client,{from:{id:userId,userId,kind:'traveler'},to:{id:`merchant:${voucher.owner_merchant_id}`,kind:'merchant'},
-            points:Number(voucher.cost_points),type:'merchant_points_voucher_income',referenceType:'voucher_redemption',referenceId:redemption.id,
-            actorId:userId,idempotencyKey,metadata:{voucher_id:voucherId,merchant_id:voucher.owner_merchant_id}});
-          await client.query('UPDATE merchant_point_credits SET ledger_group_id=$2 WHERE id=$1',[creditId,fundingGroup.entries[0].transaction_group_id]);
-          newDemoPoints=fundingGroup.userBalanceUpdate?.demoPoints;
-          if(newDemoPoints===undefined)throw new Error('VOUCHER_INCOME_BALANCE_UPDATE_MISSING');
+            [
+              creditId,
+              voucher.owner_merchant_id,
+              voucher.cost_points,
+              `redemption:${redemption.id}`,
+              userId,
+              `voucher_income:${idempotencyKey}`,
+            ],
+          );
+          fundingGroup = await movePoints(client, {
+            from: { id: userId, userId, kind: 'traveler' },
+            to: { id: `merchant:${voucher.owner_merchant_id}`, kind: 'merchant' },
+            points: Number(voucher.cost_points),
+            type: 'merchant_points_voucher_income',
+            referenceType: 'voucher_redemption',
+            referenceId: redemption.id,
+            actorId: userId,
+            idempotencyKey,
+            metadata: { voucher_id: voucherId, merchant_id: voucher.owner_merchant_id },
+          });
+          await client.query('UPDATE merchant_point_credits SET ledger_group_id=$2 WHERE id=$1', [
+            creditId,
+            fundingGroup.entries[0].transaction_group_id,
+          ]);
+          newDemoPoints = fundingGroup.userBalanceUpdate?.demoPoints;
+          if (newDemoPoints === undefined) throw new Error('VOUCHER_INCOME_BALANCE_UPDATE_MISSING');
         } else {
           const { rows: updateRows } = await client.query(
             'UPDATE users SET demo_points = demo_points - ($2)::int, updated_at = NOW() WHERE id = $1 AND demo_points >= ($2)::int RETURNING demo_points',
-            [userId, voucher.cost_points]
+            [userId, voucher.cost_points],
           );
           if (!updateRows.length) {
             await client.query('ROLLBACK');
-            return { success: false, statusCode: 409, error: { code: 'INSUFFICIENT_POINTS', message: 'You do not have enough demo points for this voucher.' } };
+            return {
+              success: false,
+              statusCode: 409,
+              error: { code: 'INSUFFICIENT_POINTS', message: 'You do not have enough demo points for this voucher.' },
+            };
           }
           newDemoPoints = updateRows[0].demo_points;
-          govResult = await governanceStore.consumePoints(userId, voucher.cost_points, voucherId, redemption.id, client);
+          govResult = await governanceStore.consumePoints(
+            userId,
+            voucher.cost_points,
+            voucherId,
+            redemption.id,
+            client,
+          );
         }
 
         // 9. COMMIT transaction
@@ -233,7 +277,7 @@ export class VouchersService {
 
         // 10. Authoritative post-commit synchronization:
         // Publish committed transaction-local entries and set in-memory demo_points.
-        if(fundingGroup) publishFunding([fundingGroup]);
+        if (fundingGroup) publishFunding([fundingGroup]);
         if (govResult && govResult.entries) {
           governanceStore.publishCommittedTransaction({
             entries: govResult.entries,
@@ -289,12 +333,25 @@ export class VouchersService {
         return { success: false, statusCode: 404, error: { code: 'NOT_FOUND', message: 'Voucher not found.' } };
       }
       if (result.error === 'ALREADY_REDEEMED') {
-        return { success: false, statusCode: 409, error: { code: 'ALREADY_REDEEMED', message: 'You have already redeemed this voucher.' } };
+        return {
+          success: false,
+          statusCode: 409,
+          error: { code: 'ALREADY_REDEEMED', message: 'You have already redeemed this voucher.' },
+        };
       }
-      return { success: false, statusCode: 409, error: { code: 'INSUFFICIENT_POINTS', message: 'You do not have enough demo points for this voucher.' } };
+      return {
+        success: false,
+        statusCode: 409,
+        error: { code: 'INSUFFICIENT_POINTS', message: 'You do not have enough demo points for this voucher.' },
+      };
     }
 
-    governanceStore.consumePoints(result.redemption.user_id, result.redemption.cost_points, result.redemption.voucher_id, result.redemption.id);
+    governanceStore.consumePoints(
+      result.redemption.user_id,
+      result.redemption.cost_points,
+      result.redemption.voucher_id,
+      result.redemption.id,
+    );
     return {
       success: true,
       statusCode: 200,

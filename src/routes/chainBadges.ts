@@ -15,7 +15,12 @@ export const chainBadgesRouter = Router();
 
 export type BadgeState = 'test_only' | 'revoked' | 'pending_wallet' | 'queued' | 'minting' | 'on_chain' | 'failed';
 
-export function badgeState(row: { is_test: boolean; revoked_at: unknown; wallet: string | null; status: string | null }): BadgeState {
+export function badgeState(row: {
+  is_test: boolean;
+  revoked_at: unknown;
+  wallet: string | null;
+  status: string | null;
+}): BadgeState {
   if (row.is_test) return 'test_only';
   if (row.status === 'finalized') return row.revoked_at ? 'revoked' : 'on_chain';
   if (row.revoked_at) return 'revoked';
@@ -28,11 +33,17 @@ export function badgeState(row: { is_test: boolean; revoked_at: unknown; wallet:
 const nftUrl = (explorer: string, contract: string, tokenId: string) => `${explorer}/nft/${contract}/${tokenId}`;
 
 const unavailable = (res: Response) =>
-  res.status(503).json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Badge storage is unavailable.' } });
+  res
+    .status(503)
+    .json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Badge storage is unavailable.' } });
 const failed = (res: Response) =>
-  res.status(500).json({ success: false, error: { code: 'BADGES_UNAVAILABLE', message: 'Badges could not be loaded.' } });
+  res
+    .status(500)
+    .json({ success: false, error: { code: 'BADGES_UNAVAILABLE', message: 'Badges could not be loaded.' } });
 
-chainBadgesRouter.get('/me/chain/badges', authenticateToken,
+chainBadgesRouter.get(
+  '/me/chain/badges',
+  authenticateToken,
   rateLimit({ policyId: 'me:chain-badges', windowMs: 60_000, max: 60, keyStrategy: 'actor_or_ip' }),
   async (req: AuthRequest, res: Response) => {
     const pool = getPool();
@@ -50,24 +61,44 @@ chainBadgesRouter.get('/me/chain/badges', authenticateToken,
            JOIN achievement_definitions d ON d.id = a.achievement_id
            LEFT JOIN chain_commands c ON c.chain_id = $2 AND c.source_award_id = a.id
           WHERE a.user_id = $1
-          ORDER BY a.awarded_at DESC`, [req.user!.id, config.chainId]);
-      const wallet = rows.rows[0]?.wallet ?? (await pool.query('SELECT wallet_address FROM users WHERE id = $1', [req.user!.id])).rows[0]?.wallet_address ?? null;
+          ORDER BY a.awarded_at DESC`,
+        [req.user!.id, config.chainId],
+      );
+      const wallet =
+        rows.rows[0]?.wallet ??
+        (await pool.query('SELECT wallet_address FROM users WHERE id = $1', [req.user!.id])).rows[0]?.wallet_address ??
+        null;
       return res.json({
         success: true,
         data: {
           walletAddress: wallet,
           mintingEnabled: env.CHAIN_BADGE_MINTING_ENABLED,
-          chain: { id: config.chainId, name: config.name, explorer: config.explorer, badgeContract: config.contracts.badge },
+          chain: {
+            id: config.chainId,
+            name: config.name,
+            explorer: config.explorer,
+            badgeContract: config.contracts.badge,
+          },
           badges: rows.rows.map((r) => {
             const state = badgeState(r);
             return {
-              awardId: r.id, achievementId: r.achievement_id, title: r.title, description: r.description,
-              icon: r.badge_icon, track: r.track, category: r.category, awardedAt: r.awarded_at, state,
+              awardId: r.id,
+              achievementId: r.achievement_id,
+              title: r.title,
+              description: r.description,
+              icon: r.badge_icon,
+              track: r.track,
+              category: r.category,
+              awardedAt: r.awarded_at,
+              state,
               tokenId: r.token_id ?? null,
               recipient: r.recipient_address ?? null,
               txHash: r.tx_hash ?? null,
               txUrl: r.tx_hash ? explorerTx(r.tx_hash, config.explorer) : null,
-              tokenUrl: r.token_id && (state === 'on_chain' || state === 'revoked') ? nftUrl(config.explorer, config.contracts.badge, r.token_id) : null,
+              tokenUrl:
+                r.token_id && (state === 'on_chain' || state === 'revoked')
+                  ? nftUrl(config.explorer, config.contracts.badge, r.token_id)
+                  : null,
             };
           }),
         },
@@ -76,14 +107,16 @@ chainBadgesRouter.get('/me/chain/badges', authenticateToken,
       console.error('[chain-badges] me failed:', err instanceof Error ? err.message : err);
       return failed(res);
     }
-  });
+  },
+);
 
 const TRACK_COLORS: Record<string, [string, string]> = {
   explorer: ['#2d6a4f', '#beead1'],
   civic: ['#7d5800', '#ffe3a3'],
   scout: ['#1d4ed8', '#c7d7fe'],
 };
-const xml = (s: string) => s.replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]!));
+const xml = (s: string) =>
+  s.replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c]!);
 
 async function loadBadge(tokenId: string) {
   const pool = getPool();
@@ -95,7 +128,8 @@ async function loadBadge(tokenId: string) {
        JOIN achievement_awards a ON a.id = c.source_award_id
        JOIN achievement_definitions d ON d.id = a.achievement_id
       WHERE c.chain_id = $1 AND c.operation = 'badge_claim' AND c.expected_token_id = $2::numeric`,
-    [config.chainId, tokenId]);
+    [config.chainId, tokenId],
+  );
   return { pool, row: result.rows[0] ?? null };
 }
 
@@ -148,8 +182,12 @@ chainBadgesRouter.get('/chain/badges/:tokenId/image.svg', publicLimit, async (re
   <circle cx="256" cy="210" r="96" fill="none" stroke="${light}" stroke-width="6" stroke-dasharray="10 8"/>
   <text x="256" y="232" text-anchor="middle" font-family="Georgia, serif" font-size="72" font-weight="700" fill="${light}">JDQ</text>
   <text x="256" y="390" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="34" font-weight="700" fill="${dark}">${title}</text>
-  <text x="256" y="438" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="20" letter-spacing="4" fill="${dark}" opacity="0.75">${track} · SOULBOUND</text>${row.revoked_at ? `
-  <text x="256" y="480" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="18" fill="#bc4749">REVOKED</text>` : ''}
+  <text x="256" y="438" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="20" letter-spacing="4" fill="${dark}" opacity="0.75">${track} · SOULBOUND</text>${
+    row.revoked_at
+      ? `
+  <text x="256" y="480" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="18" fill="#bc4749">REVOKED</text>`
+      : ''
+  }
 </svg>`);
   } catch {
     return res.status(500).end();
@@ -158,8 +196,11 @@ chainBadgesRouter.get('/chain/badges/:tokenId/image.svg', publicLimit, async (re
 
 // --- Admin ------------------------------------------------------------------
 
-const adminGuard = [authenticateToken, requireAdmin,
-  rateLimit({ policyId: 'admin:chain-badges', windowMs: 60_000, max: 30, keyStrategy: 'actor_or_ip' })] as const;
+const adminGuard = [
+  authenticateToken,
+  requireAdmin,
+  rateLimit({ policyId: 'admin:chain-badges', windowMs: 60_000, max: 30, keyStrategy: 'actor_or_ip' }),
+] as const;
 
 chainBadgesRouter.get('/admin/chain/badges', ...adminGuard, async (_req: AuthRequest, res: Response) => {
   const pool = getPool();
@@ -167,12 +208,16 @@ chainBadgesRouter.get('/admin/chain/badges', ...adminGuard, async (_req: AuthReq
   try {
     const config = getChainConfig();
     const [counts, waiting, recent] = await Promise.all([
-      pool.query(`SELECT status, count(*)::int AS n FROM chain_commands
-                   WHERE chain_id = $1 AND operation = 'badge_claim' GROUP BY status`, [config.chainId]),
+      pool.query(
+        `SELECT status, count(*)::int AS n FROM chain_commands
+                   WHERE chain_id = $1 AND operation = 'badge_claim' GROUP BY status`,
+        [config.chainId],
+      ),
       pool.query(`SELECT count(*)::int AS n FROM achievement_awards a JOIN users u ON u.id = a.user_id
                    WHERE a.revoked_at IS NULL AND a.is_test = FALSE AND COALESCE(u.is_test, FALSE) = FALSE
                      AND (u.wallet_address IS NULL OR u.wallet_address !~* '^0x[0-9a-f]{40}$')`),
-      pool.query(`SELECT c.id, c.status, c.recipient_address, c.expected_token_id::text AS token_id, c.attempt_count,
+      pool.query(
+        `SELECT c.id, c.status, c.recipient_address, c.expected_token_id::text AS token_id, c.attempt_count,
                          c.last_error, c.updated_at, d.title, u.display_name,
                          (SELECT t.tx_hash FROM chain_transaction_attempts t WHERE t.command_id = c.id
                            ORDER BY t.created_at DESC LIMIT 1) AS tx_hash
@@ -181,10 +226,14 @@ chainBadgesRouter.get('/admin/chain/badges', ...adminGuard, async (_req: AuthReq
                     JOIN achievement_definitions d ON d.id = a.achievement_id
                     JOIN users u ON u.id = a.user_id
                    WHERE c.chain_id = $1 AND c.operation = 'badge_claim'
-                   ORDER BY (c.status = 'failed') DESC, c.updated_at DESC LIMIT 25`, [config.chainId]),
+                   ORDER BY (c.status = 'failed') DESC, c.updated_at DESC LIMIT 25`,
+        [config.chainId],
+      ),
     ]);
     const byStatus: Record<string, number> = {};
-    counts.rows.forEach((r) => { byStatus[r.status] = r.n; });
+    counts.rows.forEach((r) => {
+      byStatus[r.status] = r.n;
+    });
     return res.json({
       success: true,
       data: {
@@ -197,8 +246,15 @@ chainBadgesRouter.get('/admin/chain/badges', ...adminGuard, async (_req: AuthReq
           failed: byStatus.failed ?? 0,
         },
         recent: recent.rows.map((r) => ({
-          id: r.id, status: r.status, title: r.title, traveler: r.display_name, recipient: r.recipient_address,
-          tokenId: r.token_id, attempts: r.attempt_count, lastError: r.last_error, updatedAt: r.updated_at,
+          id: r.id,
+          status: r.status,
+          title: r.title,
+          traveler: r.display_name,
+          recipient: r.recipient_address,
+          tokenId: r.token_id,
+          attempts: r.attempt_count,
+          lastError: r.last_error,
+          updatedAt: r.updated_at,
           txUrl: r.tx_hash ? explorerTx(r.tx_hash, config.explorer) : null,
           tokenUrl: r.status === 'finalized' ? nftUrl(config.explorer, config.contracts.badge, r.token_id) : null,
         })),
@@ -216,8 +272,10 @@ const LEDGER_STATES = ['pending_wallet', 'queued', 'minting', 'on_chain', 'faile
 chainBadgesRouter.get('/admin/chain/badges/ledger', ...adminGuard, async (req: AuthRequest, res: Response) => {
   const pool = getPool();
   if (!pool) return unavailable(res);
-  const stateFilter = typeof req.query.state === 'string' && (LEDGER_STATES as readonly string[]).includes(req.query.state)
-    ? req.query.state : null;
+  const stateFilter =
+    typeof req.query.state === 'string' && (LEDGER_STATES as readonly string[]).includes(req.query.state)
+      ? req.query.state
+      : null;
   const search = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 80).toLowerCase() : '';
   try {
     const config = getChainConfig();
@@ -236,24 +294,44 @@ chainBadgesRouter.get('/admin/chain/badges/ledger', ...adminGuard, async (req: A
           AND ($2 = '' OR lower(u.display_name) LIKE '%' || $2 || '%' OR lower(COALESCE(u.handle, '')) LIKE '%' || $2 || '%'
                OR lower(d.title) LIKE '%' || $2 || '%' OR lower(COALESCE(u.wallet_address, '')) LIKE '%' || $2 || '%')
         ORDER BY (c.status = 'failed') DESC NULLS LAST, a.awarded_at DESC
-        LIMIT 500`, [config.chainId, search]);
+        LIMIT 500`,
+      [config.chainId, search],
+    );
     const entries = rows.rows.map((r) => {
       const state = badgeState(r);
       return {
-        awardId: r.award_id, title: r.title, track: r.track, awardedAt: r.awarded_at,
+        awardId: r.award_id,
+        title: r.title,
+        track: r.track,
+        awardedAt: r.awarded_at,
         traveler: { id: r.user_id, name: r.display_name, handle: r.handle ?? null },
-        wallet: r.recipient_address ?? (r.wallet && /^0x[0-9a-f]{40}$/i.test(r.wallet) ? String(r.wallet).toLowerCase() : null),
-        state, commandId: r.command_id ?? null, attempts: r.attempt_count ?? 0, lastError: r.last_error ?? null,
-        updatedAt: r.updated_at ?? r.awarded_at, tokenId: r.token_id ?? null,
+        wallet:
+          r.recipient_address ??
+          (r.wallet && /^0x[0-9a-f]{40}$/i.test(r.wallet) ? String(r.wallet).toLowerCase() : null),
+        state,
+        commandId: r.command_id ?? null,
+        attempts: r.attempt_count ?? 0,
+        lastError: r.last_error ?? null,
+        updatedAt: r.updated_at ?? r.awarded_at,
+        tokenId: r.token_id ?? null,
         txUrl: r.tx_hash ? explorerTx(r.tx_hash, config.explorer) : null,
-        tokenUrl: r.token_id && (state === 'on_chain' || state === 'revoked') ? nftUrl(config.explorer, config.contracts.badge, r.token_id) : null,
+        tokenUrl:
+          r.token_id && (state === 'on_chain' || state === 'revoked')
+            ? nftUrl(config.explorer, config.contracts.badge, r.token_id)
+            : null,
       };
     });
     const totals: Record<string, number> = Object.fromEntries(LEDGER_STATES.map((s) => [s, 0]));
-    entries.forEach((e) => { totals[e.state] = (totals[e.state] ?? 0) + 1; });
+    entries.forEach((e) => {
+      totals[e.state] = (totals[e.state] ?? 0) + 1;
+    });
     return res.json({
       success: true,
-      data: { totals, total: entries.length, entries: stateFilter ? entries.filter((e) => e.state === stateFilter) : entries },
+      data: {
+        totals,
+        total: entries.length,
+        entries: stateFilter ? entries.filter((e) => e.state === stateFilter) : entries,
+      },
     });
   } catch (err) {
     console.error('[chain-badges] ledger failed:', err instanceof Error ? err.message : err);
@@ -261,20 +339,28 @@ chainBadgesRouter.get('/admin/chain/badges/ledger', ...adminGuard, async (req: A
   }
 });
 
-chainBadgesRouter.post('/admin/chain/badges/:commandId/retry', ...adminGuard, async (req: AuthRequest, res: Response) => {
-  const pool = getPool();
-  if (!pool) return unavailable(res);
-  try {
-    const updated = await pool.query(
-      `UPDATE chain_commands SET status = 'queued', attempt_count = 0, last_error = NULL, next_attempt_at = now(), updated_at = now()
-        WHERE id = $1 AND operation = 'badge_claim' AND status = 'failed' RETURNING id`, [String(req.params.commandId)]);
-    if (!updated.rowCount) {
-      return res.status(409).json({ success: false, error: { code: 'NOT_RETRYABLE', message: 'Only failed mints can be retried.' } });
+chainBadgesRouter.post(
+  '/admin/chain/badges/:commandId/retry',
+  ...adminGuard,
+  async (req: AuthRequest, res: Response) => {
+    const pool = getPool();
+    if (!pool) return unavailable(res);
+    try {
+      const updated = await pool.query(
+        `UPDATE chain_commands SET status = 'queued', attempt_count = 0, last_error = NULL, next_attempt_at = now(), updated_at = now()
+        WHERE id = $1 AND operation = 'badge_claim' AND status = 'failed' RETURNING id`,
+        [String(req.params.commandId)],
+      );
+      if (!updated.rowCount) {
+        return res
+          .status(409)
+          .json({ success: false, error: { code: 'NOT_RETRYABLE', message: 'Only failed mints can be retried.' } });
+      }
+      console.log(`[chain-badges] admin ${req.user!.id} requeued ${req.params.commandId}`);
+      return res.json({ success: true, data: { id: updated.rows[0].id, status: 'queued' } });
+    } catch (err) {
+      console.error('[chain-badges] retry failed:', err instanceof Error ? err.message : err);
+      return failed(res);
     }
-    console.log(`[chain-badges] admin ${req.user!.id} requeued ${req.params.commandId}`);
-    return res.json({ success: true, data: { id: updated.rows[0].id, status: 'queued' } });
-  } catch (err) {
-    console.error('[chain-badges] retry failed:', err instanceof Error ? err.message : err);
-    return failed(res);
-  }
-});
+  },
+);

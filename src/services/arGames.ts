@@ -108,9 +108,19 @@ export async function startSession(input: {
   const pool = getPool();
   if (!pool) {
     const s: ArGameSession = {
-      id: randomUUID(), user_id: input.userId, quest_id: input.questId, task_key: input.taskKey,
-      game: input.game, seed, started_at: new Date(), finished_at: null, status: 'open',
-      score: null, passed: null, stats: {}, is_test: input.isTest,
+      id: randomUUID(),
+      user_id: input.userId,
+      quest_id: input.questId,
+      task_key: input.taskKey,
+      game: input.game,
+      seed,
+      started_at: new Date(),
+      finished_at: null,
+      status: 'open',
+      score: null,
+      passed: null,
+      stats: {},
+      is_test: input.isTest,
     };
     memory.set(s.id, s);
     return s;
@@ -154,8 +164,7 @@ export async function closeSession(
 // ---------------------------------------------------------------- boards
 
 export type BoardScope =
-  | { kind: 'place'; questId: string; taskKey: string }
-  | { kind: 'week'; game: ArGame; now?: Date };
+  { kind: 'place'; questId: string; taskKey: string } | { kind: 'week'; game: ArGame; now?: Date };
 
 export interface BoardEntry {
   rank: number;
@@ -192,17 +201,28 @@ async function bestRows(scope: BoardScope): Promise<BestRow[]> {
     where.push('s.game = $1', 's.finished_at >= $2', 's.finished_at < $3');
   }
   if (!pool) {
-    const rows = [...memory.values()].filter((s) =>
-      s.status === 'finished' && !s.is_test && s.finished_at &&
-      (scope.kind === 'place'
-        ? s.quest_id === scope.questId && s.task_key === scope.taskKey
-        : s.game === scope.game &&
-          s.finished_at >= weekStartUtc(scope.now ?? new Date()) &&
-          s.finished_at < nextWeekStartUtc(scope.now ?? new Date())));
-    return pickBest(rows.map((s) => ({
-      user_id: s.user_id, game: s.game, score: s.score ?? 0, finished_at: s.finished_at!,
-      display_name: 'Explorer', handle: null, is_public: true,
-    })));
+    const rows = [...memory.values()].filter(
+      (s) =>
+        s.status === 'finished' &&
+        !s.is_test &&
+        s.finished_at &&
+        (scope.kind === 'place'
+          ? s.quest_id === scope.questId && s.task_key === scope.taskKey
+          : s.game === scope.game &&
+            s.finished_at >= weekStartUtc(scope.now ?? new Date()) &&
+            s.finished_at < nextWeekStartUtc(scope.now ?? new Date())),
+    );
+    return pickBest(
+      rows.map((s) => ({
+        user_id: s.user_id,
+        game: s.game,
+        score: s.score ?? 0,
+        finished_at: s.finished_at!,
+        display_name: 'Explorer',
+        handle: null,
+        is_public: true,
+      })),
+    );
   }
   // A place's task has one game, but read it from the rows so a task whose
   // game was changed later ranks each game on its own terms.
@@ -214,8 +234,13 @@ async function bestRows(scope: BoardScope): Promise<BestRow[]> {
     params,
   );
   const mapped: BestRow[] = rows.map((r: any) => ({
-    user_id: r.user_id, game: r.game, score: Number(r.score), finished_at: new Date(r.finished_at),
-    display_name: r.display_name, handle: r.handle ?? null, is_public: Boolean(r.is_public),
+    user_id: r.user_id,
+    game: r.game,
+    score: Number(r.score),
+    finished_at: new Date(r.finished_at),
+    display_name: r.display_name,
+    handle: r.handle ?? null,
+    is_public: Boolean(r.is_public),
   }));
   return pickBest(mapped);
 }

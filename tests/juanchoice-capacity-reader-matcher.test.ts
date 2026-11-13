@@ -16,7 +16,7 @@ describe('isDisposableWalletReaderLookup pure SQL matcher', () => {
       const result = isDisposableWalletReaderLookup(
         'SELECT * FROM users WHERE id = $1',
         [readerId1],
-        disposableReaderIds
+        disposableReaderIds,
       );
       expect(result).toBe(true);
     });
@@ -25,7 +25,7 @@ describe('isDisposableWalletReaderLookup pure SQL matcher', () => {
       const result = isDisposableWalletReaderLookup(
         { text: 'SELECT * FROM users WHERE id = $1' },
         [readerId2],
-        disposableReaderIds
+        disposableReaderIds,
       );
       expect(result).toBe(true);
     });
@@ -51,7 +51,7 @@ describe('isDisposableWalletReaderLookup pure SQL matcher', () => {
       const result = isDisposableWalletReaderLookup(
         'SELECT * FROM users WHERE id = $1',
         [ballotVoterId],
-        disposableReaderIds
+        disposableReaderIds,
       );
       expect(result).toBe(false);
     });
@@ -60,7 +60,7 @@ describe('isDisposableWalletReaderLookup pure SQL matcher', () => {
       const result = isDisposableWalletReaderLookup(
         'SELECT * FROM users WHERE id = $1',
         [unknownId],
-        disposableReaderIds
+        disposableReaderIds,
       );
       expect(result).toBe(false);
     });
@@ -69,21 +69,21 @@ describe('isDisposableWalletReaderLookup pure SQL matcher', () => {
   describe('negative matches - set boundary safety', () => {
     it('rejects any query when reader ID set is empty', () => {
       const emptySet = new Set<string>();
-      expect(
-        isDisposableWalletReaderLookup(
-          'SELECT * FROM users WHERE id = $1',
-          [readerId1],
-          emptySet
-        )
-      ).toBe(false);
+      expect(isDisposableWalletReaderLookup('SELECT * FROM users WHERE id = $1', [readerId1], emptySet)).toBe(false);
     });
   });
 
   describe('negative matches - bound value safety and malformed parameters', () => {
     it('rejects missing or non-array values', () => {
-      expect(isDisposableWalletReaderLookup('SELECT * FROM users WHERE id = $1', undefined, disposableReaderIds)).toBe(false);
-      expect(isDisposableWalletReaderLookup('SELECT * FROM users WHERE id = $1', null, disposableReaderIds)).toBe(false);
-      expect(isDisposableWalletReaderLookup('SELECT * FROM users WHERE id = $1', readerId1, disposableReaderIds)).toBe(false);
+      expect(isDisposableWalletReaderLookup('SELECT * FROM users WHERE id = $1', undefined, disposableReaderIds)).toBe(
+        false,
+      );
+      expect(isDisposableWalletReaderLookup('SELECT * FROM users WHERE id = $1', null, disposableReaderIds)).toBe(
+        false,
+      );
+      expect(isDisposableWalletReaderLookup('SELECT * FROM users WHERE id = $1', readerId1, disposableReaderIds)).toBe(
+        false,
+      );
       expect(isDisposableWalletReaderLookup('SELECT * FROM users WHERE id = $1', {}, disposableReaderIds)).toBe(false);
     });
 
@@ -96,16 +96,24 @@ describe('isDisposableWalletReaderLookup pure SQL matcher', () => {
         isDisposableWalletReaderLookup(
           'SELECT * FROM users WHERE id = $1',
           [readerId1, 'extra_param'],
-          disposableReaderIds
-        )
+          disposableReaderIds,
+        ),
       ).toBe(false);
     });
 
     it('rejects non-string bound parameter values', () => {
-      expect(isDisposableWalletReaderLookup('SELECT * FROM users WHERE id = $1', [12345], disposableReaderIds)).toBe(false);
-      expect(isDisposableWalletReaderLookup('SELECT * FROM users WHERE id = $1', [null], disposableReaderIds)).toBe(false);
-      expect(isDisposableWalletReaderLookup('SELECT * FROM users WHERE id = $1', [''], disposableReaderIds)).toBe(false);
-      expect(isDisposableWalletReaderLookup('SELECT * FROM users WHERE id = $1', [{ id: readerId1 }], disposableReaderIds)).toBe(false);
+      expect(isDisposableWalletReaderLookup('SELECT * FROM users WHERE id = $1', [12345], disposableReaderIds)).toBe(
+        false,
+      );
+      expect(isDisposableWalletReaderLookup('SELECT * FROM users WHERE id = $1', [null], disposableReaderIds)).toBe(
+        false,
+      );
+      expect(isDisposableWalletReaderLookup('SELECT * FROM users WHERE id = $1', [''], disposableReaderIds)).toBe(
+        false,
+      );
+      expect(
+        isDisposableWalletReaderLookup('SELECT * FROM users WHERE id = $1', [{ id: readerId1 }], disposableReaderIds),
+      ).toBe(false);
     });
   });
 
@@ -129,9 +137,7 @@ describe('isDisposableWalletReaderLookup pure SQL matcher', () => {
 
     for (const sql of lookalikes) {
       it(`rejects non-target SQL shape: "${sql}"`, () => {
-        expect(
-          isDisposableWalletReaderLookup(sql, [readerId1], disposableReaderIds)
-        ).toBe(false);
+        expect(isDisposableWalletReaderLookup(sql, [readerId1], disposableReaderIds)).toBe(false);
       });
     }
 
@@ -140,7 +146,13 @@ describe('isDisposableWalletReaderLookup pure SQL matcher', () => {
       expect(isDisposableWalletReaderLookup(undefined, [readerId1], disposableReaderIds)).toBe(false);
       expect(isDisposableWalletReaderLookup(123, [readerId1], disposableReaderIds)).toBe(false);
       expect(isDisposableWalletReaderLookup({}, [readerId1], disposableReaderIds)).toBe(false);
-      expect(isDisposableWalletReaderLookup({ query: 'SELECT * FROM users WHERE id = $1' }, [readerId1], disposableReaderIds)).toBe(false);
+      expect(
+        isDisposableWalletReaderLookup(
+          { query: 'SELECT * FROM users WHERE id = $1' },
+          [readerId1],
+          disposableReaderIds,
+        ),
+      ).toBe(false);
     });
   });
 });
@@ -153,18 +165,22 @@ describe('countDisposableWalletReaderBatchChecks', () => {
   it('counts one bounded batch of 100 and three fresh waves as 300 checked identities', () => {
     expect(countDisposableWalletReaderBatchChecks(sql, [readers], allowed)).toBe(100);
     const waves = [readers, readers, readers];
-    expect(waves.reduce((count, ids) => count + countDisposableWalletReaderBatchChecks({ text: sql }, [ids], allowed), 0))
-      .toBe(300);
+    expect(
+      waves.reduce((count, ids) => count + countDisposableWalletReaderBatchChecks({ text: sql }, [ids], allowed), 0),
+    ).toBe(300);
   });
 
   it('rejects malformed, mixed-scope, duplicate, unbound and inline-SQL lookalikes', () => {
     const invalid: Array<[unknown, unknown, ReadonlySet<string>]> = [
-      [sql, [], allowed], [sql, readers, allowed], [sql, [[]], allowed],
+      [sql, [], allowed],
+      [sql, readers, allowed],
+      [sql, [[]], allowed],
       [sql, [Array.from({ length: 101 }, (_, index) => `reader-${index}`)], allowed],
       [sql, [['reader-1', 'reader-1']], allowed],
       [sql, [['reader-1', 'ballot-voter']], allowed],
       [sql, [['reader-1']], new Set<string>()],
-      [sql, [[null]], allowed], [sql, [['']], allowed],
+      [sql, [[null]], allowed],
+      [sql, [['']], allowed],
       [sql + ' OR 1=1', [['reader-1']], allowed],
       ["SELECT id, seed_id, is_test FROM users WHERE id = ANY(ARRAY['reader-1'])", [['reader-1']], allowed],
       ['SELECT * FROM users WHERE id = $1', [['reader-1']], allowed],

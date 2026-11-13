@@ -87,9 +87,7 @@ export function formatAssessmentRow(row: any): PromotionAssessmentRow {
  * Locks campaign then candidate in order.
  * Strictly enforces revision optimistic concurrency, actor scope, and 7-day validity limit.
  */
-export async function recordPromotionAssessment(
-  input: CreateAssessmentInput
-): Promise<PromotionAssessmentRow> {
+export async function recordPromotionAssessment(input: CreateAssessmentInput): Promise<PromotionAssessmentRow> {
   const trimmedReason = input.reason.trim();
   if (trimmedReason.length < 10 || trimmedReason.length > 1000) {
     throw new JuanChoiceError('INVALID_REASON', 400, 'Assessment reason must be between 10 and 1000 characters.');
@@ -106,10 +104,7 @@ export async function recordPromotionAssessment(
   return transaction(async (client) => {
     // 1. Lock order: Campaign -> Candidate
     const campaign = (
-      await client.query(
-        'SELECT id, is_test FROM juanchoice_campaigns WHERE id = $1 FOR UPDATE',
-        [input.campaignId]
-      )
+      await client.query('SELECT id, is_test FROM juanchoice_campaigns WHERE id = $1 FOR UPDATE', [input.campaignId])
     ).rows[0];
     if (!campaign) throw new JuanChoiceError('CAMPAIGN_NOT_FOUND', 404);
 
@@ -119,7 +114,7 @@ export async function recordPromotionAssessment(
          FROM juanchoice_candidates c
          JOIN spots s ON s.id = c.spot_id
          WHERE c.id = $1 AND c.campaign_id = $2 FOR UPDATE`,
-        [input.candidateId, input.campaignId]
+        [input.candidateId, input.campaignId],
       )
     ).rows[0];
     if (!candidate) throw new JuanChoiceError('CANDIDATE_NOT_FOUND', 404);
@@ -133,12 +128,8 @@ export async function recordPromotionAssessment(
     }
 
     // 2. Verify admin actor inside the transaction
-    const admin = (
-      await client.query(
-        'SELECT id, role, is_test FROM users WHERE id = $1 FOR UPDATE',
-        [input.adminId]
-      )
-    ).rows[0];
+    const admin = (await client.query('SELECT id, role, is_test FROM users WHERE id = $1 FOR UPDATE', [input.adminId]))
+      .rows[0];
     if (!admin || admin.role !== 'admin') {
       throw new JuanChoiceError('FORBIDDEN', 403, 'Active admin role required.');
     }
@@ -162,7 +153,7 @@ export async function recordPromotionAssessment(
       throw new JuanChoiceError(
         'INVALID_VALIDITY_WINDOW',
         400,
-        'valid_until must be strictly in the future and at most 7 days from now.'
+        'valid_until must be strictly in the future and at most 7 days from now.',
       );
     }
 
@@ -170,7 +161,7 @@ export async function recordPromotionAssessment(
     const latestRevisionRow = (
       await client.query(
         'SELECT COALESCE(MAX(revision), 0) AS max_rev FROM juanchoice_promotion_assessments WHERE candidate_id = $1',
-        [input.candidateId]
+        [input.candidateId],
       )
     ).rows[0];
     const currentRevision = Number(latestRevisionRow?.max_rev ?? 0);
@@ -183,7 +174,7 @@ export async function recordPromotionAssessment(
       throw new JuanChoiceError(
         'REVISION_CONFLICT',
         409,
-        `Expected revision ${input.expectedRevision}, but current revision is ${currentRevision}.`
+        `Expected revision ${input.expectedRevision}, but current revision is ${currentRevision}.`,
       );
     }
 
@@ -211,14 +202,14 @@ export async function recordPromotionAssessment(
           dbNow.toISOString(),
           validUntilDate.toISOString(),
           Boolean(candidate.is_test),
-        ]
+        ],
       );
     } catch (insertErr: any) {
       if (insertErr.code === '23505' || String(insertErr.message).includes('duplicate key')) {
         throw new JuanChoiceError(
           'REVISION_CONFLICT',
           409,
-          `Concurrent revision conflict on revision ${nextRevision}.`
+          `Concurrent revision conflict on revision ${nextRevision}.`,
         );
       }
       throw insertErr;
@@ -235,7 +226,7 @@ export async function recordPromotionAssessment(
         input.adminId,
         `promotion_assessment:${input.candidateId}:rev${nextRevision}:${input.decision}`,
         trimmedReason,
-      ]
+      ],
     );
 
     return formatAssessmentRow(recorded);
@@ -247,7 +238,7 @@ export async function recordPromotionAssessment(
  */
 export async function getLatestPromotionAssessment(
   candidateId: string,
-  client: Pool | PoolClient = pool()
+  client: Pool | PoolClient = pool(),
 ): Promise<PromotionAssessmentRow | null> {
   const row = (
     await client.query(
@@ -256,7 +247,7 @@ export async function getLatestPromotionAssessment(
        WHERE candidate_id = $1
        ORDER BY revision DESC
        LIMIT 1`,
-      [candidateId]
+      [candidateId],
     )
   ).rows[0];
   if (!row) return null;
@@ -276,7 +267,7 @@ export async function evaluateCandidatePromotionEligibility(
   campaignId: string,
   candidateId: string,
   allowTest = false,
-  client: Pool | PoolClient = pool()
+  client: Pool | PoolClient = pool(),
 ): Promise<CandidatePromotionEligibility> {
   const dbNow = new Date((await client.query('SELECT clock_timestamp() AS now')).rows[0].now);
 
@@ -289,7 +280,7 @@ export async function evaluateCandidatePromotionEligibility(
        JOIN juanchoice_campaigns cmp ON cmp.id = c.campaign_id
        JOIN spots s ON s.id = c.spot_id
        WHERE c.id = $1 AND c.campaign_id = $2`,
-      [candidateId, campaignId]
+      [candidateId, campaignId],
     )
   ).rows[0];
 
@@ -346,7 +337,7 @@ export async function evaluateCandidatePromotionEligibility(
       `SELECT user_id, spot_id, activity_type, created_at, is_test
        FROM spot_activity_events
        WHERE spot_id = $1 AND is_test = $2 AND created_at >= $3::timestamptz AND created_at <= $4::timestamptz`,
-      [candidateRow.spot_id, isScopeTest, windowStart.toISOString(), dbNow.toISOString()]
+      [candidateRow.spot_id, isScopeTest, windowStart.toISOString(), dbNow.toISOString()],
     )
   ).rows as ActivityEventInput[];
 
@@ -354,7 +345,7 @@ export async function evaluateCandidatePromotionEligibility(
     activityRows,
     candidateRow.crowd_capacity_band || 'medium',
     dbNow.getTime(),
-    isScopeTest
+    isScopeTest,
   );
 
   // 2. Fetch latest assessment
@@ -402,11 +393,19 @@ export async function evaluateCandidatePromotionEligibility(
   // is fine. Monthly/pilot rounds keep the mandatory clearance below.
   if (candidateRow.campaign_policy_version === WEEKLY_POLICY_VERSION) {
     const scoped = latestAssessment && Boolean(latestAssessment.is_test) === isScopeTest ? latestAssessment : null;
-    const clearedNow = scoped?.decision === 'cleared' && new Date(scoped.assessed_at) <= dbNow && new Date(scoped.valid_until) > dbNow;
-    const base = { latest_assessment: latestAssessment, crowd_status: crowd.crowd_status, crowd_confidence: crowd.crowd_confidence,
-      spot_published: true, spot_suppressed: false };
-    if (scoped?.decision === 'restricted') return { ...base, eligible: false, reason: 'ASSESSMENT_RESTRICTED', gate: 'assessment' };
-    if (crowd.crowd_status === 'estimated_busy' && !clearedNow) return { ...base, eligible: false, reason: 'ESTIMATED_BUSY', gate: 'automated' };
+    const clearedNow =
+      scoped?.decision === 'cleared' && new Date(scoped.assessed_at) <= dbNow && new Date(scoped.valid_until) > dbNow;
+    const base = {
+      latest_assessment: latestAssessment,
+      crowd_status: crowd.crowd_status,
+      crowd_confidence: crowd.crowd_confidence,
+      spot_published: true,
+      spot_suppressed: false,
+    };
+    if (scoped?.decision === 'restricted')
+      return { ...base, eligible: false, reason: 'ASSESSMENT_RESTRICTED', gate: 'assessment' };
+    if (crowd.crowd_status === 'estimated_busy' && !clearedNow)
+      return { ...base, eligible: false, reason: 'ESTIMATED_BUSY', gate: 'automated' };
     return { ...base, eligible: true, reason: null, gate: clearedNow ? 'assessment' : 'automated' };
   }
 

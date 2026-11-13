@@ -10,20 +10,11 @@ describe('Phase 2: Progressive Destination-Author Quest Slice', () => {
   const otherUserId = '44444444-4444-4444-4444-444444444444';
   const travelerUserId = '55555555-5555-5555-5555-555555555555';
 
-  const authorToken = jwt.sign(
-    { id: authorUserId, seed_id: 'scout-author-01', role: 'user' },
-    env.JWT_SECRET
-  );
+  const authorToken = jwt.sign({ id: authorUserId, seed_id: 'scout-author-01', role: 'user' }, env.JWT_SECRET);
 
-  const otherUserToken = jwt.sign(
-    { id: otherUserId, seed_id: 'random-scout-02', role: 'user' },
-    env.JWT_SECRET
-  );
+  const otherUserToken = jwt.sign({ id: otherUserId, seed_id: 'random-scout-02', role: 'user' }, env.JWT_SECRET);
 
-  const travelerToken = jwt.sign(
-    { id: travelerUserId, seed_id: 'traveler-scout-03', role: 'user' },
-    env.JWT_SECRET
-  );
+  const travelerToken = jwt.sign({ id: travelerUserId, seed_id: 'traveler-scout-03', role: 'user' }, env.JWT_SECRET);
 
   const testSpotId = `spot-progression-${Date.now()}`;
   let questId = '';
@@ -74,8 +65,8 @@ describe('Phase 2: Progressive Destination-Author Quest Slice', () => {
       tags: ['beach', 'coastal'],
       municipality: 'San Fabian',
       address: 'San Fabian Coastal Road',
-      gps_lat: 16.1250,
-      gps_lng: 120.4020,
+      gps_lat: 16.125,
+      gps_lng: 120.402,
       price_level: 1,
       hours: { daily: '06:00-18:00' },
       amenities: ['parking'],
@@ -147,9 +138,7 @@ describe('Phase 2: Progressive Destination-Author Quest Slice', () => {
     });
 
     it('allows destination author to view draft quest', async () => {
-      const res = await request(app)
-        .get(`/api/v1/quests/${questId}`)
-        .set('Authorization', `Bearer ${authorToken}`);
+      const res = await request(app).get(`/api/v1/quests/${questId}`).set('Authorization', `Bearer ${authorToken}`);
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -183,9 +172,7 @@ describe('Phase 2: Progressive Destination-Author Quest Slice', () => {
     });
 
     it('allows public traveler to view published quest without marker_code leak', async () => {
-      const res = await request(app)
-        .get(`/api/v1/quests/${questId}`)
-        .set('Authorization', `Bearer ${travelerToken}`);
+      const res = await request(app).get(`/api/v1/quests/${questId}`).set('Authorization', `Bearer ${travelerToken}`);
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -283,9 +270,7 @@ describe('Phase 2: Progressive Destination-Author Quest Slice', () => {
     });
 
     it('provides aggregated stats to author without private user info', async () => {
-      const res = await request(app)
-        .get(`/api/v1/quests/${questId}`)
-        .set('Authorization', `Bearer ${authorToken}`);
+      const res = await request(app).get(`/api/v1/quests/${questId}`).set('Authorization', `Bearer ${authorToken}`);
 
       expect(res.status).toBe(200);
       expect(res.body.data.stats).toBeDefined();

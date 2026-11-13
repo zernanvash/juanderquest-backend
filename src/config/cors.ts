@@ -11,7 +11,7 @@ export interface ParsedCorsOrigins {
 export function validateAndParseCorsOrigin(
   rawOrigin: string | undefined,
   nodeEnv: string,
-  allowPresentationLoopback = false
+  allowPresentationLoopback = false,
 ): ParsedCorsOrigins {
   const isProduction = nodeEnv === 'production';
   const trimmed = rawOrigin?.trim() ?? '';
@@ -74,40 +74,31 @@ export function validateAndParseCorsOrigin(
     }
 
     if (isProduction) {
-      const isAllowedPresentationOrigin = allowPresentationLoopback &&
+      const isAllowedPresentationOrigin =
+        allowPresentationLoopback &&
         (item === 'http://127.0.0.1:3200' || item === 'https://presentation.juanderquest.app');
 
       if (parsedUrl.protocol !== 'https:' && !isAllowedPresentationOrigin) {
-        throw new Error(
-          'Production CORS origins must use HTTPS.'
-        );
+        throw new Error('Production CORS origins must use HTTPS.');
       }
 
       if (allowPresentationLoopback && !isAllowedPresentationOrigin) {
         throw new Error(
-          `Presentation mode only permits http://127.0.0.1:3200 or https://presentation.juanderquest.app, got '${item}'.`
+          `Presentation mode only permits http://127.0.0.1:3200 or https://presentation.juanderquest.app, got '${item}'.`,
         );
       }
 
       if (parsedUrl.username || parsedUrl.password) {
-        throw new Error(
-          'CORS origin cannot contain user credentials.'
-        );
+        throw new Error('CORS origin cannot contain user credentials.');
       }
       if (parsedUrl.pathname !== '/' && parsedUrl.pathname !== '') {
-        throw new Error(
-          'CORS origin cannot contain a path.'
-        );
+        throw new Error('CORS origin cannot contain a path.');
       }
       if (parsedUrl.search) {
-        throw new Error(
-          'CORS origin cannot contain query parameters.'
-        );
+        throw new Error('CORS origin cannot contain query parameters.');
       }
       if (parsedUrl.hash) {
-        throw new Error(
-          'CORS origin cannot contain a fragment.'
-        );
+        throw new Error('CORS origin cannot contain a fragment.');
       }
     }
 
@@ -118,9 +109,7 @@ export function validateAndParseCorsOrigin(
     }
 
     if (isProduction && seen.has(canonicalOrigin)) {
-      throw new Error(
-        `Duplicate CORS origin detected in production configuration: '${canonicalOrigin}'`
-      );
+      throw new Error(`Duplicate CORS origin detected in production configuration: '${canonicalOrigin}'`);
     }
 
     seen.add(canonicalOrigin);

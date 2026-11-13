@@ -41,7 +41,7 @@ describe('Phase 0: Database Harness & Migration Ledger (pg-mem)', () => {
       db.pool.query(`
         INSERT INTO users (id, seed_id, display_name, email, role, is_public)
         VALUES ('u1-dup', 'seed-1', 'Another User', 'test2@test.com', 'user', true)
-      `)
+      `),
     ).rejects.toThrow();
 
     // 3. User follow constraints
@@ -60,7 +60,7 @@ describe('Phase 0: Database Harness & Migration Ledger (pg-mem)', () => {
 
     // 4. Check constraint: self-follow is prohibited
     await expect(
-      db.pool.query(`INSERT INTO user_follows (follower_id, following_id) VALUES ('u1', 'u1')`)
+      db.pool.query(`INSERT INTO user_follows (follower_id, following_id) VALUES ('u1', 'u1')`),
     ).rejects.toThrow();
   });
 });

@@ -166,9 +166,24 @@ export class GovernanceStore {
     const organizer = this.db.users.find((user) => user.role === 'user');
     if (!organizer) return;
     const seeds = [
-      ['Patar White Beach Eco Trail', 'Bolinao, Pangasinan', 'eco', 'Feature the coast responsibly with cleanup, local guide, and safety activities.'],
-      ['Tayug Sunflower Farm Quest', 'Tayug, Pangasinan', 'eco', 'Promote agri-tourism and local farm products through a seasonal visitor quest.'],
-      ['San Fabian Heritage Trail', 'San Fabian, Pangasinan', 'cultural', 'Interpret local landing sites and community history with resident guides.'],
+      [
+        'Patar White Beach Eco Trail',
+        'Bolinao, Pangasinan',
+        'eco',
+        'Feature the coast responsibly with cleanup, local guide, and safety activities.',
+      ],
+      [
+        'Tayug Sunflower Farm Quest',
+        'Tayug, Pangasinan',
+        'eco',
+        'Promote agri-tourism and local farm products through a seasonal visitor quest.',
+      ],
+      [
+        'San Fabian Heritage Trail',
+        'San Fabian, Pangasinan',
+        'cultural',
+        'Interpret local landing sites and community history with resident guides.',
+      ],
     ] as const;
     this.proposals = seeds.map(([title, location, category, description], index) => ({
       id: `prop_${index + 1}`,
@@ -179,13 +194,15 @@ export class GovernanceStore {
       submitted_by: organizer.display_name,
       submitted_by_id: organizer.id,
       state: 'screening',
-      recipients: [{
-        user_id: organizer.id,
-        display_name: organizer.display_name,
-        role: 'organizer',
-        duty: 'Quest planning, coordination, and reporting',
-        share_bps: 10000,
-      }],
+      recipients: [
+        {
+          user_id: organizer.id,
+          display_name: organizer.display_name,
+          role: 'organizer',
+          duty: 'Quest planning, coordination, and reporting',
+          share_bps: 10000,
+        },
+      ],
       organizer_bond_mjdq: this.organizerBond,
       bond_status: 'not_locked',
       eligible_voter_snapshot: 0,
@@ -293,7 +310,7 @@ export class GovernanceStore {
     this.attachPg(pool);
     try {
       const { rows } = await pool.query<{ data: ReturnType<GovernanceStore['snapshot']> }>(
-        'SELECT data FROM governance_snapshot WHERE id = 1'
+        'SELECT data FROM governance_snapshot WHERE id = 1',
       );
       if (rows[0]?.data) this.restore(rows[0].data);
     } catch (error: any) {
@@ -307,14 +324,16 @@ export class GovernanceStore {
 
     try {
       const { rows: ledgerRows } = await pool.query<any>(
-        'SELECT id, transaction_group_id, type, account, amount_mjdq, reference_type, reference_id, actor_id, idempotency_key, metadata, created_at FROM governance_ledger ORDER BY created_at ASC'
+        'SELECT id, transaction_group_id, type, account, amount_mjdq, reference_type, reference_id, actor_id, idempotency_key, metadata, created_at FROM governance_ledger ORDER BY created_at ASC',
       );
       if (ledgerRows && ledgerRows.length > 0) {
         const existingIds = new Set(this.ledger.map((l) => l.id));
         for (const row of ledgerRows) {
           const amount = Number(row.amount_mjdq);
           if (!Number.isSafeInteger(amount)) {
-            throw new Error(`LEDGER_AMOUNT_OVERFLOW: amount_mjdq '${row.amount_mjdq}' exceeds JavaScript safe integer range`);
+            throw new Error(
+              `LEDGER_AMOUNT_OVERFLOW: amount_mjdq '${row.amount_mjdq}' exceeds JavaScript safe integer range`,
+            );
           }
           if (!existingIds.has(row.id)) {
             this.ledger.push({
@@ -336,7 +355,9 @@ export class GovernanceStore {
 
     // Hydration must not replace historical issuance with current circulation.
     const { rows: users } = await pool.query('SELECT id, demo_points FROM users');
-    this.balances = new Map(users.map((user) => [user.id, authoritativeBalance(user.demo_points, this.balanceOf(user.id))]));
+    this.balances = new Map(
+      users.map((user) => [user.id, authoritativeBalance(user.demo_points, this.balanceOf(user.id))]),
+    );
   }
 
   // All database-backed commands execute against a detached, authoritative snapshot.
@@ -355,13 +376,19 @@ export class GovernanceStore {
         users: txUsers,
         submissions: structuredClone(submissions),
         quests: structuredClone(quests),
-        findUserById(userId: string) { return txUsers.find((user) => user.id === userId); },
-        upsertQuest(quest: MemoryDb['quests'][number]) { changedQuests.set(quest.id, structuredClone(quest)); },
+        findUserById(userId: string) {
+          return txUsers.find((user) => user.id === userId);
+        },
+        upsertQuest(quest: MemoryDb['quests'][number]) {
+          changedQuests.set(quest.id, structuredClone(quest));
+        },
       } as unknown as MemoryDb;
       const worker = new GovernanceStore(txDb);
       worker.restore(snapshot);
       // Users, not cached JSON balances, are authoritative. Preserve issuance counters.
-      worker.balances = new Map(users.map((user) => [user.id, authoritativeBalance(user.demo_points, worker.balanceOf(user.id))]));
+      worker.balances = new Map(
+        users.map((user) => [user.id, authoritativeBalance(user.demo_points, worker.balanceOf(user.id))]),
+      );
       const before = worker.snapshot();
       const result = await command(worker);
       const next = worker.snapshot();
@@ -371,34 +398,70 @@ export class GovernanceStore {
           throw new Error('INVALID_GOVERNANCE_BALANCE');
         }
         if (Math.floor(balance / MJDQ_PER_JDQ) !== Number(user.demo_points)) {
-          await client.query('UPDATE users SET demo_points = $2, updated_at = NOW() WHERE id = $1',
-            [user.id, Math.floor(balance / MJDQ_PER_JDQ)]);
+          await client.query('UPDATE users SET demo_points = $2, updated_at = NOW() WHERE id = $1', [
+            user.id,
+            Math.floor(balance / MJDQ_PER_JDQ),
+          ]);
         }
       }
       const previousEntries = new Set(before.ledger.map((entry) => entry.id));
       for (const entry of next.ledger.filter((entry) => !previousEntries.has(entry.id))) {
         await client.query(
           'INSERT INTO governance_ledger (id, transaction_group_id, type, account, amount_mjdq, reference_type, reference_id, actor_id, idempotency_key, metadata, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
-          [entry.id, entry.transaction_group_id, entry.type, entry.account, entry.amount_mjdq,
-            entry.reference_type, entry.reference_id, entry.actor_id, entry.idempotency_key ?? null,
-            JSON.stringify(entry.metadata ?? {}), entry.created_at]);
+          [
+            entry.id,
+            entry.transaction_group_id,
+            entry.type,
+            entry.account,
+            entry.amount_mjdq,
+            entry.reference_type,
+            entry.reference_id,
+            entry.actor_id,
+            entry.idempotency_key ?? null,
+            JSON.stringify(entry.metadata ?? {}),
+            entry.created_at,
+          ],
+        );
       }
       const previousAudit = new Set(before.audit.map((event) => event.id));
       for (const event of next.audit.filter((event) => !previousAudit.has(event.id))) {
         await client.query(
           'INSERT INTO governance_audit (id, action, actor_id, subject_type, subject_id, metadata, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-          [event.id, event.action, event.actor_id, event.subject_type, event.subject_id,
-            JSON.stringify({ ...event.metadata, reason: event.reason, evidence_reference: event.evidence_reference }), event.created_at]);
+          [
+            event.id,
+            event.action,
+            event.actor_id,
+            event.subject_type,
+            event.subject_id,
+            JSON.stringify({ ...event.metadata, reason: event.reason, evidence_reference: event.evidence_reference }),
+            event.created_at,
+          ],
+        );
       }
       for (const quest of changedQuests.values()) {
         await client.query(
           `INSERT INTO quests (id,title,description,category,location_name,gps_lat,gps_lng,radius_meters,reward_points,marker_code,marker_image_url,is_active)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
            ON CONFLICT (id) DO UPDATE SET is_active = EXCLUDED.is_active, updated_at = NOW()`,
-          [quest.id,quest.title,quest.description,quest.category,quest.location_name,quest.gps_lat,quest.gps_lng,
-            quest.radius_meters,quest.reward_points,quest.marker_code,quest.marker_image_url,quest.is_active]);
+          [
+            quest.id,
+            quest.title,
+            quest.description,
+            quest.category,
+            quest.location_name,
+            quest.gps_lat,
+            quest.gps_lng,
+            quest.radius_meters,
+            quest.reward_points,
+            quest.marker_code,
+            quest.marker_image_url,
+            quest.is_active,
+          ],
+        );
       }
-      await client.query('UPDATE governance_snapshot SET data = $1, updated_at = NOW() WHERE id = 1', [JSON.stringify(next)]);
+      await client.query('UPDATE governance_snapshot SET data = $1, updated_at = NOW() WHERE id = 1', [
+        JSON.stringify(next),
+      ]);
       await commitGovernanceTransaction(client);
       // No shared objects were changed while the transaction was in flight.
       this.restore(next);
@@ -443,17 +506,21 @@ export class GovernanceStore {
     if (!user) throw new Error('USER_NOT_FOUND');
     const recipients = payload.recipients?.length
       ? payload.recipients
-      : [{
-          user_id: user.id,
-          display_name: user.display_name,
-          role: 'organizer' as const,
-          duty: 'Quest planning, coordination, and reporting',
-          share_bps: 10000,
-        }];
+      : [
+          {
+            user_id: user.id,
+            display_name: user.display_name,
+            role: 'organizer' as const,
+            duty: 'Quest planning, coordination, and reporting',
+            share_bps: 10000,
+          },
+        ];
     for (const recipient of recipients) {
       if (!this.db.findUserById(recipient.user_id)) throw new Error('RECIPIENT_NOT_FOUND');
     }
-    const organizers = recipients.filter((recipient) => recipient.role === 'organizer' && recipient.user_id === user.id);
+    const organizers = recipients.filter(
+      (recipient) => recipient.role === 'organizer' && recipient.user_id === user.id,
+    );
     if (recipients.reduce((sum, recipient) => sum + recipient.share_bps, 0) !== 10000 || organizers.length !== 1) {
       throw new Error('INVALID_PAYOUT_SHARES');
     }
@@ -504,7 +571,10 @@ export class GovernanceStore {
     evidenceReference: string,
     checklistComplete: boolean,
   ): Promise<GovernanceProposal> {
-    if (this.pg) return this.runCommand((worker) => worker.screenProposal(proposalId, adminId, decision, reason, evidenceReference, checklistComplete));
+    if (this.pg)
+      return this.runCommand((worker) =>
+        worker.screenProposal(proposalId, adminId, decision, reason, evidenceReference, checklistComplete),
+      );
     const proposal = this.requireProposal(proposalId);
     if (proposal.state !== 'screening') throw new Error('INVALID_TRANSITION');
     if (!reason || !evidenceReference) throw new Error('SCREENING_EVIDENCE_REQUIRED');
@@ -517,7 +587,15 @@ export class GovernanceStore {
     } else {
       this.requireFinancialActive();
       this.debitUser(proposal.submitted_by_id, this.organizerBond);
-      this.recordTransfer('bond_lock', proposal.submitted_by_id, 'bond_escrow', this.organizerBond, 'proposal', proposal.id, adminId);
+      this.recordTransfer(
+        'bond_lock',
+        proposal.submitted_by_id,
+        'bond_escrow',
+        this.organizerBond,
+        'proposal',
+        proposal.id,
+        adminId,
+      );
       proposal.bond_status = 'locked';
       proposal.state = 'voting';
       const eligible = this.eligibleGovernanceUsers();
@@ -530,39 +608,79 @@ export class GovernanceStore {
       proposal.evidence_reference = evidenceReference;
     }
     proposal.updated_at = now();
-    this.addAudit(`proposal.screened.${decision}`, adminId, 'proposal', proposal.id, reason, evidenceReference, { checklist_complete: checklistComplete });
+    this.addAudit(`proposal.screened.${decision}`, adminId, 'proposal', proposal.id, reason, evidenceReference, {
+      checklist_complete: checklistComplete,
+    });
     return proposal;
   }
 
-  async castProposalVote(proposalId: string, userId: string, choice: 'yes' | 'no', idempotencyKey: string): Promise<unknown> {
-    if (this.pg) return this.runCommand((worker) => worker.castProposalVote(proposalId, userId, choice, idempotencyKey));
+  async castProposalVote(
+    proposalId: string,
+    userId: string,
+    choice: 'yes' | 'no',
+    idempotencyKey: string,
+  ): Promise<unknown> {
+    if (this.pg)
+      return this.runCommand((worker) => worker.castProposalVote(proposalId, userId, choice, idempotencyKey));
     const fingerprint = `${proposalId}:${userId}:${choice}`;
     const cached = this.getIdempotent(idempotencyKey, fingerprint);
     if (cached) return cached;
     this.requireVotesActive();
     const proposal = this.requireProposal(proposalId);
-    if (proposal.state !== 'voting' || !proposal.voting_closes_at || new Date(proposal.voting_closes_at) <= new Date()) {
+    if (
+      proposal.state !== 'voting' ||
+      !proposal.voting_closes_at ||
+      new Date(proposal.voting_closes_at) <= new Date()
+    ) {
       throw new Error('VOTING_CLOSED');
     }
     if (!proposal.eligible_voter_ids?.includes(userId)) throw new Error('NOT_ELIGIBLE');
-    if (this.votes.some((vote) => vote.proposal_id === proposalId && vote.user_id === userId)) throw new Error('ALREADY_VOTED');
+    if (this.votes.some((vote) => vote.proposal_id === proposalId && vote.user_id === userId))
+      throw new Error('ALREADY_VOTED');
 
-    const burn = Math.floor(this.proposalVoteFee * this.burnBps / 10000);
+    const burn = Math.floor((this.proposalVoteFee * this.burnBps) / 10000);
     const escrow = this.proposalVoteFee - burn;
     this.debitUser(userId, this.proposalVoteFee);
     this.burnedMjdq += burn;
     proposal.escrow_mjdq += escrow;
-    this.recordTransfer('proposal_vote_debit', userId, 'governance_fee', this.proposalVoteFee, 'proposal', proposal.id, userId, idempotencyKey);
+    this.recordTransfer(
+      'proposal_vote_debit',
+      userId,
+      'governance_fee',
+      this.proposalVoteFee,
+      'proposal',
+      proposal.id,
+      userId,
+      idempotencyKey,
+    );
     this.recordTransfer('token_burn', 'governance_fee', 'burn', burn, 'proposal', proposal.id, userId, idempotencyKey);
-    this.recordTransfer('proposal_escrow_credit', 'governance_fee', `escrow:${proposal.id}`, escrow, 'proposal', proposal.id, userId, idempotencyKey);
+    this.recordTransfer(
+      'proposal_escrow_credit',
+      'governance_fee',
+      `escrow:${proposal.id}`,
+      escrow,
+      'proposal',
+      proposal.id,
+      userId,
+      idempotencyKey,
+    );
     this.votes.push({ proposal_id: proposal.id, user_id: userId, choice, idempotency_key: idempotencyKey });
     if (choice === 'yes') proposal.yes_votes += 1;
     else proposal.no_votes += 1;
     proposal.votes += 1;
     proposal.updated_at = now();
-    this.addAudit('proposal.vote_cast', userId, 'proposal', proposal.id, undefined, undefined, { choice: 'private', fee_mjdq: this.proposalVoteFee });
+    this.addAudit('proposal.vote_cast', userId, 'proposal', proposal.id, undefined, undefined, {
+      choice: 'private',
+      fee_mjdq: this.proposalVoteFee,
+    });
 
-    const response = { proposal, charged_mjdq: this.proposalVoteFee, burned_mjdq: burn, escrowed_mjdq: escrow, balance_mjdq: this.balanceOf(userId) };
+    const response = {
+      proposal,
+      charged_mjdq: this.proposalVoteFee,
+      burned_mjdq: burn,
+      escrowed_mjdq: escrow,
+      balance_mjdq: this.balanceOf(userId),
+    };
     this.idempotency.set(idempotencyKey, { fingerprint, response });
     return response;
   }
@@ -575,35 +693,79 @@ export class GovernanceStore {
     rating?: number,
     comment?: string,
   ): Promise<unknown> {
-    if (this.pg) return this.runCommand((worker) => worker.castFeedback(proposalId, userId, choice, idempotencyKey, rating, comment));
+    if (this.pg)
+      return this.runCommand((worker) =>
+        worker.castFeedback(proposalId, userId, choice, idempotencyKey, rating, comment),
+      );
     const fingerprint = `${proposalId}:${userId}:${choice}:${rating || ''}:${comment || ''}`;
     const cached = this.getIdempotent(idempotencyKey, fingerprint);
     if (cached) return cached;
     this.requireVotesActive();
     const proposal = this.requireProposal(proposalId);
-    if (proposal.state !== 'feedback' || !proposal.feedback_closes_at || new Date(proposal.feedback_closes_at) <= new Date()) {
+    if (
+      proposal.state !== 'feedback' ||
+      !proposal.feedback_closes_at ||
+      new Date(proposal.feedback_closes_at) <= new Date()
+    ) {
       throw new Error('FEEDBACK_CLOSED');
     }
     const eligible = this.db.submissions.some(
-      (submission) => submission.quest_id === proposal.id && submission.user_id === userId && submission.status === 'approved',
+      (submission) =>
+        submission.quest_id === proposal.id && submission.user_id === userId && submission.status === 'approved',
     );
     if (!eligible) throw new Error('NOT_ELIGIBLE');
-    if (this.feedbackVotes.some((vote) => vote.proposal_id === proposal.id && vote.user_id === userId)) throw new Error('ALREADY_VOTED');
+    if (this.feedbackVotes.some((vote) => vote.proposal_id === proposal.id && vote.user_id === userId))
+      throw new Error('ALREADY_VOTED');
 
-    const burn = Math.floor(this.feedbackVoteFee * this.burnBps / 10000);
+    const burn = Math.floor((this.feedbackVoteFee * this.burnBps) / 10000);
     const escrow = this.feedbackVoteFee - burn;
     this.debitUser(userId, this.feedbackVoteFee);
     this.burnedMjdq += burn;
     proposal.feedback_escrow_mjdq += escrow;
-    this.recordTransfer('feedback_vote_debit', userId, 'governance_fee', this.feedbackVoteFee, 'proposal', proposal.id, userId, idempotencyKey);
+    this.recordTransfer(
+      'feedback_vote_debit',
+      userId,
+      'governance_fee',
+      this.feedbackVoteFee,
+      'proposal',
+      proposal.id,
+      userId,
+      idempotencyKey,
+    );
     this.recordTransfer('token_burn', 'governance_fee', 'burn', burn, 'proposal', proposal.id, userId, idempotencyKey);
-    this.recordTransfer('feedback_escrow_credit', 'governance_fee', `escrow:${proposal.id}`, escrow, 'proposal', proposal.id, userId, idempotencyKey);
-    this.feedbackVotes.push({ proposal_id: proposal.id, user_id: userId, choice, rating, comment, idempotency_key: idempotencyKey });
+    this.recordTransfer(
+      'feedback_escrow_credit',
+      'governance_fee',
+      `escrow:${proposal.id}`,
+      escrow,
+      'proposal',
+      proposal.id,
+      userId,
+      idempotencyKey,
+    );
+    this.feedbackVotes.push({
+      proposal_id: proposal.id,
+      user_id: userId,
+      choice,
+      rating,
+      comment,
+      idempotency_key: idempotencyKey,
+    });
     if (choice === 'approve') proposal.approve_feedback += 1;
     else proposal.disapprove_feedback += 1;
     proposal.updated_at = now();
-    this.addAudit('proposal.feedback_cast', userId, 'proposal', proposal.id, undefined, undefined, { choice: 'private', rating, fee_mjdq: this.feedbackVoteFee });
-    const response = { proposal, charged_mjdq: this.feedbackVoteFee, burned_mjdq: burn, escrowed_mjdq: escrow, balance_mjdq: this.balanceOf(userId) };
+    this.addAudit('proposal.feedback_cast', userId, 'proposal', proposal.id, undefined, undefined, {
+      choice: 'private',
+      rating,
+      fee_mjdq: this.feedbackVoteFee,
+    });
+    const response = {
+      proposal,
+      charged_mjdq: this.feedbackVoteFee,
+      burned_mjdq: burn,
+      escrowed_mjdq: escrow,
+      balance_mjdq: this.balanceOf(userId),
+    };
     this.idempotency.set(idempotencyKey, { fingerprint, response });
     return response;
   }
@@ -612,7 +774,8 @@ export class GovernanceStore {
     if (this.pg) return this.runCommand((worker) => worker.closeVoting(proposalId, adminId, force));
     const proposal = this.requireProposal(proposalId);
     if (proposal.state !== 'voting') throw new Error('INVALID_TRANSITION');
-    if (!force && proposal.voting_closes_at && new Date(proposal.voting_closes_at) > new Date()) throw new Error('WINDOW_OPEN');
+    if (!force && proposal.voting_closes_at && new Date(proposal.voting_closes_at) > new Date())
+      throw new Error('WINDOW_OPEN');
     const passedQuorum = proposal.votes >= proposal.quorum_required;
     const passed = passedQuorum && proposal.yes_votes > proposal.no_votes;
     if (passed) {
@@ -620,12 +783,24 @@ export class GovernanceStore {
     } else {
       proposal.state = passedQuorum ? 'rejected' : 'expired';
       this.treasuryMjdq += proposal.escrow_mjdq;
-      this.recordTransfer('treasury_credit', `escrow:${proposal.id}`, 'community_treasury', proposal.escrow_mjdq, 'proposal', proposal.id, adminId);
+      this.recordTransfer(
+        'treasury_credit',
+        `escrow:${proposal.id}`,
+        'community_treasury',
+        proposal.escrow_mjdq,
+        'proposal',
+        proposal.id,
+        adminId,
+      );
       proposal.escrow_mjdq = 0;
       this.refundBond(proposal, adminId);
     }
     proposal.updated_at = now();
-    this.addAudit('proposal.voting_closed', adminId, 'proposal', proposal.id, undefined, undefined, { passed, force, quorum_met: passedQuorum });
+    this.addAudit('proposal.voting_closed', adminId, 'proposal', proposal.id, undefined, undefined, {
+      passed,
+      force,
+      quorum_met: passedQuorum,
+    });
     return proposal;
   }
 
@@ -633,13 +808,18 @@ export class GovernanceStore {
     if (this.pg) return this.runCommand((worker) => worker.closeFeedback(proposalId, adminId, force));
     const proposal = this.requireProposal(proposalId);
     if (proposal.state !== 'feedback') throw new Error('INVALID_TRANSITION');
-    if (!force && proposal.feedback_closes_at && new Date(proposal.feedback_closes_at) > new Date()) throw new Error('WINDOW_OPEN');
+    if (!force && proposal.feedback_closes_at && new Date(proposal.feedback_closes_at) > new Date())
+      throw new Error('WINDOW_OPEN');
     const total = proposal.approve_feedback + proposal.disapprove_feedback;
     const quorumMet = total >= proposal.feedback_quorum_required;
     const passed = quorumMet && proposal.approve_feedback > proposal.disapprove_feedback;
     proposal.state = passed ? 'payout_pending' : 'disputed';
     proposal.updated_at = now();
-    this.addAudit('proposal.feedback_closed', adminId, 'proposal', proposal.id, undefined, undefined, { passed, force, quorum_met: quorumMet });
+    this.addAudit('proposal.feedback_closed', adminId, 'proposal', proposal.id, undefined, undefined, {
+      passed,
+      force,
+      quorum_met: quorumMet,
+    });
     return proposal;
   }
 
@@ -656,7 +836,13 @@ export class GovernanceStore {
     this.refundBond(proposal, adminId);
     proposal.state = 'completed';
     proposal.updated_at = now();
-    this.addAudit('proposal.payout_finalized', adminId, 'proposal', proposal.id, 'Community feedback passed; full locked payout released.');
+    this.addAudit(
+      'proposal.payout_finalized',
+      adminId,
+      'proposal',
+      proposal.id,
+      'Community feedback passed; full locked payout released.',
+    );
     return proposal;
   }
 
@@ -714,9 +900,14 @@ export class GovernanceStore {
       }
       proposal.feedback_opens_at = timestamp.toISOString();
       proposal.feedback_closes_at = addDays(timestamp, this.feedbackWindowDays);
-      const participants = this.db.submissions.filter((submission) => submission.quest_id === proposal.id && submission.status === 'approved');
+      const participants = this.db.submissions.filter(
+        (submission) => submission.quest_id === proposal.id && submission.status === 'approved',
+      );
       proposal.feedback_eligible_snapshot = new Set(participants.map((submission) => submission.user_id)).size;
-      proposal.feedback_quorum_required = Math.max(this.quorumFloor, Math.ceil(proposal.feedback_eligible_snapshot * 0.1));
+      proposal.feedback_quorum_required = Math.max(
+        this.quorumFloor,
+        Math.ceil(proposal.feedback_eligible_snapshot * 0.1),
+      );
     }
     proposal.state = target;
     proposal.updated_at = now();
@@ -732,26 +923,40 @@ export class GovernanceStore {
     reason: string,
     evidenceReference: string,
   ): Promise<GovernanceProposal> {
-    if (this.pg) return this.runCommand((worker) => worker.resolveDispute(proposalId, adminId, releasePercent, bondAction, reason, evidenceReference));
+    if (this.pg)
+      return this.runCommand((worker) =>
+        worker.resolveDispute(proposalId, adminId, releasePercent, bondAction, reason, evidenceReference),
+      );
     this.requireFinancialActive();
     if (this.controls.pause_payouts) throw new Error('PAYOUTS_PAUSED');
     const proposal = this.requireProposal(proposalId);
     if (!['disputed', 'payout_pending'].includes(proposal.state)) throw new Error('INVALID_TRANSITION');
     if (!reason || !evidenceReference) throw new Error('RESOLUTION_EVIDENCE_REQUIRED');
     const pool = proposal.escrow_mjdq + proposal.feedback_escrow_mjdq;
-    const released = Math.floor(pool * releasePercent / 100);
+    const released = Math.floor((pool * releasePercent) / 100);
     const treasury = pool - released;
     this.distributeToRecipients(proposal, released, adminId);
     if (treasury > 0) {
       this.treasuryMjdq += treasury;
-      this.recordTransfer('treasury_credit', `escrow:${proposal.id}`, 'community_treasury', treasury, 'proposal', proposal.id, adminId);
+      this.recordTransfer(
+        'treasury_credit',
+        `escrow:${proposal.id}`,
+        'community_treasury',
+        treasury,
+        'proposal',
+        proposal.id,
+        adminId,
+      );
     }
     proposal.escrow_mjdq = 0;
     proposal.feedback_escrow_mjdq = 0;
     this.resolveBond(proposal, adminId, bondAction);
     proposal.state = 'completed';
     proposal.updated_at = now();
-    this.addAudit('proposal.dispute_resolved', adminId, 'proposal', proposal.id, reason, evidenceReference, { release_percent: releasePercent, bond_action: bondAction });
+    this.addAudit('proposal.dispute_resolved', adminId, 'proposal', proposal.id, reason, evidenceReference, {
+      release_percent: releasePercent,
+      bond_action: bondAction,
+    });
     return proposal;
   }
 
@@ -776,9 +981,15 @@ export class GovernanceStore {
 
   getTokenomics() {
     const circulating = [...this.balances.values()].reduce((sum, value) => sum + value, 0);
-    const lockedBonds = this.proposals.filter((proposal) => proposal.bond_status === 'locked').reduce((sum, proposal) => sum + proposal.organizer_bond_mjdq, 0);
-    const escrow = this.proposals.reduce((sum, proposal) => sum + proposal.escrow_mjdq + proposal.feedback_escrow_mjdq, 0);
-    const merchantHeld = this.ledger.filter((entry) => entry.account === 'merchant_settlement')
+    const lockedBonds = this.proposals
+      .filter((proposal) => proposal.bond_status === 'locked')
+      .reduce((sum, proposal) => sum + proposal.organizer_bond_mjdq, 0);
+    const escrow = this.proposals.reduce(
+      (sum, proposal) => sum + proposal.escrow_mjdq + proposal.feedback_escrow_mjdq,
+      0,
+    );
+    const merchantHeld = this.ledger
+      .filter((entry) => entry.account === 'merchant_settlement')
       .reduce((sum, entry) => sum + entry.amount_mjdq, 0);
     const accounted = circulating + lockedBonds + escrow + this.treasuryMjdq + this.burnedMjdq + merchantHeld;
     return {
@@ -790,12 +1001,19 @@ export class GovernanceStore {
       escrow_mjdq: escrow,
       treasury_mjdq: this.treasuryMjdq,
       merchant_held_mjdq: merchantHeld,
-      rewards_distributed_mjdq: this.ledger.filter((entry) => entry.type === 'quest_reward_credit' && entry.amount_mjdq > 0).reduce((sum, entry) => sum + entry.amount_mjdq, 0),
-      payouts_distributed_mjdq: this.ledger.filter((entry) => entry.type === 'recipient_credit' && entry.amount_mjdq > 0).reduce((sum, entry) => sum + entry.amount_mjdq, 0),
+      rewards_distributed_mjdq: this.ledger
+        .filter((entry) => entry.type === 'quest_reward_credit' && entry.amount_mjdq > 0)
+        .reduce((sum, entry) => sum + entry.amount_mjdq, 0),
+      payouts_distributed_mjdq: this.ledger
+        .filter((entry) => entry.type === 'recipient_credit' && entry.amount_mjdq > 0)
+        .reduce((sum, entry) => sum + entry.amount_mjdq, 0),
       reconciliation_difference_mjdq: this.issuedMjdq - accounted,
-      governance_fee_volume_mjdq: this.votes.length * this.proposalVoteFee + this.feedbackVotes.length * this.feedbackVoteFee,
+      governance_fee_volume_mjdq:
+        this.votes.length * this.proposalVoteFee + this.feedbackVotes.length * this.feedbackVoteFee,
       burn_rate_percent: 20,
-      top_balances: this.db.users.map((user) => ({ user_id: user.id, display_name: user.display_name, balance_mjdq: this.balanceOf(user.id) })).sort((a, b) => b.balance_mjdq - a.balance_mjdq),
+      top_balances: this.db.users
+        .map((user) => ({ user_id: user.id, display_name: user.display_name, balance_mjdq: this.balanceOf(user.id) }))
+        .sort((a, b) => b.balance_mjdq - a.balance_mjdq),
     };
   }
 
@@ -811,7 +1029,13 @@ export class GovernanceStore {
     return { ...this.controls };
   }
 
-  async updateControls(adminId: string, updates: Partial<Pick<GovernanceControls, 'pause_votes' | 'pause_payouts' | 'pause_vouchers' | 'pause_all_financial'>>, reason: string): Promise<GovernanceControls> {
+  async updateControls(
+    adminId: string,
+    updates: Partial<
+      Pick<GovernanceControls, 'pause_votes' | 'pause_payouts' | 'pause_vouchers' | 'pause_all_financial'>
+    >,
+    reason: string,
+  ): Promise<GovernanceControls> {
     if (this.pg) return this.runCommand((worker) => worker.updateControls(adminId, updates, reason));
     if (!reason) throw new Error('REASON_REQUIRED');
     this.controls = { ...this.controls, ...updates, updated_by: adminId, updated_at: now() };
@@ -855,7 +1079,7 @@ export class GovernanceStore {
     submissionId: string,
     rewardPoints: number,
     actorId: string,
-    client: { query: (text: string, params?: any[]) => Promise<any> }
+    client: { query: (text: string, params?: any[]) => Promise<any> },
   ): Promise<{ entries: LedgerEntry[]; audit: AuditEvent; balanceMjdq: number } | null> {
     const amount = rewardPoints * MJDQ_PER_JDQ;
     if (amount <= 0) return null;
@@ -898,7 +1122,7 @@ export class GovernanceStore {
 
     const existing = await client.query(
       "SELECT 1 FROM governance_ledger WHERE type = 'quest_reward_credit' AND reference_id = $1 AND amount_mjdq > 0 LIMIT 1",
-      [submissionId]
+      [submissionId],
     );
     if (existing.rows && existing.rows.length > 0) return null;
 
@@ -907,26 +1131,55 @@ export class GovernanceStore {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10),
               ($11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
       [
-        debitEntry.id, debitEntry.transaction_group_id, debitEntry.type, debitEntry.account, debitEntry.amount_mjdq, debitEntry.reference_type, debitEntry.reference_id, debitEntry.actor_id, JSON.stringify(debitEntry.metadata), debitEntry.created_at,
-        creditEntry.id, creditEntry.transaction_group_id, creditEntry.type, creditEntry.account, creditEntry.amount_mjdq, creditEntry.reference_type, creditEntry.reference_id, creditEntry.actor_id, JSON.stringify(creditEntry.metadata), creditEntry.created_at,
-      ]
+        debitEntry.id,
+        debitEntry.transaction_group_id,
+        debitEntry.type,
+        debitEntry.account,
+        debitEntry.amount_mjdq,
+        debitEntry.reference_type,
+        debitEntry.reference_id,
+        debitEntry.actor_id,
+        JSON.stringify(debitEntry.metadata),
+        debitEntry.created_at,
+        creditEntry.id,
+        creditEntry.transaction_group_id,
+        creditEntry.type,
+        creditEntry.account,
+        creditEntry.amount_mjdq,
+        creditEntry.reference_type,
+        creditEntry.reference_id,
+        creditEntry.actor_id,
+        JSON.stringify(creditEntry.metadata),
+        creditEntry.created_at,
+      ],
     );
     await client.query(
       `INSERT INTO governance_audit (id, action, actor_id, subject_type, subject_id, metadata, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [
-        auditEvent.id, auditEvent.action, auditEvent.actor_id, auditEvent.subject_type, auditEvent.subject_id, JSON.stringify(auditEvent.metadata), auditEvent.created_at,
-      ]
+        auditEvent.id,
+        auditEvent.action,
+        auditEvent.actor_id,
+        auditEvent.subject_type,
+        auditEvent.subject_id,
+        JSON.stringify(auditEvent.metadata),
+        auditEvent.created_at,
+      ],
     );
 
     const snapData = await lockGovernanceSnapshot(client);
     const { rows: balanceRows } = await client.query('SELECT demo_points FROM users WHERE id = $1', [userId]);
     if (!balanceRows[0]) throw new Error('USER_NOT_FOUND');
-    snapData.balances = { ...snapData.balances, [userId]: authoritativeBalance(balanceRows[0].demo_points, snapData.balances?.[userId]) };
+    snapData.balances = {
+      ...snapData.balances,
+      [userId]: authoritativeBalance(balanceRows[0].demo_points, snapData.balances?.[userId]),
+    };
     snapData.ledger = [...(snapData.ledger || []), debitEntry, creditEntry];
     snapData.audit = [...(snapData.audit || []), auditEvent];
     snapData.issuedMjdq = (snapData.issuedMjdq || 0) + amount;
-    await client.query('UPDATE governance_snapshot SET data = $1, updated_at = NOW() WHERE id = 1', [JSON.stringify(snapData)]);
+    await client.query('UPDATE governance_snapshot SET data = $1, updated_at = NOW() WHERE id = 1', [
+      JSON.stringify(snapData),
+    ]);
 
     return { entries: [debitEntry, creditEntry], audit: auditEvent, balanceMjdq: snapData.balances[userId] };
   }
@@ -936,7 +1189,7 @@ export class GovernanceStore {
     points: number,
     voucherId: string,
     redemptionId: string,
-    client: { query: (text: string, params?: any[]) => Promise<any> }
+    client: { query: (text: string, params?: any[]) => Promise<any> },
   ): Promise<{ entries: LedgerEntry[]; audit: AuditEvent; balanceMjdq: number }> {
     const amount = points * MJDQ_PER_JDQ;
     const groupId = id('txg');
@@ -981,25 +1234,54 @@ export class GovernanceStore {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10),
               ($11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
       [
-        debitEntry.id, debitEntry.transaction_group_id, debitEntry.type, debitEntry.account, debitEntry.amount_mjdq, debitEntry.reference_type, debitEntry.reference_id, debitEntry.actor_id, JSON.stringify(debitEntry.metadata), debitEntry.created_at,
-        creditEntry.id, creditEntry.transaction_group_id, creditEntry.type, creditEntry.account, creditEntry.amount_mjdq, creditEntry.reference_type, creditEntry.reference_id, creditEntry.actor_id, JSON.stringify(creditEntry.metadata), creditEntry.created_at,
-      ]
+        debitEntry.id,
+        debitEntry.transaction_group_id,
+        debitEntry.type,
+        debitEntry.account,
+        debitEntry.amount_mjdq,
+        debitEntry.reference_type,
+        debitEntry.reference_id,
+        debitEntry.actor_id,
+        JSON.stringify(debitEntry.metadata),
+        debitEntry.created_at,
+        creditEntry.id,
+        creditEntry.transaction_group_id,
+        creditEntry.type,
+        creditEntry.account,
+        creditEntry.amount_mjdq,
+        creditEntry.reference_type,
+        creditEntry.reference_id,
+        creditEntry.actor_id,
+        JSON.stringify(creditEntry.metadata),
+        creditEntry.created_at,
+      ],
     );
     await client.query(
       `INSERT INTO governance_audit (id, action, actor_id, subject_type, subject_id, metadata, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [
-        auditEvent.id, auditEvent.action, auditEvent.actor_id, auditEvent.subject_type, auditEvent.subject_id, JSON.stringify(auditEvent.metadata), auditEvent.created_at,
-      ]
+        auditEvent.id,
+        auditEvent.action,
+        auditEvent.actor_id,
+        auditEvent.subject_type,
+        auditEvent.subject_id,
+        JSON.stringify(auditEvent.metadata),
+        auditEvent.created_at,
+      ],
     );
 
     const snapData = await lockGovernanceSnapshot(client);
     const { rows: balanceRows } = await client.query('SELECT demo_points FROM users WHERE id = $1', [userId]);
     if (!balanceRows[0]) throw new Error('USER_NOT_FOUND');
-    snapData.balances = { ...snapData.balances, [userId]: authoritativeBalance(balanceRows[0].demo_points, snapData.balances?.[userId]) };
+    snapData.balances = {
+      ...snapData.balances,
+      [userId]: authoritativeBalance(balanceRows[0].demo_points, snapData.balances?.[userId]),
+    };
     snapData.ledger = [...(snapData.ledger || []), debitEntry, creditEntry];
     snapData.audit = [...(snapData.audit || []), auditEvent];
-    await client.query('UPDATE governance_snapshot SET data = $1, updated_at = NOW() WHERE id = 1', [JSON.stringify(snapData)]);
+    await client.query('UPDATE governance_snapshot SET data = $1, updated_at = NOW() WHERE id = 1', [
+      JSON.stringify(snapData),
+    ]);
 
     return { entries: [debitEntry, creditEntry], audit: auditEvent, balanceMjdq: snapData.balances[userId] };
   }
@@ -1010,19 +1292,55 @@ export class GovernanceStore {
     submissionId: string,
     rewardPoints: number,
     actorId: string,
-    client?: { query: (text: string, params?: any[]) => Promise<any> }
+    client?: { query: (text: string, params?: any[]) => Promise<any> },
   ): Promise<{ entries: LedgerEntry[]; audit: AuditEvent } | null | void> {
     if (client) {
       return this.recordQuestRewardTx(userId, questId, submissionId, rewardPoints, actorId, client);
     }
     if (this.pg) throw new Error('TRANSACTION_CLIENT_REQUIRED');
     const amount = rewardPoints * MJDQ_PER_JDQ;
-    if (amount <= 0 || this.ledger.some((entry) => entry.type === 'quest_reward_credit' && entry.reference_id === submissionId && entry.amount_mjdq > 0)) return;
+    if (
+      amount <= 0 ||
+      this.ledger.some(
+        (entry) => entry.type === 'quest_reward_credit' && entry.reference_id === submissionId && entry.amount_mjdq > 0,
+      )
+    )
+      return;
     this.balances.set(userId, this.balanceOf(userId) + amount);
     this.issuedMjdq += amount;
-    const debit = { id: id('led'), transaction_group_id: id('txg'), type: 'quest_reward_credit', account: 'reward_issuance', amount_mjdq: -amount, reference_type: 'submission', reference_id: submissionId, actor_id: actorId, metadata: { counterparty: userId }, created_at: now() };
-    const credit = { id: id('led'), transaction_group_id: debit.transaction_group_id, type: 'quest_reward_credit', account: userId, amount_mjdq: amount, reference_type: 'submission', reference_id: submissionId, actor_id: actorId, metadata: { counterparty: 'reward_issuance' }, created_at: now() };
-    const auditEvent = { id: id('audit'), action: 'quest.reward_issued', actor_id: actorId, subject_type: 'quest', subject_id: questId, metadata: { submission_id: submissionId, amount_mjdq: amount }, created_at: now() };
+    const debit = {
+      id: id('led'),
+      transaction_group_id: id('txg'),
+      type: 'quest_reward_credit',
+      account: 'reward_issuance',
+      amount_mjdq: -amount,
+      reference_type: 'submission',
+      reference_id: submissionId,
+      actor_id: actorId,
+      metadata: { counterparty: userId },
+      created_at: now(),
+    };
+    const credit = {
+      id: id('led'),
+      transaction_group_id: debit.transaction_group_id,
+      type: 'quest_reward_credit',
+      account: userId,
+      amount_mjdq: amount,
+      reference_type: 'submission',
+      reference_id: submissionId,
+      actor_id: actorId,
+      metadata: { counterparty: 'reward_issuance' },
+      created_at: now(),
+    };
+    const auditEvent = {
+      id: id('audit'),
+      action: 'quest.reward_issued',
+      actor_id: actorId,
+      subject_type: 'quest',
+      subject_id: questId,
+      metadata: { submission_id: submissionId, amount_mjdq: amount },
+      created_at: now(),
+    };
     this.ledger.push(debit, credit);
     this.audit.push(auditEvent);
     return { entries: [debit, credit], audit: auditEvent };
@@ -1034,7 +1352,7 @@ export class GovernanceStore {
     points: number,
     voucherId: string,
     redemptionId: string,
-    client?: { query: (text: string, params?: any[]) => Promise<any> }
+    client?: { query: (text: string, params?: any[]) => Promise<any> },
   ): Promise<{ entries: LedgerEntry[]; audit: AuditEvent } | void> {
     if (client) {
       return this.recordVoucherRedemptionTx(userId, points, voucherId, redemptionId, client);
@@ -1045,9 +1363,39 @@ export class GovernanceStore {
     this.balances.set(userId, this.balanceOf(userId) - amount);
     const user = this.db.findUserById(userId);
     if (user) user.demo_points = Math.floor(this.balanceOf(userId) / MJDQ_PER_JDQ);
-    const debit = { id: id('led'), transaction_group_id: id('txg'), type: 'voucher_redemption_debit', account: userId, amount_mjdq: -amount, reference_type: 'voucher', reference_id: voucherId, actor_id: userId, metadata: { counterparty: 'merchant_settlement', redemption_id: redemptionId }, created_at: now() };
-    const credit = { id: id('led'), transaction_group_id: debit.transaction_group_id, type: 'voucher_redemption_debit', account: 'merchant_settlement', amount_mjdq: amount, reference_type: 'voucher', reference_id: voucherId, actor_id: userId, metadata: { counterparty: userId, redemption_id: redemptionId }, created_at: now() };
-    const auditEvent = { id: id('audit'), action: 'voucher.redeemed', actor_id: userId, subject_type: 'voucher', subject_id: voucherId, metadata: { redemption_id: redemptionId, points }, created_at: now() };
+    const debit = {
+      id: id('led'),
+      transaction_group_id: id('txg'),
+      type: 'voucher_redemption_debit',
+      account: userId,
+      amount_mjdq: -amount,
+      reference_type: 'voucher',
+      reference_id: voucherId,
+      actor_id: userId,
+      metadata: { counterparty: 'merchant_settlement', redemption_id: redemptionId },
+      created_at: now(),
+    };
+    const credit = {
+      id: id('led'),
+      transaction_group_id: debit.transaction_group_id,
+      type: 'voucher_redemption_debit',
+      account: 'merchant_settlement',
+      amount_mjdq: amount,
+      reference_type: 'voucher',
+      reference_id: voucherId,
+      actor_id: userId,
+      metadata: { counterparty: userId, redemption_id: redemptionId },
+      created_at: now(),
+    };
+    const auditEvent = {
+      id: id('audit'),
+      action: 'voucher.redeemed',
+      actor_id: userId,
+      subject_type: 'voucher',
+      subject_id: voucherId,
+      metadata: { redemption_id: redemptionId, points },
+      created_at: now(),
+    };
     this.ledger.push(debit, credit);
     this.audit.push(auditEvent);
     // Settlement allocation: not a burn
@@ -1056,8 +1404,9 @@ export class GovernanceStore {
 
   private eligibleGovernanceUsers() {
     return this.db.users.filter(
-      (user) => user.role === 'user'
-        && this.db.submissions.some((submission) => submission.user_id === user.id && submission.status === 'approved'),
+      (user) =>
+        user.role === 'user' &&
+        this.db.submissions.some((submission) => submission.user_id === user.id && submission.status === 'approved'),
     );
   }
 
@@ -1095,16 +1444,37 @@ export class GovernanceStore {
     if (proposal.bond_status !== 'locked') return;
     this.creditUser(proposal.submitted_by_id, proposal.organizer_bond_mjdq);
     proposal.bond_status = 'refunded';
-    this.recordTransfer('bond_refund', 'bond_escrow', proposal.submitted_by_id, proposal.organizer_bond_mjdq, 'proposal', proposal.id, actorId);
+    this.recordTransfer(
+      'bond_refund',
+      'bond_escrow',
+      proposal.submitted_by_id,
+      proposal.organizer_bond_mjdq,
+      'proposal',
+      proposal.id,
+      actorId,
+    );
   }
 
   private resolveBond(proposal: GovernanceProposal, actorId: string, action: 'refund' | 'slash_50' | 'slash_100') {
     if (proposal.bond_status !== 'locked') return;
-    const slash = action === 'refund' ? 0 : action === 'slash_50' ? Math.floor(proposal.organizer_bond_mjdq / 2) : proposal.organizer_bond_mjdq;
+    const slash =
+      action === 'refund'
+        ? 0
+        : action === 'slash_50'
+          ? Math.floor(proposal.organizer_bond_mjdq / 2)
+          : proposal.organizer_bond_mjdq;
     const refund = proposal.organizer_bond_mjdq - slash;
     if (refund > 0) {
       this.creditUser(proposal.submitted_by_id, refund);
-      this.recordTransfer('bond_refund', 'bond_escrow', proposal.submitted_by_id, refund, 'proposal', proposal.id, actorId);
+      this.recordTransfer(
+        'bond_refund',
+        'bond_escrow',
+        proposal.submitted_by_id,
+        refund,
+        'proposal',
+        proposal.id,
+        actorId,
+      );
     }
     if (slash > 0) {
       this.treasuryMjdq += slash;
@@ -1115,18 +1485,38 @@ export class GovernanceStore {
 
   private distributeToRecipients(proposal: GovernanceProposal, amount: number, actorId: string) {
     if (amount <= 0) return;
-    const organizer = proposal.recipients.find((recipient) => recipient.role === 'organizer' && recipient.user_id === proposal.submitted_by_id);
+    const organizer = proposal.recipients.find(
+      (recipient) => recipient.role === 'organizer' && recipient.user_id === proposal.submitted_by_id,
+    );
     if (!organizer) throw new Error('INVALID_PAYOUT_SHARES');
     let distributed = 0;
-    proposal.recipients.filter((recipient) => recipient !== organizer).forEach((recipient) => {
-      const share = Math.floor(amount * recipient.share_bps / 10000);
-      this.creditUser(recipient.user_id, share);
-      distributed += share;
-      this.recordTransfer('recipient_credit', `escrow:${proposal.id}`, recipient.user_id, share, 'proposal', proposal.id, actorId);
-    });
+    proposal.recipients
+      .filter((recipient) => recipient !== organizer)
+      .forEach((recipient) => {
+        const share = Math.floor((amount * recipient.share_bps) / 10000);
+        this.creditUser(recipient.user_id, share);
+        distributed += share;
+        this.recordTransfer(
+          'recipient_credit',
+          `escrow:${proposal.id}`,
+          recipient.user_id,
+          share,
+          'proposal',
+          proposal.id,
+          actorId,
+        );
+      });
     const organizerShare = amount - distributed;
     this.creditUser(organizer.user_id, organizerShare);
-    this.recordTransfer('recipient_credit', `escrow:${proposal.id}`, organizer.user_id, organizerShare, 'proposal', proposal.id, actorId);
+    this.recordTransfer(
+      'recipient_credit',
+      `escrow:${proposal.id}`,
+      organizer.user_id,
+      organizerShare,
+      'proposal',
+      proposal.id,
+      actorId,
+    );
   }
 
   private recordTransfer(
@@ -1142,8 +1532,32 @@ export class GovernanceStore {
     const groupId = id('txg');
     const timestamp = now();
     this.ledger.push(
-      { id: id('led'), transaction_group_id: groupId, type, account: from, amount_mjdq: -amount, reference_type: referenceType, reference_id: referenceId, actor_id: actorId, idempotency_key: idempotencyKey, metadata: { counterparty: to }, created_at: timestamp },
-      { id: id('led'), transaction_group_id: groupId, type, account: to, amount_mjdq: amount, reference_type: referenceType, reference_id: referenceId, actor_id: actorId, idempotency_key: idempotencyKey, metadata: { counterparty: from }, created_at: timestamp },
+      {
+        id: id('led'),
+        transaction_group_id: groupId,
+        type,
+        account: from,
+        amount_mjdq: -amount,
+        reference_type: referenceType,
+        reference_id: referenceId,
+        actor_id: actorId,
+        idempotency_key: idempotencyKey,
+        metadata: { counterparty: to },
+        created_at: timestamp,
+      },
+      {
+        id: id('led'),
+        transaction_group_id: groupId,
+        type,
+        account: to,
+        amount_mjdq: amount,
+        reference_type: referenceType,
+        reference_id: referenceId,
+        actor_id: actorId,
+        idempotency_key: idempotencyKey,
+        metadata: { counterparty: from },
+        created_at: timestamp,
+      },
     );
   }
 
@@ -1156,7 +1570,17 @@ export class GovernanceStore {
     evidenceReference?: string,
     metadata?: Record<string, unknown>,
   ) {
-    this.audit.push({ id: id('audit'), action, actor_id: actorId, subject_type: subjectType, subject_id: subjectId, reason, evidence_reference: evidenceReference, metadata, created_at: now() });
+    this.audit.push({
+      id: id('audit'),
+      action,
+      actor_id: actorId,
+      subject_type: subjectType,
+      subject_id: subjectId,
+      reason,
+      evidence_reference: evidenceReference,
+      metadata,
+      created_at: now(),
+    });
   }
 
   private getIdempotent(key: string, fingerprint: string) {
@@ -1169,9 +1593,12 @@ export class GovernanceStore {
   private getAlerts() {
     const tokenomics = this.getTokenomics();
     const alerts: Array<{ severity: 'critical' | 'warning' | 'info'; code: string; message: string }> = [];
-    if (tokenomics.reconciliation_difference_mjdq !== 0) alerts.push({ severity: 'critical', code: 'LEDGER_MISMATCH', message: 'JDQ ledger does not reconcile.' });
-    if (this.controls.pause_all_financial) alerts.push({ severity: 'warning', code: 'FINANCIAL_PAUSE', message: 'All financial activity is paused.' });
-    if (!alerts.length) alerts.push({ severity: 'info', code: 'CONTROLS_HEALTHY', message: 'No active governance control alerts.' });
+    if (tokenomics.reconciliation_difference_mjdq !== 0)
+      alerts.push({ severity: 'critical', code: 'LEDGER_MISMATCH', message: 'JDQ ledger does not reconcile.' });
+    if (this.controls.pause_all_financial)
+      alerts.push({ severity: 'warning', code: 'FINANCIAL_PAUSE', message: 'All financial activity is paused.' });
+    if (!alerts.length)
+      alerts.push({ severity: 'info', code: 'CONTROLS_HEALTHY', message: 'No active governance control alerts.' });
     return alerts;
   }
 }

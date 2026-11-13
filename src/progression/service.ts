@@ -6,21 +6,24 @@ import { db, UserRow } from '../db/index.js';
 import { progressionRepo } from './repository.js';
 import { getExplorerLevel, getCivicLevel, getScoutLevel } from './levels.js';
 import { grantAchievementCosmetics } from '../shop/cosmetics.js';
-import {
-  TravelerPassport,
-  AchievementAward,
-  CuratedCollection,
-} from './types.js';
+import { TravelerPassport, AchievementAward, CuratedCollection } from './types.js';
 
 export class ProgressionService {
-  private async awardWithCosmetics(award: Parameters<typeof progressionRepo.awardAchievement>[0], client: PoolClient): Promise<void> {
+  private async awardWithCosmetics(
+    award: Parameters<typeof progressionRepo.awardAchievement>[0],
+    client: PoolClient,
+  ): Promise<void> {
     await progressionRepo.awardAchievement(award, client);
-    const inTransaction = (client as PoolClient & { getTransactionStatus?: () => string }).getTransactionStatus?.() === 'T';
+    const inTransaction =
+      (client as PoolClient & { getTransactionStatus?: () => string }).getTransactionStatus?.() === 'T';
     if (!inTransaction) {
       try {
         await grantAchievementCosmetics(client, award.user_id);
       } catch (error) {
-        console.warn('[shop] Achievement cosmetic grant skipped:', error instanceof Error ? error.message : 'unknown error');
+        console.warn(
+          '[shop] Achievement cosmetic grant skipped:',
+          error instanceof Error ? error.message : 'unknown error',
+        );
       }
       return;
     }
@@ -31,7 +34,10 @@ export class ProgressionService {
     } catch (error) {
       await client.query('ROLLBACK TO SAVEPOINT shop_achievement_cosmetics');
       await client.query('RELEASE SAVEPOINT shop_achievement_cosmetics');
-      console.warn('[shop] Achievement cosmetic grant skipped:', error instanceof Error ? error.message : 'unknown error');
+      console.warn(
+        '[shop] Achievement cosmetic grant skipped:',
+        error instanceof Error ? error.message : 'unknown error',
+      );
     }
   }
   /**
@@ -47,7 +53,7 @@ export class ProgressionService {
       reviewed_at?: string | Date | null;
       is_test?: boolean;
     },
-    client: PoolClient
+    client: PoolClient,
   ): Promise<void> {
     // 1. Verify actor and quest scope from database
     const { rows: scopeRows } = await client.query(
@@ -56,7 +62,7 @@ export class ProgressionService {
        JOIN users u ON u.id = sub.user_id
        JOIN quests q ON q.id = sub.quest_id
        WHERE sub.id = $1`,
-      [submission.id]
+      [submission.id],
     );
 
     const subTest = Boolean(submission.is_test ?? scopeRows[0]?.sub_test);
@@ -67,10 +73,9 @@ export class ProgressionService {
     let spotTest = questTest;
     let rawMunicipality = '';
     if (binding && binding.spot_id) {
-      const { rows: spotRows } = await client.query(
-        'SELECT municipality, is_test FROM spots WHERE id = $1',
-        [binding.spot_id]
-      );
+      const { rows: spotRows } = await client.query('SELECT municipality, is_test FROM spots WHERE id = $1', [
+        binding.spot_id,
+      ]);
       rawMunicipality = spotRows[0]?.municipality || '';
       if (spotRows.length) {
         spotTest = Boolean(spotRows[0].is_test);
@@ -85,12 +90,15 @@ export class ProgressionService {
       (binding ? spotTest !== questTest : false);
 
     // Note: occurred_at records submission creation/receipt time, not proven physical capture time.
-    const occurredAt = submission.created_at instanceof Date
-      ? submission.created_at.toISOString()
-      : new Date(submission.created_at).toISOString();
+    const occurredAt =
+      submission.created_at instanceof Date
+        ? submission.created_at.toISOString()
+        : new Date(submission.created_at).toISOString();
 
     const verifiedAt = submission.reviewed_at
-      ? (submission.reviewed_at instanceof Date ? submission.reviewed_at.toISOString() : new Date(submission.reviewed_at).toISOString())
+      ? submission.reviewed_at instanceof Date
+        ? submission.reviewed_at.toISOString()
+        : new Date(submission.reviewed_at).toISOString()
       : new Date().toISOString();
 
     if (isScopeMismatched) {
@@ -110,7 +118,7 @@ export class ProgressionService {
             is_test: true,
           },
         },
-        client
+        client,
       );
       return;
     }
@@ -139,7 +147,7 @@ export class ProgressionService {
             is_test: effectiveIsTest,
           },
         },
-        client
+        client,
       );
     } else {
       // Unmapped or ambiguous quest: emit unresolved evidence record for review, NOT a visit award
@@ -158,7 +166,7 @@ export class ProgressionService {
             is_test: effectiveIsTest,
           },
         },
-        client
+        client,
       );
     }
   }
@@ -167,7 +175,10 @@ export class ProgressionService {
    * Processes a batch of pending outbox events.
    * Safely idempotent: duplicate deliveries do not duplicate visits, XP, or awards.
    */
-  async processOutboxBatch(batchSize = 20, leaseOwner = `worker-${process.pid}`): Promise<{ processed: number; failed: number }> {
+  async processOutboxBatch(
+    batchSize = 20,
+    leaseOwner = `worker-${process.pid}`,
+  ): Promise<{ processed: number; failed: number }> {
     const pool = getPool();
     if (!pool) return { processed: 0, failed: 0 };
 
@@ -188,12 +199,19 @@ export class ProgressionService {
           // 1. Lock submission row FOR SHARE to stabilize source evidence against concurrent modifications
           const { rows: verifiedSub } = await client.query(
             "SELECT id, user_id, quest_id, status, is_test FROM submissions WHERE id = $1 AND status = 'approved' FOR SHARE",
-            [payload.submission_id]
+            [payload.submission_id],
           );
 
           if (!verifiedSub.length) {
             // Submission is revoked or not approved; fail outbox delivery safely
-            await progressionRepo.markOutboxFailed(event.id, activeOwner, 'SUBMISSION_NOT_APPROVED', 3600, client, claimToken);
+            await progressionRepo.markOutboxFailed(
+              event.id,
+              activeOwner,
+              'SUBMISSION_NOT_APPROVED',
+              3600,
+              client,
+              claimToken,
+            );
             await client.query('COMMIT');
             failed++;
             continue;
@@ -201,7 +219,14 @@ export class ProgressionService {
 
           const sub = verifiedSub[0];
           if (sub.user_id !== payload.user_id || sub.quest_id !== payload.quest_id) {
-            await progressionRepo.markOutboxFailed(event.id, activeOwner, 'IDENTITY_MISMATCH', 3600, client, claimToken);
+            await progressionRepo.markOutboxFailed(
+              event.id,
+              activeOwner,
+              'IDENTITY_MISMATCH',
+              3600,
+              client,
+              claimToken,
+            );
             await client.query('COMMIT');
             failed++;
             continue;
@@ -216,30 +241,58 @@ export class ProgressionService {
           }
 
           // Lock user row FOR UPDATE early to serialize with progression totals updates and prevent deadlock
-          const { rows: userRows } = await client.query('SELECT id, is_test FROM users WHERE id = $1 FOR UPDATE', [payload.user_id]);
-          const { rows: questRows } = await client.query('SELECT id, is_test FROM quests WHERE id = $1 FOR SHARE', [payload.quest_id]);
-          const { rows: spotRows } = await client.query('SELECT id, is_test, status, municipality FROM spots WHERE id = $1 FOR SHARE', [payload.spot_id]);
+          const { rows: userRows } = await client.query('SELECT id, is_test FROM users WHERE id = $1 FOR UPDATE', [
+            payload.user_id,
+          ]);
+          const { rows: questRows } = await client.query('SELECT id, is_test FROM quests WHERE id = $1 FOR SHARE', [
+            payload.quest_id,
+          ]);
+          const { rows: spotRows } = await client.query(
+            'SELECT id, is_test, status, municipality FROM spots WHERE id = $1 FOR SHARE',
+            [payload.spot_id],
+          );
           const { rows: bindingRows } = await client.query(
             'SELECT id, quest_id, spot_id, status, is_test FROM reviewed_quest_spot_bindings WHERE id = $1 FOR SHARE',
-            [payload.binding_id]
+            [payload.binding_id],
           );
 
           if (!userRows.length || !questRows.length || !spotRows.length || !bindingRows.length) {
-            await progressionRepo.markOutboxFailed(event.id, activeOwner, 'SOURCE_ENTITY_MISSING', 3600, client, claimToken);
+            await progressionRepo.markOutboxFailed(
+              event.id,
+              activeOwner,
+              'SOURCE_ENTITY_MISSING',
+              3600,
+              client,
+              claimToken,
+            );
             await client.query('COMMIT');
             failed++;
             continue;
           }
 
           if (spotRows[0].status !== 'published') {
-            await progressionRepo.markOutboxFailed(event.id, activeOwner, 'SPOT_NOT_PUBLISHED', 3600, client, claimToken);
+            await progressionRepo.markOutboxFailed(
+              event.id,
+              activeOwner,
+              'SPOT_NOT_PUBLISHED',
+              3600,
+              client,
+              claimToken,
+            );
             await client.query('COMMIT');
             failed++;
             continue;
           }
 
           if (bindingRows[0].status !== 'active') {
-            await progressionRepo.markOutboxFailed(event.id, activeOwner, 'BINDING_NOT_ACTIVE', 3600, client, claimToken);
+            await progressionRepo.markOutboxFailed(
+              event.id,
+              activeOwner,
+              'BINDING_NOT_ACTIVE',
+              3600,
+              client,
+              claimToken,
+            );
             await client.query('COMMIT');
             failed++;
             continue;
@@ -291,7 +344,7 @@ export class ProgressionService {
                 evidence_version: payload.binding_version || 'v1',
                 is_test: currentEffectiveIsTest,
               },
-              client
+              client,
             );
           } catch (visitErr: any) {
             if (visitErr?.message?.includes('VISIT_REVOKED')) {
@@ -305,10 +358,15 @@ export class ProgressionService {
 
           // 5. Award Explorer XP (+50 XP per verified visit, rule version explorer-v1). Plan 65: the
           // reigning JuanChoice perks add +X% at the Champion destination and for its category.
-          const visitedCategory = (await client.query('SELECT category FROM spots WHERE id=$1', [payload.spot_id])).rows[0]?.category;
-          const questBonus = await perkBonus(client, Boolean(currentEffectiveIsTest), perk =>
-            (perk.key === 'spot_xp_boost' && perk.spot_id === payload.spot_id)
-            || (perk.key === 'category_xp_boost' && perk.category === visitedCategory));
+          const visitedCategory = (await client.query('SELECT category FROM spots WHERE id=$1', [payload.spot_id]))
+            .rows[0]?.category;
+          const questBonus = await perkBonus(
+            client,
+            Boolean(currentEffectiveIsTest),
+            (perk) =>
+              (perk.key === 'spot_xp_boost' && perk.spot_id === payload.spot_id) ||
+              (perk.key === 'category_xp_boost' && perk.category === visitedCategory),
+          );
           const visitXp = Math.round(50 * (1 + questBonus.value));
           const xpEvent = await progressionRepo.recordProgressionEvent(
             {
@@ -323,16 +381,12 @@ export class ProgressionService {
               earned_at: payload.occurred_at,
               is_test: currentEffectiveIsTest,
             },
-            client
+            client,
           );
 
           // Only increment totals if this XP event was newly inserted (not duplicate replay)
           if (xpEvent) {
-            await progressionRepo.updateProgressionTotals(
-              payload.user_id,
-              { explorerXp: visitXp },
-              client
-            );
+            await progressionRepo.updateProgressionTotals(payload.user_id, { explorerXp: visitXp }, client);
           }
 
           // 6. Evaluate milestone achievements
@@ -341,7 +395,7 @@ export class ProgressionService {
             payload.spot_id,
             payload.submission_id,
             currentEffectiveIsTest,
-            client
+            client,
           );
         } else if (event.event_type === 'submission_approved_unresolved') {
           // No-op for unresolved events; recorded for audit inspection
@@ -358,7 +412,14 @@ export class ProgressionService {
         }
       } catch (err: any) {
         await client.query('ROLLBACK');
-        await progressionRepo.markOutboxFailed(event.id, activeOwner, err?.message || 'unknown error', 10, pool, claimToken);
+        await progressionRepo.markOutboxFailed(
+          event.id,
+          activeOwner,
+          err?.message || 'unknown error',
+          10,
+          pool,
+          claimToken,
+        );
         failed++;
       } finally {
         client.release();
@@ -372,9 +433,7 @@ export class ProgressionService {
    * Catches up approved submissions that missed outbox emission (e.g. during disabled emission periods).
    * Durable watermark/sync policy guaranteeing no historical progression is lost.
    */
-  async catchUpApprovedSubmissions(
-    options: { since?: string; limit?: number } = {}
-  ): Promise<{ enqueued: number }> {
+  async catchUpApprovedSubmissions(options: { since?: string; limit?: number } = {}): Promise<{ enqueued: number }> {
     const pool = getPool();
     if (!pool) return { enqueued: 0 };
     const client = await pool.connect();
@@ -400,7 +459,7 @@ export class ProgressionService {
          ORDER BY s.reviewed_at ASC
          LIMIT $1
          FOR UPDATE SKIP LOCKED`,
-        params
+        params,
       );
 
       let enqueued = 0;
@@ -414,7 +473,7 @@ export class ProgressionService {
             reviewed_at: sub.reviewed_at,
             is_test: sub.is_test,
           },
-          client
+          client,
         );
         enqueued++;
       }
@@ -433,12 +492,12 @@ export class ProgressionService {
     spotId: string,
     submissionId: string,
     isTest = false,
-    client: PoolClient
+    client: PoolClient,
   ): Promise<void> {
     // 1. First Footstep (1 verified visit)
     const { rows: firstVisitRows } = await client.query(
       'SELECT id FROM verified_visits WHERE user_id = $1 AND is_test = $2 AND revoked_at IS NULL LIMIT 1',
-      [userId, isTest]
+      [userId, isTest],
     );
     if (firstVisitRows.length >= 1) {
       await this.awardWithCosmetics(
@@ -451,7 +510,7 @@ export class ProgressionService {
           awarded_at: new Date().toISOString(),
           is_test: isTest,
         },
-        client
+        client,
       );
     }
 
@@ -460,7 +519,7 @@ export class ProgressionService {
       `SELECT COUNT(DISTINCT spot_id) AS unique_spots
        FROM verified_visits
        WHERE user_id = $1 AND is_test = $2 AND revoked_at IS NULL`,
-      [userId, isTest]
+      [userId, isTest],
     );
     const uniqueSpotsCount = Number(uniqueSpotsRows[0]?.unique_spots || 0);
 
@@ -475,7 +534,7 @@ export class ProgressionService {
           awarded_at: new Date().toISOString(),
           is_test: isTest,
         },
-        client
+        client,
       );
     }
 
@@ -493,7 +552,7 @@ export class ProgressionService {
             awarded_at: new Date().toISOString(),
             is_test: isTest,
           },
-          client
+          client,
         );
       }
     }
@@ -502,7 +561,7 @@ export class ProgressionService {
   async getTravelerPassport(
     targetUserId: string,
     requestingUserId?: string,
-    allowTest = false
+    allowTest = false,
   ): Promise<TravelerPassport | null> {
     const pool = getPool();
     let targetUser: UserRow | null = null;
@@ -544,9 +603,7 @@ export class ProgressionService {
     // LGU progress
     const exploredLgus = await progressionRepo.getExploredLguCount(targetUserId, allowTest);
     const totalLgus = await progressionRepo.getTotalLguCount();
-    const percentage = totalLgus > 0
-      ? Number(((exploredLgus / totalLgus) * 100).toFixed(1))
-      : 0;
+    const percentage = totalLgus > 0 ? Number(((exploredLgus / totalLgus) * 100).toFixed(1)) : 0;
 
     // Recent visits & achievements (only owner gets full visit trail; public gets achievements)
     const recentVisits = isOwner
@@ -579,7 +636,7 @@ export class ProgressionService {
 
   async getPublicAchievements(
     targetUserId: string,
-    allowTest = false
+    allowTest = false,
   ): Promise<{ user_id: string; display_name: string; is_public: boolean; achievements: AchievementAward[] } | null> {
     const pool = getPool();
     let targetUser: UserRow | null = null;

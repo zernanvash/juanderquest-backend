@@ -92,7 +92,7 @@ export class SubmissionsService {
     if (pool) {
       const { rows: existingRows } = await pool.query(
         'SELECT * FROM submissions WHERE idempotency_key = $1 AND user_id = $2',
-        [payload.idempotency_key, payload.user_id]
+        [payload.idempotency_key, payload.user_id],
       );
       if (existingRows.length > 0) {
         const existing = existingRows[0];
@@ -150,8 +150,11 @@ export class SubmissionsService {
     // FALSE silently turn a synthetic proof into a live moderation record.
     const actor = db.findUserById(payload.user_id);
     if (!actor || Boolean(actor.is_test) !== Boolean(quest.is_test)) {
-      return { success: false, statusCode: 403,
-        error: { code: 'SCOPE_MISMATCH', message: 'Traveler and quest scopes do not match.' } };
+      return {
+        success: false,
+        statusCode: 403,
+        error: { code: 'SCOPE_MISMATCH', message: 'Traveler and quest scopes do not match.' },
+      };
     }
 
     if (quest.status === 'paused') {
@@ -180,9 +183,11 @@ export class SubmissionsService {
     }
 
     if (pool) {
-      try { await requireFundingHold(pool, payload.user_id, payload.quest_id); }
-      catch (error) {
-        if (error instanceof FundingError) return { success: false, statusCode: error.status, error: { code: error.code, message: error.message } };
+      try {
+        await requireFundingHold(pool, payload.user_id, payload.quest_id);
+      } catch (error) {
+        if (error instanceof FundingError)
+          return { success: false, statusCode: error.status, error: { code: error.code, message: error.message } };
         throw error;
       }
     }
@@ -192,15 +197,21 @@ export class SubmissionsService {
     if (pool) {
       const pending = await pool.query(
         "SELECT 1 FROM submissions WHERE user_id = $1 AND quest_id = $2 AND status = 'pending' LIMIT 1",
-        [payload.user_id, payload.quest_id]
+        [payload.user_id, payload.quest_id],
       );
       if (pending.rowCount) {
-        return { success: false, statusCode: 409,
-          error: { code: 'SUBMISSION_PENDING', message: 'A proof for this quest is already awaiting review.' } };
+        return {
+          success: false,
+          statusCode: 409,
+          error: { code: 'SUBMISSION_PENDING', message: 'A proof for this quest is already awaiting review.' },
+        };
       }
     } else if (db.hasPendingSubmission(payload.user_id, payload.quest_id)) {
-      return { success: false, statusCode: 409,
-        error: { code: 'SUBMISSION_PENDING', message: 'A proof for this quest is already awaiting review.' } };
+      return {
+        success: false,
+        statusCode: 409,
+        error: { code: 'SUBMISSION_PENDING', message: 'A proof for this quest is already awaiting review.' },
+      };
     }
 
     // 4. Verify Proof (Challenge Token or Physical Scanned Marker)
@@ -259,10 +270,9 @@ export class SubmissionsService {
           };
         }
         if (pool) {
-          const { rows } = await pool.query(
-            "SELECT 1 FROM submissions WHERE scanned_marker_code = $1 LIMIT 1",
-            [`CHALLENGE:${nonce}`]
-          );
+          const { rows } = await pool.query('SELECT 1 FROM submissions WHERE scanned_marker_code = $1 LIMIT 1', [
+            `CHALLENGE:${nonce}`,
+          ]);
           if (rows.length > 0) {
             return {
               success: false,
@@ -277,7 +287,10 @@ export class SubmissionsService {
           return {
             success: false,
             statusCode: 400,
-            error: { code: 'CHALLENGE_EXPIRED', message: 'Challenge token has expired. Please refresh your quest attempt.' },
+            error: {
+              code: 'CHALLENGE_EXPIRED',
+              message: 'Challenge token has expired. Please refresh your quest attempt.',
+            },
           };
         }
         return {
@@ -293,7 +306,8 @@ export class SubmissionsService {
           statusCode: 400,
           error: {
             code: 'CHALLENGE_REQUIRED',
-            message: 'Marker-code proof is deprecated. Request a challenge token from POST /quests/:id/challenge and resubmit.',
+            message:
+              'Marker-code proof is deprecated. Request a challenge token from POST /quests/:id/challenge and resubmit.',
           },
         };
       }
@@ -314,7 +328,8 @@ export class SubmissionsService {
         statusCode: 400,
         error: {
           code: 'CHALLENGE_REQUIRED',
-          message: 'Challenge verification is required. Request a challenge token from POST /quests/:id/challenge and resubmit.',
+          message:
+            'Challenge verification is required. Request a challenge token from POST /quests/:id/challenge and resubmit.',
         },
       };
     }
@@ -324,7 +339,7 @@ export class SubmissionsService {
       payload.captured_lat,
       payload.captured_lng,
       quest.gps_lat,
-      quest.gps_lng
+      quest.gps_lng,
     );
 
     if (distanceMeters > quest.radius_meters) {
@@ -349,29 +364,49 @@ export class SubmissionsService {
           await requireFundingHold(client, payload.user_id, payload.quest_id);
           const held = await client.query(
             `SELECT h.*, p.quest_id FROM quest_funding_holds h JOIN quest_funding_plans p ON p.id=h.plan_id
-             WHERE p.quest_id=$1 AND h.user_id=$2 AND h.status='held' FOR UPDATE OF h`, [payload.quest_id, payload.user_id]);
+             WHERE p.quest_id=$1 AND h.user_id=$2 AND h.status='held' FOR UPDATE OF h`,
+            [payload.quest_id, payload.user_id],
+          );
           const hold = held.rows[0];
-          if (!hold || new Date(hold.expires_at).getTime() <= Date.now()) throw new FundingError('FUNDING_HOLD_EXPIRED', 409, 'This reward reservation has expired.');
-          if (!claimNonceForInsert()) throw new FundingError('CHALLENGE_ALREADY_USED', 409, 'This challenge has already been used.');
+          if (!hold || new Date(hold.expires_at).getTime() <= Date.now())
+            throw new FundingError('FUNDING_HOLD_EXPIRED', 409, 'This reward reservation has expired.');
+          if (!claimNonceForInsert())
+            throw new FundingError('CHALLENGE_ALREADY_USED', 409, 'This challenge has already been used.');
           const inserted = await client.query(
             `INSERT INTO submissions(id,idempotency_key,user_id,quest_id,scanned_marker_code,captured_lat,captured_lng,captured_accuracy,status,is_test)
              VALUES($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9) RETURNING *`,
-            [subId,payload.idempotency_key,payload.user_id,payload.quest_id,finalMarkerCode,payload.captured_lat,payload.captured_lng,payload.captured_accuracy,Boolean(quest.is_test)]);
-          await client.query('UPDATE quest_funding_holds SET submission_id=$2 WHERE id=$1', [hold.id,subId]);
-          await client.query("UPDATE quest_attempts SET status='submitted',updated_at=NOW() WHERE id=$1", [hold.attempt_id]);
+            [
+              subId,
+              payload.idempotency_key,
+              payload.user_id,
+              payload.quest_id,
+              finalMarkerCode,
+              payload.captured_lat,
+              payload.captured_lng,
+              payload.captured_accuracy,
+              Boolean(quest.is_test),
+            ],
+          );
+          await client.query('UPDATE quest_funding_holds SET submission_id=$2 WHERE id=$1', [hold.id, subId]);
+          await client.query("UPDATE quest_attempts SET status='submitted',updated_at=NOW() WHERE id=$1", [
+            hold.attempt_id,
+          ]);
           await commitGovernanceTransaction(client);
           claimedNonceForInsert = undefined;
           const created = this.mapSubmissionRow(inserted.rows[0]);
           db.submissions.push(created);
-          const attempt = db.quest_attempts.find(a => a.id === hold.attempt_id);
+          const attempt = db.quest_attempts.find((a) => a.id === hold.attempt_id);
           if (attempt) attempt.status = 'submitted';
           return { success: true, statusCode: 201, data: created };
         } catch (error) {
           releaseInsertNonce();
           await client.query('ROLLBACK').catch(() => undefined);
-          if (error instanceof FundingError) return { success: false, statusCode: error.status, error: { code: error.code, message: error.message } };
+          if (error instanceof FundingError)
+            return { success: false, statusCode: error.status, error: { code: error.code, message: error.message } };
           throw error;
-        } finally { client.release(); }
+        } finally {
+          client.release();
+        }
       }
       const durableEconomy = process.env.NODE_ENV !== 'test' || Boolean(process.env.JDQ_REAL_PG_URL);
       if (durableEconomy && isLocalEconomyProfile()) {
@@ -383,7 +418,8 @@ export class SubmissionsService {
              SELECT 1 FROM reward_reservations r JOIN reward_pools p ON p.id = r.pool_id
              WHERE p.quest_id = $1 AND r.user_id = $2 AND r.status = 'reserved'
                AND p.scope_id IS NOT NULL
-           )`, [payload.quest_id, payload.user_id]
+           )`,
+          [payload.quest_id, payload.user_id],
         );
         if (fundedContext.rowCount) {
           const client = await pool.connect();
@@ -393,12 +429,15 @@ export class SubmissionsService {
               `SELECT u.is_test AS user_test, q.is_test AS quest_test
                  FROM users u JOIN quests q ON q.id = $2
                 WHERE u.id = $1 FOR SHARE OF u, q`,
-              [payload.user_id, payload.quest_id]
+              [payload.user_id, payload.quest_id],
             );
             if (!scope.rows[0] || Boolean(scope.rows[0].user_test) !== Boolean(scope.rows[0].quest_test)) {
               await client.query('ROLLBACK');
-              return { success: false, statusCode: 403,
-                error: { code: 'SCOPE_MISMATCH', message: 'Traveler and quest scopes do not match.' } };
+              return {
+                success: false,
+                statusCode: 403,
+                error: { code: 'SCOPE_MISMATCH', message: 'Traveler and quest scopes do not match.' },
+              };
             }
             const held = await client.query(
               `SELECT r.id, r.attempt_id, r.quest_version, r.expires_at,
@@ -409,29 +448,44 @@ export class SubmissionsService {
                JOIN quests q ON q.id = p.quest_id
                WHERE p.quest_id = $1 AND r.user_id = $2 AND r.status = 'reserved'
                ORDER BY r.created_at DESC LIMIT 1 FOR UPDATE OF r`,
-              [payload.quest_id, payload.user_id]
+              [payload.quest_id, payload.user_id],
             );
             const reservation = held.rows[0];
             if (!reservation || reservation.attempt_status !== 'in_progress') {
               await client.query('ROLLBACK');
-              return { success: false, statusCode: 409,
-                error: { code: 'FUNDED_ATTEMPT_REQUIRED', message: 'Start the funded quest before submitting proof.' } };
+              return {
+                success: false,
+                statusCode: 409,
+                error: { code: 'FUNDED_ATTEMPT_REQUIRED', message: 'Start the funded quest before submitting proof.' },
+              };
             }
             if (Number(reservation.quest_version) !== Number(reservation.current_version)) {
               await client.query('ROLLBACK');
-              return { success: false, statusCode: 409,
-                error: { code: 'QUEST_REVISION_STALE', message: 'This quest changed; restart with the reviewed terms.' } };
+              return {
+                success: false,
+                statusCode: 409,
+                error: {
+                  code: 'QUEST_REVISION_STALE',
+                  message: 'This quest changed; restart with the reviewed terms.',
+                },
+              };
             }
             const receiptTime = (await client.query('SELECT clock_timestamp() AS received_at')).rows[0].received_at;
             if (new Date(receiptTime).getTime() > new Date(reservation.expires_at).getTime()) {
               await client.query('ROLLBACK');
-              return { success: false, statusCode: 409,
-                error: { code: 'FUNDED_ATTEMPT_EXPIRED', message: 'The funded attempt deadline has passed.' } };
+              return {
+                success: false,
+                statusCode: 409,
+                error: { code: 'FUNDED_ATTEMPT_EXPIRED', message: 'The funded attempt deadline has passed.' },
+              };
             }
             if (!claimNonceForInsert()) {
               await client.query('ROLLBACK');
-              return { success: false, statusCode: 409,
-                error: { code: 'CHALLENGE_ALREADY_USED', message: 'This challenge token has already been consumed.' } };
+              return {
+                success: false,
+                statusCode: 409,
+                error: { code: 'CHALLENGE_ALREADY_USED', message: 'This challenge token has already been consumed.' },
+              };
             }
             const inserted = await client.query(
               `INSERT INTO submissions
@@ -439,19 +493,29 @@ export class SubmissionsService {
                 captured_lat, captured_lng, captured_accuracy, status, created_at,
                 updated_at, economic_attempt_id, is_test)
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9,$9,$10,$11) RETURNING *`,
-              [subId, payload.idempotency_key, payload.user_id, payload.quest_id,
-                finalMarkerCode, payload.captured_lat, payload.captured_lng,
-                payload.captured_accuracy, receiptTime, reservation.attempt_id,
-                Boolean(scope.rows[0].user_test)]
+              [
+                subId,
+                payload.idempotency_key,
+                payload.user_id,
+                payload.quest_id,
+                finalMarkerCode,
+                payload.captured_lat,
+                payload.captured_lng,
+                payload.captured_accuracy,
+                receiptTime,
+                reservation.attempt_id,
+                Boolean(scope.rows[0].user_test),
+              ],
             );
             await client.query(
               `UPDATE reward_reservations SET status = 'submitted', submission_id = $2,
                submitted_at = $3, updated_at = clock_timestamp() WHERE id = $1`,
-              [reservation.id, subId, receiptTime]
+              [reservation.id, subId, receiptTime],
             );
             await client.query(
               `UPDATE quest_attempts SET status = 'submitted', updated_at = clock_timestamp()
-               WHERE id = $1`, [reservation.attempt_id]
+               WHERE id = $1`,
+              [reservation.attempt_id],
             );
             const commit = await client.query('COMMIT');
             if (commit.command !== 'COMMIT') throw new Error('FUNDED_SUBMISSION_COMMIT_ABORTED');
@@ -492,8 +556,11 @@ export class SubmissionsService {
         payload.captured_accuracy,
       ];
       if (!claimNonceForInsert()) {
-        return { success: false, statusCode: 409,
-          error: { code: 'CHALLENGE_ALREADY_USED', message: 'This challenge token has already been consumed.' } };
+        return {
+          success: false,
+          statusCode: 409,
+          error: { code: 'CHALLENGE_ALREADY_USED', message: 'This challenge token has already been consumed.' },
+        };
       }
       let rows: any[];
       try {
@@ -504,8 +571,11 @@ export class SubmissionsService {
       }
       if (!rows[0]) {
         releaseInsertNonce();
-        return { success: false, statusCode: 403,
-          error: { code: 'SCOPE_MISMATCH', message: 'Traveler and quest scopes do not match.' } };
+        return {
+          success: false,
+          statusCode: 403,
+          error: { code: 'SCOPE_MISMATCH', message: 'Traveler and quest scopes do not match.' },
+        };
       }
       claimedNonceForInsert = undefined;
       const created = this.mapSubmissionRow(rows[0]);
@@ -518,21 +588,24 @@ export class SubmissionsService {
     }
 
     if (!claimNonceForInsert()) {
-      return { success: false, statusCode: 409,
-        error: { code: 'CHALLENGE_ALREADY_USED', message: 'This challenge token has already been consumed.' } };
+      return {
+        success: false,
+        statusCode: 409,
+        error: { code: 'CHALLENGE_ALREADY_USED', message: 'This challenge token has already been consumed.' },
+      };
     }
     let created: SubmissionRow;
     try {
       created = db.createSubmission({
-      idempotency_key: payload.idempotency_key,
-      user_id: payload.user_id,
-      quest_id: payload.quest_id,
-      scanned_marker_code: finalMarkerCode,
-      captured_lat: payload.captured_lat,
-      captured_lng: payload.captured_lng,
-      captured_accuracy: payload.captured_accuracy,
-      status: 'pending',
-      is_test: Boolean(actor.is_test),
+        idempotency_key: payload.idempotency_key,
+        user_id: payload.user_id,
+        quest_id: payload.quest_id,
+        scanned_marker_code: finalMarkerCode,
+        captured_lat: payload.captured_lat,
+        captured_lng: payload.captured_lng,
+        captured_accuracy: payload.captured_accuracy,
+        status: 'pending',
+        is_test: Boolean(actor.is_test),
       });
     } catch (error) {
       releaseInsertNonce();
@@ -551,13 +624,15 @@ export class SubmissionsService {
     action: 'approve' | 'reject',
     adminId: string,
     rejectionReason?: string,
-    appealDecision?: { appealId: string; reason: string }
-  ): Promise<ServiceResult<{
-    submission: SubmissionRow;
-    awarded_points: number;
-    awarded_explorer_coins?: string;
-    explorer_coin_transaction_id?: string;
-  }>> {
+    appealDecision?: { appealId: string; reason: string },
+  ): Promise<
+    ServiceResult<{
+      submission: SubmissionRow;
+      awarded_points: number;
+      awarded_explorer_coins?: string;
+      explorer_coin_transaction_id?: string;
+    }>
+  > {
     const pool = getPool();
     const targetStatus = action === 'approve' ? 'approved' : 'rejected';
 
@@ -581,8 +656,11 @@ export class SubmissionsService {
         const sub = subRows[0];
         if (sub.user_id === adminId) {
           await client.query('ROLLBACK');
-          return { success: false, statusCode: 403,
-            error: { code: 'SELF_REVIEW_FORBIDDEN', message: 'Reviewers cannot approve or reject their own proof.' } };
+          return {
+            success: false,
+            statusCode: 403,
+            error: { code: 'SELF_REVIEW_FORBIDDEN', message: 'Reviewers cannot approve or reject their own proof.' },
+          };
         }
         // A replayed approval of an already-approved submission is idempotent: it must
         // reach the shortcut below instead of tripping on the attempt its own first
@@ -593,16 +671,28 @@ export class SubmissionsService {
           await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [sub.user_id]);
           if (await hasCompletedQuest(db, sub.user_id, sub.quest_id, client, id)) {
             await client.query('ROLLBACK');
-            return { success: false, statusCode: 409,
-              error: { code: 'ALREADY_COMPLETED', message: 'This traveler already has an approved proof for this quest. Reject this one as a duplicate.' } };
+            return {
+              success: false,
+              statusCode: 409,
+              error: {
+                code: 'ALREADY_COMPLETED',
+                message: 'This traveler already has an approved proof for this quest. Reject this one as a duplicate.',
+              },
+            };
           }
         }
         if (appealDecision) {
-          if (action !== 'approve' || appealDecision.reason.trim().length < 10 ||
-              appealDecision.reason.trim().length > 2000) {
+          if (
+            action !== 'approve' ||
+            appealDecision.reason.trim().length < 10 ||
+            appealDecision.reason.trim().length > 2000
+          ) {
             await client.query('ROLLBACK');
-            return { success: false, statusCode: 400,
-              error: { code: 'INVALID_APPEAL_DECISION', message: 'Invalid appeal decision.' } };
+            return {
+              success: false,
+              statusCode: 400,
+              error: { code: 'INVALID_APPEAL_DECISION', message: 'Invalid appeal decision.' },
+            };
           }
           const appeal = await client.query(
             `SELECT a.id, a.status, a.user_id, r.status AS reservation_status,
@@ -612,19 +702,26 @@ export class SubmissionsService {
              JOIN submissions s ON s.id = a.submission_id
              JOIN quests q ON q.id = s.quest_id
              WHERE a.id = $1 AND a.submission_id = $2 FOR UPDATE OF a`,
-            [appealDecision.appealId, id]
+            [appealDecision.appealId, id],
           );
           const decision = appeal.rows[0];
-          if (!decision || decision.user_id !== sub.user_id ||
-              adminId === sub.user_id || adminId === decision.author_id ||
-              adminId === decision.original_reviewer ||
-              (decision.status !== 'submitted' && decision.status !== 'approved') ||
-              (decision.status === 'approved' && sub.status !== 'approved') ||
-              (decision.status === 'submitted' && sub.status !== 'rejected') ||
-              (decision.status === 'submitted' && decision.reservation_status !== 'appeal')) {
+          if (
+            !decision ||
+            decision.user_id !== sub.user_id ||
+            adminId === sub.user_id ||
+            adminId === decision.author_id ||
+            adminId === decision.original_reviewer ||
+            (decision.status !== 'submitted' && decision.status !== 'approved') ||
+            (decision.status === 'approved' && sub.status !== 'approved') ||
+            (decision.status === 'submitted' && sub.status !== 'rejected') ||
+            (decision.status === 'submitted' && decision.reservation_status !== 'appeal')
+          ) {
             await client.query('ROLLBACK');
-            return { success: false, statusCode: 409,
-              error: { code: 'APPEAL_REVIEW_CONFLICT', message: 'Independent appeal review is unavailable.' } };
+            return {
+              success: false,
+              statusCode: 409,
+              error: { code: 'APPEAL_REVIEW_CONFLICT', message: 'Independent appeal review is unavailable.' },
+            };
           }
           const reviewer = await client.query('SELECT role FROM users WHERE id = $1', [adminId]);
           if (reviewer.rows[0]?.role !== 'admin') throw new Error('ADMIN_APPEAL_REVIEW_REQUIRED');
@@ -632,16 +729,17 @@ export class SubmissionsService {
             await client.query(
               `UPDATE reward_appeals SET status = 'approved', decided_by = $2,
                decided_at = clock_timestamp(), decision_reason = $3 WHERE id = $1`,
-              [appealDecision.appealId, adminId, appealDecision.reason.trim()]
+              [appealDecision.appealId, adminId, appealDecision.reason.trim()],
             );
           }
         }
 
         // Idempotent check: if already in target status, return cleanly without awarding points twice
         if (sub.status === targetStatus) {
-          const coinReceipt = action === 'approve' && isLocalEconomyProfile()
-            ? await new EconomyService(pool).receiptForApprovedSubmissionInTx(client, sub)
-            : null;
+          const coinReceipt =
+            action === 'approve' && isLocalEconomyProfile()
+              ? await new EconomyService(pool).receiptForApprovedSubmissionInTx(client, sub)
+              : null;
           await commitGovernanceTransaction(client);
           return {
             success: true,
@@ -649,10 +747,12 @@ export class SubmissionsService {
             data: {
               submission: this.mapSubmissionRow(sub),
               awarded_points: 0,
-              ...(coinReceipt ? {
-                awarded_explorer_coins: coinReceipt.amountMinor,
-                explorer_coin_transaction_id: coinReceipt.transactionId,
-              } : {}),
+              ...(coinReceipt
+                ? {
+                    awarded_explorer_coins: coinReceipt.amountMinor,
+                    explorer_coin_transaction_id: coinReceipt.transactionId,
+                  }
+                : {}),
             },
           };
         }
@@ -691,8 +791,14 @@ export class SubmissionsService {
         } catch (error: any) {
           if (error.code === '23505' && error.constraint === 'idx_submissions_unique_approved') {
             await client.query('ROLLBACK');
-            return { success: false, statusCode: 409,
-              error: { code: 'ALREADY_COMPLETED', message: 'This traveler already has an approved proof for this quest. Reject this one as a duplicate.' } };
+            return {
+              success: false,
+              statusCode: 409,
+              error: {
+                code: 'ALREADY_COMPLETED',
+                message: 'This traveler already has an approved proof for this quest. Reject this one as a duplicate.',
+              },
+            };
           }
           throw error;
         }
@@ -738,8 +844,12 @@ export class SubmissionsService {
           if (quest) {
             awardedPoints = quest.reward_points;
             const rewardSettlement = await settleReward({
-              client, userId: updatedSub.user_id, questId: quest.id,
-              referenceId: updatedSub.id, actorId: adminId, rewardPoints: awardedPoints,
+              client,
+              userId: updatedSub.user_id,
+              questId: quest.id,
+              referenceId: updatedSub.id,
+              actorId: adminId,
+              rewardPoints: awardedPoints,
             });
             newPoints = rewardSettlement.newPoints;
             govResult = rewardSettlement.governanceResult;
@@ -751,7 +861,9 @@ export class SubmissionsService {
 
           if (isLocalEconomyProfile()) {
             const coinReceipt = await new EconomyService(pool).settleApprovedSubmissionInTx(
-              client, updatedSub, adminId
+              client,
+              updatedSub,
+              adminId,
             );
             awardedExplorerCoins = coinReceipt?.amountMinor;
             explorerCoinTransactionId = coinReceipt?.transactionId;
@@ -768,7 +880,7 @@ export class SubmissionsService {
                 reviewed_at: updatedSub.reviewed_at,
                 is_test: updatedSub.is_test,
               },
-              client
+              client,
             );
           }
 
@@ -779,14 +891,14 @@ export class SubmissionsService {
             const completedAttempt = await client.query(
               `UPDATE quest_attempts SET status = 'completed', completed_at = NOW(), updated_at = NOW()
                WHERE id = $1 AND user_id = $2 AND quest_id = $3 AND status = 'submitted'`,
-              [sub.economic_attempt_id, updatedSub.user_id, updatedSub.quest_id]
+              [sub.economic_attempt_id, updatedSub.user_id, updatedSub.quest_id],
             );
             if (completedAttempt.rowCount !== 1) throw new Error('FUNDED_ATTEMPT_COMPLETION_REQUIRED');
           } else {
             try {
               await client.query(
                 "UPDATE quest_attempts SET status = 'completed', completed_at = NOW(), updated_at = NOW() WHERE user_id = $1 AND quest_id = $2 AND status = 'in_progress'",
-                [updatedSub.user_id, updatedSub.quest_id]
+                [updatedSub.user_id, updatedSub.quest_id],
               );
             } catch {
               // non-fatal if table not present in legacy fixtures
@@ -799,13 +911,15 @@ export class SubmissionsService {
         if (action === 'reject') {
           await client.query(
             `UPDATE quest_attempts SET status='in_progress',updated_at=NOW() WHERE id IN
-             (SELECT h.attempt_id FROM quest_funding_holds h WHERE h.submission_id=$1 AND h.status='held')`, [id]);
+             (SELECT h.attempt_id FROM quest_funding_holds h WHERE h.submission_id=$1 AND h.status='held')`,
+            [id],
+          );
         }
 
         await commitGovernanceTransaction(client);
         if (fundedGroups) publishFunding(fundedGroups);
         if (fundedAttemptId) {
-          const attempt = db.quest_attempts.find(row => row.id === fundedAttemptId);
+          const attempt = db.quest_attempts.find((row) => row.id === fundedAttemptId);
           if (attempt) attempt.status = 'completed';
         }
 
@@ -854,10 +968,17 @@ export class SubmissionsService {
         };
       } catch (error) {
         await client.query('ROLLBACK');
-        if (error instanceof FundingError) return { success: false, statusCode: error.status, error: { code: error.code, message: error.message } };
+        if (error instanceof FundingError)
+          return { success: false, statusCode: error.status, error: { code: error.code, message: error.message } };
         if ((error as any)?.code === '23505' && (error as any)?.constraint === 'idx_submissions_unique_approved') {
-          return { success: false, statusCode: 409,
-            error: { code: 'ALREADY_COMPLETED', message: 'This traveler already has an approved proof for this quest. Reject this one as a duplicate.' } };
+          return {
+            success: false,
+            statusCode: 409,
+            error: {
+              code: 'ALREADY_COMPLETED',
+              message: 'This traveler already has an approved proof for this quest. Reject this one as a duplicate.',
+            },
+          };
         }
         throw error;
       } finally {
@@ -868,8 +989,11 @@ export class SubmissionsService {
     // In-memory fallback
     const existingSubmission = db.submissions.find((submission) => submission.id === id);
     if (existingSubmission?.user_id === adminId) {
-      return { success: false, statusCode: 403,
-        error: { code: 'SELF_REVIEW_FORBIDDEN', message: 'Reviewers cannot approve or reject their own proof.' } };
+      return {
+        success: false,
+        statusCode: 403,
+        error: { code: 'SELF_REVIEW_FORBIDDEN', message: 'Reviewers cannot approve or reject their own proof.' },
+      };
     }
     const result = db.reviewSubmission(id, action, adminId, rejectionReason);
     if (!result) {
@@ -885,9 +1009,10 @@ export class SubmissionsService {
         statusCode: 409,
         error: {
           code: result.reason ?? 'STATE_CONFLICT',
-          message: result.reason === 'ALREADY_COMPLETED'
-            ? 'This traveler already has an approved proof for this quest. Reject this one as a duplicate.'
-            : `Submission '${id}' has already been reviewed as '${result.submission.status}' and cannot transition.`,
+          message:
+            result.reason === 'ALREADY_COMPLETED'
+              ? 'This traveler already has an approved proof for this quest. Reject this one as a duplicate.'
+              : `Submission '${id}' has already been reviewed as '${result.submission.status}' and cannot transition.`,
         },
       };
     }
@@ -898,8 +1023,11 @@ export class SubmissionsService {
       db.completeAttempt(result.submission.user_id, result.submission.quest_id);
       if (!result.alreadyReviewed && quest) {
         await settleReward({
-          userId: result.submission.user_id, questId: quest.id,
-          referenceId: result.submission.id, actorId: adminId, rewardPoints: awardedPoints,
+          userId: result.submission.user_id,
+          questId: quest.id,
+          referenceId: result.submission.id,
+          actorId: adminId,
+          rewardPoints: awardedPoints,
         });
       }
     }

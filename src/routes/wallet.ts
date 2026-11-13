@@ -20,25 +20,32 @@ router.get('/wallet', authenticateToken, async (req: AuthRequest, res: Response)
       // A single SQL statement gives points and the remainder the same MVCC view.
       const result = await pool.query(
         'SELECT u.demo_points, u.scout_reputation, gs.data FROM users u CROSS JOIN governance_snapshot gs WHERE u.id = $1 AND gs.id = 1',
-        [req.user!.id]
+        [req.user!.id],
       );
       if (!result.rows[0]?.data) throw new Error('WALLET_STATE_MISSING');
       demoPoints = Number(result.rows[0].demo_points);
       scoutReputation = Number(result.rows[0].scout_reputation ?? 0);
       previousMjdq = Number(result.rows[0].data.balances?.[req.user!.id] ?? 0);
     } catch {
-      return res.status(503).json({ success: false, error: { code: 'DATABASE_OUTAGE', message: 'Wallet temporarily unavailable.' } });
+      return res
+        .status(503)
+        .json({ success: false, error: { code: 'DATABASE_OUTAGE', message: 'Wallet temporarily unavailable.' } });
     }
   }
   const wallet = governanceStore.getWallet(req.user!.id);
-  
+
   // SQL points are the whole-point authority. Preserve the committed snapshot's
   // sub-point remainder; the legacy mjdq_balance field can be stale.
   let mjdq_balance: number;
   try {
     mjdq_balance = demoPoints !== undefined ? authoritativeBalance(demoPoints, previousMjdq) : wallet.balance_mjdq;
   } catch {
-    return res.status(503).json({ success: false, error: { code: 'ACCOUNTING_UNAVAILABLE', message: 'Wallet balance temporarily unavailable.' } });
+    return res
+      .status(503)
+      .json({
+        success: false,
+        error: { code: 'ACCOUNTING_UNAVAILABLE', message: 'Wallet balance temporarily unavailable.' },
+      });
   }
   const formatted_jdq = mjdq_balance / 1000;
   const jdq_governance_balance = governanceBalance;
@@ -48,10 +55,15 @@ router.get('/wallet', authenticateToken, async (req: AuthRequest, res: Response)
     try {
       explorerCoins = await new EconomyService(pool).balance(req.user!.id);
     } catch {
-      return res.status(503).json({ success: false, error: { code: 'ACCOUNTING_UNAVAILABLE', message: 'Coin balance temporarily unavailable.' } });
+      return res
+        .status(503)
+        .json({
+          success: false,
+          error: { code: 'ACCOUNTING_UNAVAILABLE', message: 'Coin balance temporarily unavailable.' },
+        });
     }
   }
-  
+
   res.setHeader('Cache-Control', 'private, no-store');
   res.json({
     success: true,
@@ -75,27 +87,40 @@ router.get('/wallet', authenticateToken, async (req: AuthRequest, res: Response)
 
 const cosmeticsPurchaseAvailable = (_req: AuthRequest, res: Response, next: NextFunction) => {
   if (!db.usersRepo.getPool() || !isLocalEconomyProfile()) {
-    return res.status(404).json({ success: false, error: { code: 'NOT_AVAILABLE', message: 'Simulation purchase is unavailable.' } });
+    return res
+      .status(404)
+      .json({ success: false, error: { code: 'NOT_AVAILABLE', message: 'Simulation purchase is unavailable.' } });
   }
   next();
 };
 
-router.post('/wallet/cosmetics/:id/purchase', authenticateToken, cosmeticsPurchaseAvailable, requireBoundWallet, async (req: AuthRequest, res: Response) => {
-  const pool = db.usersRepo.getPool()!;
-  const key = req.header('x-idempotency-key') ?? '';
-  try {
-    const receipt = await new EconomyService(pool).purchaseCosmetic(req.user!.id, req.params.id, key);
-    res.setHeader('Cache-Control', 'private, no-store');
-    return res.status(200).json({ success: true, data: receipt });
-  } catch (error) {
-    if (error instanceof EconomyError) {
-      const status = error.code === 'INVALID_IDEMPOTENCY_KEY' ? 400 :
-        error.code === 'COSMETIC_UNAVAILABLE' ? 404 : 409;
-      return res.status(status).json({ success: false, error: { code: error.code, message: error.message } });
+router.post(
+  '/wallet/cosmetics/:id/purchase',
+  authenticateToken,
+  cosmeticsPurchaseAvailable,
+  requireBoundWallet,
+  async (req: AuthRequest, res: Response) => {
+    const pool = db.usersRepo.getPool()!;
+    const key = req.header('x-idempotency-key') ?? '';
+    try {
+      const receipt = await new EconomyService(pool).purchaseCosmetic(req.user!.id, req.params.id, key);
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.status(200).json({ success: true, data: receipt });
+    } catch (error) {
+      if (error instanceof EconomyError) {
+        const status =
+          error.code === 'INVALID_IDEMPOTENCY_KEY' ? 400 : error.code === 'COSMETIC_UNAVAILABLE' ? 404 : 409;
+        return res.status(status).json({ success: false, error: { code: error.code, message: error.message } });
+      }
+      return res
+        .status(503)
+        .json({
+          success: false,
+          error: { code: 'ACCOUNTING_UNAVAILABLE', message: 'Purchase temporarily unavailable.' },
+        });
     }
-    return res.status(503).json({ success: false, error: { code: 'ACCOUNTING_UNAVAILABLE', message: 'Purchase temporarily unavailable.' } });
-  }
-});
+  },
+);
 
 router.get('/wallet/ledger', authenticateToken, async (req: AuthRequest, res: Response) => {
   let govLedger = governanceStore.getWallet(req.user!.id).ledger;
@@ -104,12 +129,18 @@ router.get('/wallet/ledger', authenticateToken, async (req: AuthRequest, res: Re
     try {
       const result = await pool.query(
         'SELECT * FROM governance_ledger WHERE account = $1 ORDER BY created_at DESC LIMIT 100',
-        [req.user!.id]
+        [req.user!.id],
       );
       govLedger = result.rows.map((row) => ({ ...row, amount_mjdq: Number(row.amount_mjdq) }));
-      if (govLedger.some((entry) => !Number.isSafeInteger(entry.amount_mjdq))) throw new Error('LEDGER_AMOUNT_OVERFLOW');
+      if (govLedger.some((entry) => !Number.isSafeInteger(entry.amount_mjdq)))
+        throw new Error('LEDGER_AMOUNT_OVERFLOW');
     } catch {
-      return res.status(503).json({ success: false, error: { code: 'ACCOUNTING_UNAVAILABLE', message: 'Wallet ledger temporarily unavailable.' } });
+      return res
+        .status(503)
+        .json({
+          success: false,
+          error: { code: 'ACCOUNTING_UNAVAILABLE', message: 'Wallet ledger temporarily unavailable.' },
+        });
     }
   }
   const dbLedger = db.ledger.filter((l) => l.user_id === req.user!.id);

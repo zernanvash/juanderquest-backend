@@ -31,42 +31,68 @@ describe('quest attempt durable authority', () => {
     const adapter = mem.adapters.createPg();
     setPool(new adapter.Pool() as any);
     db.users.push({
-      id: userId, seed_id: 'durable-traveler', display_name: 'Traveler', email: 'durable@example.test',
-      avatar_url: '', role: 'user', demo_points: 0, mjdq_balance: 0, jdq_governance_balance: 0,
-      scout_reputation: 0, is_public: false, created_at: new Date().toISOString(),
+      id: userId,
+      seed_id: 'durable-traveler',
+      display_name: 'Traveler',
+      email: 'durable@example.test',
+      avatar_url: '',
+      role: 'user',
+      demo_points: 0,
+      mjdq_balance: 0,
+      jdq_governance_balance: 0,
+      scout_reputation: 0,
+      is_public: false,
+      created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     });
     db.quests.push({
-      id: questId, author_id: authorId, status: 'published', version: 1,
+      id: questId,
+      author_id: authorId,
+      status: 'published',
+      version: 1,
       steps: [{ step_order: 1, title: 'Arrive', description: 'Visit', checkpoint_type: 'location', required: true }],
-      title: 'Durable test', description: 'Visit the destination', category: 'eco', location_name: 'Test',
-      gps_lat: 16, gps_lng: 120, radius_meters: 100, base_reward_php: 0,
-      difficulty_factor: 1, geo_multiplier: 1, reward_points: 50,
-      marker_code: 'SECRET', marker_image_url: '', is_active: true,
-      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      title: 'Durable test',
+      description: 'Visit the destination',
+      category: 'eco',
+      location_name: 'Test',
+      gps_lat: 16,
+      gps_lng: 120,
+      radius_meters: 100,
+      base_reward_php: 0,
+      difficulty_factor: 1,
+      geo_multiplier: 1,
+      reward_points: 50,
+      marker_code: 'SECRET',
+      marker_image_url: '',
+      is_active: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     });
   });
 
   afterAll(() => {
     setPool(null);
-    db.users = db.users.filter(user => user.id !== userId);
-    db.quests = db.quests.filter(quest => quest.id !== questId);
-    db.quest_attempts = db.quest_attempts.filter(attempt => attempt.quest_id !== questId);
+    db.users = db.users.filter((user) => user.id !== userId);
+    db.quests = db.quests.filter((quest) => quest.id !== questId);
+    db.quest_attempts = db.quest_attempts.filter((attempt) => attempt.quest_id !== questId);
   });
 
   it('resumes the same attempt from PostgreSQL after the in-memory mirror is cleared', async () => {
-    const started = await request(app).post(`/api/v1/quests/${questId}/attempts`)
+    const started = await request(app)
+      .post(`/api/v1/quests/${questId}/attempts`)
       .set('Authorization', `Bearer ${token}`);
     expect(started.status).toBe(201);
     const attemptId = started.body.data.id;
-    db.quest_attempts = db.quest_attempts.filter(attempt => attempt.quest_id !== questId);
+    db.quest_attempts = db.quest_attempts.filter((attempt) => attempt.quest_id !== questId);
 
-    const progress = await request(app).get(`/api/v1/quests/${questId}/progress`)
+    const progress = await request(app)
+      .get(`/api/v1/quests/${questId}/progress`)
       .set('Authorization', `Bearer ${token}`);
     expect(progress.status).toBe(200);
     expect(progress.body.data.active_attempt.id).toBe(attemptId);
 
-    const resumed = await request(app).post(`/api/v1/quests/${questId}/attempts`)
+    const resumed = await request(app)
+      .post(`/api/v1/quests/${questId}/attempts`)
       .set('Authorization', `Bearer ${token}`);
     expect(resumed.status).toBe(200);
     expect(resumed.body.data.id).toBe(attemptId);
@@ -74,7 +100,8 @@ describe('quest attempt durable authority', () => {
 
   it('blocks a new attempt when the durable store records a completed attempt', async () => {
     await setPoolStatusCompletedAttempt();
-    const started = await request(app).post(`/api/v1/quests/${questId}/attempts`)
+    const started = await request(app)
+      .post(`/api/v1/quests/${questId}/attempts`)
       .set('Authorization', `Bearer ${token}`);
     expect(started.status).toBe(409);
     expect(started.body.error.code).toBe('ALREADY_COMPLETED');
@@ -83,10 +110,11 @@ describe('quest attempt durable authority', () => {
   async function setPoolStatusCompletedAttempt() {
     const pool = getPool();
     if (!pool) throw new Error('test pool missing');
-    const current = await pool.query(
-      'UPDATE quest_attempts SET status = $1 WHERE quest_id = $2 AND user_id = $3',
-      ['completed', questId, userId],
-    );
+    const current = await pool.query('UPDATE quest_attempts SET status = $1 WHERE quest_id = $2 AND user_id = $3', [
+      'completed',
+      questId,
+      userId,
+    ]);
     expect(current.rowCount).toBe(1);
   }
 });

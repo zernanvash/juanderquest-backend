@@ -76,23 +76,28 @@ progressionRouter.get(
         error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve traveler passport.' },
       });
     }
-  }
+  },
 );
 
-progressionRouter.get('/me/engagement', authenticateToken, checkQAAuthorization, async (req: AuthRequest, res: Response) => {
-  try {
-    res.set('Cache-Control', 'private, no-store');
-    const summary = await getEngagementSummary(req.user!.id, isAuthorizedQA(req));
-    if (!summary) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND' } });
-    return res.json({ success: true, data: summary });
-  } catch (err: any) {
-    console.error('[progression] GET /me/engagement error:', err);
-    return res.status(503).json({
-      success: false,
-      error: { code: 'DATABASE_OUTAGE', message: 'Engagement summary temporarily unavailable.' },
-    });
-  }
-});
+progressionRouter.get(
+  '/me/engagement',
+  authenticateToken,
+  checkQAAuthorization,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      res.set('Cache-Control', 'private, no-store');
+      const summary = await getEngagementSummary(req.user!.id, isAuthorizedQA(req));
+      if (!summary) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND' } });
+      return res.json({ success: true, data: summary });
+    } catch (err: any) {
+      console.error('[progression] GET /me/engagement error:', err);
+      return res.status(503).json({
+        success: false,
+        error: { code: 'DATABASE_OUTAGE', message: 'Engagement summary temporarily unavailable.' },
+      });
+    }
+  },
+);
 
 const engagementPreferenceSchema = z.object({ share_achievements: z.boolean() }).strict();
 progressionRouter.put('/me/engagement/preferences', authenticateToken, async (req: AuthRequest, res: Response) => {
@@ -143,10 +148,13 @@ progressionRouter.get(
         error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve visits.' },
       });
     }
-  }
+  },
 );
 
-progressionRouter.get('/community-goals', optionalAuthenticateToken, checkQAAuthorization,
+progressionRouter.get(
+  '/community-goals',
+  optionalAuthenticateToken,
+  checkQAAuthorization,
   async (req: AuthRequest, res: Response) => {
     try {
       const allowTest = isAuthorizedQA(req);
@@ -157,7 +165,8 @@ progressionRouter.get('/community-goals', optionalAuthenticateToken, checkQAAuth
       console.error('[progression] GET /community-goals error:', err);
       return res.json({ success: true, data: { items: [], total: 0 } });
     }
-  });
+  },
+);
 
 // GET /me/achievements — Earned badges and honors for authenticated account
 progressionRouter.get(
@@ -186,7 +195,7 @@ progressionRouter.get(
         error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve achievements.' },
       });
     }
-  }
+  },
 );
 
 // ==========================================
@@ -223,7 +232,7 @@ progressionRouter.get(
         error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve collections.' },
       });
     }
-  }
+  },
 );
 
 // ==========================================
@@ -268,7 +277,7 @@ progressionRouter.get(
         error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve public achievements.' },
       });
     }
-  }
+  },
 );
 
 // ==========================================
@@ -309,13 +318,20 @@ progressionRouter.post(
         error: { code: 'INTERNAL_ERROR', message: 'Failed to process outbox batch.' },
       });
     }
-  }
+  },
 );
 
-progressionRouter.post('/admin/progression/evaluate-community-goals', authenticateToken, requireAdmin,
-  adminOutboxLimiter, async (req: AuthRequest, res: Response) => {
+progressionRouter.post(
+  '/admin/progression/evaluate-community-goals',
+  authenticateToken,
+  requireAdmin,
+  adminOutboxLimiter,
+  async (req: AuthRequest, res: Response) => {
     try {
-      const parsed = z.object({ limit: z.number().int().min(1).max(100).optional() }).strict().safeParse(req.body);
+      const parsed = z
+        .object({ limit: z.number().int().min(1).max(100).optional() })
+        .strict()
+        .safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR' } });
       return res.json({ success: true, data: await evaluateCommunityGoals(parsed.data.limit ?? 20) });
     } catch (err: any) {
@@ -325,7 +341,8 @@ progressionRouter.post('/admin/progression/evaluate-community-goals', authentica
         error: { code: 'INTERNAL_ERROR', message: 'Failed to evaluate community goals.' },
       });
     }
-  });
+  },
+);
 
 const catchUpSchema = z.object({
   limit: z.number().int().min(1).max(500).optional(),
@@ -344,7 +361,10 @@ progressionRouter.post(
       if (!parseResult.success) {
         return res.status(400).json({
           success: false,
-          error: { code: 'VALIDATION_ERROR', message: 'Invalid catch-up parameters. limit must be 1..500 and since must be an ISO datetime string.' },
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Invalid catch-up parameters. limit must be 1..500 and since must be an ISO datetime string.',
+          },
         });
       }
 
@@ -360,5 +380,5 @@ progressionRouter.post(
         error: { code: 'INTERNAL_ERROR', message: 'Failed to catch up approved submissions.' },
       });
     }
-  }
+  },
 );

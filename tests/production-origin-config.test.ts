@@ -47,14 +47,12 @@ describe('production origin configuration', () => {
   });
 
   it('accepts the explicit public alpha HTTPS allowlist', () => {
-    expect(validateAndParseCorsOrigin(
-      'https://juanderquest.app,https://www.juanderquest.app,https://admin.juanderquest.app',
-      'production'
-    ).origins).toEqual([
-      'https://juanderquest.app',
-      'https://www.juanderquest.app',
-      'https://admin.juanderquest.app',
-    ]);
+    expect(
+      validateAndParseCorsOrigin(
+        'https://juanderquest.app,https://www.juanderquest.app,https://admin.juanderquest.app',
+        'production',
+      ).origins,
+    ).toEqual(['https://juanderquest.app', 'https://www.juanderquest.app', 'https://admin.juanderquest.app']);
   });
 
   it.each([
@@ -81,22 +79,26 @@ describe('production origin configuration', () => {
   it('retains local development wildcard support', () => {
     expect(validateAndParseCorsOrigin('*', 'development').isWildcard).toBe(true);
     expect(validateAndParseCorsOrigin(undefined, 'test').isWildcard).toBe(true);
-    expect(validateAndParseCorsOrigin('http://localhost:3000', 'development').origins)
-      .toEqual(['http://localhost:3000']);
+    expect(validateAndParseCorsOrigin('http://localhost:3000', 'development').origins).toEqual([
+      'http://localhost:3000',
+    ]);
   });
 
   it('permits only the isolated presentation HTTP loopback origin when explicitly gated', () => {
-    expect(validateAndParseCorsOrigin('http://127.0.0.1:3200', 'production', true).origins)
-      .toEqual(['http://127.0.0.1:3200']);
+    expect(validateAndParseCorsOrigin('http://127.0.0.1:3200', 'production', true).origins).toEqual([
+      'http://127.0.0.1:3200',
+    ]);
     expect(() => validateAndParseCorsOrigin('http://127.0.0.1:3200', 'production')).toThrow(/HTTPS/);
     expect(() => validateAndParseCorsOrigin('http://localhost:3200', 'production', true)).toThrow(/HTTPS/);
     expect(() => validateAndParseCorsOrigin('http://127.0.0.1:3000', 'production', true)).toThrow(/HTTPS/);
   });
 
   it('permits exact public presentation HTTPS origin when explicitly gated', () => {
-    expect(validateAndParseCorsOrigin('https://presentation.juanderquest.app', 'production', true).origins)
-      .toEqual(['https://presentation.juanderquest.app']);
-    expect(() => validateAndParseCorsOrigin('https://evil.com', 'production', true))
-      .toThrow(/Presentation mode only permits/);
+    expect(validateAndParseCorsOrigin('https://presentation.juanderquest.app', 'production', true).origins).toEqual([
+      'https://presentation.juanderquest.app',
+    ]);
+    expect(() => validateAndParseCorsOrigin('https://evil.com', 'production', true)).toThrow(
+      /Presentation mode only permits/,
+    );
   });
 });

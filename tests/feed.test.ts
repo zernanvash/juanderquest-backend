@@ -74,9 +74,7 @@ describe('Ranked Home Feed API (GET /api/v1/feed)', () => {
 
       if (res.body.data.has_more) {
         expect(res.body.data.cursor).toBeDefined();
-        const nextRes = await request(app)
-          .get('/api/v1/feed')
-          .query({ cursor: res.body.data.cursor, limit: 3 });
+        const nextRes = await request(app).get('/api/v1/feed').query({ cursor: res.body.data.cursor, limit: 3 });
         expect(nextRes.status).toBe(200);
         expect(nextRes.body.data.items).toBeDefined();
       }

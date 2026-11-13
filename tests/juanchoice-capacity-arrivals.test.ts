@@ -26,17 +26,25 @@ describe('summarizeArrivals', () => {
 
     it('rejects negative or non-finite ingressMs', () => {
       expect(() => summarizeArrivals([{ kind: 'overview', ingressMs: -1, finishMs: 10 }])).toThrow(/Invalid ingressMs/);
-      expect(() => summarizeArrivals([{ kind: 'overview', ingressMs: Infinity, finishMs: 10 }])).toThrow(/Invalid ingressMs/);
-      expect(() => summarizeArrivals([{ kind: 'overview', ingressMs: NaN, finishMs: 10 }])).toThrow(/Invalid ingressMs/);
+      expect(() => summarizeArrivals([{ kind: 'overview', ingressMs: Infinity, finishMs: 10 }])).toThrow(
+        /Invalid ingressMs/,
+      );
+      expect(() => summarizeArrivals([{ kind: 'overview', ingressMs: NaN, finishMs: 10 }])).toThrow(
+        /Invalid ingressMs/,
+      );
     });
 
     it('rejects negative or non-finite finishMs', () => {
       expect(() => summarizeArrivals([{ kind: 'overview', ingressMs: 10, finishMs: -1 }])).toThrow(/Invalid finishMs/);
-      expect(() => summarizeArrivals([{ kind: 'overview', ingressMs: 10, finishMs: Infinity }])).toThrow(/Invalid finishMs/);
+      expect(() => summarizeArrivals([{ kind: 'overview', ingressMs: 10, finishMs: Infinity }])).toThrow(
+        /Invalid finishMs/,
+      );
     });
 
     it('rejects finishMs < ingressMs', () => {
-      expect(() => summarizeArrivals([{ kind: 'overview', ingressMs: 100, finishMs: 90 }])).toThrow(/cannot be less than/);
+      expect(() => summarizeArrivals([{ kind: 'overview', ingressMs: 100, finishMs: 90 }])).toThrow(
+        /cannot be less than/,
+      );
     });
   });
 
@@ -117,18 +125,12 @@ describe('summarizeArrivals', () => {
     });
 
     it('does not leak IDs, URLs, tokens, headers or raw timestamps into output', () => {
-      const records: RawArrivalRecord[] = [
-        { kind: 'overview', ingressMs: 500, finishMs: 600 },
-      ];
+      const records: RawArrivalRecord[] = [{ kind: 'overview', ingressMs: 500, finishMs: 600 }];
       const res = summarizeArrivals(records);
       const keys = Object.keys(res.overview);
-      expect(keys.sort()).toEqual([
-        'count',
-        'ingressSpanMs',
-        'maxIngressIn100ms',
-        'maxIngressIn1s',
-        'maxSimultaneousInFlight',
-      ].sort());
+      expect(keys.sort()).toEqual(
+        ['count', 'ingressSpanMs', 'maxIngressIn100ms', 'maxIngressIn1s', 'maxSimultaneousInFlight'].sort(),
+      );
     });
   });
 

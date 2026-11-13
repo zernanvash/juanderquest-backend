@@ -17,7 +17,9 @@ describe('JuanChoice Presentation Mode Voter Eligibility Predicate & Service', (
   describe('env configuration & extractDatabaseName validation', () => {
     it('extracts database name from valid PostgreSQL connection URLs', () => {
       expect(extractDatabaseName('postgres://postgres:postgres@localhost:5432/juanderquest')).toBe('juanderquest');
-      expect(extractDatabaseName('postgres://user:pass@127.0.0.1:5432/juanderquest_presentation?sslmode=disable')).toBe('juanderquest_presentation');
+      expect(extractDatabaseName('postgres://user:pass@127.0.0.1:5432/juanderquest_presentation?sslmode=disable')).toBe(
+        'juanderquest_presentation',
+      );
       expect(extractDatabaseName('invalid-url')).toBeNull();
       expect(extractDatabaseName('https://localhost/juanderquest_presentation')).toBeNull();
     });
@@ -321,7 +323,12 @@ describe('JuanChoice Presentation Mode Voter Eligibility Predicate & Service', (
       // Keep the real predicate for every other name (calling envModule.* here would hit the spy itself).
       const realIsPresentationDatabaseName = envModule.isPresentationDatabaseName;
       jest.spyOn(envModule, 'isPresentationDatabaseName').mockImplementation((dbName: string, ...rest) => {
-        if (dbName === currentDb || dbName === 'juanderquest_presentation_test' || dbName === 'juanderquest_presentation') return true;
+        if (
+          dbName === currentDb ||
+          dbName === 'juanderquest_presentation_test' ||
+          dbName === 'juanderquest_presentation'
+        )
+          return true;
         return realIsPresentationDatabaseName(dbName, ...rest);
       });
 
@@ -332,10 +339,11 @@ describe('JuanChoice Presentation Mode Voter Eligibility Predicate & Service', (
       // Seed fresh guest created 10 minutes ago
       await db.pool.query(
         "INSERT INTO users(id,seed_id,display_name,email,created_at,is_test) VALUES($1,$2,'Fresh Guest','fresh@example.test',NOW() - INTERVAL '10 minutes',false)",
-        [freshUser, freshUser]
+        [freshUser, freshUser],
       );
       // Seed spots
-      await db.pool.query(`INSERT INTO spots(id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,source_type,source_name,is_test)
+      await db.pool
+        .query(`INSERT INTO spots(id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,source_type,source_name,is_test)
         VALUES('spot-demo-1','spot-demo-1','Demo Spot 1','Desc','nature','beach','Alaminos','Alaminos',16,120,'lgu','LGU',false),
               ('spot-demo-2','spot-demo-2','Demo Spot 2','Desc','nature','beach','Alaminos','Alaminos',16,120,'lgu','LGU',false)`);
 
@@ -344,17 +352,17 @@ describe('JuanChoice Presentation Mode Voter Eligibility Predicate & Service', (
         `INSERT INTO juanchoice_campaigns(id,slug,region,theme,status,opens_at,closes_at,is_test) VALUES
         ($1,'demo-campaign','Pangasinan','Presentation','voting',NOW() - INTERVAL '1 day',NOW() + INTERVAL '1 day',false),
         ($2,'normal-campaign','Pangasinan','Normal','voting',NOW() - INTERVAL '1 day',NOW() + INTERVAL '1 day',false)`,
-        [allowedCampaignId, otherCampaignId]
+        [allowedCampaignId, otherCampaignId],
       );
 
       // Seed candidates
       await db.pool.query(
-        'INSERT INTO juanchoice_candidates(id,campaign_id,spot_id,status,is_test) VALUES($1,$2,$3,\'eligible\',false)',
-        [cand1, allowedCampaignId, 'spot-demo-1']
+        "INSERT INTO juanchoice_candidates(id,campaign_id,spot_id,status,is_test) VALUES($1,$2,$3,'eligible',false)",
+        [cand1, allowedCampaignId, 'spot-demo-1'],
       );
       await db.pool.query(
-        'INSERT INTO juanchoice_candidates(id,campaign_id,spot_id,status,is_test) VALUES($1,$2,$3,\'eligible\',false)',
-        [cand2, allowedCampaignId, 'spot-demo-2']
+        "INSERT INTO juanchoice_candidates(id,campaign_id,spot_id,status,is_test) VALUES($1,$2,$3,'eligible',false)",
+        [cand2, allowedCampaignId, 'spot-demo-2'],
       );
     });
 
@@ -386,7 +394,7 @@ describe('JuanChoice Presentation Mode Voter Eligibility Predicate & Service', (
           candidateId: cand1,
           expectedVersion: 0,
           idempotencyKey: randomUUID(),
-        })
+        }),
       ).rejects.toMatchObject({ code: 'NOT_ELIGIBLE', status: 403 });
     });
 
@@ -446,39 +454,54 @@ describe('JuanChoice Presentation Mode Voter Eligibility Predicate & Service', (
         .get(`/api/v1/juanchoice/campaigns/${otherCampaignId}/me`)
         .set('Authorization', `Bearer ${token}`);
       expect(secondRes.status).toBe(404);
-      await expect(castBallot({
-        campaignId: otherCampaignId, userId: freshUser, candidateId: cand1,
-        expectedVersion: 0, idempotencyKey: randomUUID(),
-      })).rejects.toMatchObject({ code: 'CAMPAIGN_NOT_FOUND', status: 404 });
+      await expect(
+        castBallot({
+          campaignId: otherCampaignId,
+          userId: freshUser,
+          candidateId: cand1,
+          expectedVersion: 0,
+          idempotencyKey: randomUUID(),
+        }),
+      ).rejects.toMatchObject({ code: 'CAMPAIGN_NOT_FOUND', status: 404 });
     });
 
     it('blocks even an old account from voting outside the presentation allowlist', async () => {
       env.JUANCHOICE_PRESENTATION_MODE = true;
       env.JUANCHOICE_PRESENTATION_CAMPAIGN_ID = allowedCampaignId;
       await db.pool.query(
-        "INSERT INTO users(id,seed_id,display_name,email,created_at,is_test) VALUES('old-guest','old-guest','Old Guest','old@example.test',NOW() - INTERVAL '5 days',false)"
+        "INSERT INTO users(id,seed_id,display_name,email,created_at,is_test) VALUES('old-guest','old-guest','Old Guest','old@example.test',NOW() - INTERVAL '5 days',false)",
       );
-      await expect(castBallot({
-        campaignId: otherCampaignId, userId: 'old-guest', candidateId: cand1,
-        expectedVersion: 0, idempotencyKey: randomUUID(),
-      })).rejects.toMatchObject({ code: 'CAMPAIGN_NOT_FOUND', status: 404 });
+      await expect(
+        castBallot({
+          campaignId: otherCampaignId,
+          userId: 'old-guest',
+          candidateId: cand1,
+          expectedVersion: 0,
+          idempotencyKey: randomUUID(),
+        }),
+      ).rejects.toMatchObject({ code: 'CAMPAIGN_NOT_FOUND', status: 404 });
     });
 
     it('rejects an allowlisted round after it gains official-series metadata', async () => {
       env.JUANCHOICE_PRESENTATION_MODE = true;
       await db.pool.query(
         "UPDATE juanchoice_campaigns SET series_key='pangasinan-primary', round_number=1, counts_for_streak=true WHERE id=$1",
-        [allowedCampaignId]
+        [allowedCampaignId],
       );
       try {
-        await expect(castBallot({
-          campaignId: allowedCampaignId, userId: freshUser, candidateId: cand1,
-          expectedVersion: 2, idempotencyKey: randomUUID(),
-        })).rejects.toMatchObject({ code: 'CAMPAIGN_NOT_FOUND', status: 404 });
+        await expect(
+          castBallot({
+            campaignId: allowedCampaignId,
+            userId: freshUser,
+            candidateId: cand1,
+            expectedVersion: 2,
+            idempotencyKey: randomUUID(),
+          }),
+        ).rejects.toMatchObject({ code: 'CAMPAIGN_NOT_FOUND', status: 404 });
       } finally {
         await db.pool.query(
           'UPDATE juanchoice_campaigns SET series_key=NULL, round_number=NULL, counts_for_streak=false WHERE id=$1',
-          [allowedCampaignId]
+          [allowedCampaignId],
         );
       }
     });

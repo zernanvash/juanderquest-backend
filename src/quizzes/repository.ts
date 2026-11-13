@@ -25,10 +25,7 @@ export class CulturalQuizRepository {
     const executor = this.getExecutor(client);
     if (!executor) return null;
 
-    const { rows } = await executor.query(
-      `SELECT * FROM cultural_quizzes WHERE id = $1`,
-      [id]
-    );
+    const { rows } = await executor.query(`SELECT * FROM cultural_quizzes WHERE id = $1`, [id]);
     if (!rows.length) return null;
     const r = rows[0];
     return {
@@ -50,7 +47,7 @@ export class CulturalQuizRepository {
 
     const { rows } = await executor.query(
       `SELECT * FROM cultural_quizzes WHERE destination_id = $1 ORDER BY created_at DESC LIMIT 1`,
-      [destinationId]
+      [destinationId],
     );
     if (!rows.length) return null;
     const r = rows[0];
@@ -67,14 +64,18 @@ export class CulturalQuizRepository {
     };
   }
 
-  async findVersion(quizId: string, versionNumber: number, client?: QueryExecutor): Promise<CulturalQuizVersion | null> {
+  async findVersion(
+    quizId: string,
+    versionNumber: number,
+    client?: QueryExecutor,
+  ): Promise<CulturalQuizVersion | null> {
     const executor = this.getExecutor(client);
     if (!executor) return null;
 
-    const { rows } = await executor.query(
-      `SELECT * FROM cultural_quiz_versions WHERE quiz_id = $1 AND version = $2`,
-      [quizId, versionNumber]
-    );
+    const { rows } = await executor.query(`SELECT * FROM cultural_quiz_versions WHERE quiz_id = $1 AND version = $2`, [
+      quizId,
+      versionNumber,
+    ]);
     if (!rows.length) return null;
     const r = rows[0];
     return {
@@ -100,10 +101,7 @@ export class CulturalQuizRepository {
     const executor = this.getExecutor(client);
     if (!executor) return null;
 
-    const { rows } = await executor.query(
-      `SELECT * FROM cultural_quiz_versions WHERE id = $1`,
-      [versionId]
-    );
+    const { rows } = await executor.query(`SELECT * FROM cultural_quiz_versions WHERE id = $1`, [versionId]);
     if (!rows.length) return null;
     const r = rows[0];
     return {
@@ -131,7 +129,7 @@ export class CulturalQuizRepository {
 
     const { rows: qRows } = await executor.query(
       `SELECT * FROM cultural_quiz_questions WHERE version_id = $1 ORDER BY ordinal ASC`,
-      [versionId]
+      [versionId],
     );
     if (!qRows.length) return [];
 
@@ -139,7 +137,7 @@ export class CulturalQuizRepository {
     const placeholders = questionIds.map((_, i) => `$${i + 1}`).join(', ');
     const { rows: optRows } = await executor.query(
       `SELECT * FROM cultural_quiz_options WHERE question_id IN (${placeholders}) ORDER BY ordinal ASC`,
-      questionIds
+      questionIds,
     );
 
     const optionsByQ = new Map<string, CulturalQuizOption[]>();
@@ -181,7 +179,7 @@ export class CulturalQuizRepository {
       `SELECT * FROM cultural_quiz_attempts 
        WHERE quiz_id = $1 AND user_id = $2 AND status = 'in_progress'
        ORDER BY started_at DESC LIMIT 1`,
-      [quizId, userId]
+      [quizId, userId],
     );
     if (!rows.length) return null;
     return this.mapAttempt(rows[0]);
@@ -191,15 +189,16 @@ export class CulturalQuizRepository {
     const executor = this.getExecutor(client);
     if (!executor) return null;
 
-    const { rows } = await executor.query(
-      `SELECT * FROM cultural_quiz_attempts WHERE id = $1`,
-      [attemptId]
-    );
+    const { rows } = await executor.query(`SELECT * FROM cultural_quiz_attempts WHERE id = $1`, [attemptId]);
     if (!rows.length) return null;
     return this.mapAttempt(rows[0]);
   }
 
-  async findLastFailedAttempt(quizId: string, userId: string, client?: QueryExecutor): Promise<CulturalQuizAttempt | null> {
+  async findLastFailedAttempt(
+    quizId: string,
+    userId: string,
+    client?: QueryExecutor,
+  ): Promise<CulturalQuizAttempt | null> {
     const executor = this.getExecutor(client);
     if (!executor) return null;
 
@@ -207,7 +206,7 @@ export class CulturalQuizRepository {
       `SELECT * FROM cultural_quiz_attempts 
        WHERE quiz_id = $1 AND user_id = $2 AND status = 'failed'
        ORDER BY completed_at DESC LIMIT 1`,
-      [quizId, userId]
+      [quizId, userId],
     );
     if (!rows.length) return null;
     return this.mapAttempt(rows[0]);
@@ -219,7 +218,7 @@ export class CulturalQuizRepository {
 
     const { rows } = await executor.query(
       `SELECT 1 FROM cultural_quiz_completions WHERE user_id = $1 AND reward_scope_id = $2`,
-      [userId, rewardScopeId]
+      [userId, rewardScopeId],
     );
     return rows.length > 0;
   }
@@ -230,7 +229,7 @@ export class CulturalQuizRepository {
 
     const { rows } = await executor.query(
       `SELECT * FROM cultural_quiz_attempt_answers WHERE attempt_id = $1 ORDER BY answered_at ASC`,
-      [attemptId]
+      [attemptId],
     );
     return rows.map((r) => ({
       attempt_id: r.attempt_id,
@@ -250,12 +249,20 @@ export class CulturalQuizRepository {
        WHERE user_id = $1 AND status IN ('passed', 'failed', 'expired')
        ORDER BY completed_at DESC NULLS LAST, started_at DESC
        LIMIT $2`,
-      [userId, limit]
+      [userId, limit],
     );
     return rows.map((r) => this.mapAttempt(r));
   }
 
-  async listPublishedQuizzes(client?: QueryExecutor): Promise<Array<{ quiz: CulturalQuiz; version: CulturalQuizVersion; destination: { id: string; name: string; municipality: string; gps_lat: number; gps_lng: number } }>> {
+  async listPublishedQuizzes(
+    client?: QueryExecutor,
+  ): Promise<
+    Array<{
+      quiz: CulturalQuiz;
+      version: CulturalQuizVersion;
+      destination: { id: string; name: string; municipality: string; gps_lat: number; gps_lng: number };
+    }>
+  > {
     const executor = this.getExecutor(client);
     if (!executor) return [];
 
@@ -265,7 +272,7 @@ export class CulturalQuizRepository {
        FROM cultural_quizzes q
        JOIN cultural_quiz_versions v ON v.quiz_id = q.id AND v.version = q.current_version
        JOIN spots s ON s.id = q.destination_id
-       WHERE q.status = 'published'`
+       WHERE q.status = 'published'`,
     );
 
     return rows.map((r) => ({
@@ -305,7 +312,9 @@ export class CulturalQuizRepository {
     }));
   }
 
-  async listAllQuizzesForAdmin(client?: QueryExecutor): Promise<Array<{ quiz: CulturalQuiz; version: CulturalQuizVersion; destination_name: string }>> {
+  async listAllQuizzesForAdmin(
+    client?: QueryExecutor,
+  ): Promise<Array<{ quiz: CulturalQuiz; version: CulturalQuizVersion; destination_name: string }>> {
     const executor = this.getExecutor(client);
     if (!executor) return [];
 
@@ -315,7 +324,7 @@ export class CulturalQuizRepository {
        FROM cultural_quizzes q
        JOIN cultural_quiz_versions v ON v.quiz_id = q.id AND v.version = q.current_version
        JOIN spots s ON s.id = q.destination_id
-       ORDER BY q.created_at DESC`
+       ORDER BY q.created_at DESC`,
     );
 
     return rows.map((r) => ({

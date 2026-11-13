@@ -63,9 +63,15 @@ export class UsersRepository {
       }
     }
 
-    const { rows } = await this.pool.query<{ id: string; seed_id: string; is_test: boolean; session_epoch: number; role: 'user' | 'admin' | 'area_admin' | 'qa' }>(
+    const { rows } = await this.pool.query<{
+      id: string;
+      seed_id: string;
+      is_test: boolean;
+      session_epoch: number;
+      role: 'user' | 'admin' | 'area_admin' | 'qa';
+    }>(
       'SELECT id, seed_id, is_test, COALESCE(session_epoch, 0)::int AS session_epoch, role FROM users WHERE id = ANY($1::text[])',
-      [uniqueIds]
+      [uniqueIds],
     );
 
     const resultMap = new Map<string, AlphaSessionScope>();
@@ -88,7 +94,7 @@ export class UsersRepository {
     }
     const { rows } = await this.pool.query<{ session_epoch: number }>(
       'UPDATE users SET session_epoch = COALESCE(session_epoch, 0) + 1, updated_at = NOW() WHERE id = $1 RETURNING session_epoch',
-      [userId]
+      [userId],
     );
     return rows[0]?.session_epoch ?? 0;
   }
@@ -113,8 +119,7 @@ export class UsersRepository {
     const demoPoints = data.demo_points ?? 100;
     const isPublic = Boolean(data.is_public);
     const avatarUrl =
-      data.avatar_url ||
-      `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(data.seed_id)}`;
+      data.avatar_url || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(data.seed_id)}`;
 
     if (!this.pool) {
       const now = new Date().toISOString();
@@ -175,7 +180,7 @@ export class UsersRepository {
     if (!this.pool) return undefined;
     const { rows } = await this.pool.query(
       'SELECT * FROM users WHERE id = $1 AND is_public = TRUE AND ($2 = TRUE OR COALESCE(is_test, FALSE) = FALSE)',
-      [id, allowTest]
+      [id, allowTest],
     );
     if (!rows.length) return undefined;
     return this.mapRow(rows[0]);
@@ -186,7 +191,7 @@ export class UsersRepository {
     const clean = rawHandle.replace(/^@/, '').toLowerCase().trim();
     const { rows } = await this.pool.query(
       'SELECT * FROM users WHERE LOWER(handle) = $1 AND is_public = TRUE AND ($2 = TRUE OR COALESCE(is_test, FALSE) = FALSE)',
-      [clean, allowTest]
+      [clean, allowTest],
     );
     if (!rows.length) return undefined;
     return this.mapRow(rows[0]);
@@ -207,7 +212,7 @@ export class UsersRepository {
     const clean = walletAddress.trim();
     const { rows: conflict } = await this.pool.query(
       'SELECT id FROM users WHERE LOWER(wallet_address) = LOWER($1) AND id <> $2',
-      [clean, userId]
+      [clean, userId],
     );
     if (conflict.length > 0) {
       const err = new Error('WALLET_ALREADY_BOUND');
@@ -216,7 +221,7 @@ export class UsersRepository {
     }
     const { rows } = await this.pool.query(
       'UPDATE users SET wallet_address = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
-      [clean, userId]
+      [clean, userId],
     );
     if (!rows.length) {
       const err = new Error('USER_NOT_FOUND');
@@ -232,7 +237,7 @@ export class UsersRepository {
     }
     const { rows } = await this.pool.query(
       'UPDATE users SET wallet_address = NULL, updated_at = NOW() WHERE id = $1 RETURNING *',
-      [userId]
+      [userId],
     );
     if (!rows.length) {
       const err = new Error('USER_NOT_FOUND');
@@ -250,7 +255,7 @@ export class UsersRepository {
       handle?: string | null;
       bio?: string | null;
       status_text?: string | null;
-    }
+    },
   ): Promise<UserRow | undefined> {
     if (!this.pool) return undefined;
 
@@ -311,7 +316,11 @@ export class UsersRepository {
     }
   }
 
-  async getFollowCounts(userId: string, ownerView = false, allowTest = false): Promise<{ follower_count: number; following_count: number }> {
+  async getFollowCounts(
+    userId: string,
+    ownerView = false,
+    allowTest = false,
+  ): Promise<{ follower_count: number; following_count: number }> {
     if (!this.pool) {
       return { follower_count: 0, following_count: 0 };
     }
@@ -319,7 +328,7 @@ export class UsersRepository {
     if (!ownerView) {
       const { rows: userRows } = await this.pool.query(
         'SELECT is_public FROM users WHERE id = $1 AND ($2 = TRUE OR COALESCE(is_test, FALSE) = FALSE)',
-        [userId, allowTest]
+        [userId, allowTest],
       );
       if (!userRows.length || !userRows[0].is_public) {
         return { follower_count: 0, following_count: 0 };
@@ -340,7 +349,7 @@ export class UsersRepository {
 
   async getRelationship(
     actorId: string,
-    targetId: string
+    targetId: string,
   ): Promise<{
     is_following: boolean;
     follows_you: boolean;
@@ -350,7 +359,10 @@ export class UsersRepository {
     if (!this.pool) {
       return { is_following: false, follows_you: false, can_follow: false, reason: 'TARGET_NOT_FOUND' };
     }
-    const { rows: users } = await this.pool.query('SELECT id, is_public FROM users WHERE id IN ($1, $2)', [actorId, targetId]);
+    const { rows: users } = await this.pool.query('SELECT id, is_public FROM users WHERE id IN ($1, $2)', [
+      actorId,
+      targetId,
+    ]);
     const actor = users.find((u: any) => u.id === actorId);
     const target = users.find((u: any) => u.id === targetId);
 
@@ -363,7 +375,7 @@ export class UsersRepository {
 
     const { rows: follows } = await this.pool.query(
       'SELECT follower_id, following_id FROM user_follows WHERE (follower_id = $1 AND following_id = $2) OR (follower_id = $2 AND following_id = $1)',
-      [actorId, targetId]
+      [actorId, targetId],
     );
     const is_following = follows.some((f: any) => f.follower_id === actorId && f.following_id === targetId);
     const follows_you = follows.some((f: any) => f.follower_id === targetId && f.following_id === actorId);
@@ -377,7 +389,7 @@ export class UsersRepository {
 
   async followUser(
     actorId: string,
-    targetId: string
+    targetId: string,
   ): Promise<{
     success: boolean;
     error?: 'CANNOT_FOLLOW_SELF' | 'PROFILE_VISIBILITY_REQUIRED' | 'NOT_FOUND';
@@ -396,10 +408,10 @@ export class UsersRepository {
     try {
       await client.query('BEGIN');
       const [firstId, secondId] = [actorId, targetId].sort();
-      const { rows: locked } = await client.query(
-        'SELECT id, is_public FROM users WHERE id IN ($1, $2) FOR UPDATE',
-        [firstId, secondId]
-      );
+      const { rows: locked } = await client.query('SELECT id, is_public FROM users WHERE id IN ($1, $2) FOR UPDATE', [
+        firstId,
+        secondId,
+      ]);
       const lockedActor = locked.find((r: any) => r.id === actorId);
       const lockedTarget = locked.find((r: any) => r.id === targetId);
 
@@ -417,7 +429,7 @@ export class UsersRepository {
          VALUES ($1, $2, NOW())
          ON CONFLICT (follower_id, following_id) DO NOTHING
          RETURNING follower_id`,
-        [actorId, targetId]
+        [actorId, targetId],
       );
       await client.query('COMMIT');
 
@@ -438,17 +450,14 @@ export class UsersRepository {
 
   async unfollowUser(
     actorId: string,
-    targetId: string
+    targetId: string,
   ): Promise<{
     success: boolean;
     follower_count: number;
     following_count: number;
   }> {
     if (!this.pool) return { success: true, follower_count: 0, following_count: 0 };
-    await this.pool.query(
-      'DELETE FROM user_follows WHERE follower_id = $1 AND following_id = $2',
-      [actorId, targetId]
-    );
+    await this.pool.query('DELETE FROM user_follows WHERE follower_id = $1 AND following_id = $2', [actorId, targetId]);
     const counts = await this.getFollowCounts(targetId);
     return {
       success: true,
@@ -469,7 +478,7 @@ export class UsersRepository {
        JOIN users u ON u.id = uf.follower_id AND u.is_public = TRUE AND COALESCE(u.is_test, FALSE) = FALSE
        WHERE uf.following_id IN (${placeholders})
        GROUP BY uf.following_id`,
-      userIds
+      userIds,
     );
 
     const { rows: followingRows } = await this.pool.query(
@@ -478,7 +487,7 @@ export class UsersRepository {
        JOIN users u ON u.id = uf.following_id AND u.is_public = TRUE AND COALESCE(u.is_test, FALSE) = FALSE
        WHERE uf.follower_id IN (${placeholders})
        GROUP BY uf.follower_id`,
-      userIds
+      userIds,
     );
 
     const followerMap = new Map<string, number>();
@@ -503,13 +512,13 @@ export class UsersRepository {
     limit: number = 20,
     cursor?: string,
     ownerView = false,
-    allowTest = false
+    allowTest = false,
   ): Promise<{ items: any[]; next_cursor: string | null; has_more: boolean } | null> {
     if (!this.pool) return null;
 
     const { rows: targetRows } = await this.pool.query(
       'SELECT id, is_public FROM users WHERE id = $1 AND ($2 = TRUE OR COALESCE(is_test, FALSE) = FALSE)',
-      [targetId, allowTest]
+      [targetId, allowTest],
     );
     if (!targetRows.length || (!targetRows[0].is_public && !ownerView)) {
       return null;
@@ -578,13 +587,13 @@ export class UsersRepository {
     targetId: string,
     limit: number = 20,
     cursor?: string,
-    allowTest = false
+    allowTest = false,
   ): Promise<{ items: any[]; next_cursor: string | null; has_more: boolean } | null> {
     if (!this.pool) return null;
 
     const { rows: targetRows } = await this.pool.query(
       'SELECT id, is_public FROM users WHERE id = $1 AND ($2 = TRUE OR COALESCE(is_test, FALSE) = FALSE)',
-      [targetId, allowTest]
+      [targetId, allowTest],
     );
     if (!targetRows.length || !targetRows[0].is_public) {
       return null;
@@ -651,7 +660,7 @@ export class UsersRepository {
   async listMyFollowing(
     actorId: string,
     limit: number = 20,
-    cursor?: string
+    cursor?: string,
   ): Promise<{ items: any[]; next_cursor: string | null; has_more: boolean }> {
     if (!this.pool) return { items: [], next_cursor: null, has_more: false };
 

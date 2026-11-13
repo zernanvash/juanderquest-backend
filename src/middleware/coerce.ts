@@ -7,4 +7,7 @@ const blankToUndefined = (value: unknown) =>
 
 export const optionalLat = z.preprocess(blankToUndefined, z.number().finite().min(-90).max(90).optional());
 export const optionalLng = z.preprocess(blankToUndefined, z.number().finite().min(-180).max(180).optional());
-export const optionalAccuracy = z.preprocess(blankToUndefined, z.number().finite().nonnegative().max(10_000).optional());
+export const optionalAccuracy = z.preprocess(
+  blankToUndefined,
+  z.number().finite().nonnegative().max(10_000).optional(),
+);

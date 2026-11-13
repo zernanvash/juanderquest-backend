@@ -19,9 +19,19 @@ describe('Phase 1: Progression & Identity Foundation', () => {
   const testUserId = '99999999-9999-9999-9999-999999999999';
   const adminId = '22222222-2222-2222-2222-222222222222';
 
-  const tokenTraveler = jwt.sign({ id: travelerId, seed_id: 'progression-identity-traveler', role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
-  const tokenPrivateUser = jwt.sign({ id: privateUserId, seed_id: 'progression-identity-private', role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
-  const tokenAdmin = jwt.sign({ id: adminId, seed_id: 'progression-identity-admin', role: 'admin' }, env.JWT_SECRET, { expiresIn: '1h' });
+  const tokenTraveler = jwt.sign(
+    { id: travelerId, seed_id: 'progression-identity-traveler', role: 'user' },
+    env.JWT_SECRET,
+    { expiresIn: '1h' },
+  );
+  const tokenPrivateUser = jwt.sign(
+    { id: privateUserId, seed_id: 'progression-identity-private', role: 'user' },
+    env.JWT_SECRET,
+    { expiresIn: '1h' },
+  );
+  const tokenAdmin = jwt.sign({ id: adminId, seed_id: 'progression-identity-admin', role: 'admin' }, env.JWT_SECRET, {
+    expiresIn: '1h',
+  });
 
   const mappedQuestId = 'q1111111-1111-1111-1111-111111111111';
   const unmappedQuestId = 'q2222222-2222-2222-2222-222222222222';
@@ -92,10 +102,9 @@ describe('Phase 1: Progression & Identity Foundation', () => {
       expect(reviewRes.statusCode).toBe(200);
 
       // Verify outbox event was recorded in DB
-      const { rows } = await testDb.pool.query(
-        'SELECT * FROM outbox_events WHERE event_key = $1',
-        [`submission_approval_${subId}`]
-      );
+      const { rows } = await testDb.pool.query('SELECT * FROM outbox_events WHERE event_key = $1', [
+        `submission_approval_${subId}`,
+      ]);
       expect(rows.length).toBe(1);
       expect(rows[0].event_type).toBe('submission_approved');
       const payload = typeof rows[0].payload === 'string' ? JSON.parse(rows[0].payload) : rows[0].payload;
@@ -111,10 +120,9 @@ describe('Phase 1: Progression & Identity Foundation', () => {
       expect(replay.data?.awarded_points).toBe(0);
 
       // Count outbox events: strictly 1
-      const { rows } = await testDb.pool.query(
-        'SELECT COUNT(*) AS count FROM outbox_events WHERE event_key = $1',
-        [`submission_approval_${approvedSubId}`]
-      );
+      const { rows } = await testDb.pool.query('SELECT COUNT(*) AS count FROM outbox_events WHERE event_key = $1', [
+        `submission_approval_${approvedSubId}`,
+      ]);
       expect(Number(rows[0].count)).toBe(1);
     });
 
@@ -128,10 +136,7 @@ describe('Phase 1: Progression & Identity Foundation', () => {
       const reviewRes = await submissionsService.reviewSubmission(subId, 'reject', adminId, 'Blurry photo');
       expect(reviewRes.success).toBe(true);
 
-      const { rows } = await testDb.pool.query(
-        'SELECT * FROM outbox_events WHERE event_key LIKE $1',
-        [`%${subId}%`]
-      );
+      const { rows } = await testDb.pool.query('SELECT * FROM outbox_events WHERE event_key LIKE $1', [`%${subId}%`]);
       expect(rows.length).toBe(0);
     });
 
@@ -145,10 +150,9 @@ describe('Phase 1: Progression & Identity Foundation', () => {
       const reviewRes = await submissionsService.reviewSubmission(subId, 'approve', adminId);
       expect(reviewRes.success).toBe(true);
 
-      const { rows } = await testDb.pool.query(
-        'SELECT * FROM outbox_events WHERE event_key = $1',
-        [`submission_approval_unresolved_${subId}`]
-      );
+      const { rows } = await testDb.pool.query('SELECT * FROM outbox_events WHERE event_key = $1', [
+        `submission_approval_unresolved_${subId}`,
+      ]);
       expect(rows.length).toBe(1);
       expect(rows[0].event_type).toBe('submission_approved_unresolved');
     });
@@ -207,9 +211,7 @@ describe('Phase 1: Progression & Identity Foundation', () => {
 
   describe('3. API Endpoints: Owner Passport & Public Privacy Guard', () => {
     it('GET /api/v1/me/progression returns traveler passport with multi-track levels', async () => {
-      const res = await request(app)
-        .get('/api/v1/me/progression')
-        .set('Authorization', `Bearer ${tokenTraveler}`);
+      const res = await request(app).get('/api/v1/me/progression').set('Authorization', `Bearer ${tokenTraveler}`);
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -226,9 +228,7 @@ describe('Phase 1: Progression & Identity Foundation', () => {
     });
 
     it('GET /api/v1/me/visits returns paginated visits', async () => {
-      const res = await request(app)
-        .get('/api/v1/me/visits')
-        .set('Authorization', `Bearer ${tokenTraveler}`);
+      const res = await request(app).get('/api/v1/me/visits').set('Authorization', `Bearer ${tokenTraveler}`);
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -237,9 +237,7 @@ describe('Phase 1: Progression & Identity Foundation', () => {
     });
 
     it('GET /api/v1/collections returns curated trails and spot completion', async () => {
-      const res = await request(app)
-        .get('/api/v1/collections')
-        .set('Authorization', `Bearer ${tokenTraveler}`);
+      const res = await request(app).get('/api/v1/collections').set('Authorization', `Bearer ${tokenTraveler}`);
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -250,12 +248,10 @@ describe('Phase 1: Progression & Identity Foundation', () => {
     });
 
     it('GET /api/v1/users/:id/achievements returns public badges for public user', async () => {
-      await testDb.pool.query(
-        'INSERT INTO user_engagement_preferences(user_id,share_achievements) VALUES($1,TRUE)',
-        [travelerId],
-      );
-      const res = await request(app)
-        .get(`/api/v1/users/${travelerId}/achievements`);
+      await testDb.pool.query('INSERT INTO user_engagement_preferences(user_id,share_achievements) VALUES($1,TRUE)', [
+        travelerId,
+      ]);
+      const res = await request(app).get(`/api/v1/users/${travelerId}/achievements`);
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -264,8 +260,7 @@ describe('Phase 1: Progression & Identity Foundation', () => {
     });
 
     it('GET /api/v1/users/:id/achievements returns 404 for private user', async () => {
-      const res = await request(app)
-        .get(`/api/v1/users/${privateUserId}/achievements`);
+      const res = await request(app).get(`/api/v1/users/${privateUserId}/achievements`);
 
       expect(res.status).toBe(404);
       expect(res.body.success).toBe(false);
@@ -273,8 +268,7 @@ describe('Phase 1: Progression & Identity Foundation', () => {
     });
 
     it('GET /api/v1/users/:id/achievements returns 404 for synthetic test user to standard caller', async () => {
-      const res = await request(app)
-        .get(`/api/v1/users/${testUserId}/achievements`);
+      const res = await request(app).get(`/api/v1/users/${testUserId}/achievements`);
 
       expect(res.status).toBe(404);
       expect(res.body.success).toBe(false);

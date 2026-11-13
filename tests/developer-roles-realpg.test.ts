@@ -27,10 +27,13 @@ realPg('developer roles (real PostgreSQL)', () => {
     setPool(fixture.pool);
     db.attachDurabilityPool(fixture.pool);
     db.usersRepo.setPool(fixture.pool);
-    await fixture.pool.query(`INSERT INTO users(id,seed_id,display_name,email,role,admin_scope,wallet_address,is_test) VALUES
+    await fixture.pool.query(
+      `INSERT INTO users(id,seed_id,display_name,email,role,admin_scope,wallet_address,is_test) VALUES
       ($1::text,$1::text,'Zernan Dev',$1::text||'@example.test','admin','developer','0xFAdD476C10B6A93Bc26a226f9b7d8e8c556F9671',FALSE),
       ($2::text,$2::text,'Plain Admin',$2::text||'@example.test','admin',NULL,NULL,FALSE),
-      ($3::text,$3::text,'Traveler Ana',$3::text||'@example.test','user',NULL,NULL,FALSE)`, [dev, admin, traveler]);
+      ($3::text,$3::text,'Traveler Ana',$3::text||'@example.test','user',NULL,NULL,FALSE)`,
+      [dev, admin, traveler],
+    );
   });
 
   afterAll(async () => {
@@ -38,10 +41,17 @@ realPg('developer roles (real PostgreSQL)', () => {
   });
 
   it('tells each account whether it is a developer', async () => {
-    expect((await request(app).get('/api/v1/admin/developer/access').set(as(dev, 'admin'))).body.data.developer).toBe(true);
-    expect((await request(app).get('/api/v1/admin/developer/access').set(as(admin, 'admin'))).body.data.developer).toBe(false);
+    expect((await request(app).get('/api/v1/admin/developer/access').set(as(dev, 'admin'))).body.data.developer).toBe(
+      true,
+    );
+    expect((await request(app).get('/api/v1/admin/developer/access').set(as(admin, 'admin'))).body.data.developer).toBe(
+      false,
+    );
     // Travelers never reach admin paths at all.
-    expect((await request(app).get('/api/v1/admin/developer/access').set(as(traveler, 'user'))).body.data?.developer ?? false).toBe(false);
+    expect(
+      (await request(app).get('/api/v1/admin/developer/access').set(as(traveler, 'user'))).body.data?.developer ??
+        false,
+    ).toBe(false);
   });
 
   it('keeps role management away from ordinary admins and travelers', async () => {
@@ -49,7 +59,9 @@ realPg('developer roles (real PostgreSQL)', () => {
     expect(byAdmin.status).toBe(403);
     expect(byAdmin.body.error.code).toBe('DEVELOPER_ONLY');
     expect((await request(app).get('/api/v1/admin/developer/users').set(as(traveler, 'user'))).status).toBe(403);
-    const change = await request(app).put(`/api/v1/admin/developer/users/${traveler}/role`).set(as(admin, 'admin'))
+    const change = await request(app)
+      .put(`/api/v1/admin/developer/users/${traveler}/role`)
+      .set(as(admin, 'admin'))
       .send({ role: 'admin', admin_scope: 'developer', reason: 'Self-promotion attempt' });
     expect(change.status).toBe(403);
   });
@@ -68,15 +80,22 @@ realPg('developer roles (real PostgreSQL)', () => {
     const all = await request(app).get('/api/v1/admin/developer/users').set(as(dev, 'admin'));
     expect(all.status).toBe(200);
     expect(all.body.data.map((u: { id: string }) => u.id)).toEqual(expect.arrayContaining([dev, admin, traveler]));
-    const byWallet = await request(app).get('/api/v1/admin/developer/users')
-      .query({ q: '0xfadd476c10b6a93bc26a226f9b7d8e8c556f9671' }).set(as(dev, 'admin'));
+    const byWallet = await request(app)
+      .get('/api/v1/admin/developer/users')
+      .query({ q: '0xfadd476c10b6a93bc26a226f9b7d8e8c556f9671' })
+      .set(as(dev, 'admin'));
     expect(byWallet.body.data.map((u: { id: string }) => u.id)).toEqual([dev]);
-    const staff = await request(app).get('/api/v1/admin/developer/users').query({ role: 'staff', q: 'Traveler Ana' }).set(as(dev, 'admin'));
+    const staff = await request(app)
+      .get('/api/v1/admin/developer/users')
+      .query({ role: 'staff', q: 'Traveler Ana' })
+      .set(as(dev, 'admin'));
     expect(staff.body.data).toEqual([]);
   });
 
   it('changes a role with a reason, audits it, and the new admin passes admin checks', async () => {
-    const res = await request(app).put(`/api/v1/admin/developer/users/${traveler}/role`).set(as(dev, 'admin'))
+    const res = await request(app)
+      .put(`/api/v1/admin/developer/users/${traveler}/role`)
+      .set(as(dev, 'admin'))
       .send({ role: 'admin', admin_scope: 'platform', reason: 'Joins the tourism office team' });
     expect(res.status).toBe(200);
     expect(res.body.data).toMatchObject({ id: traveler, role: 'admin', admin_scope: 'platform' });
@@ -85,23 +104,38 @@ realPg('developer roles (real PostgreSQL)', () => {
     const adminOnly = await request(app).get('/api/v1/admin/developer/users').set(as(traveler, 'admin'));
     expect(adminOnly.status).toBe(403); // admin, but not a developer
     const audit = await request(app).get('/api/v1/admin/developer/role-audit').set(as(dev, 'admin'));
-    expect(audit.body.data[0]).toMatchObject({ old_role: 'user', new_role: 'admin', new_scope: 'platform', reason: 'Joins the tourism office team', actor_name: 'Zernan Dev', target_name: 'Traveler Ana' });
+    expect(audit.body.data[0]).toMatchObject({
+      old_role: 'user',
+      new_role: 'admin',
+      new_scope: 'platform',
+      reason: 'Joins the tourism office team',
+      actor_name: 'Zernan Dev',
+      target_name: 'Traveler Ana',
+    });
 
     // Scopes only apply to admins: demoting clears the scope.
-    const back = await request(app).put(`/api/v1/admin/developer/users/${traveler}/role`).set(as(dev, 'admin'))
+    const back = await request(app)
+      .put(`/api/v1/admin/developer/users/${traveler}/role`)
+      .set(as(dev, 'admin'))
       .send({ role: 'user', admin_scope: 'platform', reason: 'Left the team' });
     expect(back.body.data).toMatchObject({ role: 'user', admin_scope: null });
   });
 
   it('refuses self-changes, short reasons and unknown accounts', async () => {
-    const self = await request(app).put(`/api/v1/admin/developer/users/${dev}/role`).set(as(dev, 'admin'))
+    const self = await request(app)
+      .put(`/api/v1/admin/developer/users/${dev}/role`)
+      .set(as(dev, 'admin'))
       .send({ role: 'user', admin_scope: null, reason: 'Stepping down now' });
     expect(self.status).toBe(409);
     expect(self.body.error.code).toBe('CANNOT_CHANGE_SELF');
-    const short = await request(app).put(`/api/v1/admin/developer/users/${admin}/role`).set(as(dev, 'admin'))
+    const short = await request(app)
+      .put(`/api/v1/admin/developer/users/${admin}/role`)
+      .set(as(dev, 'admin'))
       .send({ role: 'user', admin_scope: null, reason: 'no' });
     expect(short.status).toBe(400);
-    const missing = await request(app).put('/api/v1/admin/developer/users/nobody-here/role').set(as(dev, 'admin'))
+    const missing = await request(app)
+      .put('/api/v1/admin/developer/users/nobody-here/role')
+      .set(as(dev, 'admin'))
       .send({ role: 'user', admin_scope: null, reason: 'Cleanup of accounts' });
     expect(missing.status).toBe(404);
   });
@@ -113,7 +147,9 @@ describe('SESSIONS_VALID_AFTER signs everyone out', () => {
   const user = { id: 'u-1', seed_id: 'u-1', role: 'user' };
 
   it('rejects sessions issued before the cutoff and accepts newer ones', () => {
-    const old = jwt.sign({ ...user, typ: 'session', iat: Math.floor(Date.now() / 1000) - 3600 }, env.JWT_SECRET, { expiresIn: '7d' });
+    const old = jwt.sign({ ...user, typ: 'session', iat: Math.floor(Date.now() / 1000) - 3600 }, env.JWT_SECRET, {
+      expiresIn: '7d',
+    });
     expect(verifySessionToken(old)).not.toBeNull();
     Reflect.set(env, 'SESSIONS_VALID_AFTER', new Date(Date.now() - 60_000).toISOString());
     expect(verifySessionToken(old)).toBeNull();

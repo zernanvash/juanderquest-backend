@@ -56,7 +56,7 @@ export function calculateCrowdMetrics(
   events: ActivityEventInput[],
   capacityBand: CrowdCapacityBand = 'medium',
   now: number | Date = Date.now(),
-  isTest = false
+  isTest = false,
 ): CrowdMetrics {
   const nowMs = typeof now === 'number' ? now : now.getTime();
   if (!Number.isFinite(nowMs)) {
@@ -99,11 +99,9 @@ export function calculateCrowdMetrics(
   const uniqueUsers = new Set(relevantEvents.map((item) => item.event.user_id)).size;
   const roundedScore = Number(score.toFixed(2));
 
-  const status: CrowdStatus =
-    roundedScore >= busy ? 'estimated_busy' : roundedScore >= moderate ? 'moderate' : 'quiet';
+  const status: CrowdStatus = roundedScore >= busy ? 'estimated_busy' : roundedScore >= moderate ? 'moderate' : 'quiet';
 
-  const confidence: CrowdConfidence =
-    uniqueUsers >= 8 ? 'high' : uniqueUsers >= 3 ? 'medium' : 'low';
+  const confidence: CrowdConfidence = uniqueUsers >= 8 ? 'high' : uniqueUsers >= 3 ? 'medium' : 'low';
 
   const maxTimestamp = Math.max(...relevantEvents.map((item) => item.eventTime));
 

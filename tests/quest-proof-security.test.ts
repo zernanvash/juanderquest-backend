@@ -13,25 +13,16 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
   const otherTravelerUserId = '66666666-6666-6666-6666-666666666666'; // Same-scope second traveler
   const qaUserId = '55555555-5555-5555-5555-555555555555'; // QA Evaluator
 
-  const travelerToken = jwt.sign(
-    { id: travelerUserId, seed_id: 'demo-traveler-1', role: 'user' },
-    env.JWT_SECRET
-  );
+  const travelerToken = jwt.sign({ id: travelerUserId, seed_id: 'demo-traveler-1', role: 'user' }, env.JWT_SECRET);
 
   const otherTravelerToken = jwt.sign(
     { id: otherTravelerUserId, seed_id: 'proof-security-traveler-2', role: 'user' },
-    env.JWT_SECRET
+    env.JWT_SECRET,
   );
 
-  const qaToken = jwt.sign(
-    { id: qaUserId, seed_id: 'qa-evaluator-1', role: 'qa' },
-    env.JWT_SECRET
-  );
+  const qaToken = jwt.sign({ id: qaUserId, seed_id: 'qa-evaluator-1', role: 'qa' }, env.JWT_SECRET);
 
-  const authorToken = jwt.sign(
-    { id: authorUserId, seed_id: 'demo-author-1', role: 'user' },
-    env.JWT_SECRET
-  );
+  const authorToken = jwt.sign({ id: authorUserId, seed_id: 'demo-author-1', role: 'user' }, env.JWT_SECRET);
 
   const testSpotId = `spot-security-test-${Date.now()}`;
   const testQuestId = `quest-security-test-${Date.now()}`;
@@ -47,11 +38,23 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
     // The legacy 4444 account is synthetic; using it against this live-scope
     // quest now correctly fails at the scope gate before challenge validation.
     // A separate same-scope actor keeps these challenge assertions meaningful.
-    db.users.push({ ...db.findUserById(travelerUserId)!, id: otherTravelerUserId,
-      seed_id: 'proof-security-traveler-2', display_name: 'Proof Security Traveler',
-      email: 'proof-security-traveler@example.invalid', handle: 'proofsecuritytraveler',
-      is_test: false });
-    db.users.push({ id: qaUserId, seed_id: 'qa-evaluator-1', role: 'qa', display_name: 'QA Evaluator', email: 'qa@example.invalid', is_test: true } as any);
+    db.users.push({
+      ...db.findUserById(travelerUserId)!,
+      id: otherTravelerUserId,
+      seed_id: 'proof-security-traveler-2',
+      display_name: 'Proof Security Traveler',
+      email: 'proof-security-traveler@example.invalid',
+      handle: 'proofsecuritytraveler',
+      is_test: false,
+    });
+    db.users.push({
+      id: qaUserId,
+      seed_id: 'qa-evaluator-1',
+      role: 'qa',
+      display_name: 'QA Evaluator',
+      email: 'qa@example.invalid',
+      is_test: true,
+    } as any);
     // Register spot authored by Juan Dela Cruz
     spotStore.spots.push({
       id: testSpotId,
@@ -147,18 +150,14 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
     });
 
     it('allows the spot author to view marker_code on GET /quests/:id', async () => {
-      const res = await request(app)
-        .get(`/api/v1/quests/${testQuestId}`)
-        .set('Authorization', `Bearer ${authorToken}`);
+      const res = await request(app).get(`/api/v1/quests/${testQuestId}`).set('Authorization', `Bearer ${authorToken}`);
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.data.marker_code).toBe(secretMarkerCode); // Author allowed
     });
 
     it('allows QA evaluators to view marker_code on GET /quests/:id', async () => {
-      const res = await request(app)
-        .get(`/api/v1/quests/${testQuestId}`)
-        .set('Authorization', `Bearer ${qaToken}`);
+      const res = await request(app).get(`/api/v1/quests/${testQuestId}`).set('Authorization', `Bearer ${qaToken}`);
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.data.marker_code).toBe(secretMarkerCode); // QA allowed
@@ -224,20 +223,17 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
     it('rejects forged challenge token with 401 INVALID_CHALLENGE', async () => {
       const forgedToken = jwt.sign(
         { sub: 'quest_challenge', user_id: travelerUserId, quest_id: testQuestId, nonce: randomUUID() },
-        'WRONG_FORGED_SECRET'
+        'WRONG_FORGED_SECRET',
       );
 
-      const res = await request(app)
-        .post('/api/v1/submissions')
-        .set('Authorization', `Bearer ${travelerToken}`)
-        .send({
-          idempotency_key: randomUUID(),
-          quest_id: testQuestId,
-          challenge_token: forgedToken,
-          captured_lat: questLat,
-          captured_lng: questLng,
-          captured_accuracy: 5,
-        });
+      const res = await request(app).post('/api/v1/submissions').set('Authorization', `Bearer ${travelerToken}`).send({
+        idempotency_key: randomUUID(),
+        quest_id: testQuestId,
+        challenge_token: forgedToken,
+        captured_lat: questLat,
+        captured_lng: questLng,
+        captured_accuracy: 5,
+      });
 
       expect(res.status).toBe(401);
       expect(res.body.success).toBe(false);
@@ -254,20 +250,17 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
           iat: Math.floor(Date.now() / 1000) - 1000,
           exp: Math.floor(Date.now() / 1000) - 100, // expired 100s ago
         },
-        env.JWT_SECRET
+        env.JWT_SECRET,
       );
 
-      const res = await request(app)
-        .post('/api/v1/submissions')
-        .set('Authorization', `Bearer ${travelerToken}`)
-        .send({
-          idempotency_key: randomUUID(),
-          quest_id: testQuestId,
-          challenge_token: expiredToken,
-          captured_lat: questLat,
-          captured_lng: questLng,
-          captured_accuracy: 5,
-        });
+      const res = await request(app).post('/api/v1/submissions').set('Authorization', `Bearer ${travelerToken}`).send({
+        idempotency_key: randomUUID(),
+        quest_id: testQuestId,
+        challenge_token: expiredToken,
+        captured_lat: questLat,
+        captured_lng: questLng,
+        captured_accuracy: 5,
+      });
 
       expect(res.status).toBe(400);
       expect(res.body.success).toBe(false);
@@ -307,17 +300,14 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
       const challengeToken = challengeRes.body.data.challenge_token;
 
       // Submitted for otherQuestId
-      const res = await request(app)
-        .post('/api/v1/submissions')
-        .set('Authorization', `Bearer ${travelerToken}`)
-        .send({
-          idempotency_key: randomUUID(),
-          quest_id: otherQuestId,
-          challenge_token: challengeToken,
-          captured_lat: 16.38,
-          captured_lng: 119.89,
-          captured_accuracy: 5,
-        });
+      const res = await request(app).post('/api/v1/submissions').set('Authorization', `Bearer ${travelerToken}`).send({
+        idempotency_key: randomUUID(),
+        quest_id: otherQuestId,
+        challenge_token: challengeToken,
+        captured_lat: 16.38,
+        captured_lng: 119.89,
+        captured_accuracy: 5,
+      });
 
       expect(res.status).toBe(400);
       expect(res.body.success).toBe(false);
@@ -369,17 +359,14 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
       const challengeToken = challengeRes.body.data.challenge_token;
 
       // Coordinate in Manila (~200 km away)
-      const res = await request(app)
-        .post('/api/v1/submissions')
-        .set('Authorization', `Bearer ${travelerToken}`)
-        .send({
-          idempotency_key: randomUUID(),
-          quest_id: testQuestId,
-          challenge_token: challengeToken,
-          captured_lat: 14.5995,
-          captured_lng: 120.9842,
-          captured_accuracy: 5,
-        });
+      const res = await request(app).post('/api/v1/submissions').set('Authorization', `Bearer ${travelerToken}`).send({
+        idempotency_key: randomUUID(),
+        quest_id: testQuestId,
+        challenge_token: challengeToken,
+        captured_lat: 14.5995,
+        captured_lng: 120.9842,
+        captured_accuracy: 5,
+      });
 
       expect(res.status).toBe(422);
       expect(res.body.success).toBe(false);
@@ -498,17 +485,14 @@ describe('Phase 1: Quest Truth and Proof-Security Repair (P0)', () => {
       const challengeToken = challengeRes.body.data.challenge_token;
 
       const submit = () =>
-        request(app)
-          .post('/api/v1/submissions')
-          .set('Authorization', `Bearer ${otherTravelerToken}`)
-          .send({
-            idempotency_key: randomUUID(),
-            quest_id: testQuestId,
-            challenge_token: challengeToken,
-            captured_lat: questLat,
-            captured_lng: questLng,
-            captured_accuracy: 5,
-          });
+        request(app).post('/api/v1/submissions').set('Authorization', `Bearer ${otherTravelerToken}`).send({
+          idempotency_key: randomUUID(),
+          quest_id: testQuestId,
+          challenge_token: challengeToken,
+          captured_lat: questLat,
+          captured_lng: questLng,
+          captured_accuracy: 5,
+        });
 
       const results = await Promise.all([submit(), submit()]);
       const statuses = results.map((r) => r.status).sort();

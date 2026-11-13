@@ -11,14 +11,22 @@ const clearApiSubmissionFixture = async () => {
   let isolatedTestDatabase = false;
   try {
     const databaseUrl = new URL(env.DATABASE_URL);
-    isolatedTestDatabase = env.NODE_ENV === 'test' && ['localhost', '127.0.0.1', '::1'].includes(databaseUrl.hostname) && /(?:^|_)test$/i.test(databaseUrl.pathname.slice(1));
+    isolatedTestDatabase =
+      env.NODE_ENV === 'test' &&
+      ['localhost', '127.0.0.1', '::1'].includes(databaseUrl.hostname) &&
+      /(?:^|_)test$/i.test(databaseUrl.pathname.slice(1));
   } catch {
     isolatedTestDatabase = false;
   }
   if (pool && isolatedTestDatabase) {
-    await pool.query('DELETE FROM submissions WHERE user_id = $1 AND quest_id = $2', [userId, 'q1111111-1111-1111-1111-111111111111']);
+    await pool.query('DELETE FROM submissions WHERE user_id = $1 AND quest_id = $2', [
+      userId,
+      'q1111111-1111-1111-1111-111111111111',
+    ]);
   }
-  db.submissions = db.submissions.filter((submission) => !(submission.user_id === userId && submission.quest_id === 'q1111111-1111-1111-1111-111111111111'));
+  db.submissions = db.submissions.filter(
+    (submission) => !(submission.user_id === userId && submission.quest_id === 'q1111111-1111-1111-1111-111111111111'),
+  );
 };
 
 describe('JuanderQuest Backend REST API & QA Rules', () => {
@@ -35,16 +43,41 @@ describe('JuanderQuest Backend REST API & QA Rules', () => {
     const merchantId = 'api-test-live-merchant';
     const pool = getPool();
     if (pool) {
-      await pool.query(`INSERT INTO merchants(id,name,location,description) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO NOTHING`, [merchantId, 'API Test Merchant', 'Pangasinan', 'Test merchant']);
-      await pool.query(`INSERT INTO vouchers(id,merchant_id,title,description,cost_points,is_active,availability) VALUES($1,$3,$4,$5,100,TRUE,'live'),($2,$3,$6,$5,999999,TRUE,'live') ON CONFLICT(id) DO UPDATE SET availability='live',is_active=TRUE,cost_points=EXCLUDED.cost_points`, [liveVoucherId, expensiveVoucherId, merchantId, 'API Test Voucher', 'Test voucher', 'Expensive Test Voucher']);
+      await pool.query(
+        `INSERT INTO merchants(id,name,location,description) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO NOTHING`,
+        [merchantId, 'API Test Merchant', 'Pangasinan', 'Test merchant'],
+      );
+      await pool.query(
+        `INSERT INTO vouchers(id,merchant_id,title,description,cost_points,is_active,availability) VALUES($1,$3,$4,$5,100,TRUE,'live'),($2,$3,$6,$5,999999,TRUE,'live') ON CONFLICT(id) DO UPDATE SET availability='live',is_active=TRUE,cost_points=EXCLUDED.cost_points`,
+        [liveVoucherId, expensiveVoucherId, merchantId, 'API Test Voucher', 'Test voucher', 'Expensive Test Voucher'],
+      );
     }
     if (!db.merchants.some((merchant) => merchant.id === merchantId)) {
-      db.merchants.push({ id: merchantId, name: 'API Test Merchant', location: 'Pangasinan', description: 'Test merchant', created_at: new Date().toISOString() });
+      db.merchants.push({
+        id: merchantId,
+        name: 'API Test Merchant',
+        location: 'Pangasinan',
+        description: 'Test merchant',
+        created_at: new Date().toISOString(),
+      });
     }
-    for (const [id, title, cost_points] of [[liveVoucherId, 'API Test Voucher', 100], [expensiveVoucherId, 'Expensive Test Voucher', 999999]] as const) {
+    for (const [id, title, cost_points] of [
+      [liveVoucherId, 'API Test Voucher', 100],
+      [expensiveVoucherId, 'Expensive Test Voucher', 999999],
+    ] as const) {
       const voucher = db.vouchers.find((item) => item.id === id);
-      if (voucher) Object.assign(voucher, { merchant_id: merchantId, title, cost_points, is_active: true, availability: 'live' });
-      else db.vouchers.push({ id, merchant_id: merchantId, title, description: 'Test voucher', cost_points, fiat_floor_php: 50, is_active: true } as any);
+      if (voucher)
+        Object.assign(voucher, { merchant_id: merchantId, title, cost_points, is_active: true, availability: 'live' });
+      else
+        db.vouchers.push({
+          id,
+          merchant_id: merchantId,
+          title,
+          description: 'Test voucher',
+          cost_points,
+          fiat_floor_php: 50,
+          is_active: true,
+        } as any);
     }
   }, 120_000);
 
@@ -52,7 +85,9 @@ describe('JuanderQuest Backend REST API & QA Rules', () => {
     Reflect.set(env, 'MARKETPLACE_ENABLED', originalMarketplaceAvailability);
     const pool = getPool();
     if (pool) {
-      await pool.query('DELETE FROM redemptions WHERE voucher_id = ANY($1::text[])', [[liveVoucherId, expensiveVoucherId]]);
+      await pool.query('DELETE FROM redemptions WHERE voucher_id = ANY($1::text[])', [
+        [liveVoucherId, expensiveVoucherId],
+      ]);
       await pool.query('DELETE FROM vouchers WHERE id = ANY($1::text[])', [[liveVoucherId, expensiveVoucherId]]);
       await pool.query("DELETE FROM merchants WHERE id='api-test-live-merchant'");
     }
@@ -81,7 +116,7 @@ describe('JuanderQuest Backend REST API & QA Rules', () => {
     expect(res.body.data.every((spot: any) => spot.distance_km <= 10)).toBe(true);
   });
 
-it('filters spots by category and optional quest availability', async () => {
+  it('filters spots by category and optional quest availability', async () => {
     const res = await request(app).get('/api/v1/spots?categories=nature_outdoors&has_quest=true');
     expect(res.status).toBe(200);
     expect(res.body.data.length).toBeGreaterThan(0);
@@ -91,9 +126,19 @@ it('filters spots by category and optional quest availability', async () => {
   it('allows duplicate community spots within 50 meters and auto-publishes them', async () => {
     const login = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'user-1' });
     const res = await request(app).post('/api/v1/spots').set('Authorization', `Bearer ${login.body.data.token}`).send({
-      name: 'Hundred Islands Park', description: 'A duplicate test entry close to the known destination pin.',
-      category: 'nature_outdoors', subcategory: 'park', municipality: 'Alaminos City', address: 'Lucap',
-      gps_lat: 16.20631, gps_lng: 119.97061, tags: [], price_level: 1, hours: {}, amenities: [], image_url: '',
+      name: 'Hundred Islands Park',
+      description: 'A duplicate test entry close to the known destination pin.',
+      category: 'nature_outdoors',
+      subcategory: 'park',
+      municipality: 'Alaminos City',
+      address: 'Lucap',
+      gps_lat: 16.20631,
+      gps_lng: 119.97061,
+      tags: [],
+      price_level: 1,
+      hours: {},
+      amenities: [],
+      image_url: '',
     });
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
@@ -118,8 +163,12 @@ it('filters spots by category and optional quest availability', async () => {
     expect(res.body.data.status).toBe('requires_account_completion');
     expect(res.body.data.token).toBeUndefined();
     const done = await request(app).post('/api/v1/auth/wallet/complete-registration').send({
-      wallet_onboarding_grant: res.body.data.wallet_onboarding_grant, wallet_address: address,
-      email: 'dev-wallet-42@example.com', password: 'DevWallet123', age_eligibility_declared: true, terms_accepted: true,
+      wallet_onboarding_grant: res.body.data.wallet_onboarding_grant,
+      wallet_address: address,
+      email: 'dev-wallet-42@example.com',
+      password: 'DevWallet123',
+      age_eligibility_declared: true,
+      terms_accepted: true,
     });
     expect(done.status).toBe(200);
     expect(done.body.data.token).toBeDefined();
@@ -135,9 +184,7 @@ it('filters spots by category and optional quest availability', async () => {
   });
 
   it('POST /api/v1/auth/demo-login for user-1', async () => {
-    const res = await request(app)
-      .post('/api/v1/auth/demo-login')
-      .send({ seed_id: 'user-1' });
+    const res = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'user-1' });
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -147,9 +194,7 @@ it('filters spots by category and optional quest availability', async () => {
   });
 
   it('POST /api/v1/auth/demo-login for admin-1', async () => {
-    const res = await request(app)
-      .post('/api/v1/auth/demo-login')
-      .send({ seed_id: 'admin-1' });
+    const res = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'admin-1' });
 
     expect(res.status).toBe(200);
     expect(res.body.data.user.role).toBe('admin');
@@ -158,17 +203,14 @@ it('filters spots by category and optional quest availability', async () => {
 
   it('Reject submission with HTTP 422 if GPS distance exceeds radius', async () => {
     await clearApiSubmissionFixture();
-    const res = await request(app)
-      .post('/api/v1/submissions')
-      .set('Authorization', `Bearer ${userToken}`)
-      .send({
-        idempotency_key: 'b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e',
-        quest_id: 'q1111111-1111-1111-1111-111111111111',
-        scanned_marker_code: 'MARKER_HUNDRED_ISLANDS_01',
-        captured_lat: 16.5000, // Very far from 16.2063
-        captured_lng: 119.9706,
-        captured_accuracy: 5.0,
-      });
+    const res = await request(app).post('/api/v1/submissions').set('Authorization', `Bearer ${userToken}`).send({
+      idempotency_key: 'b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e',
+      quest_id: 'q1111111-1111-1111-1111-111111111111',
+      scanned_marker_code: 'MARKER_HUNDRED_ISLANDS_01',
+      captured_lat: 16.5, // Very far from 16.2063
+      captured_lng: 119.9706,
+      captured_accuracy: 5.0,
+    });
 
     expect(res.status).toBe(422);
     expect(res.body.error.code).toBe('OUT_OF_RANGE');
@@ -176,17 +218,14 @@ it('filters spots by category and optional quest availability', async () => {
 
   it('POST /api/v1/submissions succeeds within valid GPS radius', async () => {
     await clearApiSubmissionFixture();
-    const res = await request(app)
-      .post('/api/v1/submissions')
-      .set('Authorization', `Bearer ${userToken}`)
-      .send({
-        idempotency_key: testIdempotencyKey,
-        quest_id: 'q1111111-1111-1111-1111-111111111111',
-        scanned_marker_code: 'MARKER_HUNDRED_ISLANDS_01',
-        captured_lat: 16.20635, // ~5 meters offset
-        captured_lng: 119.9706,
-        captured_accuracy: 4.5,
-      });
+    const res = await request(app).post('/api/v1/submissions').set('Authorization', `Bearer ${userToken}`).send({
+      idempotency_key: testIdempotencyKey,
+      quest_id: 'q1111111-1111-1111-1111-111111111111',
+      scanned_marker_code: 'MARKER_HUNDRED_ISLANDS_01',
+      captured_lat: 16.20635, // ~5 meters offset
+      captured_lng: 119.9706,
+      captured_accuracy: 4.5,
+    });
 
     expect(res.status).toBe(201);
     expect(res.body.data.status).toBe('pending');
@@ -211,9 +250,7 @@ it('filters spots by category and optional quest availability', async () => {
     expect(approveRes.status).toBe(200);
     expect(approveRes.body.data.status).toBe('approved');
 
-    const profileRes = await request(app)
-      .get('/api/v1/auth/me')
-      .set('Authorization', `Bearer ${userToken}`);
+    const profileRes = await request(app).get('/api/v1/auth/me').set('Authorization', `Bearer ${userToken}`);
     expect(profileRes.body.data.demo_points).toBe(150); // 100 initial + 50
   });
 
@@ -226,33 +263,26 @@ it('filters spots by category and optional quest availability', async () => {
     expect(reApproveRes.status).toBe(200);
     expect(reApproveRes.body.data.awarded_points).toBe(0);
 
-    const profileRes = await request(app)
-      .get('/api/v1/auth/me')
-      .set('Authorization', `Bearer ${userToken}`);
+    const profileRes = await request(app).get('/api/v1/auth/me').set('Authorization', `Bearer ${userToken}`);
     expect(profileRes.body.data.demo_points).toBe(150); // Remains 150
   });
 
   it('Reject duplicate submission attempt for already completed quest with 409 ALREADY_COMPLETED', async () => {
-    const res = await request(app)
-      .post('/api/v1/submissions')
-      .set('Authorization', `Bearer ${userToken}`)
-      .send({
-        idempotency_key: 'c3d4e5f6-a7b8-9c0d-1e2f-3a4b5c6d7e8f',
-        quest_id: 'q1111111-1111-1111-1111-111111111111',
-        scanned_marker_code: 'MARKER_HUNDRED_ISLANDS_01',
-        captured_lat: 16.2063,
-        captured_lng: 119.9706,
-        captured_accuracy: 2.0,
-      });
+    const res = await request(app).post('/api/v1/submissions').set('Authorization', `Bearer ${userToken}`).send({
+      idempotency_key: 'c3d4e5f6-a7b8-9c0d-1e2f-3a4b5c6d7e8f',
+      quest_id: 'q1111111-1111-1111-1111-111111111111',
+      scanned_marker_code: 'MARKER_HUNDRED_ISLANDS_01',
+      captured_lat: 16.2063,
+      captured_lng: 119.9706,
+      captured_accuracy: 2.0,
+    });
 
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('ALREADY_COMPLETED');
   });
 
   it('FORBIDDEN for regular user accessing admin routes', async () => {
-    const res = await request(app)
-      .get('/api/v1/admin/submissions')
-      .set('Authorization', `Bearer ${userToken}`);
+    const res = await request(app).get('/api/v1/admin/submissions').set('Authorization', `Bearer ${userToken}`);
 
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
@@ -266,15 +296,12 @@ it('filters spots by category and optional quest availability', async () => {
   });
 
   it('POST /api/v1/proposals returns 410 FEATURE_RETIRED directing to JuanChoice', async () => {
-    const res = await request(app)
-      .post('/api/v1/proposals')
-      .set('Authorization', `Bearer ${userToken}`)
-      .send({
-        title: 'Balingasay River Eco Cruise',
-        location_name: 'Bolinao, Pangasinan',
-        category: 'eco',
-        description: 'Explore the cleanest river in Region 1 with mangrove kayaking.',
-      });
+    const res = await request(app).post('/api/v1/proposals').set('Authorization', `Bearer ${userToken}`).send({
+      title: 'Balingasay River Eco Cruise',
+      location_name: 'Bolinao, Pangasinan',
+      category: 'eco',
+      description: 'Explore the cleanest river in Region 1 with mangrove kayaking.',
+    });
 
     expect(res.status).toBe(410);
     expect(res.body.success).toBe(false);
@@ -353,9 +380,7 @@ it('filters spots by category and optional quest availability', async () => {
   });
 
   it('admin submission listing includes quest_radius_meters', async () => {
-    const res = await request(app)
-      .get('/api/v1/admin/submissions')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const res = await request(app).get('/api/v1/admin/submissions').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.data.length).toBeGreaterThan(0);
     for (const submission of res.body.data) {
@@ -383,7 +408,11 @@ it('filters spots by category and optional quest availability', async () => {
     expect(res.status).toBe(200);
     expect(res.body.data.length).toBeGreaterThanOrEqual(3);
     expect(res.body.data[0]).toHaveProperty('merchant_name');
-    expect(res.body.data.filter((voucher: any) => ['v1', 'v2', 'v3'].includes(voucher.id)).every((voucher: any) => voucher.availability === 'preview' && voucher.redeemable === false)).toBe(true);
+    expect(
+      res.body.data
+        .filter((voucher: any) => ['v1', 'v2', 'v3'].includes(voucher.id))
+        .every((voucher: any) => voucher.availability === 'preview' && voucher.redeemable === false),
+    ).toBe(true);
   });
 
   it('voucher redemption deducts points, replays idempotently, and blocks repeat with a new key', async () => {
@@ -467,7 +496,10 @@ it('returns explainable reviewed alternatives for a public spot', async () => {
 
 it('does not count an unverified visit as crowd activity', async () => {
   const login = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'user-1' });
-  const res = await request(app).post('/api/v1/spots/spot-hundred-islands/interactions').set('Authorization', `Bearer ${login.body.data.token}`).send({ type: 'visit' });
+  const res = await request(app)
+    .post('/api/v1/spots/spot-hundred-islands/interactions')
+    .set('Authorization', `Bearer ${login.body.data.token}`)
+    .send({ type: 'visit' });
   expect(res.status).toBe(422);
   expect(res.body.error.code).toBe('VISIT_NOT_VERIFIED');
 });

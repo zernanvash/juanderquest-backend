@@ -121,17 +121,13 @@ describe('Plan 72 Phase 4: Per-Account Login Throttle', () => {
 
       // 10 invalid login attempts for non-existent account
       for (let i = 0; i < 10; i++) {
-        const res = await request(app)
-          .post('/api/v1/auth/login')
-          .send({ email, password: 'wrongpassword' });
+        const res = await request(app).post('/api/v1/auth/login').send({ email, password: 'wrongpassword' });
         expect(res.status).toBe(401);
         expect(res.body.error.code).toBe('INVALID_CREDENTIALS');
       }
 
       // 11th attempt is throttled, returning the exact same 401 status and code
-      const throttledRes = await request(app)
-        .post('/api/v1/auth/login')
-        .send({ email, password: 'wrongpassword' });
+      const throttledRes = await request(app).post('/api/v1/auth/login').send({ email, password: 'wrongpassword' });
       expect(throttledRes.status).toBe(401);
       expect(throttledRes.body.error.code).toBe('INVALID_CREDENTIALS');
       expect(throttledRes.body.error.message).toBe('Invalid email or password.');

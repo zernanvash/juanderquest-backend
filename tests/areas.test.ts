@@ -30,10 +30,18 @@ describe('Admin Areas & Geometry Utilities (Plan 45 Phase 2)', () => {
     it('handles polygon with holes', () => {
       // Outer square [10, 10] to [20, 20], hole from [13, 13] to [17, 17]
       const outer: [number, number][] = [
-        [10, 10], [20, 10], [20, 20], [10, 20], [10, 10]
+        [10, 10],
+        [20, 10],
+        [20, 20],
+        [10, 20],
+        [10, 10],
       ];
       const hole: [number, number][] = [
-        [13, 13], [17, 13], [17, 17], [13, 17], [13, 13]
+        [13, 13],
+        [17, 13],
+        [17, 17],
+        [13, 17],
+        [13, 13],
       ];
 
       expect(pointInPolygon(11, 11, [outer, hole])).toBe(true);
@@ -353,7 +361,10 @@ describe('Admin Areas & Geometry Utilities (Plan 45 Phase 2)', () => {
              '{"type":"Polygon","coordinates":[[[120.04,16.04],[120.06,16.04],[120.06,16.06],[120.04,16.06],[120.04,16.04]]]}'::jsonb)
         `);
         await ensureAreaCache(testDb.pool, true);
-        expect(matchSpotToAreas(16.05, 120.05, 'Cachetown')).toEqual({ townAreaId: 'cachetown', barangayAreaId: 'cachetown--centro' });
+        expect(matchSpotToAreas(16.05, 120.05, 'Cachetown')).toEqual({
+          townAreaId: 'cachetown',
+          barangayAreaId: 'cachetown--centro',
+        });
         expect(matchSpotToAreas(16.09, 120.09, 'Cachetown')).toEqual({ townAreaId: 'cachetown', barangayAreaId: null });
       } finally {
         setPool(null as any);
@@ -362,4 +373,3 @@ describe('Admin Areas & Geometry Utilities (Plan 45 Phase 2)', () => {
     });
   });
 });
-

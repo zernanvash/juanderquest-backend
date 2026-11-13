@@ -22,13 +22,14 @@ describe('response lifecycle timing diagnostic', () => {
     statusCode: 200,
   });
   const sample = (reqId: string, totalClientMs: number): RequestTimingSample => ({
-    reqId, kind: 'overview', status: 200, totalClientMs,
+    reqId,
+    kind: 'overview',
+    status: 200,
+    totalClientMs,
   });
 
   it('reports ordinary response order without anomalies', () => {
-    const result = summarizeResponseLifecycleDiagnostics(
-      [sample('safe', 110)], new Map([['safe', record(80)]])
-    );
+    const result = summarizeResponseLifecycleDiagnostics([sample('safe', 110)], new Map([['safe', record(80)]]));
     expect(result.matched_samples).toBe(1);
     expect(result.client_below_prefinish_count).toBe(0);
     expect(result.client_below_finish_count).toBe(0);
@@ -37,7 +38,8 @@ describe('response lifecycle timing diagnostic', () => {
 
   it('keeps delayed finish separate from a client shorter than prefinish', () => {
     const result = summarizeResponseLifecycleDiagnostics(
-      [sample('delayed', 70)], new Map([['delayed', record(60, 100)]])
+      [sample('delayed', 70)],
+      new Map([['delayed', record(60, 100)]]),
     );
     expect(result.client_below_finish_count).toBe(1);
     expect(result.client_below_prefinish_count).toBe(0);
@@ -47,7 +49,8 @@ describe('response lifecycle timing diagnostic', () => {
 
   it('detects a client duration shorter than ingress-to-prefinish', () => {
     const result = summarizeResponseLifecycleDiagnostics(
-      [sample('too-short', 50)], new Map([['too-short', record(80, 100)]])
+      [sample('too-short', 50)],
+      new Map([['too-short', record(80, 100)]]),
     );
     expect(result.client_below_prefinish_count).toBe(1);
     expect(result.client_below_finish_count).toBe(1);
@@ -62,7 +65,7 @@ describe('response lifecycle timing diagnostic', () => {
         ['nan', record(Number.NaN)],
         ['reversed', record(5)],
         ['after', record(110)],
-      ])
+      ]),
     );
     expect(result.missing_prefinish_count).toBe(1);
     expect(result.invalid_prefinish_count).toBe(2);
@@ -73,7 +76,7 @@ describe('response lifecycle timing diagnostic', () => {
   it('detects invalid server clocks and never prints request identifiers', () => {
     const result = summarizeResponseLifecycleDiagnostics(
       [sample('private-request-id', 120)],
-      new Map([['private-request-id', { ...record(80), serverFinish: Number.NaN }]])
+      new Map([['private-request-id', { ...record(80), serverFinish: Number.NaN }]]),
     );
     expect(result.invalid_server_clock_count).toBe(1);
     expect(() => assertResponseLifecycleDiagnosticIntegrity('reads', result)).toThrow(/invalid server clocks/);
@@ -93,7 +96,11 @@ describe('child negative-duration-gap diagnostic', () => {
   it('returns a bounded empty summary when no child duration is shorter', () => {
     const samples: RequestTimingSample[] = [{ reqId: 'clean', kind: 'overview', status: 200, totalClientMs: 101 }];
     expect(summarizeNegativeDurationGaps(samples, new Map([['clean', record(100)]]))).toEqual({
-      count: 0, min_ms: 0, p50_ms: 0, p95_ms: 0, max_ms: 0,
+      count: 0,
+      min_ms: 0,
+      p50_ms: 0,
+      p95_ms: 0,
+      max_ms: 0,
     });
   });
 
@@ -104,9 +111,13 @@ describe('child negative-duration-gap diagnostic', () => {
       { reqId: 'c', kind: 'overview', status: 200, totalClientMs: 95 },
       { reqId: 'd', kind: 'overview', status: 200, totalClientMs: 92 },
     ];
-    const timings = new Map(samples.map(sample => [sample.reqId, record(100)]));
+    const timings = new Map(samples.map((sample) => [sample.reqId, record(100)]));
     expect(summarizeNegativeDurationGaps(samples, timings)).toEqual({
-      count: 4, min_ms: 0.125, p50_ms: 3, p95_ms: 8, max_ms: 8,
+      count: 4,
+      min_ms: 0.125,
+      p50_ms: 3,
+      p95_ms: 8,
+      max_ms: 8,
     });
   });
 
@@ -120,17 +131,30 @@ describe('child negative-duration-gap diagnostic', () => {
       { reqId: 'timestamped', kind: 'overview', status: 200, clientStart: 0, totalClientMs: 1 },
     ];
     const timings = new Map<string, ServerTimingRecord>([
-      ['valid', record(100)], ['mismatch', record(100, 500)],
-      ['nan', record(100)], ['negative', record(100)], ['timestamped', record(100)],
+      ['valid', record(100)],
+      ['mismatch', record(100, 500)],
+      ['nan', record(100)],
+      ['negative', record(100)],
+      ['timestamped', record(100)],
     ]);
     expect(summarizeNegativeDurationGaps(samples, timings)).toEqual({
-      count: 1, min_ms: 1, p50_ms: 1, p95_ms: 1, max_ms: 1,
+      count: 1,
+      min_ms: 1,
+      p50_ms: 1,
+      p95_ms: 1,
+      max_ms: 1,
     });
     const correlated = computeCorrelatedSegmentSummary(samples, timings);
     expect(correlated.invalid_reason_counts.client_shorter_than_server).toBe(1);
-    expect(() => assertCapacityPopulationIntegrity([{
-      name: 'all_reads', unmatched_count: correlated.unmatched_count, invalid_count: correlated.invalid_count,
-    }])).toThrow(/Integrity check failed/);
+    expect(() =>
+      assertCapacityPopulationIntegrity([
+        {
+          name: 'all_reads',
+          unmatched_count: correlated.unmatched_count,
+          invalid_count: correlated.invalid_count,
+        },
+      ]),
+    ).toThrow(/Integrity check failed/);
   });
 });
 
@@ -142,7 +166,7 @@ describe('JuanChoice capacity correlated latency segments pure calculation helpe
     });
 
     it('computes exact percentiles for single and multiple elements', () => {
-      expect(computePercentile([42], 0.50)).toBe(42);
+      expect(computePercentile([42], 0.5)).toBe(42);
       expect(computePercentile([42], 0.95)).toBe(42);
 
       const data = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
@@ -217,7 +241,7 @@ describe('JuanChoice capacity correlated latency segments pure calculation helpe
         totalClientMs: 50,
       };
       expect(correlateRequestSample(nanStart, serverRecord)).toEqual(
-        expect.objectContaining({ isValid: false, invalidReason: 'non_finite_timing_value' })
+        expect.objectContaining({ isValid: false, invalidReason: 'non_finite_timing_value' }),
       );
 
       const infDuration: RequestTimingSample = {
@@ -228,7 +252,7 @@ describe('JuanChoice capacity correlated latency segments pure calculation helpe
         totalClientMs: Infinity,
       };
       expect(correlateRequestSample(infDuration, serverRecord)).toEqual(
-        expect.objectContaining({ isValid: false, invalidReason: 'non_finite_timing_value' })
+        expect.objectContaining({ isValid: false, invalidReason: 'non_finite_timing_value' }),
       );
 
       const infServerRecord: ServerTimingRecord = {
@@ -246,7 +270,7 @@ describe('JuanChoice capacity correlated latency segments pure calculation helpe
         totalClientMs: 40,
       };
       expect(correlateRequestSample(validClient, infServerRecord)).toEqual(
-        expect.objectContaining({ isValid: false, invalidReason: 'non_finite_timing_value' })
+        expect.objectContaining({ isValid: false, invalidReason: 'non_finite_timing_value' }),
       );
     });
 
@@ -492,9 +516,23 @@ describe('JuanChoice capacity correlated latency segments pure calculation helpe
         // Valid
         { reqId: 'ok-1', kind: 'ballot', status: 200, clientStart: 100, clientBodyConsumed: 300, totalClientMs: 200 },
         // Unmatched
-        { reqId: 'missing', kind: 'ballot', status: 200, clientStart: 100, clientBodyConsumed: 300, totalClientMs: 200 },
+        {
+          reqId: 'missing',
+          kind: 'ballot',
+          status: 200,
+          clientStart: 100,
+          clientBodyConsumed: 300,
+          totalClientMs: 200,
+        },
         // Invalid order
-        { reqId: 'inverted', kind: 'ballot', status: 200, clientStart: 500, clientBodyConsumed: 600, totalClientMs: 100 },
+        {
+          reqId: 'inverted',
+          kind: 'ballot',
+          status: 200,
+          clientStart: 500,
+          clientBodyConsumed: 600,
+          totalClientMs: 100,
+        },
       ];
 
       const servers = new Map<string, ServerTimingRecord>([
@@ -572,11 +610,17 @@ describe('JuanChoice capacity correlated latency segments pure calculation helpe
 
     it('keeps finish-based p95 and counts a between-events sample in the valid population', () => {
       const request: RequestTimingSample = {
-        reqId: 'private-timing-request', kind: 'overview', status: 200, totalClientMs: 150,
+        reqId: 'private-timing-request',
+        kind: 'overview',
+        status: 200,
+        totalClientMs: 150,
       };
       const timing: ServerTimingRecord = {
-        serverIngress: 1000, serverPrefinish: 1100, serverFinish: 1200,
-        durationMs: 200, statusCode: 200,
+        serverIngress: 1000,
+        serverPrefinish: 1100,
+        serverFinish: 1200,
+        durationMs: 200,
+        statusCode: 200,
       };
       const summary = computeCorrelatedSegmentSummary([request], new Map([[request.reqId, timing]]));
       expect(summary.invalid_count).toBe(0);
@@ -647,7 +691,7 @@ describe('JuanChoice capacity correlated latency segments pure calculation helpe
         statusCode: 200,
       };
       expect(correlateRequestSample(clientSample, missingPrefinish)).toEqual(
-        expect.objectContaining({ isValid: false, invalidReason: 'non_finite_timing_value' })
+        expect.objectContaining({ isValid: false, invalidReason: 'non_finite_timing_value' }),
       );
 
       const nanPrefinish: ServerTimingRecord = {
@@ -658,7 +702,7 @@ describe('JuanChoice capacity correlated latency segments pure calculation helpe
         statusCode: 200,
       };
       expect(correlateRequestSample(clientSample, nanPrefinish)).toEqual(
-        expect.objectContaining({ isValid: false, invalidReason: 'non_finite_timing_value' })
+        expect.objectContaining({ isValid: false, invalidReason: 'non_finite_timing_value' }),
       );
     });
 
@@ -678,7 +722,7 @@ describe('JuanChoice capacity correlated latency segments pure calculation helpe
         statusCode: 200,
       };
       expect(correlateRequestSample(clientSample, prefinishBeforeIngress)).toEqual(
-        expect.objectContaining({ isValid: false, invalidReason: 'invalid_timing_order' })
+        expect.objectContaining({ isValid: false, invalidReason: 'invalid_timing_order' }),
       );
 
       const prefinishAfterFinish: ServerTimingRecord = {
@@ -689,7 +733,7 @@ describe('JuanChoice capacity correlated latency segments pure calculation helpe
         statusCode: 200,
       };
       expect(correlateRequestSample(clientSample, prefinishAfterFinish)).toEqual(
-        expect.objectContaining({ isValid: false, invalidReason: 'invalid_timing_order' })
+        expect.objectContaining({ isValid: false, invalidReason: 'invalid_timing_order' }),
       );
     });
 
@@ -710,7 +754,7 @@ describe('JuanChoice capacity correlated latency segments pure calculation helpe
       };
 
       expect(correlateRequestSample(clientSample, inconsistentServer)).toEqual(
-        expect.objectContaining({ isValid: false, invalidReason: 'inconsistent_server_duration' })
+        expect.objectContaining({ isValid: false, invalidReason: 'inconsistent_server_duration' }),
       );
     });
 
@@ -797,8 +841,14 @@ describe('JuanChoice capacity correlated latency segments pure calculation helpe
 
       const serverTimings = new Map<string, ServerTimingRecord>([
         ['req-clean', { serverIngress: 100, serverPrefinish: 160, serverFinish: 180, durationMs: 80, statusCode: 200 }],
-        ['req-neg-gap', { serverIngress: 200, serverPrefinish: 300, serverFinish: 350, durationMs: 150, statusCode: 200 }], // client 80 < prefinish (100) < server (150)
-        ['req-status-mismatch', { serverIngress: 400, serverPrefinish: 440, serverFinish: 450, durationMs: 50, statusCode: 500 }], // client 200 !== server 500
+        [
+          'req-neg-gap',
+          { serverIngress: 200, serverPrefinish: 300, serverFinish: 350, durationMs: 150, statusCode: 200 },
+        ], // client 80 < prefinish (100) < server (150)
+        [
+          'req-status-mismatch',
+          { serverIngress: 400, serverPrefinish: 440, serverFinish: 450, durationMs: 50, statusCode: 500 },
+        ], // client 200 !== server 500
       ]);
 
       const clientSamples = [cleanSample, negativeGapSample, statusMismatchSample, unmatchedSample];
@@ -810,10 +860,7 @@ describe('JuanChoice capacity correlated latency segments pure calculation helpe
       expect(summary.invalid_count).toBe(2);
 
       // Verify static keys are all present and no arbitrary/dynamic keys leak
-      const expectedKeys: InvalidTimingReason[] = [
-        ...KNOWN_INVALID_TIMING_REASONS,
-        'unknown_invalid_reason',
-      ];
+      const expectedKeys: InvalidTimingReason[] = [...KNOWN_INVALID_TIMING_REASONS, 'unknown_invalid_reason'];
       expect(Object.keys(summary.invalid_reason_counts).sort()).toEqual([...expectedKeys].sort());
 
       // Verify specific counts

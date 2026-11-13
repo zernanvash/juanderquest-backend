@@ -1,10 +1,6 @@
 import type { Pool } from 'pg';
 import { initPostgres, seedDevelopmentData } from '../src/db/pool.js';
-import {
-  DatabaseRuntimePolicy,
-  isDevelopmentSeedEnabled,
-  isInMemoryFallbackAllowed,
-} from '../src/db/policy.js';
+import { DatabaseRuntimePolicy, isDevelopmentSeedEnabled, isInMemoryFallbackAllowed } from '../src/db/policy.js';
 
 const productionPolicy: DatabaseRuntimePolicy = {
   nodeEnv: 'production',
@@ -28,9 +24,9 @@ describe('PostgreSQL runtime policy', () => {
   it('fails closed when PostgreSQL initialization fails in production', async () => {
     const candidate = unavailablePool();
 
-    await expect(
-      initPostgres({ policy: productionPolicy, poolFactory: () => candidate })
-    ).rejects.toThrow('refusing to start without durable storage');
+    await expect(initPostgres({ policy: productionPolicy, poolFactory: () => candidate })).rejects.toThrow(
+      'refusing to start without durable storage',
+    );
     expect(candidate.end).toHaveBeenCalledTimes(1);
   });
 
@@ -49,16 +45,20 @@ describe('PostgreSQL runtime policy', () => {
   });
 
   it('does not seed unless a non-production runtime explicitly enables it', () => {
-    expect(isDevelopmentSeedEnabled({
-      nodeEnv: 'development',
-      allowInMemoryFallback: false,
-      seedDevelopmentData: false,
-    })).toBe(false);
-    expect(isDevelopmentSeedEnabled({
-      nodeEnv: 'development',
-      allowInMemoryFallback: false,
-      seedDevelopmentData: true,
-    })).toBe(true);
+    expect(
+      isDevelopmentSeedEnabled({
+        nodeEnv: 'development',
+        allowInMemoryFallback: false,
+        seedDevelopmentData: false,
+      }),
+    ).toBe(false);
+    expect(
+      isDevelopmentSeedEnabled({
+        nodeEnv: 'development',
+        allowInMemoryFallback: false,
+        seedDevelopmentData: true,
+      }),
+    ).toBe(true);
   });
 
   it('replays the idempotent development seed to repair partially populated databases', async () => {
@@ -79,13 +79,13 @@ describe('PostgreSQL runtime policy', () => {
       on,
     } as unknown as Pool;
 
-    await expect(initPostgres({ policy: productionPolicy, poolFactory: () => candidate }))
-      .rejects.toThrow('refusing to start without durable storage');
+    await expect(initPostgres({ policy: productionPolicy, poolFactory: () => candidate })).rejects.toThrow(
+      'refusing to start without durable storage',
+    );
 
     expect(on).toHaveBeenCalledWith('error', expect.any(Function));
     const handler = on.mock.calls[0][1] as (error: Error) => void;
-    expect(() => handler(new Error('terminating connection due to administrator command')))
-      .not.toThrow();
+    expect(() => handler(new Error('terminating connection due to administrator command'))).not.toThrow();
     expect(logger).toHaveBeenCalledWith(expect.stringContaining('Idle PostgreSQL connection error'));
     logger.mockRestore();
   });

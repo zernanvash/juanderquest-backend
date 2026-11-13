@@ -61,15 +61,17 @@ describe('shared funded-quest point ledger', () => {
         return { rows: [] };
       }),
     };
-    await expect(movePoints(client, {
-      from: { id: 'author-1', kind: 'traveler', userId: 'author-1' },
-      to: { id: 'treasury', kind: 'treasury' },
-      points: 11,
-      type: 'quest_fund_lock',
-      referenceType: 'quest_funding_plan',
-      referenceId: 'plan-1',
-      actorId: 'author-1',
-    })).rejects.toThrow('INSUFFICIENT_TRAVELER_POINTS');
+    await expect(
+      movePoints(client, {
+        from: { id: 'author-1', kind: 'traveler', userId: 'author-1' },
+        to: { id: 'treasury', kind: 'treasury' },
+        points: 11,
+        type: 'quest_fund_lock',
+        referenceType: 'quest_funding_plan',
+        referenceId: 'plan-1',
+        actorId: 'author-1',
+      }),
+    ).rejects.toThrow('INSUFFICIENT_TRAVELER_POINTS');
     expect(client.query.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO governance_ledger'))).toBe(false);
   });
 });

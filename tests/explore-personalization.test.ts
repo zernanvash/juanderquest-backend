@@ -69,14 +69,64 @@ describe('Plan 80: ExploreRanker v2 Personalization, Home Town, Privacy & Divers
       }
     };
 
-    ensureUser({ id: userBeachId, seed_id: 'seed_beach', display_name: 'Beach Lover', handle: 'beach_lover', is_public: true });
-    ensureUser({ id: userCafeId, seed_id: 'seed_cafe', display_name: 'Cafe Hopper', handle: 'cafe_hopper', is_public: true });
-    ensureUser({ id: userImplicitId, seed_id: 'seed_implicit', display_name: 'Implicit Scout', handle: 'implicit_scout', is_public: true });
-    ensureUser({ id: friendPublicId, seed_id: 'seed_aira', display_name: 'Aira Coast', handle: 'aira_coast', is_public: true });
-    ensureUser({ id: friendPrivateId, seed_id: 'seed_priv', display_name: 'Private Friend', handle: 'secret_handle', is_public: false });
-    ensureUser({ id: friendTestId, seed_id: 'seed_qa_friend', display_name: 'QA Bot', handle: 'qa_bot', is_public: true, is_test: true });
-    ensureUser({ id: friendNoHandleId, seed_id: 'seed_nohandle', display_name: 'No Handle Friend', handle: null, is_public: true });
-    ensureUser({ id: friendNoShareId, seed_id: 'seed_noshare', display_name: 'No Share Friend', handle: 'noshare_friend', is_public: true, share_activity: false });
+    ensureUser({
+      id: userBeachId,
+      seed_id: 'seed_beach',
+      display_name: 'Beach Lover',
+      handle: 'beach_lover',
+      is_public: true,
+    });
+    ensureUser({
+      id: userCafeId,
+      seed_id: 'seed_cafe',
+      display_name: 'Cafe Hopper',
+      handle: 'cafe_hopper',
+      is_public: true,
+    });
+    ensureUser({
+      id: userImplicitId,
+      seed_id: 'seed_implicit',
+      display_name: 'Implicit Scout',
+      handle: 'implicit_scout',
+      is_public: true,
+    });
+    ensureUser({
+      id: friendPublicId,
+      seed_id: 'seed_aira',
+      display_name: 'Aira Coast',
+      handle: 'aira_coast',
+      is_public: true,
+    });
+    ensureUser({
+      id: friendPrivateId,
+      seed_id: 'seed_priv',
+      display_name: 'Private Friend',
+      handle: 'secret_handle',
+      is_public: false,
+    });
+    ensureUser({
+      id: friendTestId,
+      seed_id: 'seed_qa_friend',
+      display_name: 'QA Bot',
+      handle: 'qa_bot',
+      is_public: true,
+      is_test: true,
+    });
+    ensureUser({
+      id: friendNoHandleId,
+      seed_id: 'seed_nohandle',
+      display_name: 'No Handle Friend',
+      handle: null,
+      is_public: true,
+    });
+    ensureUser({
+      id: friendNoShareId,
+      seed_id: 'seed_noshare',
+      display_name: 'No Share Friend',
+      handle: 'noshare_friend',
+      is_public: true,
+      share_activity: false,
+    });
 
     spotStore.preferences.delete(userBeachId);
     spotStore.preferences.delete(userCafeId);
@@ -139,9 +189,7 @@ describe('Plan 80: ExploreRanker v2 Personalization, Home Town, Privacy & Divers
       ),
     ).toBe(true);
     expect(
-      resB.body.data[0].recommendation_reasons.some((r: string) =>
-        r.includes('Matches your Eat & Drink interests'),
-      ),
+      resB.body.data[0].recommendation_reasons.some((r: string) => r.includes('Matches your Eat & Drink interests')),
     ).toBe(true);
   });
 
@@ -162,12 +210,8 @@ describe('Plan 80: ExploreRanker v2 Personalization, Home Town, Privacy & Divers
     const ranked = spotStore.list({ userId: userImplicitId });
     const capitol = ranked.find((s) => s.id === 'spot-capitol')!;
     expect(capitol).toBeDefined();
-    expect(capitol.recommendation_reasons).toContain(
-      'Because you liked Minor Basilica of Our Lady of Manaoag',
-    );
-    expect(capitol.recommendation_reasons).toContain(
-      'Matches your Culture & Heritage interests',
-    );
+    expect(capitol.recommendation_reasons).toContain('Because you liked Minor Basilica of Our Lady of Manaoag');
+    expect(capitol.recommendation_reasons).toContain('Matches your Culture & Heritage interests');
     // Unvisited heritage spot (spot-capitol) ranks above already-visited spot-manaoag
     const capitolIdx = ranked.findIndex((s) => s.id === 'spot-capitol');
     const manaoagIdx = ranked.findIndex((s) => s.id === 'spot-manaoag');

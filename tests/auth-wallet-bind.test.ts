@@ -31,9 +31,7 @@ describe('Progressive Web3 Onboarding & Wallet Binding', () => {
     // Plan 67: wallet sign-in only skips account completion for accounts with a password.
     await db.identityService.setPassword(traveler.id, 'Password123!');
 
-    const travelerLogin = await request(app)
-      .post('/api/v1/auth/demo-login')
-      .send({ seed_id: 'user-wallet-test-1' });
+    const travelerLogin = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'user-wallet-test-1' });
 
     expect(travelerLogin.status).toBe(200);
     const token = travelerLogin.body.data.token;
@@ -45,9 +43,7 @@ describe('Progressive Web3 Onboarding & Wallet Binding', () => {
     const address = wallet.address;
 
     // 3. Request challenge for this address
-    const challengeRes = await request(app)
-      .post('/api/v1/auth/wallet/challenge')
-      .send({ address });
+    const challengeRes = await request(app).post('/api/v1/auth/wallet/challenge').send({ address });
 
     expect(challengeRes.status).toBe(200);
     const challengeMessage = challengeRes.body.data.message;
@@ -72,9 +68,7 @@ describe('Progressive Web3 Onboarding & Wallet Binding', () => {
     expect(pgRes.rows[0].wallet_address).toBe(address);
 
     // 7. Verify profile endpoint reflects the bound wallet
-    const meRes = await request(app)
-      .get('/api/v1/auth/me')
-      .set('Authorization', `Bearer ${token}`);
+    const meRes = await request(app).get('/api/v1/auth/me').set('Authorization', `Bearer ${token}`);
 
     expect(meRes.status).toBe(200);
     expect(meRes.body.data.wallet_address).toBe(address);
@@ -87,15 +81,11 @@ describe('Progressive Web3 Onboarding & Wallet Binding', () => {
       role: 'user',
     });
 
-    const traveler2Login = await request(app)
-      .post('/api/v1/auth/demo-login')
-      .send({ seed_id: 'user-wallet-test-2' });
+    const traveler2Login = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'user-wallet-test-2' });
     const token2 = traveler2Login.body.data.token;
 
     // Challenge and sign for user 2
-    const challenge2Res = await request(app)
-      .post('/api/v1/auth/wallet/challenge')
-      .send({ address });
+    const challenge2Res = await request(app).post('/api/v1/auth/wallet/challenge').send({ address });
     const sig2 = await wallet.signMessage(challenge2Res.body.data.message);
 
     const conflictRes = await request(app)
@@ -108,23 +98,17 @@ describe('Progressive Web3 Onboarding & Wallet Binding', () => {
 
     // 9. DIRECT LOGIN WITH WALLET: User returns and logs in directly with wallet
     // Should resolve to originalUserId (user-1) without creating a duplicate account!
-    const returnChallengeRes = await request(app)
-      .post('/api/v1/auth/wallet/challenge')
-      .send({ address });
+    const returnChallengeRes = await request(app).post('/api/v1/auth/wallet/challenge').send({ address });
     const returnSig = await wallet.signMessage(returnChallengeRes.body.data.message);
 
-    const directLoginRes = await request(app)
-      .post('/api/v1/auth/wallet/login')
-      .send({ address, signature: returnSig });
+    const directLoginRes = await request(app).post('/api/v1/auth/wallet/login').send({ address, signature: returnSig });
 
     expect(directLoginRes.status).toBe(200);
     expect(directLoginRes.body.data.user.id).toBe(originalUserId);
     expect(directLoginRes.body.data.user.seed_id).toBe('user-wallet-test-1');
 
     // 10. UNBIND WALLET
-    const unbindRes = await request(app)
-      .delete('/api/v1/auth/wallet/unbind')
-      .set('Authorization', `Bearer ${token}`);
+    const unbindRes = await request(app).delete('/api/v1/auth/wallet/unbind').set('Authorization', `Bearer ${token}`);
 
     expect(unbindRes.status).toBe(200);
     expect(unbindRes.body.success).toBe(true);

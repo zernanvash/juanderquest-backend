@@ -41,7 +41,7 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
        ($1, $2, 'Admin', 'admin@example.test', 'admin', false),
        ($3, $4, 'User', 'user@example.test', 'user', false),
        ($5, $6, 'QA Admin', 'qa-admin@example.test', 'admin', true)`,
-      [adminId, adminId, normalUserId, normalUserId, testAdminId, testAdminId]
+      [adminId, adminId, normalUserId, normalUserId, testAdminId, testAdminId],
     );
 
     // Spots
@@ -52,7 +52,7 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
       await db.pool.query(
         `INSERT INTO spots (id, slug, name, description, category, subcategory, municipality, address, gps_lat, gps_lng, source_type, source_name, is_test, status, recommendation_suppressed, crowd_capacity_band)
          VALUES ($1, $2, $3, 'Description', 'nature_outdoors', 'beach', 'Bolinao', 'Pangasinan', 16.3, 119.8, 'lgu', 'LGU', false, 'published', false, 'low')`,
-        [id, slug, slug]
+        [id, slug, slug],
       );
     }
 
@@ -60,7 +60,7 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
     await db.pool.query(
       `INSERT INTO juanchoice_campaigns (id, slug, region, theme, status, opens_at, closes_at, finalized_at, is_test)
        VALUES ($1, 'campaign-assessments', 'Pangasinan', 'Beaches', 'finalized', NOW() - INTERVAL '2 days', NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 hour', false)`,
-      [campaignId]
+      [campaignId],
     );
 
     // Candidates
@@ -68,7 +68,7 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
       `INSERT INTO juanchoice_candidates (id, campaign_id, spot_id, status, is_test) VALUES
        ($1, $2, $3, 'eligible', false),
        ($4, $2, $5, 'eligible', false)`,
-      [candidate1, campaignId, spot1, candidate2, spot2]
+      [candidate1, campaignId, spot1, candidate2, spot2],
     );
 
     // Results (tied co-winners)
@@ -82,7 +82,7 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
           { candidate_id: candidate2, spot_id: spot2, votes: 5 },
         ]),
         JSON.stringify([candidate1, candidate2]),
-      ]
+      ],
     );
   }, 30_000);
 
@@ -115,7 +115,7 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
         reason: 'Valid reasoning for promotion',
         validUntil: new Date(Date.now() - 1000).toISOString(),
         expectedRevision: 0,
-      })
+      }),
     ).rejects.toMatchObject({ code: 'INVALID_VALIDITY_WINDOW' });
 
     // > 7 days in future
@@ -128,7 +128,7 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
         reason: 'Valid reasoning for promotion',
         validUntil: new Date(Date.now() + 8 * 86_400_000).toISOString(),
         expectedRevision: 0,
-      })
+      }),
     ).rejects.toMatchObject({ code: 'INVALID_VALIDITY_WINDOW' });
   });
 
@@ -157,7 +157,7 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
         reason: 'Trying a stale revision write',
         validUntil,
         expectedRevision: 0,
-      })
+      }),
     ).rejects.toMatchObject({ code: 'REVISION_CONFLICT' });
   });
 
@@ -181,9 +181,7 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
     const spotlight = await getPublicSpotlight();
     expect(spotlight).not.toBeNull();
     expect(spotlight?.winners).toHaveLength(2);
-    expect(spotlight?.winners.map((w: any) => w.candidate_id).sort()).toEqual(
-      [candidate1, candidate2].sort()
-    );
+    expect(spotlight?.winners.map((w: any) => w.candidate_id).sort()).toEqual([candidate1, candidate2].sort());
   });
 
   it('later restriction (revision 2) supersedes old clearance and hides spotlight immediately', async () => {
@@ -213,7 +211,7 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
     // Manually backdate revision 2 assessed_at and valid_until to past so valid_until > assessed_at constraint holds
     await db.pool.query(
       "UPDATE juanchoice_promotion_assessments SET assessed_at = NOW() - INTERVAL '2 days', valid_until = NOW() - INTERVAL '1 hour' WHERE candidate_id = $1 AND revision = 2",
-      [candidate1]
+      [candidate1],
     );
 
     const eligibility = await evaluateCandidatePromotionEligibility(campaignId, candidate1, false, db.pool);
@@ -240,7 +238,7 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
     const activeUser = 'user-active-crowd';
     await db.pool.query(
       `INSERT INTO users (id, seed_id, display_name, email, role, is_test) VALUES ($1, $2, 'Active', 'active@example.test', 'user', false)`,
-      [activeUser, activeUser]
+      [activeUser, activeUser],
     );
 
     // Insert activity events: 2 visits (5 * 2 = 10 >= 8) -> estimated_busy
@@ -248,7 +246,7 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
       `INSERT INTO spot_activity_events (id, user_id, spot_id, activity_type, created_at, is_test) VALUES
        ($1, $2, $3, 'visit', NOW() - INTERVAL '1 minute', false),
        ($4, $5, $3, 'visit', NOW() - INTERVAL '1 minute', false)`,
-      [randomUUID(), activeUser, spot1, randomUUID(), normalUserId]
+      [randomUUID(), activeUser, spot1, randomUUID(), normalUserId],
     );
 
     const eligibility = await evaluateCandidatePromotionEligibility(campaignId, candidate1, false, db.pool);
@@ -271,7 +269,7 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
         reason: 'Synthetic admin assessing real candidate',
         validUntil: new Date(Date.now() + 86_400_000).toISOString(),
         expectedRevision: 3,
-      })
+      }),
     ).rejects.toMatchObject({ code: 'SCOPE_MISMATCH' });
   });
 
@@ -337,37 +335,41 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
     await db.pool.query(
       `INSERT INTO spots (id, slug, name, description, category, subcategory, municipality, address, gps_lat, gps_lng, source_type, source_name, is_test, status, recommendation_suppressed, crowd_capacity_band)
        VALUES ($1, 'sq-spot', 'SQ Spot', 'Desc', 'nature_outdoors', 'beach', 'Bolinao', 'Pangasinan', 16.3, 119.8, 'lgu', 'LGU', false, 'published', false, 'high')`,
-      [sqSpot]
+      [sqSpot],
     );
 
     await db.pool.query(
       `INSERT INTO juanchoice_campaigns (id, slug, region, theme, status, opens_at, closes_at, finalized_at, is_test)
        VALUES ($1, 'campaign-sq', 'Pangasinan', 'Hidden Gems', 'finalized', NOW() - INTERVAL '3 days', NOW() - INTERVAL '1 day', NOW() - INTERVAL '2 hours', false)`,
-      [sqCampaign]
+      [sqCampaign],
     );
 
     await db.pool.query(
       `INSERT INTO juanchoice_candidates (id, campaign_id, spot_id, status, is_test)
        VALUES ($1, $2, $3, 'eligible', false)`,
-      [sqCandidate, sqCampaign, sqSpot]
+      [sqCandidate, sqCampaign, sqSpot],
     );
 
     await db.pool.query(
       `INSERT INTO juanchoice_results (campaign_id, standings, co_winner_ids, valid_ballots, policy_version, finalized_at)
        VALUES ($1, $2::jsonb, $3::jsonb, 5, 'juanchoice-pilot-v1', NOW() - INTERVAL '2 hours')`,
-      [sqCampaign, JSON.stringify([{ candidate_id: sqCandidate, spot_id: sqSpot, votes: 5 }]), JSON.stringify([sqCandidate])]
+      [
+        sqCampaign,
+        JSON.stringify([{ candidate_id: sqCandidate, spot_id: sqSpot, votes: 5 }]),
+        JSON.stringify([sqCandidate]),
+      ],
     );
 
     await db.pool.query(
       `INSERT INTO quests (id, title, description, category, location_name, gps_lat, gps_lng, radius_meters, reward_points, marker_code, marker_image_url)
        VALUES ($1, 'SQ Quest', 'Desc', 'eco', 'Bolinao', 16.3, 119.8, 100, 0, 'marker-sq', 'https://example.test/sq.png')`,
-      [questId]
+      [questId],
     );
 
     await db.pool.query(
       `INSERT INTO reviewed_quest_spot_bindings (id, quest_id, spot_id, binding_version, status, is_test)
        VALUES ($1, $2, $3, 'supporter-v1', 'active', false)`,
-      [bindingId, questId, sqSpot]
+      [bindingId, questId, sqSpot],
     );
 
     // Initial cleared assessment
@@ -387,12 +389,12 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
     await db.pool.query(
       `INSERT INTO submissions (id, idempotency_key, user_id, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy, status, reviewed_at)
        VALUES ($1, $2, $3, $4, 'marker-sq', 16.3, 119.8, 5, 'approved', NOW() - INTERVAL '1 hour')`,
-      [submissionId, randomUUID(), normalUserId, questId]
+      [submissionId, randomUUID(), normalUserId, questId],
     );
     await db.pool.query(
       `INSERT INTO verified_visits (id, user_id, spot_id, binding_id, source_submission_id, occurred_at, verified_at, evidence_version, is_test)
        VALUES ($1, $2, $3, $4, $5, NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour', 'supporter-v1', false)`,
-      [visitId, normalUserId, sqSpot, bindingId, submissionId]
+      [visitId, normalUserId, sqSpot, bindingId, submissionId],
     );
 
     // Initial claim succeeds
@@ -422,7 +424,7 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
     const anotherUser = 'traveler-user-2';
     await db.pool.query(
       `INSERT INTO users (id, seed_id, display_name, email, role, is_test) VALUES ($1, $2, 'User 2', 'u2@example.test', 'user', false)`,
-      [anotherUser, anotherUser]
+      [anotherUser, anotherUser],
     );
     await expect(claimSupporterQuest(sqCampaign, anotherUser)).rejects.toMatchObject({
       code: 'SUPPORTER_QUEST_NOT_FOUND',
@@ -430,9 +432,8 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
   });
 
   it('historical campaign results stay intact regardless of promotion assessment changes', async () => {
-    const resultsRow = (
-      await db.pool.query('SELECT * FROM juanchoice_results WHERE campaign_id = $1', [campaignId])
-    ).rows[0];
+    const resultsRow = (await db.pool.query('SELECT * FROM juanchoice_results WHERE campaign_id = $1', [campaignId]))
+      .rows[0];
     expect(resultsRow).toBeDefined();
     expect(Number(resultsRow.valid_ballots)).toBe(10);
   });
@@ -447,17 +448,17 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
       await db.pool.query(
         `INSERT INTO spots (id, slug, name, description, category, subcategory, municipality, address, gps_lat, gps_lng, source_type, source_name, is_test, status, recommendation_suppressed, crowd_capacity_band)
          VALUES ($1, 'qa-iter03-spot', 'QA Iter03 Spot', 'Desc', 'nature_outdoors', 'beach', 'Bolinao', 'Pangasinan', 16.3, 119.8, 'lgu', 'LGU', true, 'published', false, 'low')`,
-        [qaSpotId]
+        [qaSpotId],
       );
       await db.pool.query(
         `INSERT INTO juanchoice_campaigns (id, slug, region, theme, status, opens_at, closes_at, finalized_at, is_test)
          VALUES ($1, 'campaign-qa-iter03', 'Pangasinan', 'QA Beaches', 'finalized', NOW() - INTERVAL '2 days', NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 hour', true)`,
-        [qaCampaignId]
+        [qaCampaignId],
       );
       await db.pool.query(
         `INSERT INTO juanchoice_candidates (id, campaign_id, spot_id, status, is_test)
          VALUES ($1, $2, $3, 'eligible', true)`,
-        [qaCandidateId, qaCampaignId, qaSpotId]
+        [qaCandidateId, qaCampaignId, qaSpotId],
       );
     });
 
@@ -483,13 +484,13 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
       const realUser = 'user-real-isolation';
       await db.pool.query(
         `INSERT INTO users (id, seed_id, display_name, email, role, is_test) VALUES ($1, $2, 'Real', 'real@example.test', 'user', false) ON CONFLICT DO NOTHING`,
-        [realUser, realUser]
+        [realUser, realUser],
       );
       await db.pool.query(
         `INSERT INTO spot_activity_events (id, user_id, spot_id, activity_type, created_at, is_test) VALUES
          ($1, $2, $3, 'visit', NOW() - INTERVAL '5 minutes', false),
          ($4, $5, $3, 'visit', NOW() - INTERVAL '5 minutes', false)`,
-        [randomUUID(), realUser, qaSpotId, randomUUID(), normalUserId]
+        [randomUUID(), realUser, qaSpotId, randomUUID(), normalUserId],
       );
 
       // QA evaluation should STILL be eligible because opposite-scope real events are excluded from QA evaluation
@@ -504,13 +505,13 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
         `INSERT INTO users (id, seed_id, display_name, email, role, is_test) VALUES
          ($1, $2, 'QA1', 'qa1@example.test', 'user', true),
          ($3, $4, 'QA2', 'qa2@example.test', 'user', true) ON CONFLICT DO NOTHING`,
-        [qaUser1, qaUser1, qaUser2, qaUser2]
+        [qaUser1, qaUser1, qaUser2, qaUser2],
       );
       await db.pool.query(
         `INSERT INTO spot_activity_events (id, user_id, spot_id, activity_type, created_at, is_test) VALUES
          ($1, $2, $3, 'visit', NOW() - INTERVAL '2 minutes', true),
          ($4, $5, $3, 'visit', NOW() - INTERVAL '2 minutes', true)`,
-        [randomUUID(), qaUser1, qaSpotId, randomUUID(), qaUser2]
+        [randomUUID(), qaUser1, qaSpotId, randomUUID(), qaUser2],
       );
 
       const postQACrowd = await evaluateCandidatePromotionEligibility(qaCampaignId, qaCandidateId, true, db.pool);
@@ -551,21 +552,21 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
         await db.pool.query(
           `INSERT INTO spots (id, slug, name, description, category, subcategory, municipality, address, gps_lat, gps_lng, source_type, source_name, is_test, status, recommendation_suppressed, crowd_capacity_band)
            VALUES ($1, $2, $3, 'Desc', 'nature_outdoors', 'beach', 'Bolinao', 'Pangasinan', 16.3, 119.8, 'lgu', 'LGU', false, 'published', false, 'low')`,
-          [s, s, s]
+          [s, s, s],
         );
       }
 
       const testCand = randomUUID();
       await db.pool.query(
         `INSERT INTO juanchoice_candidates (id, campaign_id, spot_id, status, is_test) VALUES ($1, $2, $3, 'eligible', false)`,
-        [testCand, campaignId, spotFuture]
+        [testCand, campaignId, spotFuture],
       );
 
       // Future-dated assessed_at
       await db.pool.query(
         `INSERT INTO juanchoice_promotion_assessments (id, candidate_id, assessed_by, revision, decision, reason, assessed_at, valid_until, is_test)
          VALUES ($1, $2, $3, 1, 'cleared', 'Future dated reason', NOW() + INTERVAL '1 hour', NOW() + INTERVAL '2 days', false)`,
-        [randomUUID(), testCand, adminId]
+        [randomUUID(), testCand, adminId],
       );
 
       const futureEval = await evaluateCandidatePromotionEligibility(campaignId, testCand, false, db.pool);
@@ -576,12 +577,12 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
       const exactCand = randomUUID();
       await db.pool.query(
         `INSERT INTO juanchoice_candidates (id, campaign_id, spot_id, status, is_test) VALUES ($1, $2, $3, 'eligible', false)`,
-        [exactCand, campaignId, spotExpired]
+        [exactCand, campaignId, spotExpired],
       );
       await db.pool.query(
         `INSERT INTO juanchoice_promotion_assessments (id, candidate_id, assessed_by, revision, decision, reason, assessed_at, valid_until, is_test)
          VALUES ($1, $2, $3, 1, 'cleared', 'Exact expiry reason', NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 second', false)`,
-        [randomUUID(), exactCand, adminId]
+        [randomUUID(), exactCand, adminId],
       );
 
       const expiredEval = await evaluateCandidatePromotionEligibility(campaignId, exactCand, false, db.pool);
@@ -594,20 +595,20 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
       await db.pool.query(
         `INSERT INTO spots (id, slug, name, description, category, subcategory, municipality, address, gps_lat, gps_lng, source_type, source_name, is_test, status, recommendation_suppressed, crowd_capacity_band)
          VALUES ($1, $2, $3, 'Desc', 'nature_outdoors', 'beach', 'Bolinao', 'Pangasinan', 16.3, 119.8, 'lgu', 'LGU', false, 'published', false, 'low')`,
-        [spotBigRev, spotBigRev, spotBigRev]
+        [spotBigRev, spotBigRev, spotBigRev],
       );
 
       const bigRevCand = randomUUID();
       await db.pool.query(
         `INSERT INTO juanchoice_candidates (id, campaign_id, spot_id, status, is_test) VALUES ($1, $2, $3, 'eligible', false)`,
-        [bigRevCand, campaignId, spotBigRev]
+        [bigRevCand, campaignId, spotBigRev],
       );
 
       const largeRev = 3_000_000_000; // > 2^31 - 1 (2,147,483,647)
       await db.pool.query(
         `INSERT INTO juanchoice_promotion_assessments (id, candidate_id, assessed_by, revision, decision, reason, assessed_at, valid_until, is_test)
          VALUES ($1, $2, $3, $4, 'cleared', 'Large revision test', NOW() - INTERVAL '10 minutes', NOW() + INTERVAL '2 days', false)`,
-        [randomUUID(), bigRevCand, adminId, largeRev]
+        [randomUUID(), bigRevCand, adminId, largeRev],
       );
 
       const latest = await getLatestPromotionAssessment(bigRevCand, db.pool);
@@ -635,7 +636,7 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
           reason: 'Testing negative revision rejection',
           validUntil: new Date(Date.now() + 86_400_000).toISOString(),
           expectedRevision: -1,
-        })
+        }),
       ).rejects.toMatchObject({ code: 'INVALID_REVISION' });
 
       await expect(
@@ -647,7 +648,7 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
           reason: 'Testing NaN revision rejection',
           validUntil: new Date(Date.now() + 86_400_000).toISOString(),
           expectedRevision: NaN,
-        })
+        }),
       ).rejects.toMatchObject({ code: 'INVALID_REVISION' });
     });
 
@@ -656,13 +657,13 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
       await db.pool.query(
         `INSERT INTO spots (id, slug, name, description, category, subcategory, municipality, address, gps_lat, gps_lng, source_type, source_name, is_test, status, recommendation_suppressed, crowd_capacity_band)
          VALUES ($1, $2, $3, 'Desc', 'nature_outdoors', 'beach', 'Bolinao', 'Pangasinan', 16.3, 119.8, 'lgu', 'LGU', false, 'published', false, 'low')`,
-        [spotRace, spotRace, spotRace]
+        [spotRace, spotRace, spotRace],
       );
 
       const raceCand = randomUUID();
       await db.pool.query(
         `INSERT INTO juanchoice_candidates (id, campaign_id, spot_id, status, is_test) VALUES ($1, $2, $3, 'eligible', false)`,
-        [raceCand, campaignId, spotRace]
+        [raceCand, campaignId, spotRace],
       );
 
       const validUntil = new Date(Date.now() + 86_400_000).toISOString();
@@ -704,12 +705,18 @@ describe('JuanChoice Promotion Assessments & Safety Invariants', () => {
 
       // Verify database state: exactly ONE assessment record and ONE audit log entry created
       const assessmentsCount = (
-        await db.pool.query(`SELECT COUNT(*)::int AS count FROM juanchoice_promotion_assessments WHERE candidate_id = $1`, [raceCand])
+        await db.pool.query(
+          `SELECT COUNT(*)::int AS count FROM juanchoice_promotion_assessments WHERE candidate_id = $1`,
+          [raceCand],
+        )
       ).rows[0].count;
       expect(assessmentsCount).toBe(1);
 
       const auditsCount = (
-        await db.pool.query(`SELECT COUNT(*)::int AS count FROM juanchoice_campaign_audit WHERE campaign_id = $1 AND action LIKE $2`, [campaignId, `%${raceCand}%`])
+        await db.pool.query(
+          `SELECT COUNT(*)::int AS count FROM juanchoice_campaign_audit WHERE campaign_id = $1 AND action LIKE $2`,
+          [campaignId, `%${raceCand}%`],
+        )
       ).rows[0].count;
       expect(auditsCount).toBe(1);
     });

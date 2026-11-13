@@ -1,10 +1,6 @@
 import { Pool } from 'pg';
 import { env } from '../config/env.js';
-import {
-  DatabaseRuntimePolicy,
-  isDevelopmentSeedEnabled,
-  isInMemoryFallbackAllowed,
-} from './policy.js';
+import { DatabaseRuntimePolicy, isDevelopmentSeedEnabled, isInMemoryFallbackAllowed } from './policy.js';
 import { applyMigrations, seedDevelopmentData, verifyMigrations } from './migrations.js';
 
 // Migration helpers live in a config-free module so scripts and the test
@@ -15,8 +11,10 @@ let pool: Pool | null = null;
 const benchmarkDurationsMs: number[] = [];
 let benchmarkQueryCount = 0;
 let benchmarkQueryErrors = 0;
-const benchmarkTelemetryEnabled = process.env.ECONOMY_BENCH_TRACE === 'true' &&
-  process.env.JDQ_ENV === 'dev' && process.env.NODE_ENV !== 'production' &&
+const benchmarkTelemetryEnabled =
+  process.env.ECONOMY_BENCH_TRACE === 'true' &&
+  process.env.JDQ_ENV === 'dev' &&
+  process.env.NODE_ENV !== 'production' &&
   /\/jdq_economy_lab_[a-f0-9]{12}_dev(?:\?|$)/.test(process.env.DATABASE_URL || '');
 
 function recordBenchmarkQuery(begin: bigint, failed: boolean) {
@@ -29,13 +27,24 @@ function recordBenchmarkQuery(begin: bigint, failed: boolean) {
 export function getEconomyBenchmarkTelemetry() {
   if (!benchmarkTelemetryEnabled || !pool) return null;
   const sorted = [...benchmarkDurationsMs].sort((a, b) => a - b);
-  const percentile = (fraction: number) => sorted.length
-    ? Math.round(sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1)] * 100) / 100 : null;
-  return { enabled: true, query_count: benchmarkQueryCount, query_errors: benchmarkQueryErrors,
-    sql_roundtrip_ms: { sample_count: sorted.length, p50: percentile(0.5), p95: percentile(0.95),
-      p99: percentile(0.99), max: sorted.length ? Math.round(sorted.at(-1)! * 100) / 100 : null },
+  const percentile = (fraction: number) =>
+    sorted.length
+      ? Math.round(sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1)] * 100) / 100
+      : null;
+  return {
+    enabled: true,
+    query_count: benchmarkQueryCount,
+    query_errors: benchmarkQueryErrors,
+    sql_roundtrip_ms: {
+      sample_count: sorted.length,
+      p50: percentile(0.5),
+      p95: percentile(0.95),
+      p99: percentile(0.99),
+      max: sorted.length ? Math.round(sorted.at(-1)! * 100) / 100 : null,
+    },
     pool: { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount, max: 5 },
-    note: 'Client-side PostgreSQL query round trip, including network/lock wait; not server execution-only time.' };
+    note: 'Client-side PostgreSQL query round trip, including network/lock wait; not server execution-only time.',
+  };
 }
 
 export function getPool(): Pool | null {
@@ -74,12 +83,14 @@ export async function initPostgres(options: InitPostgresOptions = {}): Promise<b
 
   if (policy.nodeEnv === 'test' && fallbackAllowed && !options.poolFactory) return false;
 
-  const candidate = options.poolFactory?.() ?? new Pool({
-    connectionString: env.DATABASE_URL,
-    connectionTimeoutMillis: 3000,
-    query_timeout: 5000,
-    max: 5,
-  });
+  const candidate =
+    options.poolFactory?.() ??
+    new Pool({
+      connectionString: env.DATABASE_URL,
+      connectionTimeoutMillis: 3000,
+      query_timeout: 5000,
+      max: 5,
+    });
   if (benchmarkTelemetryEnabled && !options.poolFactory) {
     candidate.on('connect', (client) => {
       const target = client as unknown as { query: (...args: unknown[]) => Promise<unknown> };
@@ -88,8 +99,16 @@ export async function initPostgres(options: InitPostgresOptions = {}): Promise<b
         const begin = process.hrtime.bigint();
         const outcome = original(...args);
         if (!outcome || typeof outcome.then !== 'function') return outcome;
-        return outcome.then(value => { recordBenchmarkQuery(begin, false); return value; },
-          error => { recordBenchmarkQuery(begin, true); throw error; });
+        return outcome.then(
+          (value) => {
+            recordBenchmarkQuery(begin, false);
+            return value;
+          },
+          (error) => {
+            recordBenchmarkQuery(begin, true);
+            throw error;
+          },
+        );
       };
     });
   }

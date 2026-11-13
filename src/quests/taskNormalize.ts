@@ -17,7 +17,7 @@ export interface SpotContext {
 export function normalizeTasks(
   rawSteps: any,
   spot?: SpotContext | null,
-  options?: { preserveSecretsFrom?: QuestTask[]; allowClientMarkerCode?: boolean }
+  options?: { preserveSecretsFrom?: QuestTask[]; allowClientMarkerCode?: boolean },
 ): QuestTask[] {
   if (!Array.isArray(rawSteps)) return [];
 
@@ -45,9 +45,7 @@ export function normalizeTasks(
     }
 
     // Stable key: keep existing key or generate task_<uuid>
-    let key = typeof raw?.key === 'string' && raw.key.startsWith('task_')
-      ? raw.key
-      : `task_${randomUUID()}`;
+    let key = typeof raw?.key === 'string' && raw.key.startsWith('task_') ? raw.key : `task_${randomUUID()}`;
 
     // Deterministic key fallback if raw provides an id or stable reference
     if (!key && raw?.id) {
@@ -55,17 +53,26 @@ export function normalizeTasks(
     }
 
     // Build GeoFence from legacy fields or spot default
-    const fenceLat = typeof raw?.gps_lat === 'number' && Number.isFinite(raw.gps_lat)
-      ? raw.gps_lat
-      : (typeof raw?.verification?.fence?.lat === 'number' ? raw.verification.fence.lat : defaultLat);
-    const fenceLng = typeof raw?.gps_lng === 'number' && Number.isFinite(raw.gps_lng)
-      ? raw.gps_lng
-      : (typeof raw?.verification?.fence?.lng === 'number' ? raw.verification.fence.lng : defaultLng);
-    const fenceRadius = typeof raw?.radius_meters === 'number' && Number.isFinite(raw.radius_meters)
-      ? raw.radius_meters
-      : (typeof raw?.verification?.fence?.radius_meters === 'number'
+    const fenceLat =
+      typeof raw?.gps_lat === 'number' && Number.isFinite(raw.gps_lat)
+        ? raw.gps_lat
+        : typeof raw?.verification?.fence?.lat === 'number'
+          ? raw.verification.fence.lat
+          : defaultLat;
+    const fenceLng =
+      typeof raw?.gps_lng === 'number' && Number.isFinite(raw.gps_lng)
+        ? raw.gps_lng
+        : typeof raw?.verification?.fence?.lng === 'number'
+          ? raw.verification.fence.lng
+          : defaultLng;
+    const fenceRadius =
+      typeof raw?.radius_meters === 'number' && Number.isFinite(raw.radius_meters)
+        ? raw.radius_meters
+        : typeof raw?.verification?.fence?.radius_meters === 'number'
           ? raw.verification.fence.radius_meters
-          : (checkpointType === 'ar' ? 50 : 100));
+          : checkpointType === 'ar'
+            ? 50
+            : 100;
 
     const fence: GeoFence = {
       lat: fenceLat,
@@ -117,7 +124,7 @@ export function normalizeTasks(
         case 'photo':
           verification = {
             type: 'photo',
-            prompt: typeof raw?.hint === 'string' && raw.hint ? raw.hint : (description || title),
+            prompt: typeof raw?.hint === 'string' && raw.hint ? raw.hint : description || title,
             fence: raw?.gps_lat != null && raw?.gps_lng != null ? fence : null,
             require_gps: raw?.gps_lat != null && raw?.gps_lng != null,
           };
@@ -133,7 +140,12 @@ export function normalizeTasks(
         case 'action': {
           let task: InAppTask;
           const actionKind = raw?.action_kind || raw?.verification?.task?.kind || 'save_spot';
-          const targetId = raw?.action_target_id || raw?.verification?.task?.spot_id || raw?.verification?.task?.quiz_id || raw?.verification?.task?.campaign_id || '';
+          const targetId =
+            raw?.action_target_id ||
+            raw?.verification?.task?.spot_id ||
+            raw?.verification?.task?.quiz_id ||
+            raw?.verification?.task?.campaign_id ||
+            '';
 
           if (actionKind === 'complete_quiz') {
             task = { kind: 'complete_quiz', quiz_id: targetId };
@@ -167,7 +179,8 @@ export function normalizeTasks(
       gps_lat: fence.lat,
       gps_lng: fence.lng,
       radius_meters: fence.radius_meters,
-      hint: raw?.hint || (checkpointType === 'photo' && verification.type === 'photo' ? verification.prompt : undefined),
+      hint:
+        raw?.hint || (checkpointType === 'photo' && verification.type === 'photo' ? verification.prompt : undefined),
       marker_code: checkpointType === 'qr' ? markerCode : undefined,
       qr_scan_mode: checkpointType === 'qr' ? qrScanMode : undefined,
     };

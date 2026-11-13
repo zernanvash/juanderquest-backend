@@ -20,10 +20,10 @@ export interface UserRow {
   email: string;
   avatar_url: string;
   role: 'user' | 'admin' | 'area_admin' | 'qa';
-  demo_points: number;            // Backwards-compatible formatted value (100 JDQ)
-  mjdq_balance: number;           // Integer milli-JDQ balance (100,000 mJDQ = 100 JDQ)
+  demo_points: number; // Backwards-compatible formatted value (100 JDQ)
+  mjdq_balance: number; // Integer milli-JDQ balance (100,000 mJDQ = 100 JDQ)
   jdq_governance_balance: number; // JDQ Governance Token count (15 JDQ)
-  scout_reputation: number;       // Non-inflationary reputation for casual spot discovery
+  scout_reputation: number; // Non-inflationary reputation for casual spot discovery
   is_public: boolean;
   share_activity?: boolean;
   home_municipality?: string | null;
@@ -81,7 +81,7 @@ export function encodeFollowCursor(payload: FollowCursorPayload): string {
 export function decodeFollowCursor(
   cursor: string,
   expectedTargetId: string,
-  expectedDirection: 'followers' | 'following'
+  expectedDirection: 'followers' | 'following',
 ): FollowCursorPayload {
   try {
     const raw = Buffer.from(cursor, 'base64url').toString('utf8');
@@ -124,7 +124,8 @@ export interface QuestStep {
   marker_code?: string;
 }
 
-export type QuestStepStatus = 'not_started' | 'ready' | 'pending_review' | 'needs_changes' | 'verified' | 'skipped_optional';
+export type QuestStepStatus =
+  'not_started' | 'ready' | 'pending_review' | 'needs_changes' | 'verified' | 'skipped_optional';
 
 export interface QuestStepEvidenceRow {
   id: string;
@@ -273,7 +274,7 @@ export interface QuestRow {
   base_reward_php: number;
   difficulty_factor: number;
   geo_multiplier: number;
-  reward_points: number;          // reward_mjdq (e.g. 50,000 mJDQ / 50 JDQ)
+  reward_points: number; // reward_mjdq (e.g. 50,000 mJDQ / 50 JDQ)
   marker_code: string;
   marker_image_url: string | null;
   is_active: boolean;
@@ -376,7 +377,7 @@ export interface VoucherRow {
   merchant_id: string;
   title: string;
   description: string;
-  cost_points: number;            // cost in mJDQ (e.g. 100,000 mJDQ = 100 JDQ)
+  cost_points: number; // cost in mJDQ (e.g. 100,000 mJDQ = 100 JDQ)
   fiat_floor_php: number;
   is_active: boolean;
 }
@@ -401,7 +402,13 @@ export interface TreasuryRow {
 export interface LedgerEntryRow {
   id: string;
   user_id: string;
-  entry_type: 'poa_reward' | 'campaign_reward' | 'voucher_redemption' | 'proposal_vote_fee' | 'feedback_vote_fee' | 'event_creation_fee';
+  entry_type:
+    | 'poa_reward'
+    | 'campaign_reward'
+    | 'voucher_redemption'
+    | 'proposal_vote_fee'
+    | 'feedback_vote_fee'
+    | 'event_creation_fee';
   mjdq_delta: number;
   jdq_delta: number;
   burned_mjdq: number;
@@ -428,9 +435,9 @@ const mockUsers: UserRow[] = [
     avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Juan',
     role: 'user',
     demo_points: 100,
-    mjdq_balance: 100000,          // 100,000 mJDQ = 100.00 JDQ
-    jdq_governance_balance: 15,    // 15 JDQ
-    scout_reputation: 250,         // Scout Reputation
+    mjdq_balance: 100000, // 100,000 mJDQ = 100.00 JDQ
+    jdq_governance_balance: 15, // 15 JDQ
+    scout_reputation: 250, // Scout Reputation
     is_public: true,
     handle: 'juandelacruz',
     bio: 'Pangasinan explorer & cultural heritage scout.',
@@ -526,13 +533,14 @@ const mockCampaigns: CampaignRow[] = [
     location_name: 'Patar White Beach, Bolinao',
     municipality: 'Bolinao',
     banner_image_url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1400&q=80',
-    description: 'Join local residents and travelers to clean up Patar beach front before sunset. Earn 250,000 mJDQ (250 JDQ value) plus the exclusive Bolinao Coastal Steward Civic Badge.',
+    description:
+      'Join local residents and travelers to clean up Patar beach front before sunset. Earn 250,000 mJDQ (250 JDQ value) plus the exclusive Bolinao Coastal Steward Civic Badge.',
     event_date: '2026-09-12T08:00:00.000Z',
     start_date: '2026-09-12T08:00:00.000Z',
     end_date: '2026-09-12T17:00:00.000Z',
-    total_budget_mjdq: 50000000,          // 50,000,000 mJDQ (50,000 JDQ value)
+    total_budget_mjdq: 50000000, // 50,000,000 mJDQ (50,000 JDQ value)
     reward_per_participant_mjdq: 250000, // 250,000 mJDQ (250 JDQ value)
-    referral_bounty_mjdq: 50000,         // 50,000 mJDQ (50 JDQ) per referred attendee
+    referral_bounty_mjdq: 50000, // 50,000 mJDQ (50 JDQ) per referred attendee
     max_participants: 200,
     reserved_participants: 45,
     completed_participants: 12,
@@ -553,7 +561,8 @@ const mockCampaigns: CampaignRow[] = [
     location_name: 'Downtown Commercial Strip, Dagupan City',
     municipality: 'Dagupan City',
     banner_image_url: 'https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?auto=format&fit=crop&w=1400&q=80',
-    description: 'Document traditional milkfish street dancing and culinary street grills for the municipal cultural archive. Earn 150,000 mJDQ and free seafood voucher.',
+    description:
+      'Document traditional milkfish street dancing and culinary street grills for the municipal cultural archive. Earn 150,000 mJDQ and free seafood voucher.',
     event_date: '2026-09-20T09:00:00.000Z',
     start_date: '2026-09-20T09:00:00.000Z',
     end_date: '2026-09-20T21:00:00.000Z',
@@ -580,7 +589,8 @@ const mockCampaigns: CampaignRow[] = [
     location_name: 'Capitol Beachfront Park, Lingayen',
     municipality: 'Lingayen',
     banner_image_url: 'https://images.unsplash.com/photo-1612872087720-bb876e2e67d1?auto=format&fit=crop&w=1400&q=80',
-    description: 'Participate in beach volleyball exhibition and heritage monument walking tour around the historic Provincial Capitol grounds.',
+    description:
+      'Participate in beach volleyball exhibition and heritage monument walking tour around the historic Provincial Capitol grounds.',
     event_date: '2026-09-28T07:30:00.000Z',
     start_date: '2026-09-28T07:30:00.000Z',
     end_date: '2026-09-28T18:00:00.000Z',
@@ -607,7 +617,8 @@ const mockCampaigns: CampaignRow[] = [
     location_name: 'Dasol Salt Farm Basin, Dasol',
     municipality: 'Dasol',
     banner_image_url: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1400&q=80',
-    description: 'Experience authentic Pangasinan artisanal salt harvesting methods. Capture harvest photos and earn 180,000 mJDQ with free souvenir salt pouch.',
+    description:
+      'Experience authentic Pangasinan artisanal salt harvesting methods. Capture harvest photos and earn 180,000 mJDQ with free souvenir salt pouch.',
     event_date: '2026-10-05T08:30:00.000Z',
     start_date: '2026-10-05T08:30:00.000Z',
     end_date: '2026-10-05T16:30:00.000Z',
@@ -640,7 +651,7 @@ const mockQuests: QuestRow[] = [
     base_reward_php: 25.0,
     difficulty_factor: 1.0,
     geo_multiplier: 2.0, // LGU priority zone surge
-    reward_points: 50,  // (25 * 1.0 * 2.0) / 1.0
+    reward_points: 50, // (25 * 1.0 * 2.0) / 1.0
     marker_code: 'MARKER_HUNDRED_ISLANDS_01',
     marker_image_url: null,
     is_active: true,
@@ -825,21 +836,63 @@ const mockProposals: ProposalRow[] = [
 ];
 
 const mockMerchants: MerchantRow[] = [
-  { id: 'm1', name: 'Bangus Street Grill', location: 'Dagupan City, Pangasinan', description: 'Local grill house serving the famous Dagupan bangus (milkfish).', created_at: new Date().toISOString() },
-  { id: 'm2', name: 'Bolinao Lighthouse Cafe', location: 'Bolinao, Pangasinan', description: 'Cafe beside Cape Bolinao Lighthouse with coastal views.', created_at: new Date().toISOString() },
-  { id: 'm3', name: 'Alaminos Souvenir Hub', location: 'Alaminos City, Pangasinan', description: 'Souvenir shop near the Hundred Islands ferry port.', created_at: new Date().toISOString() },
+  {
+    id: 'm1',
+    name: 'Bangus Street Grill',
+    location: 'Dagupan City, Pangasinan',
+    description: 'Local grill house serving the famous Dagupan bangus (milkfish).',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'm2',
+    name: 'Bolinao Lighthouse Cafe',
+    location: 'Bolinao, Pangasinan',
+    description: 'Cafe beside Cape Bolinao Lighthouse with coastal views.',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'm3',
+    name: 'Alaminos Souvenir Hub',
+    location: 'Alaminos City, Pangasinan',
+    description: 'Souvenir shop near the Hundred Islands ferry port.',
+    created_at: new Date().toISOString(),
+  },
 ];
 
 const mockVouchers: VoucherRow[] = [
-  { id: 'v1', merchant_id: 'm1', title: 'P50 Off Bangus Meal', description: 'Discount voucher valid for one meal at Bangus Street Grill.', cost_points: 100, fiat_floor_php: 50.0, is_active: true },
-  { id: 'v2', merchant_id: 'm2', title: 'Free Iced Coffee', description: 'Free iced coffee at Bolinao Lighthouse Cafe.', cost_points: 60, fiat_floor_php: 60.0, is_active: true },
-  { id: 'v3', merchant_id: 'm3', title: '15% Off Souvenirs', description: '15% discount on a single souvenir item at Alaminos Souvenir Hub.', cost_points: 80, fiat_floor_php: 80.0, is_active: true },
+  {
+    id: 'v1',
+    merchant_id: 'm1',
+    title: 'P50 Off Bangus Meal',
+    description: 'Discount voucher valid for one meal at Bangus Street Grill.',
+    cost_points: 100,
+    fiat_floor_php: 50.0,
+    is_active: true,
+  },
+  {
+    id: 'v2',
+    merchant_id: 'm2',
+    title: 'Free Iced Coffee',
+    description: 'Free iced coffee at Bolinao Lighthouse Cafe.',
+    cost_points: 60,
+    fiat_floor_php: 60.0,
+    is_active: true,
+  },
+  {
+    id: 'v3',
+    merchant_id: 'm3',
+    title: '15% Off Souvenirs',
+    description: '15% discount on a single souvenir item at Alaminos Souvenir Hub.',
+    cost_points: 80,
+    fiat_floor_php: 80.0,
+    is_active: true,
+  },
 ];
 
 // Oracled Proof-of-Activity (PoA) reward calculation helper
 export function computeOracledReward(
   quest: { base_reward_php: number; difficulty_factor: number; geo_multiplier: number },
-  oracleRate: number = 1.0
+  oracleRate: number = 1.0,
 ): number {
   const base = quest.base_reward_php || 25.0;
   const difficulty = quest.difficulty_factor || 1.0;
@@ -865,13 +918,11 @@ export function withinRadius(
   targetLat: number,
   targetLng: number,
   radiusMeters: number,
-  accuracyMeters = 0
+  accuracyMeters = 0,
 ): { ok: boolean; distance: number } {
   const distance = calculateHaversineDistance(lat, lng, targetLat, targetLng);
   if (!Number.isFinite(distance)) return { ok: false, distance };
-  const accuracyAllowance = Number.isFinite(accuracyMeters)
-    ? Math.min(Math.max(accuracyMeters, 0), 25)
-    : 0;
+  const accuracyAllowance = Number.isFinite(accuracyMeters) ? Math.min(Math.max(accuracyMeters, 0), 25) : 0;
   return { ok: distance <= radiusMeters + accuracyAllowance, distance };
 }
 
@@ -885,42 +936,48 @@ export class MemoryDb {
   vouchers = developmentFixturesEnabled ? [...mockVouchers] : [];
   redemptions: RedemptionRow[] = [];
   follows: FollowRow[] = developmentFixturesEnabled ? [...mockFollows] : [];
-  campaign_reservations: CampaignReservationRow[] = developmentFixturesEnabled ? [
-    {
-      id: 'res_1',
-      campaign_id: 'camp_1',
-      user_id: '11111111-1111-1111-1111-111111111111',
-      user_display_name: 'Juan Dela Cruz',
-      referred_by_user_id: null,
-      referred_by_name: null,
-      ticket_code: 'TICKET-BOLINAO-8821',
-      status: 'reserved',
-      created_at: new Date().toISOString(),
-    },
-  ] : [];
-  treasury: TreasuryRow = developmentFixturesEnabled ? {
-    growth_pool_mjdq: 50000000,       // 50,000,000 mJDQ (50,000 JDQ initial Growth Pool)
-    total_burned_mjdq: 250000,        // 250,000 mJDQ (250 JDQ total burned)
-    community_treasury_mjdq: 1000000, // 1,000,000 mJDQ (1,000 JDQ treasury)
-    oracle_rate_php_per_jdq: 1.0,     // 1 JDQ = ₱1.00 Floor
-  } : {
-    growth_pool_mjdq: 0,
-    total_burned_mjdq: 0,
-    community_treasury_mjdq: 0,
-    oracle_rate_php_per_jdq: 1.0,
-  };
-  ledger: LedgerEntryRow[] = developmentFixturesEnabled ? [
-    {
-      id: 'ledg-1',
-      user_id: '11111111-1111-1111-1111-111111111111',
-      entry_type: 'poa_reward',
-      mjdq_delta: 50000, // 50,000 mJDQ (50 JDQ)
-      jdq_delta: 0,
-      burned_mjdq: 0,
-      description: 'PoA Reward: Dagupan Bangus Taste & Trade Trail (D=1.0, G=2.0)',
-      created_at: new Date().toISOString(),
-    },
-  ] : [];
+  campaign_reservations: CampaignReservationRow[] = developmentFixturesEnabled
+    ? [
+        {
+          id: 'res_1',
+          campaign_id: 'camp_1',
+          user_id: '11111111-1111-1111-1111-111111111111',
+          user_display_name: 'Juan Dela Cruz',
+          referred_by_user_id: null,
+          referred_by_name: null,
+          ticket_code: 'TICKET-BOLINAO-8821',
+          status: 'reserved',
+          created_at: new Date().toISOString(),
+        },
+      ]
+    : [];
+  treasury: TreasuryRow = developmentFixturesEnabled
+    ? {
+        growth_pool_mjdq: 50000000, // 50,000,000 mJDQ (50,000 JDQ initial Growth Pool)
+        total_burned_mjdq: 250000, // 250,000 mJDQ (250 JDQ total burned)
+        community_treasury_mjdq: 1000000, // 1,000,000 mJDQ (1,000 JDQ treasury)
+        oracle_rate_php_per_jdq: 1.0, // 1 JDQ = ₱1.00 Floor
+      }
+    : {
+        growth_pool_mjdq: 0,
+        total_burned_mjdq: 0,
+        community_treasury_mjdq: 0,
+        oracle_rate_php_per_jdq: 1.0,
+      };
+  ledger: LedgerEntryRow[] = developmentFixturesEnabled
+    ? [
+        {
+          id: 'ledg-1',
+          user_id: '11111111-1111-1111-1111-111111111111',
+          entry_type: 'poa_reward',
+          mjdq_delta: 50000, // 50,000 mJDQ (50 JDQ)
+          jdq_delta: 0,
+          burned_mjdq: 0,
+          description: 'PoA Reward: Dagupan Bangus Taste & Trade Trail (D=1.0, G=2.0)',
+          created_at: new Date().toISOString(),
+        },
+      ]
+    : [];
   web_analytics_events: WebAnalyticsEventRow[] = [];
   quest_attempts: QuestAttemptRow[] = [];
   quest_step_evidence: QuestStepEvidenceRow[] = [];
@@ -974,8 +1031,13 @@ export class MemoryDb {
     const toIso = (value: Date | string) => new Date(value).toISOString();
     const { rows: users } = await pool.query('SELECT * FROM users ORDER BY created_at');
     this.users = users.map((row: any) => ({
-      id: row.id, seed_id: row.seed_id, display_name: row.display_name, email: row.email,
-      avatar_url: row.avatar_url, role: row.role, demo_points: row.demo_points,
+      id: row.id,
+      seed_id: row.seed_id,
+      display_name: row.display_name,
+      email: row.email,
+      avatar_url: row.avatar_url,
+      role: row.role,
+      demo_points: row.demo_points,
       mjdq_balance: row.mjdq_balance ?? row.demo_points * 1000,
       jdq_governance_balance: row.jdq_governance_balance ?? (row.seed_id?.startsWith('guest:') ? 0 : 15),
       scout_reputation: row.scout_reputation ?? 100,
@@ -984,24 +1046,33 @@ export class MemoryDb {
       bio: row.bio ?? null,
       status_text: row.status_text ?? null,
       is_test: Boolean(row.is_test),
-      created_at: toIso(row.created_at), updated_at: toIso(row.updated_at),
+      created_at: toIso(row.created_at),
+      updated_at: toIso(row.updated_at),
     }));
     const { rows: quests } = await pool.query('SELECT * FROM quests ORDER BY created_at');
     this.quests = quests.map((row: any) => ({
-      id: row.id, title: row.title, description: row.description, category: row.category,
-      location_name: row.location_name, gps_lat: row.gps_lat, gps_lng: row.gps_lng,
+      id: row.id,
+      title: row.title,
+      description: row.description,
+      category: row.category,
+      location_name: row.location_name,
+      gps_lat: row.gps_lat,
+      gps_lng: row.gps_lng,
       radius_meters: row.radius_meters,
       base_reward_php: row.base_reward_php ?? 25.0,
       difficulty_factor: row.difficulty_factor ?? 1.0,
       geo_multiplier: row.geo_multiplier ?? 2.0,
-      reward_points: row.reward_points, marker_code: row.marker_code,
-      marker_image_url: row.marker_image_url, is_active: row.is_active,
+      reward_points: row.reward_points,
+      marker_code: row.marker_code,
+      marker_image_url: row.marker_image_url,
+      is_active: row.is_active,
       is_test: Boolean(row.is_test),
       author_id: row.author_id ?? null,
       status: row.status ?? 'published',
       version: row.version ?? 1,
       steps: Array.isArray(row.steps) ? row.steps : [],
-      created_at: toIso(row.created_at), updated_at: toIso(row.updated_at),
+      created_at: toIso(row.created_at),
+      updated_at: toIso(row.updated_at),
     }));
     try {
       const { rows: attempts } = await pool.query('SELECT * FROM quest_attempts ORDER BY created_at');
@@ -1021,7 +1092,9 @@ export class MemoryDb {
       // quest_attempts table may not exist in legacy dev fixtures
     }
     try {
-      const { rows: affiliateApps } = await pool.query('SELECT * FROM merchant_affiliate_applications ORDER BY created_at DESC');
+      const { rows: affiliateApps } = await pool.query(
+        'SELECT * FROM merchant_affiliate_applications ORDER BY created_at DESC',
+      );
       this.affiliate_applications = affiliateApps.map((row: any) => ({
         id: row.id,
         user_id: row.user_id,
@@ -1089,7 +1162,9 @@ export class MemoryDb {
       }));
     } catch {}
     try {
-      const { rows: products } = await pool.query('SELECT * FROM merchant_products ORDER BY display_order ASC, created_at DESC');
+      const { rows: products } = await pool.query(
+        'SELECT * FROM merchant_products ORDER BY display_order ASC, created_at DESC',
+      );
       this.merchant_products = products.map((row: any) => ({
         id: row.id,
         merchant_id: row.merchant_id,
@@ -1107,12 +1182,21 @@ export class MemoryDb {
     } catch {}
     const { rows: submissions } = await pool.query('SELECT * FROM submissions ORDER BY created_at');
     this.submissions = submissions.map((row: any) => ({
-      id: row.id, idempotency_key: row.idempotency_key, user_id: row.user_id, quest_id: row.quest_id,
-      scanned_marker_code: row.scanned_marker_code, captured_lat: row.captured_lat, captured_lng: row.captured_lng,
-      captured_accuracy: row.captured_accuracy, status: row.status, rejection_reason: row.rejection_reason,
-      reviewed_by: row.reviewed_by, reviewed_at: row.reviewed_at ? toIso(row.reviewed_at) : null,
+      id: row.id,
+      idempotency_key: row.idempotency_key,
+      user_id: row.user_id,
+      quest_id: row.quest_id,
+      scanned_marker_code: row.scanned_marker_code,
+      captured_lat: row.captured_lat,
+      captured_lng: row.captured_lng,
+      captured_accuracy: row.captured_accuracy,
+      status: row.status,
+      rejection_reason: row.rejection_reason,
+      reviewed_by: row.reviewed_by,
+      reviewed_at: row.reviewed_at ? toIso(row.reviewed_at) : null,
       is_test: Boolean(row.is_test),
-      created_at: toIso(row.created_at), updated_at: toIso(row.updated_at),
+      created_at: toIso(row.created_at),
+      updated_at: toIso(row.updated_at),
     }));
     const { rows: merchants } = await pool.query('SELECT * FROM merchants ORDER BY created_at');
     this.merchants = merchants.map((row: any) => ({
@@ -1133,19 +1217,42 @@ export class MemoryDb {
     }));
     const { rows: vouchers } = await pool.query('SELECT * FROM vouchers ORDER BY id');
     this.vouchers = vouchers.map((row: any) => ({
-      id: row.id, merchant_id: row.merchant_id, title: row.title, description: row.description,
-      cost_points: row.cost_points, fiat_floor_php: row.fiat_floor_php ?? 50.0, is_active: row.is_active,
+      id: row.id,
+      merchant_id: row.merchant_id,
+      title: row.title,
+      description: row.description,
+      cost_points: row.cost_points,
+      fiat_floor_php: row.fiat_floor_php ?? 50.0,
+      is_active: row.is_active,
     }));
     const { rows: redemptions } = await pool.query('SELECT * FROM redemptions ORDER BY created_at');
     this.redemptions = redemptions.map((row: any) => ({
-      id: row.id, voucher_id: row.voucher_id, user_id: row.user_id, code: row.code,
-      cost_points: row.cost_points, idempotency_key: row.idempotency_key, created_at: toIso(row.created_at),
+      id: row.id,
+      voucher_id: row.voucher_id,
+      user_id: row.user_id,
+      code: row.code,
+      cost_points: row.cost_points,
+      idempotency_key: row.idempotency_key,
+      created_at: toIso(row.created_at),
     }));
-    const { rows: analytics } = await pool.query('SELECT * FROM web_analytics_events WHERE occurred_at >= NOW() - INTERVAL \'90 days\' ORDER BY occurred_at');
-    this.web_analytics_events = analytics.map((row: any) => ({ id: row.id, event_type: row.event_type, path: row.path, label: row.label, session_id: row.session_id, occurred_at: toIso(row.occurred_at) }));
+    const { rows: analytics } = await pool.query(
+      "SELECT * FROM web_analytics_events WHERE occurred_at >= NOW() - INTERVAL '90 days' ORDER BY occurred_at",
+    );
+    this.web_analytics_events = analytics.map((row: any) => ({
+      id: row.id,
+      event_type: row.event_type,
+      path: row.path,
+      label: row.label,
+      session_id: row.session_id,
+      occurred_at: toIso(row.occurred_at),
+    }));
     try {
       const { rows: follows } = await pool.query('SELECT * FROM user_follows ORDER BY created_at');
-      this.follows = follows.map((row: any) => ({ follower_id: row.follower_id, following_id: row.following_id, created_at: toIso(row.created_at) }));
+      this.follows = follows.map((row: any) => ({
+        follower_id: row.follower_id,
+        following_id: row.following_id,
+        created_at: toIso(row.created_at),
+      }));
     } catch {
       // user_follows may not exist yet in dev/fallback
     }
@@ -1204,7 +1311,15 @@ export class MemoryDb {
     }
   }
 
-  private buildApplicationAudit(applicationId: string, actorId: string | null, fromStatus: string, toStatus: string, revision: number, notes?: string | null, applicantFeedback?: string | null): MerchantApplicationAuditRow {
+  private buildApplicationAudit(
+    applicationId: string,
+    actorId: string | null,
+    fromStatus: string,
+    toStatus: string,
+    revision: number,
+    notes?: string | null,
+    applicantFeedback?: string | null,
+  ): MerchantApplicationAuditRow {
     return {
       id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       application_id: applicationId,
@@ -1222,14 +1337,27 @@ export class MemoryDb {
     return {
       query: `INSERT INTO merchant_application_audits (id, application_id, actor_id, from_status, to_status, revision, notes, applicant_feedback, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
-      params: [audit.id, audit.application_id, audit.actor_id, audit.from_status, audit.to_status, audit.revision, audit.notes, audit.applicant_feedback],
+      params: [
+        audit.id,
+        audit.application_id,
+        audit.actor_id,
+        audit.from_status,
+        audit.to_status,
+        audit.revision,
+        audit.notes,
+        audit.applicant_feedback,
+      ],
     };
   }
 
   recordWebAnalyticsEvent(event: WebAnalyticsEventRow) {
     this.web_analytics_events.push(event);
-    if (this.web_analytics_events.length > 20000) this.web_analytics_events.splice(0, this.web_analytics_events.length - 20000);
-    this.persist('INSERT INTO web_analytics_events (id,event_type,path,label,session_id,occurred_at) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING', [event.id, event.event_type, event.path, event.label ?? null, event.session_id, event.occurred_at]);
+    if (this.web_analytics_events.length > 20000)
+      this.web_analytics_events.splice(0, this.web_analytics_events.length - 20000);
+    this.persist(
+      'INSERT INTO web_analytics_events (id,event_type,path,label,session_id,occurred_at) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING',
+      [event.id, event.event_type, event.path, event.label ?? null, event.session_id, event.occurred_at],
+    );
   }
 
   getWebAnalyticsSummary(days: number) {
@@ -1237,9 +1365,36 @@ export class MemoryDb {
     const events = this.web_analytics_events.filter((event) => Date.parse(event.occurred_at) >= cutoff);
     const views = events.filter((event) => event.event_type === 'page_view');
     const clicks = events.filter((event) => event.event_type === 'cta_click');
-    const count = (items: WebAnalyticsEventRow[], key: 'path' | 'label') => Object.entries(items.reduce<Record<string, number>>((acc, item) => { const value = item[key] || 'unknown'; acc[value] = (acc[value] || 0) + 1; return acc; }, {})).sort((a, b) => b[1] - a[1]).slice(0, 10);
-    const daily = Object.entries(views.reduce<Record<string, { views: number; sessions: Set<string> }>>((acc, event) => { const date = event.occurred_at.slice(0, 10); acc[date] ||= { views: 0, sessions: new Set() }; acc[date].views += 1; acc[date].sessions.add(event.session_id); return acc; }, {})).sort(([a], [b]) => a.localeCompare(b)).map(([date, value]) => ({ date, views: value.views, sessions: value.sessions.size }));
-    return { days, totalViews: views.length, uniqueSessions: new Set(views.map((event) => event.session_id)).size, ctaClicks: clicks.length, topPages: count(views, 'path').map(([path, total]) => ({ path, views: total })), topCtas: count(clicks, 'label').map(([label, total]) => ({ label, clicks: total })), daily };
+    const count = (items: WebAnalyticsEventRow[], key: 'path' | 'label') =>
+      Object.entries(
+        items.reduce<Record<string, number>>((acc, item) => {
+          const value = item[key] || 'unknown';
+          acc[value] = (acc[value] || 0) + 1;
+          return acc;
+        }, {}),
+      )
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10);
+    const daily = Object.entries(
+      views.reduce<Record<string, { views: number; sessions: Set<string> }>>((acc, event) => {
+        const date = event.occurred_at.slice(0, 10);
+        acc[date] ||= { views: 0, sessions: new Set() };
+        acc[date].views += 1;
+        acc[date].sessions.add(event.session_id);
+        return acc;
+      }, {}),
+    )
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, value]) => ({ date, views: value.views, sessions: value.sessions.size }));
+    return {
+      days,
+      totalViews: views.length,
+      uniqueSessions: new Set(views.map((event) => event.session_id)).size,
+      ctaClicks: clicks.length,
+      topPages: count(views, 'path').map(([path, total]) => ({ path, views: total })),
+      topCtas: count(clicks, 'label').map(([label, total]) => ({ label, clicks: total })),
+      daily,
+    };
   }
 
   // Writes a quest row (insert or update). Used by the governance store when it schedules community quests.
@@ -1257,9 +1412,24 @@ export class MemoryDb {
          author_id=COALESCE(EXCLUDED.author_id, quests.author_id),
          status=EXCLUDED.status, version=EXCLUDED.version, steps=EXCLUDED.steps,
          updated_at=NOW()`,
-      [quest.id, quest.title, quest.description, quest.category, quest.location_name, quest.gps_lat, quest.gps_lng,
-        quest.radius_meters, quest.reward_points, quest.marker_code, quest.marker_image_url, quest.is_active,
-        quest.author_id ?? null, quest.status ?? 'published', quest.version ?? 1, JSON.stringify(quest.steps ?? [])]
+      [
+        quest.id,
+        quest.title,
+        quest.description,
+        quest.category,
+        quest.location_name,
+        quest.gps_lat,
+        quest.gps_lng,
+        quest.radius_meters,
+        quest.reward_points,
+        quest.marker_code,
+        quest.marker_image_url,
+        quest.is_active,
+        quest.author_id ?? null,
+        quest.status ?? 'published',
+        quest.version ?? 1,
+        JSON.stringify(quest.steps ?? []),
+      ],
     );
   }
 
@@ -1267,14 +1437,24 @@ export class MemoryDb {
     this.persist(
       `INSERT INTO submissions (id, idempotency_key, user_id, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy, status)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
-      [sub.id, sub.idempotency_key, sub.user_id, sub.quest_id, sub.scanned_marker_code, sub.captured_lat, sub.captured_lng, sub.captured_accuracy, sub.status]
+      [
+        sub.id,
+        sub.idempotency_key,
+        sub.user_id,
+        sub.quest_id,
+        sub.scanned_marker_code,
+        sub.captured_lat,
+        sub.captured_lng,
+        sub.captured_accuracy,
+        sub.status,
+      ],
     );
   }
 
   private persistReview(sub: SubmissionRow) {
     this.persist(
       `UPDATE submissions SET status=$2, rejection_reason=$3, reviewed_by=$4, reviewed_at=NOW(), updated_at=NOW() WHERE id=$1`,
-      [sub.id, sub.status, sub.rejection_reason ?? null, sub.reviewed_by ?? null]
+      [sub.id, sub.status, sub.rejection_reason ?? null, sub.reviewed_by ?? null],
     );
   }
 
@@ -1286,7 +1466,14 @@ export class MemoryDb {
     this.persist(
       `INSERT INTO redemptions (id, voucher_id, user_id, code, cost_points, idempotency_key)
        VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (user_id, idempotency_key) DO NOTHING`,
-      [redemption.id, redemption.voucher_id, redemption.user_id, redemption.code, redemption.cost_points, redemption.idempotency_key]
+      [
+        redemption.id,
+        redemption.voucher_id,
+        redemption.user_id,
+        redemption.code,
+        redemption.cost_points,
+        redemption.idempotency_key,
+      ],
     );
   }
 
@@ -1417,9 +1604,7 @@ export class MemoryDb {
       return updated;
     }
 
-    const conflict = this.users.find(
-      (u) => u.wallet_address?.toLowerCase() === clean.toLowerCase() && u.id !== userId
-    );
+    const conflict = this.users.find((u) => u.wallet_address?.toLowerCase() === clean.toLowerCase() && u.id !== userId);
     if (conflict) {
       const err = new Error('WALLET_ALREADY_BOUND');
       (err as any).code = 'WALLET_ALREADY_BOUND';
@@ -1440,7 +1625,10 @@ export class MemoryDb {
 
   async setUserEmail(userId: string, email: string): Promise<UserRow | undefined> {
     if (this.pg) {
-      const { rows } = await this.pg.query('UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2 RETURNING id', [email, userId]);
+      const { rows } = await this.pg.query(
+        'UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2 RETURNING id',
+        [email, userId],
+      );
       if (!rows.length) return undefined;
       const updated = await this.usersRepo.findById(userId);
       const memIdx = this.users.findIndex((u) => u.id === userId);
@@ -1476,7 +1664,13 @@ export class MemoryDb {
 
   async updateUserProfile(
     userId: string,
-    updates: { is_public?: boolean; handle?: string | null; bio?: string | null; status_text?: string | null; display_name?: string }
+    updates: {
+      is_public?: boolean;
+      handle?: string | null;
+      bio?: string | null;
+      status_text?: string | null;
+      display_name?: string;
+    },
   ): Promise<UserRow | undefined> {
     if (this.pg) {
       const updated = await this.usersRepo.updateProfile(userId, updates);
@@ -1494,14 +1688,15 @@ export class MemoryDb {
     const user = this.findUserById(userId);
     if (!user) return undefined;
 
-    const normalizedHandle = updates.handle !== undefined
-      ? (updates.handle ? updates.handle.replace(/^@/, '').toLowerCase().trim() : null)
-      : undefined;
+    const normalizedHandle =
+      updates.handle !== undefined
+        ? updates.handle
+          ? updates.handle.replace(/^@/, '').toLowerCase().trim()
+          : null
+        : undefined;
 
     if (normalizedHandle) {
-      const conflict = this.users.find(
-        (u) => u.id !== userId && u.handle?.toLowerCase() === normalizedHandle
-      );
+      const conflict = this.users.find((u) => u.id !== userId && u.handle?.toLowerCase() === normalizedHandle);
       if (conflict) {
         const err = new Error('HANDLE_TAKEN');
         (err as any).code = 'HANDLE_TAKEN';
@@ -1518,7 +1713,11 @@ export class MemoryDb {
     return user;
   }
 
-  async getFollowCounts(userId: string, ownerView = false, allowTest = false): Promise<{ follower_count: number; following_count: number }> {
+  async getFollowCounts(
+    userId: string,
+    ownerView = false,
+    allowTest = false,
+  ): Promise<{ follower_count: number; following_count: number }> {
     if (this.pg) {
       return await this.usersRepo.getFollowCounts(userId, ownerView, allowTest);
     }
@@ -1528,15 +1727,18 @@ export class MemoryDb {
     }
     const publicUserIds = new Set(this.users.filter((u) => u.is_public && (allowTest || !u.is_test)).map((u) => u.id));
     const follower_count = this.follows.filter(
-      (f) => f.following_id === userId && publicUserIds.has(f.follower_id)
+      (f) => f.following_id === userId && publicUserIds.has(f.follower_id),
     ).length;
     const following_count = this.follows.filter(
-      (f) => f.follower_id === userId && publicUserIds.has(f.following_id)
+      (f) => f.follower_id === userId && publicUserIds.has(f.following_id),
     ).length;
     return { follower_count, following_count };
   }
 
-  async getRelationship(actorId: string, targetId: string): Promise<{
+  async getRelationship(
+    actorId: string,
+    targetId: string,
+  ): Promise<{
     is_following: boolean;
     follows_you: boolean;
     can_follow: boolean;
@@ -1585,7 +1787,10 @@ export class MemoryDb {
     };
   }
 
-  async followUser(actorId: string, targetId: string): Promise<{
+  async followUser(
+    actorId: string,
+    targetId: string,
+  ): Promise<{
     success: boolean;
     error?: 'CANNOT_FOLLOW_SELF' | 'PROFILE_VISIBILITY_REQUIRED' | 'NOT_FOUND';
     follower_count?: number;
@@ -1639,22 +1844,21 @@ export class MemoryDb {
     };
   }
 
-  async unfollowUser(actorId: string, targetId: string): Promise<{
+  async unfollowUser(
+    actorId: string,
+    targetId: string,
+  ): Promise<{
     success: boolean;
     follower_count: number;
     following_count: number;
   }> {
     if (this.pg) {
       const res = await this.usersRepo.unfollowUser(actorId, targetId);
-      this.follows = this.follows.filter(
-        (f) => !(f.follower_id === actorId && f.following_id === targetId)
-      );
+      this.follows = this.follows.filter((f) => !(f.follower_id === actorId && f.following_id === targetId));
       return res;
     }
 
-    this.follows = this.follows.filter(
-      (f) => !(f.follower_id === actorId && f.following_id === targetId)
-    );
+    this.follows = this.follows.filter((f) => !(f.follower_id === actorId && f.following_id === targetId));
 
     const counts = await this.getFollowCounts(targetId);
     return {
@@ -1669,7 +1873,7 @@ export class MemoryDb {
     limit: number = 20,
     cursor?: string,
     ownerView = false,
-    allowTest = false
+    allowTest = false,
   ): Promise<{ items: PublicTravelerSummary[]; next_cursor: string | null; has_more: boolean } | null> {
     if (this.pg) {
       return await this.usersRepo.listFollowers(targetId, limit, cursor, ownerView, allowTest);
@@ -1678,9 +1882,7 @@ export class MemoryDb {
     if (!target || (!target.is_public && !ownerView)) return null;
 
     const publicUserIds = new Set(this.users.filter((u) => u.is_public && (allowTest || !u.is_test)).map((u) => u.id));
-    let candidates = this.follows.filter(
-      (f) => f.following_id === targetId && publicUserIds.has(f.follower_id)
-    );
+    let candidates = this.follows.filter((f) => f.following_id === targetId && publicUserIds.has(f.follower_id));
 
     candidates.sort((a, b) => {
       const timeDiff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
@@ -1740,7 +1942,7 @@ export class MemoryDb {
     targetId: string,
     limit: number = 20,
     cursor?: string,
-    allowTest = false
+    allowTest = false,
   ): Promise<{ items: PublicTravelerSummary[]; next_cursor: string | null; has_more: boolean } | null> {
     if (this.pg) {
       return await this.usersRepo.listFollowing(targetId, limit, cursor, allowTest);
@@ -1749,9 +1951,7 @@ export class MemoryDb {
     if (!target || !target.is_public) return null;
 
     const publicUserIds = new Set(this.users.filter((u) => u.is_public && (allowTest || !u.is_test)).map((u) => u.id));
-    let candidates = this.follows.filter(
-      (f) => f.follower_id === targetId && publicUserIds.has(f.following_id)
-    );
+    let candidates = this.follows.filter((f) => f.follower_id === targetId && publicUserIds.has(f.following_id));
 
     candidates.sort((a, b) => {
       const timeDiff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
@@ -1810,7 +2010,7 @@ export class MemoryDb {
   async listMyFollowing(
     actorId: string,
     limit: number = 20,
-    cursor?: string
+    cursor?: string,
   ): Promise<{ items: PublicTravelerSummary[]; next_cursor: string | null; has_more: boolean }> {
     if (this.pg) {
       return await this.usersRepo.listMyFollowing(actorId, limit, cursor);
@@ -1914,10 +2114,10 @@ export class MemoryDb {
     }
     const publicUserIds = new Set(this.users.filter((u) => u.is_public).map((u) => u.id));
     const follower_count = this.follows.filter(
-      (f) => f.following_id === userId && publicUserIds.has(f.follower_id)
+      (f) => f.following_id === userId && publicUserIds.has(f.follower_id),
     ).length;
     const following_count = this.follows.filter(
-      (f) => f.follower_id === userId && publicUserIds.has(f.following_id)
+      (f) => f.follower_id === userId && publicUserIds.has(f.following_id),
     ).length;
     return { follower_count, following_count };
   }
@@ -1936,7 +2136,9 @@ export class MemoryDb {
   }
 
   getActiveAttempt(userId: string, questId: string): QuestAttemptRow | undefined {
-    return this.quest_attempts.find((a) => a.user_id === userId && a.quest_id === questId && a.status === 'in_progress');
+    return this.quest_attempts.find(
+      (a) => a.user_id === userId && a.quest_id === questId && a.status === 'in_progress',
+    );
   }
 
   getAttemptsForUser(userId: string): QuestAttemptRow[] {
@@ -1955,7 +2157,7 @@ export class MemoryDb {
 
   saveStepEvidence(evidence: QuestStepEvidenceRow): QuestStepEvidenceRow {
     const existingIndex = this.quest_step_evidence.findIndex(
-      (e) => e.attempt_id === evidence.attempt_id && e.step_order === evidence.step_order
+      (e) => e.attempt_id === evidence.attempt_id && e.step_order === evidence.step_order,
     );
     if (existingIndex >= 0) {
       this.quest_step_evidence[existingIndex] = evidence;
@@ -1966,17 +2168,18 @@ export class MemoryDb {
   }
 
   createAttempt(payload: Omit<QuestAttemptRow, 'created_at' | 'updated_at' | 'completed_at'>): QuestAttemptRow {
-    const stepsSnapshot = payload.steps_snapshot && payload.steps_snapshot.length > 0
-      ? payload.steps_snapshot
-      : [
-          {
-            step_order: 1,
-            title: 'Destination check-in',
-            description: 'Submit location proof for verification.',
-            checkpoint_type: 'location',
-            required: true,
-          } as QuestStep,
-        ];
+    const stepsSnapshot =
+      payload.steps_snapshot && payload.steps_snapshot.length > 0
+        ? payload.steps_snapshot
+        : [
+            {
+              step_order: 1,
+              title: 'Destination check-in',
+              description: 'Submit location proof for verification.',
+              checkpoint_type: 'location',
+              required: true,
+            } as QuestStep,
+          ];
     const requiredCount = stepsSnapshot.filter((s) => s.required !== false).length;
 
     const newAttempt: QuestAttemptRow = {
@@ -2017,7 +2220,15 @@ export class MemoryDb {
       `INSERT INTO quest_attempts (id, quest_id, user_id, version, current_step, total_steps, status, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
        ON CONFLICT (id) DO UPDATE SET current_step = EXCLUDED.current_step, status = EXCLUDED.status, updated_at = NOW()`,
-      [newAttempt.id, newAttempt.quest_id, newAttempt.user_id, newAttempt.version, newAttempt.current_step, newAttempt.total_steps, newAttempt.status]
+      [
+        newAttempt.id,
+        newAttempt.quest_id,
+        newAttempt.user_id,
+        newAttempt.version,
+        newAttempt.current_step,
+        newAttempt.total_steps,
+        newAttempt.status,
+      ],
     );
     return newAttempt;
   }
@@ -2030,13 +2241,17 @@ export class MemoryDb {
       attempt.updated_at = new Date().toISOString();
       this.persist(
         `UPDATE quest_attempts SET status = 'completed', completed_at = NOW(), updated_at = NOW() WHERE id = $1`,
-        [attempt.id]
+        [attempt.id],
       );
     }
     return attempt;
   }
 
-  getQuestAttemptStats(questId: string): { total_attempts: number; active_attempts: number; completed_attempts: number } {
+  getQuestAttemptStats(questId: string): {
+    total_attempts: number;
+    active_attempts: number;
+    completed_attempts: number;
+  } {
     const attempts = this.quest_attempts.filter((a) => a.quest_id === questId);
     return {
       total_attempts: attempts.length,
@@ -2047,7 +2262,9 @@ export class MemoryDb {
 
   findAffiliateApplicationByUser(userId: string): AffiliateApplicationRow | undefined {
     const userApps = this.affiliate_applications.filter((a) => a.user_id === userId);
-    const active = userApps.find((a) => a.status === 'received' || a.status === 'in_review' || a.status === 'needs_changes');
+    const active = userApps.find(
+      (a) => a.status === 'received' || a.status === 'in_review' || a.status === 'needs_changes',
+    );
     if (active) return active;
     return userApps[0];
   }
@@ -2068,7 +2285,12 @@ export class MemoryDb {
     return this.merchant_affiliate_drafts.find((d) => d.user_id === userId);
   }
 
-  saveAffiliateDraft(userId: string, draftData: Record<string, any>, currentStep: number, expectedRevision?: number): MerchantAffiliateDraftRow {
+  saveAffiliateDraft(
+    userId: string,
+    draftData: Record<string, any>,
+    currentStep: number,
+    expectedRevision?: number,
+  ): MerchantAffiliateDraftRow {
     const existing = this.getAffiliateDraft(userId);
     const now = new Date().toISOString();
 
@@ -2087,7 +2309,7 @@ export class MemoryDb {
         `INSERT INTO merchant_affiliate_drafts (user_id, draft_data, current_step, revision, updated_at)
          VALUES ($1, $2, $3, $4, NOW())
          ON CONFLICT (user_id) DO UPDATE SET draft_data = EXCLUDED.draft_data, current_step = EXCLUDED.current_step, revision = EXCLUDED.revision, updated_at = NOW()`,
-        [userId, JSON.stringify(draftData), currentStep, existing.revision]
+        [userId, JSON.stringify(draftData), currentStep, existing.revision],
       );
       return existing;
     }
@@ -2105,7 +2327,7 @@ export class MemoryDb {
       `INSERT INTO merchant_affiliate_drafts (user_id, draft_data, current_step, revision, created_at, updated_at)
        VALUES ($1, $2, $3, $4, NOW(), NOW())
        ON CONFLICT (user_id) DO UPDATE SET draft_data = EXCLUDED.draft_data, current_step = EXCLUDED.current_step, revision = EXCLUDED.revision, updated_at = NOW()`,
-      [userId, JSON.stringify(draftData), currentStep, 1]
+      [userId, JSON.stringify(draftData), currentStep, 1],
     );
     return newDraft;
   }
@@ -2115,9 +2337,16 @@ export class MemoryDb {
     this.persist('DELETE FROM merchant_affiliate_drafts WHERE user_id = $1', [userId]);
   }
 
-  async createAffiliateApplication(payload: Omit<AffiliateApplicationRow, 'id' | 'status' | 'reviewer_id' | 'reviewer_notes' | 'reviewed_at' | 'created_at' | 'updated_at'>): Promise<AffiliateApplicationRow> {
+  async createAffiliateApplication(
+    payload: Omit<
+      AffiliateApplicationRow,
+      'id' | 'status' | 'reviewer_id' | 'reviewer_notes' | 'reviewed_at' | 'created_at' | 'updated_at'
+    >,
+  ): Promise<AffiliateApplicationRow> {
     const existingActive = this.affiliate_applications.find(
-      (a) => a.user_id === payload.user_id && (a.status === 'received' || a.status === 'in_review' || a.status === 'needs_changes')
+      (a) =>
+        a.user_id === payload.user_id &&
+        (a.status === 'received' || a.status === 'in_review' || a.status === 'needs_changes'),
     );
     if (existingActive) {
       const error: any = new Error('You already have an active application under review.');
@@ -2190,7 +2419,11 @@ export class MemoryDb {
     return newApp;
   }
 
-  async resubmitAffiliateApplication(id: string, userId: string, payload: Partial<AffiliateApplicationRow>): Promise<AffiliateApplicationRow> {
+  async resubmitAffiliateApplication(
+    id: string,
+    userId: string,
+    payload: Partial<AffiliateApplicationRow>,
+  ): Promise<AffiliateApplicationRow> {
     const app = this.findAffiliateApplicationById(id);
     if (!app) {
       const err: any = new Error('Application not found');
@@ -2228,7 +2461,14 @@ export class MemoryDb {
       preferred_contact_method: payload.preferred_contact_method ?? app.preferred_contact_method,
     };
 
-    const audit = this.buildApplicationAudit(app.id, userId, oldStatus, 'received', next.version, 'Applicant resubmission');
+    const audit = this.buildApplicationAudit(
+      app.id,
+      userId,
+      oldStatus,
+      'received',
+      next.version,
+      'Applicant resubmission',
+    );
 
     // Durable first: application update, then the audit row that references it.
     await this.runDurableTransaction([
@@ -2282,10 +2522,21 @@ export class MemoryDb {
   }
 
   getApplicationAudits(applicationId: string): MerchantApplicationAuditRow[] {
-    return this.merchant_application_audits.filter((a) => a.application_id === applicationId).sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    return this.merchant_application_audits
+      .filter((a) => a.application_id === applicationId)
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   }
 
-  async updateAffiliateApplicationStatus(id: string, update: { status: AffiliateApplicationStatus; reviewer_id: string; reviewer_notes?: string | null; applicant_feedback?: string | null; expected_version?: number }): Promise<AffiliateApplicationRow | null> {
+  async updateAffiliateApplicationStatus(
+    id: string,
+    update: {
+      status: AffiliateApplicationStatus;
+      reviewer_id: string;
+      reviewer_notes?: string | null;
+      applicant_feedback?: string | null;
+      expected_version?: number;
+    },
+  ): Promise<AffiliateApplicationRow | null> {
     const app = this.findAffiliateApplicationById(id);
     if (!app) return null;
 
@@ -2304,7 +2555,15 @@ export class MemoryDb {
       applicant_feedback: update.applicant_feedback !== undefined ? update.applicant_feedback : app.applicant_feedback,
     };
 
-    const audit = this.buildApplicationAudit(app.id, update.reviewer_id, fromStatus, update.status, app.version || 1, update.reviewer_notes, update.applicant_feedback);
+    const audit = this.buildApplicationAudit(
+      app.id,
+      update.reviewer_id,
+      fromStatus,
+      update.status,
+      app.version || 1,
+      update.reviewer_notes,
+      update.applicant_feedback,
+    );
 
     // Durable first, one transaction, parent rows before children:
     // application update -> merchant -> owner membership -> audit.
@@ -2325,7 +2584,19 @@ export class MemoryDb {
           query: `INSERT INTO merchants (id, name, location, description, status, is_published, category, municipality, contact_email, contact_phone, source_application_id, created_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
            ON CONFLICT (id) DO NOTHING`,
-          params: [provision.merchant.id, provision.merchant.name, provision.merchant.location, provision.merchant.description, provision.merchant.status, provision.merchant.is_published, provision.merchant.category, provision.merchant.municipality, provision.merchant.contact_email, provision.merchant.contact_phone, provision.merchant.source_application_id],
+          params: [
+            provision.merchant.id,
+            provision.merchant.name,
+            provision.merchant.location,
+            provision.merchant.description,
+            provision.merchant.status,
+            provision.merchant.is_published,
+            provision.merchant.category,
+            provision.merchant.municipality,
+            provision.merchant.contact_email,
+            provision.merchant.contact_phone,
+            provision.merchant.source_application_id,
+          ],
         });
       }
       if (provision.newMembership && provision.membership) {
@@ -2333,7 +2604,13 @@ export class MemoryDb {
           query: `INSERT INTO merchant_memberships (id, merchant_id, user_id, role, status, created_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
            ON CONFLICT (merchant_id, user_id) DO UPDATE SET status = 'active', updated_at = NOW()`,
-          params: [provision.membership.id, provision.membership.merchant_id, provision.membership.user_id, provision.membership.role, provision.membership.status],
+          params: [
+            provision.membership.id,
+            provision.membership.merchant_id,
+            provision.membership.user_id,
+            provision.membership.role,
+            provision.membership.status,
+          ],
         });
       }
     }
@@ -2377,7 +2654,7 @@ export class MemoryDb {
     }
 
     const existingMembership = this.merchant_memberships.find(
-      (m) => m.merchant_id === merchant!.id && m.user_id === app.user_id
+      (m) => m.merchant_id === merchant!.id && m.user_id === app.user_id,
     );
     let membership: MerchantMembershipRow | null = null;
     let newMembership = false;
@@ -2403,7 +2680,9 @@ export class MemoryDb {
   }
 
   // Merchant membership and resource helpers
-  getMerchantMembershipForUser(userId: string): { membership: MerchantMembershipRow; merchant: MerchantRow } | undefined {
+  getMerchantMembershipForUser(
+    userId: string,
+  ): { membership: MerchantMembershipRow; merchant: MerchantRow } | undefined {
     const membership = this.merchant_memberships.find((m) => m.user_id === userId && m.status === 'active');
     if (!membership) return undefined;
     const merchant = this.merchants.find((m) => m.id === membership.merchant_id && m.status === 'active');
@@ -2453,7 +2732,7 @@ export class MemoryDb {
         merchant.banner_url ?? null,
         merchant.is_published ?? false,
         merchant.id,
-      ]
+      ],
     );
     return merchant;
   }
@@ -2461,7 +2740,10 @@ export class MemoryDb {
   listMerchantProducts(merchantId: string, includeArchived = false): MerchantProductRow[] {
     return this.merchant_products
       .filter((p) => p.merchant_id === merchantId && (includeArchived || !p.is_archived))
-      .sort((a, b) => a.display_order - b.display_order || new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      .sort(
+        (a, b) =>
+          a.display_order - b.display_order || new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      );
   }
 
   findMerchantProductById(productId: string): MerchantProductRow | undefined {
@@ -2481,7 +2763,18 @@ export class MemoryDb {
     this.persist(
       `INSERT INTO merchant_products (id, merchant_id, name, description, price, currency, image_url, is_published, is_archived, display_order, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())`,
-      [product.id, product.merchant_id, product.name, product.description, product.price ?? null, product.currency, product.image_url ?? null, product.is_published, product.is_archived, product.display_order]
+      [
+        product.id,
+        product.merchant_id,
+        product.name,
+        product.description,
+        product.price ?? null,
+        product.currency,
+        product.image_url ?? null,
+        product.is_published,
+        product.is_archived,
+        product.display_order,
+      ],
     );
     return product;
   }
@@ -2505,7 +2798,17 @@ export class MemoryDb {
       `UPDATE merchant_products 
        SET name = $1, description = $2, price = $3, currency = $4, image_url = $5, is_published = $6, is_archived = $7, display_order = $8, updated_at = NOW()
        WHERE id = $9`,
-      [product.name, product.description, product.price ?? null, product.currency, product.image_url ?? null, product.is_published, product.is_archived, product.display_order, product.id]
+      [
+        product.name,
+        product.description,
+        product.price ?? null,
+        product.currency,
+        product.image_url ?? null,
+        product.is_published,
+        product.is_archived,
+        product.display_order,
+        product.id,
+      ],
     );
     return product;
   }
@@ -2525,8 +2828,18 @@ export class MemoryDb {
   }
 
   hasCompletedQuest(userId: string, questId: string, excludeApprovedSubmissionId?: string): boolean {
-    return this.submissions.some((s) => s.user_id === userId && s.quest_id === questId && s.status === 'approved' && s.id !== excludeApprovedSubmissionId) ||
-      this.quest_attempts.some((attempt) => attempt.user_id === userId && attempt.quest_id === questId && attempt.status === 'completed');
+    return (
+      this.submissions.some(
+        (s) =>
+          s.user_id === userId &&
+          s.quest_id === questId &&
+          s.status === 'approved' &&
+          s.id !== excludeApprovedSubmissionId,
+      ) ||
+      this.quest_attempts.some(
+        (attempt) => attempt.user_id === userId && attempt.quest_id === questId && attempt.status === 'completed',
+      )
+    );
   }
 
   hasPendingSubmission(userId: string, questId: string): boolean {
@@ -2557,7 +2870,9 @@ export class MemoryDb {
     return newSub;
   }
 
-  listSubmissionsForUser(userId: string): Array<SubmissionRow & { quest_title: string; category: string; reward_points: number }> {
+  listSubmissionsForUser(
+    userId: string,
+  ): Array<SubmissionRow & { quest_title: string; category: string; reward_points: number }> {
     return this.submissions
       .filter((s) => s.user_id === userId)
       .map((s) => {
@@ -2581,7 +2896,7 @@ export class MemoryDb {
           s.captured_lat,
           s.captured_lng,
           quest?.gps_lat || 0,
-          quest?.gps_lng || 0
+          quest?.gps_lng || 0,
         );
 
         return {
@@ -2597,7 +2912,14 @@ export class MemoryDb {
   }
 
   // Idempotent state transition & single point award (Fix 4.5 & 4.7)
-  reviewSubmission(id: string, action: 'approve' | 'reject', adminId: string, reason?: string): { submission: SubmissionRow; alreadyReviewed: boolean; conflicting: boolean; reason?: 'ALREADY_COMPLETED' } | undefined {
+  reviewSubmission(
+    id: string,
+    action: 'approve' | 'reject',
+    adminId: string,
+    reason?: string,
+  ):
+    | { submission: SubmissionRow; alreadyReviewed: boolean; conflicting: boolean; reason?: 'ALREADY_COMPLETED' }
+    | undefined {
     const sub = this.submissions.find((s) => s.id === id);
     if (!sub) return undefined;
 
@@ -2635,7 +2957,8 @@ export class MemoryDb {
       .filter((voucher) => voucher.is_active)
       .map((voucher) => ({
         ...voucher,
-        merchant_name: this.merchants.find((merchant) => merchant.id === voucher.merchant_id)?.name || 'Unknown Merchant',
+        merchant_name:
+          this.merchants.find((merchant) => merchant.id === voucher.merchant_id)?.name || 'Unknown Merchant',
       }));
   }
 
@@ -2651,8 +2974,10 @@ export class MemoryDb {
   redeemVoucher(
     voucherId: string,
     userId: string,
-    idempotencyKey: string
-  ): { redemption: RedemptionRow; replayed: boolean } | { error: 'NOT_FOUND' | 'INSUFFICIENT_POINTS' | 'ALREADY_REDEEMED' } {
+    idempotencyKey: string,
+  ):
+    | { redemption: RedemptionRow; replayed: boolean }
+    | { error: 'NOT_FOUND' | 'INSUFFICIENT_POINTS' | 'ALREADY_REDEEMED' } {
     const replay = this.findRedemptionByIdempotency(idempotencyKey, userId);
     if (replay) return { redemption: replay, replayed: true };
 

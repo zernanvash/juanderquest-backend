@@ -9,9 +9,23 @@ describe('public funded quest summaries', () => {
   });
 
   it('projects the latest active plan, remaining estimate, sponsors and voucher perk', async () => {
-    const query = jest.fn()
-      .mockResolvedValueOnce({ rows: [{ id: 'plan-1', quest_id: 'quest-1', mode: 'budget', status: 'active',
-        ends_at: '2026-10-18T00:00:00.000Z', reward_points: 50, fee_points: 3, planned_completions: 3, round_number: 2 }] })
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'plan-1',
+            quest_id: 'quest-1',
+            mode: 'budget',
+            status: 'active',
+            ends_at: '2026-10-18T00:00:00.000Z',
+            reward_points: 50,
+            fee_points: 3,
+            planned_completions: 3,
+            round_number: 2,
+          },
+        ],
+      })
       .mockResolvedValueOnce({ rows: [{ plan_id: 'plan-1', available_points: '106' }] })
       .mockResolvedValueOnce({ rows: [{ plan_id: 'plan-1', name: 'Local Cafe', logo_url: null }] })
       .mockResolvedValueOnce({ rows: [{ plan_id: 'plan-1', title: 'Local treat', remaining: 2, id: 'perk-1' }] });

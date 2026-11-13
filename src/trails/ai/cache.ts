@@ -10,7 +10,13 @@ export const TRAIL_AI_TTL_MS: Readonly<Record<TrailAiPurpose, number>> = Object.
   tell_story: 30 * 24 * 60 * 60 * 1000,
 });
 
-export interface CachedAiResult<T> { value: T; aiUsed: boolean; model: string | null; fallbackReason: AiFallbackReason | null; cacheHit: boolean }
+export interface CachedAiResult<T> {
+  value: T;
+  aiUsed: boolean;
+  model: string | null;
+  fallbackReason: AiFallbackReason | null;
+  cacheHit: boolean;
+}
 export interface CachedAiOptions<T> {
   queryable: Pool | PoolClient;
   purpose: TrailAiPurpose;
@@ -31,9 +37,16 @@ export async function cachedTrailAi<T>(options: CachedAiOptions<T>): Promise<Cac
     return fallbackResult(options, 'nim_not_configured', client.model);
   }
   const canonicalInput = canonicalize(options.input);
-  const cacheKey = createHash('sha256').update(JSON.stringify({
-    purpose: options.purpose, model: client.model, promptVersion: TRAIL_PROMPT_VERSION, input: canonicalInput,
-  })).digest('hex');
+  const cacheKey = createHash('sha256')
+    .update(
+      JSON.stringify({
+        purpose: options.purpose,
+        model: client.model,
+        promptVersion: TRAIL_PROMPT_VERSION,
+        input: canonicalInput,
+      }),
+    )
+    .digest('hex');
 
   try {
     const cached = await options.queryable.query(
@@ -63,7 +76,9 @@ export async function cachedTrailAi<T>(options: CachedAiOptions<T>): Promise<Cac
          ON CONFLICT (cache_key) DO UPDATE SET response=EXCLUDED.response,created_at=EXCLUDED.created_at,expires_at=EXCLUDED.expires_at`,
         [cacheKey, options.purpose, JSON.stringify(generated.value), now, expiresAt],
       );
-    } catch { return fallbackResult(options, 'cache_unavailable', client.model); }
+    } catch {
+      return fallbackResult(options, 'cache_unavailable', client.model);
+    }
     return { value: generated.value, aiUsed: true, model: generated.model, fallbackReason: null, cacheHit: false };
   } catch (error) {
     const reason = error instanceof TrailAiError ? error.reason : 'upstream_unavailable';
@@ -71,14 +86,22 @@ export async function cachedTrailAi<T>(options: CachedAiOptions<T>): Promise<Cac
   }
 }
 
-function fallbackResult<T>(options: CachedAiOptions<T>, reason: AiFallbackReason, model: string | null): CachedAiResult<T> {
+function fallbackResult<T>(
+  options: CachedAiOptions<T>,
+  reason: AiFallbackReason,
+  model: string | null,
+): CachedAiResult<T> {
   return { value: options.fallback(reason), aiUsed: false, model, fallbackReason: reason, cacheHit: false };
 }
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonicalize(item)]));
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, item]) => [key, canonicalize(item)]),
+    );
   }
   return value;
 }

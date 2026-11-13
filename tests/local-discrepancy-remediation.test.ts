@@ -28,9 +28,7 @@ describe('local-only discrepancy guardrails', () => {
     try {
       user.demo_points = 20;
       user.mjdq_balance = 100000;
-      const response = await request(app)
-        .get('/api/v1/wallet')
-        .set('Authorization', `Bearer ${login.body.data.token}`);
+      const response = await request(app).get('/api/v1/wallet').set('Authorization', `Bearer ${login.body.data.token}`);
       expect(response.status).toBe(200);
       expect(response.body.data.demo_points).toBe(20);
       expect(response.body.data.balance_mjdq).toBe(20000);
@@ -45,16 +43,18 @@ describe('local-only discrepancy guardrails', () => {
     expect(login.status).toBe(200);
     const userId = login.body.data.user.id as string;
     const previousPool = db.usersRepo.getPool();
-    const query = jest.fn().mockResolvedValue({ rows: [{
-      demo_points: 20,
-      scout_reputation: 42,
-      data: { balances: { [userId]: 20550 } },
-    }] });
+    const query = jest.fn().mockResolvedValue({
+      rows: [
+        {
+          demo_points: 20,
+          scout_reputation: 42,
+          data: { balances: { [userId]: 20550 } },
+        },
+      ],
+    });
     db.usersRepo.setPool({ query } as unknown as Pool);
     try {
-      const response = await request(app)
-        .get('/api/v1/wallet')
-        .set('Authorization', `Bearer ${login.body.data.token}`);
+      const response = await request(app).get('/api/v1/wallet').set('Authorization', `Bearer ${login.body.data.token}`);
       expect(response.status).toBe(200);
       expect(response.body.data.balance_mjdq).toBe(20550);
       expect(response.body.data.demo_points).toBe(20);
@@ -63,7 +63,7 @@ describe('local-only discrepancy guardrails', () => {
       // mode. Keep the legacy points + snapshot assertion scoped to its query.
       expect(query).toHaveBeenCalledWith(
         'SELECT u.demo_points, u.scout_reputation, gs.data FROM users u CROSS JOIN governance_snapshot gs WHERE u.id = $1 AND gs.id = 1',
-        [userId]
+        [userId],
       );
     } finally {
       db.usersRepo.setPool(previousPool);
