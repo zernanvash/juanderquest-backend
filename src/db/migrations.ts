@@ -87,6 +87,9 @@ export const MIGRATIONS = [
   '080_ar_game_sessions.sql',
   '081_user_home_municipality.sql',
   '082_profile_showcase.sql',
+  '083_hot_foreign_key_indexes.sql',
+  '084_drop_duplicate_indexes_and_status_checks.sql',
+  '085_drop_unused_tables_if_empty.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
