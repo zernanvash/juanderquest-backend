@@ -245,28 +245,40 @@ trailsRouter.get('/trails/:id', optionalAuthenticateToken, async (req: AuthReque
         )
       : { rows: [] };
     const checkinByPosition = new Map(checkins.rows.map((row: any) => [Number(row.position), row]));
+    const storyObj = typeof trail.story === 'string' ? JSON.parse(trail.story) : (trail.story ?? {});
     return res.json({
       success: true,
       data: {
-        ...trail,
+        ...lockedTrailShape(trail, true),
+        intro: typeof storyObj?.intro === 'string' ? storyObj.intro : '',
+        story: storyObj,
         reward_points: rewardFor(trail.tier, await loadTrailEconomy(pool)),
-        stops: stops.rows.map((stop: any) => ({
-          position: Number(stop.position),
-          spot_id: stop.spot_id,
-          arrive_offset_min: Number(stop.arrive_offset_min),
-          dwell_min: Number(stop.dwell_min),
-          leg_minutes: Number(stop.leg_minutes),
-          leg_km: Number(stop.leg_km),
-          narration: stop.narration,
-          checkin_radius_m: Number(stop.checkin_radius_m),
-          name: stop.name,
-          municipality: stop.municipality,
-          category: stop.category,
-          lat: Number(stop.gps_lat),
-          lng: Number(stop.gps_lng),
-          checked_in: checkinByPosition.has(Number(stop.position)),
-          ...(checkinByPosition.get(Number(stop.position)) ?? {}),
-        })),
+        stops: stops.rows.map((stop: any) => {
+          const checkin = checkinByPosition.get(Number(stop.position));
+          return {
+            position: Number(stop.position),
+            spot_id: stop.spot_id,
+            arrive_offset_min: Number(stop.arrive_offset_min),
+            dwell_min: Number(stop.dwell_min),
+            leg_minutes: Number(stop.leg_minutes),
+            leg_km: Number(stop.leg_km),
+            narration: stop.narration,
+            checkin_radius_m: Number(stop.checkin_radius_m),
+            name: stop.name,
+            municipality: stop.municipality,
+            category: stop.category,
+            lat: Number(stop.gps_lat),
+            lng: Number(stop.gps_lng),
+            checked_in: Boolean(checkin),
+            ...(checkin
+              ? {
+                  verified_at: checkin.verified_at,
+                  distance_m: Number(checkin.distance_m),
+                  accuracy_m: Number(checkin.accuracy_m),
+                }
+              : {}),
+          };
+        }),
       },
     });
   } catch {
