@@ -46,6 +46,7 @@ import { handleQuestStepVerified } from '../stamps/hooks.js';
 import { settleReward } from '../funding/rewardSettlement.js';
 import { progressionService } from '../progression/service.js';
 import { governanceStore } from './proposals.js';
+import { log } from '../utils/logger.js';
 
 const router = Router();
 
@@ -185,7 +186,7 @@ router.get('/quests', optionalAuthenticateToken, checkQAAuthorization, async (re
         );
         for (const quest of quests) if (summaries.has(quest.id)) (quest as any).funding = summaries.get(quest.id);
       } catch (error) {
-        console.error('[funding] public quest summary unavailable:', error);
+        log.error('[funding] public quest summary unavailable:', { error: error });
       }
     }
   }
@@ -245,7 +246,7 @@ router.get('/quests/:id', optionalAuthenticateToken, checkQAAuthorization, async
         responseData.funding =
           (await publicFundingSummaries(pool, [quest.id], Boolean(quest.is_test))).get(quest.id) ?? null;
       } catch (error) {
-        console.error('[funding] quest detail summary unavailable:', error);
+        log.error('[funding] quest detail summary unavailable:', { error: error });
       }
     }
   }

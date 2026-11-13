@@ -16,6 +16,7 @@ import { hasFundingPlan } from '../funding/holds.js';
 import { publishFunding, FundingError } from '../funding/transaction.js';
 import { governanceStore } from './proposals.js';
 import { isAreaScopedAdminRoute } from '../admin/scope.js';
+import { log } from '../utils/logger.js';
 
 const router = Router();
 
@@ -81,7 +82,7 @@ router.patch('/admin/submissions/:id', validateRequest(reviewSchema), async (req
       },
     });
   } catch (err) {
-    console.error('[admin] review submission failed:', err);
+    log.error('[admin] review submission failed:', { error: err });
     return res.status(503).json({
       success: false,
       error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable review storage is unavailable. Please try again later.' },
@@ -137,7 +138,7 @@ router.get('/admin/quest-attempts', async (req: AuthRequest, res: Response) => {
       const result = await pool.query(query, params);
       return res.status(200).json({ success: true, data: result.rows });
     } catch (err) {
-      console.error('[admin] Failed to list quest attempts from pool:', err);
+      log.error('[admin] Failed to list quest attempts from pool:', { error: err });
       return res
         .status(500)
         .json({ success: false, error: { code: 'DATABASE_ERROR', message: 'Failed to query quest attempts.' } });
@@ -214,7 +215,7 @@ router.get('/admin/quest-attempts/:id', async (req: AuthRequest, res: Response) 
       }
       return res.status(200).json({ success: true, data: result.rows[0] });
     } catch (err) {
-      console.error('[admin] Failed to fetch quest attempt detail:', err);
+      log.error('[admin] Failed to fetch quest attempt detail:', { error: err });
       return res
         .status(500)
         .json({ success: false, error: { code: 'DATABASE_ERROR', message: 'Failed to query quest attempt.' } });
@@ -522,7 +523,7 @@ router.patch(
             },
           });
         }
-        console.error('[admin] quest-attempt review error:', err);
+        log.error('[admin] quest-attempt review error:', { error: err });
         return res
           .status(500)
           .json({ success: false, error: { code: 'REVIEW_FAILED', message: 'Internal review processing failure.' } });
@@ -766,7 +767,7 @@ router.patch(
         });
       } catch (err) {
         await client.query('ROLLBACK').catch(() => undefined);
-        console.error('[admin] per-task review error:', err);
+        log.error('[admin] per-task review error:', { error: err });
         return res
           .status(500)
           .json({ success: false, error: { code: 'REVIEW_FAILED', message: 'Internal review processing failure.' } });

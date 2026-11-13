@@ -6,6 +6,7 @@ import { env } from '../config/env.js';
 import { getChainConfig, explorerTx } from '../chain/config.js';
 import { isBadgeTokenId } from '../chain/badgeIdentity.js';
 import { badgeMinterStatus } from '../chain/badgeMinter.js';
+import { log } from '../utils/logger.js';
 
 /**
  * Plan 50: on-chain badge status for travelers, public ERC-721 metadata for
@@ -104,7 +105,7 @@ chainBadgesRouter.get(
         },
       });
     } catch (err) {
-      console.error('[chain-badges] me failed:', err instanceof Error ? err.message : err);
+      log.error('[chain-badges] me failed:', { error: err instanceof Error ? err.message : err });
       return failed(res);
     }
   },
@@ -158,7 +159,7 @@ chainBadgesRouter.get('/chain/badges/:tokenId', publicLimit, async (req, res) =>
       ],
     });
   } catch (err) {
-    console.error('[chain-badges] metadata failed:', err instanceof Error ? err.message : err);
+    log.error('[chain-badges] metadata failed:', { error: err instanceof Error ? err.message : err });
     return failed(res);
   }
 });
@@ -261,7 +262,7 @@ chainBadgesRouter.get('/admin/chain/badges', ...adminGuard, async (_req: AuthReq
       },
     });
   } catch (err) {
-    console.error('[chain-badges] admin list failed:', err instanceof Error ? err.message : err);
+    log.error('[chain-badges] admin list failed:', { error: err instanceof Error ? err.message : err });
     return failed(res);
   }
 });
@@ -334,7 +335,7 @@ chainBadgesRouter.get('/admin/chain/badges/ledger', ...adminGuard, async (req: A
       },
     });
   } catch (err) {
-    console.error('[chain-badges] ledger failed:', err instanceof Error ? err.message : err);
+    log.error('[chain-badges] ledger failed:', { error: err instanceof Error ? err.message : err });
     return failed(res);
   }
 });
@@ -356,10 +357,10 @@ chainBadgesRouter.post(
           .status(409)
           .json({ success: false, error: { code: 'NOT_RETRYABLE', message: 'Only failed mints can be retried.' } });
       }
-      console.log(`[chain-badges] admin ${req.user!.id} requeued ${req.params.commandId}`);
+      log.info(`[chain-badges] admin ${req.user!.id} requeued ${req.params.commandId}`);
       return res.json({ success: true, data: { id: updated.rows[0].id, status: 'queued' } });
     } catch (err) {
-      console.error('[chain-badges] retry failed:', err instanceof Error ? err.message : err);
+      log.error('[chain-badges] retry failed:', { error: err instanceof Error ? err.message : err });
       return failed(res);
     }
   },

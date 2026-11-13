@@ -21,6 +21,7 @@ import { devGoogleCredentialsEnabled, verifyGoogleCredential } from '../auth/goo
 import { accountLoginThrottle } from '../auth/loginThrottle.js';
 import { canonicalTown, getHomeTown, setHomeTown } from '../social/homeTown.js';
 import { PANGASINAN_MUNICIPALITIES } from './affiliates.js';
+import { log } from '../utils/logger.js';
 
 const router = Router();
 
@@ -246,7 +247,7 @@ router.post(
         },
       });
     } catch (err) {
-      console.error('[auth] register error:', err);
+      log.error('[auth] register error:', { error: err });
       return res.status(503).json({
         success: false,
         error: { code: 'STORAGE_UNAVAILABLE', message: 'Failed to process registration. Please try again.' },
@@ -311,7 +312,7 @@ router.post(
         data: { token, user, message: 'Email verified successfully.' },
       });
     } catch (err) {
-      console.error('[auth] email verify error:', err);
+      log.error('[auth] email verify error:', { error: err });
       return res
         .status(503)
         .json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Verification unavailable.' } });
@@ -364,7 +365,7 @@ router.post(
         },
       });
     } catch (err) {
-      console.error('[auth] resend error:', err);
+      log.error('[auth] resend error:', { error: err });
       return res
         .status(503)
         .json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Resend service unavailable.' } });
@@ -436,7 +437,7 @@ router.post(
         data: { token, user },
       });
     } catch (err) {
-      console.error('[auth] email login error:', err);
+      log.error('[auth] email login error:', { error: err });
       return res
         .status(503)
         .json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Login service unavailable.' } });
@@ -489,7 +490,7 @@ router.post(
         data: { message: 'If an account exists with this email, a recovery code has been sent.' },
       });
     } catch (err) {
-      console.error('[auth] forgot password error:', err);
+      log.error('[auth] forgot password error:', { error: err });
       return res
         .status(503)
         .json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Password recovery unavailable.' } });
@@ -542,7 +543,7 @@ router.post(
         data: { reset_grant: resetGrant, message: 'Recovery code verified.' },
       });
     } catch (err) {
-      console.error('[auth] verify code error:', err);
+      log.error('[auth] verify code error:', { error: err });
       return res
         .status(503)
         .json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Verification unavailable.' } });
@@ -588,7 +589,7 @@ router.post(
         data: { message: 'Password has been successfully reset. Please sign in with your new password.' },
       });
     } catch (err) {
-      console.error('[auth] password reset error:', err);
+      log.error('[auth] password reset error:', { error: err });
       return res
         .status(503)
         .json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Password reset unavailable.' } });
@@ -689,7 +690,7 @@ router.post(
         .status(created ? 201 : 200)
         .json({ success: true, data: { status: 'authenticated', token, user, created } });
     } catch (err) {
-      console.error('[auth] google sign-in error:', err);
+      log.error('[auth] google sign-in error:', { error: err });
       return res.status(503).json({
         success: false,
         error: { code: 'STORAGE_UNAVAILABLE', message: 'Google sign-in is unavailable. Please try again.' },
@@ -840,7 +841,7 @@ router.post(
     try {
       return await walletSignIn(res, address, req.body.remember_me === true);
     } catch (err) {
-      console.error('[auth] durable user creation failed in wallet login:', err);
+      log.error('[auth] durable user creation failed in wallet login:', { error: err });
       return res.status(503).json({
         success: false,
         error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable user storage is unavailable. Please try again later.' },
@@ -870,7 +871,7 @@ router.post(
     try {
       return await walletSignIn(res, address, req.body.remember_me === true, { auth_method: 'local_bypass' });
     } catch (err) {
-      console.error('[auth] durable user creation failed in local wallet login:', err);
+      log.error('[auth] durable user creation failed in local wallet login:', { error: err });
       return res.status(503).json({
         success: false,
         error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable user storage is unavailable. Please try again later.' },
@@ -1017,7 +1018,7 @@ router.post(
           'This email or wallet is already linked to another account.',
         );
       }
-      console.error('[auth] wallet account completion failed:', err);
+      log.error('[auth] wallet account completion failed:', { error: err });
       return walletCompletionError(res, 503, 'STORAGE_UNAVAILABLE', 'Account setup is unavailable. Please try again.');
     }
   },
@@ -1105,7 +1106,7 @@ router.post(
           error: { code: 'USER_NOT_FOUND', message: 'Traveler account not found.' },
         });
       }
-      console.error('[auth] wallet binding failed:', err);
+      log.error('[auth] wallet binding failed:', { error: err });
       return res.status(503).json({
         success: false,
         error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable user storage is unavailable. Please try again later.' },
@@ -1145,7 +1146,7 @@ router.delete(
         },
       });
     } catch (err: any) {
-      console.error('[auth] wallet unbinding failed:', err);
+      log.error('[auth] wallet unbinding failed:', { error: err });
       return res.status(503).json({
         success: false,
         error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable user storage is unavailable. Please try again later.' },
@@ -1227,7 +1228,7 @@ router.post(
           });
         }
       } catch (err) {
-        console.warn('[auth] Auto-provision of canonical demo user failed:', err);
+        log.warn('[auth] Auto-provision of canonical demo user failed:', { error: err });
       }
     }
 
@@ -1356,7 +1357,7 @@ router.post(
           created_at: new Date().toISOString(),
         });
       } catch (err) {
-        console.error('[auth] durable user creation failed in simulated login:', err);
+        log.error('[auth] durable user creation failed in simulated login:', { error: err });
         return res.status(503).json({
           success: false,
           error: {
@@ -1425,7 +1426,7 @@ router.post(
         data: { message: 'All active sessions have been revoked.' },
       });
     } catch (err) {
-      console.error('[auth] revoke-all sessions error:', err);
+      log.error('[auth] revoke-all sessions error:', { error: err });
       return res.status(503).json({
         success: false,
         error: { code: 'DATABASE_UNAVAILABLE', message: 'Failed to revoke sessions. Please try again.' },

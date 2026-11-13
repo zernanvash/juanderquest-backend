@@ -4,6 +4,7 @@ import { authenticateToken, optionalAuthenticateToken, AuthRequest } from '../mi
 import { CulturalQuizRepository } from '../quizzes/repository.js';
 import { ProgressionRepository } from '../progression/repository.js';
 import { CulturalQuizService } from '../quizzes/service.js';
+import { log } from '../utils/logger.js';
 
 const router = Router();
 const repo = new CulturalQuizRepository();
@@ -277,7 +278,7 @@ router.put('/quiz-attempts/:id/submission', authenticateToken, async (req: AuthR
       data: result,
     });
   } catch (err: any) {
-    console.error('[quiz-submission] error:', err);
+    log.error('[quiz-submission] error:', { error: err });
     const msg = err?.message || '';
     if (msg.startsWith('ATTEMPT_EXPIRED')) {
       return res.status(410).json({ success: false, error: { code: 'ATTEMPT_EXPIRED', message: msg } });

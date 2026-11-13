@@ -7,6 +7,7 @@ import { validateRequest } from '../middleware/validate.js';
 import { env } from '../config/env.js';
 import { MerchantPointsError, MerchantPointsService, MERCHANT_POINT_PACKAGES } from '../funding/merchantPoints.js';
 import { reconcileFunding } from '../funding/reconcile.js';
+import { log } from '../utils/logger.js';
 
 export const merchantPointsRouter = Router();
 
@@ -35,7 +36,7 @@ const sendError = (res: Response, error: unknown) => {
       error: { code: error.code, message: error.message, ...(error.details ? { details: error.details } : {}) },
     });
   }
-  console.error('[merchant-points] command failed:', error);
+  log.error('[merchant-points] command failed:', { error: error });
   return res.status(503).json({
     success: false,
     error: { code: 'MERCHANT_POINTS_UNAVAILABLE', message: 'Merchant points are temporarily unavailable.' },

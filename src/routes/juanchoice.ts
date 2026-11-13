@@ -41,6 +41,7 @@ import {
   suspendLivePerk,
   updatePerkSetting,
 } from '../juanchoice/perk-controls.js';
+import { log } from '../utils/logger.js';
 
 export const juanChoiceRouter = Router();
 const uuid = z.string().uuid();
@@ -152,7 +153,7 @@ const monthlyScheduleBody = z
 function failure(res: Response, error: unknown) {
   if (error instanceof JuanChoiceError)
     return res.status(error.status).json({ success: false, error: { code: error.code, message: error.message } });
-  console.error('[JUANCHOICE]', error);
+  log.error('[JUANCHOICE]', { error: error });
   return res
     .status(503)
     .json({ success: false, error: { code: 'DATABASE_OUTAGE', message: 'JuanChoice is temporarily unavailable.' } });

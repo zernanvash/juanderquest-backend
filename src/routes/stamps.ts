@@ -23,6 +23,7 @@ import {
 } from '../stamps/service.js';
 import { handleQotdAnswered } from '../stamps/hooks.js';
 import { manilaDateString } from '../stamps/time.js';
+import { log } from '../utils/logger.js';
 
 export const stampsRouter = Router();
 
@@ -30,7 +31,7 @@ function fail(res: Response, error: unknown) {
   if (error instanceof StampsError) {
     return res.status(error.status).json({ success: false, error: { code: error.code, message: error.message } });
   }
-  console.error('[stamps] route failed', error);
+  log.error('[stamps] route failed', { error: error });
   return res.status(503).json({
     success: false,
     error: { code: 'STORAGE_UNAVAILABLE', message: 'Stamp storage is unavailable. Please try again later.' },

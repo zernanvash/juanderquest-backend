@@ -17,6 +17,7 @@ import { manilaHour } from '../social/time.js';
 import { safeCosmeticsFor } from '../shop/render.js';
 import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
 import { spotStore, Spot } from '../spots/store.js';
+import { log } from '../utils/logger.js';
 
 export const usersRouter = Router();
 
@@ -391,7 +392,7 @@ usersRouter.get(
         }));
         allSpots = [...mappedRows, ...memSpots].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
       } catch (err) {
-        console.error('[users] Error querying user spots from pool:', err);
+        log.error('[users] Error querying user spots from pool:', { error: err });
         allSpots = spotStore.spots
           .filter((s) => s.created_by === user.id && s.status === 'published' && (allowTest || !s.is_test))
           .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
@@ -653,7 +654,7 @@ usersRouter.put('/users/:id/follow', authenticateToken, followLimiter, async (re
             collapseKey: `social:${targetId}:${hourBucket}`,
             actorName,
           },
-        }).catch((err) => console.error('[users:follow] Failed to notify follow:', err));
+        }).catch((err) => log.error('[users:follow] Failed to notify follow:', { error: err }));
       }
     }
 

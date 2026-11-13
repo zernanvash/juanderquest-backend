@@ -6,6 +6,7 @@ import { db, UserRow } from '../db/index.js';
 import { AlphaSessionScopeBatcher } from '../auth/alphaSessionScopeBatcher.js';
 import { UsersRepository } from '../repositories/users.js';
 import type { Pool } from 'pg';
+import { log } from '../utils/logger.js';
 
 export interface AuthenticatedUser {
   id: string;
@@ -91,7 +92,7 @@ export const optionalAuthenticateToken = async (req: AuthRequest, res: Response,
     req.user = user;
     next();
   } catch (err) {
-    console.error('[auth] optionalAuthenticateToken database error:', err);
+    log.error('[auth] optionalAuthenticateToken database error:', { error: err });
     return res.status(503).json({
       success: false,
       error: {
@@ -144,7 +145,7 @@ export const authenticateToken = async (req: AuthRequest, res: Response, next: N
     req.user = user;
     next();
   } catch (err) {
-    console.error('[auth] session scope verification database error:', err);
+    log.error('[auth] session scope verification database error:', { error: err });
     return res.status(503).json({
       success: false,
       error: {

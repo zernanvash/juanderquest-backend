@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
+import { log } from '../utils/logger.js';
 
 export const appVersionRouter = Router();
 const LATEST_ANDROID_APK =
@@ -157,7 +158,7 @@ export const getLatestAppVersion = (): AppVersionData => {
       };
     }
   } catch (error) {
-    console.warn('[AppVersion] Error reading version.json, falling back to default:', error);
+    log.warn('[AppVersion] Error reading version.json, falling back to default:', { error: error });
   }
 
   return fallback;

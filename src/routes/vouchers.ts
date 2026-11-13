@@ -9,6 +9,7 @@ import { validateRequest } from '../middleware/validate.js';
 import { vouchersService } from '../services/vouchers.js';
 import { getPool } from '../db/pool.js';
 import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
+import { log } from '../utils/logger.js';
 
 const router = Router();
 
@@ -97,7 +98,7 @@ async function handleRedemption(voucherId: string, req: AuthRequest, res: Respon
       },
     });
   } catch (err) {
-    console.error('[vouchers] redemption failed:', err);
+    log.error('[vouchers] redemption failed:', { error: err });
     return res.status(503).json({
       success: false,
       error: {

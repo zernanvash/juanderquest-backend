@@ -4,6 +4,7 @@ import { getPool } from '../db/pool.js';
 import { authenticateToken, type AuthRequest } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { validateRequest } from '../middleware/validate.js';
+import { log } from '../utils/logger.js';
 
 export const notificationsRouter = Router();
 
@@ -50,7 +51,7 @@ notificationsRouter.get(
         },
       });
     } catch (error) {
-      console.error('[notifications] list failed:', error);
+      log.error('[notifications] list failed:', { error: error });
       return res.status(503).json({
         success: false,
         error: { code: 'NOTIFICATIONS_UNAVAILABLE', message: 'Notifications are temporarily unavailable.' },
@@ -83,7 +84,7 @@ notificationsRouter.patch(
       res.setHeader('Cache-Control', 'private, no-store');
       return res.json({ success: true, data: { id: updated.rows[0].id, read_at: updated.rows[0].read_at } });
     } catch (error) {
-      console.error('[notifications] mark-read failed:', error);
+      log.error('[notifications] mark-read failed:', { error: error });
       return res.status(503).json({
         success: false,
         error: { code: 'NOTIFICATIONS_UNAVAILABLE', message: 'Notifications are temporarily unavailable.' },
@@ -108,7 +109,7 @@ notificationsRouter.post(
       res.setHeader('Cache-Control', 'private, no-store');
       return res.json({ success: true, data: { marked_read: updated.rowCount ?? 0 } });
     } catch (error) {
-      console.error('[notifications] mark-all-read failed:', error);
+      log.error('[notifications] mark-all-read failed:', { error: error });
       return res.status(503).json({
         success: false,
         error: { code: 'NOTIFICATIONS_UNAVAILABLE', message: 'Notifications are temporarily unavailable.' },

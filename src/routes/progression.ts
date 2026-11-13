@@ -19,6 +19,7 @@ import {
   listCommunityGoals,
   setAchievementSharing,
 } from '../progression/retention.js';
+import { log } from '../utils/logger.js';
 
 export const progressionRouter = Router();
 
@@ -70,7 +71,7 @@ progressionRouter.get(
         data: passport,
       });
     } catch (err: any) {
-      console.error('[progression] GET /me/progression error:', err);
+      log.error('[progression] GET /me/progression error:', { error: err });
       return res.status(500).json({
         success: false,
         error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve traveler passport.' },
@@ -90,7 +91,7 @@ progressionRouter.get(
       if (!summary) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND' } });
       return res.json({ success: true, data: summary });
     } catch (err: any) {
-      console.error('[progression] GET /me/engagement error:', err);
+      log.error('[progression] GET /me/engagement error:', { error: err });
       return res.status(503).json({
         success: false,
         error: { code: 'DATABASE_OUTAGE', message: 'Engagement summary temporarily unavailable.' },
@@ -107,7 +108,7 @@ progressionRouter.put('/me/engagement/preferences', authenticateToken, async (re
     res.set('Cache-Control', 'private, no-store');
     return res.json({ success: true, data: await setAchievementSharing(req.user!.id, parsed.data.share_achievements) });
   } catch (err: any) {
-    console.error('[progression] PUT /me/engagement/preferences error:', err);
+    log.error('[progression] PUT /me/engagement/preferences error:', { error: err });
     return res.status(503).json({
       success: false,
       error: { code: 'DATABASE_OUTAGE', message: 'Unable to update engagement preferences.' },
@@ -142,7 +143,7 @@ progressionRouter.get(
         },
       });
     } catch (err: any) {
-      console.error('[progression] GET /me/visits error:', err);
+      log.error('[progression] GET /me/visits error:', { error: err });
       return res.status(500).json({
         success: false,
         error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve visits.' },
@@ -162,7 +163,7 @@ progressionRouter.get(
       const items = await listCommunityGoals(allowTest && req.query.include_test === 'true');
       return res.json({ success: true, data: { items, total: items.length } });
     } catch (err: any) {
-      console.error('[progression] GET /community-goals error:', err);
+      log.error('[progression] GET /community-goals error:', { error: err });
       return res.json({ success: true, data: { items: [], total: 0 } });
     }
   },
@@ -189,7 +190,7 @@ progressionRouter.get(
         },
       });
     } catch (err: any) {
-      console.error('[progression] GET /me/achievements error:', err);
+      log.error('[progression] GET /me/achievements error:', { error: err });
       return res.status(500).json({
         success: false,
         error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve achievements.' },
@@ -226,7 +227,7 @@ progressionRouter.get(
         },
       });
     } catch (err: any) {
-      console.error('[progression] GET /collections error:', err);
+      log.error('[progression] GET /collections error:', { error: err });
       return res.status(500).json({
         success: false,
         error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve collections.' },
@@ -271,7 +272,7 @@ progressionRouter.get(
         data: publicProjection,
       });
     } catch (err: any) {
-      console.error('[progression] GET /users/:id/achievements error:', err);
+      log.error('[progression] GET /users/:id/achievements error:', { error: err });
       return res.status(500).json({
         success: false,
         error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve public achievements.' },
@@ -312,7 +313,7 @@ progressionRouter.post(
         data: result,
       });
     } catch (err: any) {
-      console.error('[progression] POST /admin/progression/process-outbox error:', err);
+      log.error('[progression] POST /admin/progression/process-outbox error:', { error: err });
       return res.status(500).json({
         success: false,
         error: { code: 'INTERNAL_ERROR', message: 'Failed to process outbox batch.' },
@@ -335,7 +336,7 @@ progressionRouter.post(
       if (!parsed.success) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR' } });
       return res.json({ success: true, data: await evaluateCommunityGoals(parsed.data.limit ?? 20) });
     } catch (err: any) {
-      console.error('[progression] POST /admin/progression/evaluate-community-goals error:', err);
+      log.error('[progression] POST /admin/progression/evaluate-community-goals error:', { error: err });
       return res.status(500).json({
         success: false,
         error: { code: 'INTERNAL_ERROR', message: 'Failed to evaluate community goals.' },
@@ -374,7 +375,7 @@ progressionRouter.post(
         data: result,
       });
     } catch (err: any) {
-      console.error('[progression] POST /admin/progression/catch-up error:', err);
+      log.error('[progression] POST /admin/progression/catch-up error:', { error: err });
       return res.status(500).json({
         success: false,
         error: { code: 'INTERNAL_ERROR', message: 'Failed to catch up approved submissions.' },

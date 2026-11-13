@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { getPool } from '../db/pool.js';
 import { spotStore } from '../spots/store.js';
 import { createCirclePolygon } from '../maps/geometry.js';
+import { log } from '../utils/logger.js';
 
 export const areasRouter = Router();
 
@@ -81,7 +82,7 @@ areasRouter.get('/areas', async (req: Request, res: Response) => {
 
       return res.json({ success: true, data: items, meta: { count: items.length } });
     } catch (error) {
-      console.error('[areas] Error querying admin_areas from database:', error);
+      log.error('[areas] Error querying admin_areas from database:', { error: error });
       return res.status(500).json({
         success: false,
         error: { code: 'DATABASE_ERROR', message: 'Failed to query admin areas from database.' },
@@ -158,7 +159,7 @@ areasRouter.get('/areas/:id', async (req: Request, res: Response) => {
         },
       });
     } catch (error) {
-      console.error(`[areas] Error querying admin_area ${areaId} from database:`, error);
+      log.error(`[areas] Error querying admin_area ${areaId} from database:`, { error: error });
       return res.status(500).json({
         success: false,
         error: { code: 'DATABASE_ERROR', message: `Failed to query area ${areaId} from database.` },
@@ -188,7 +189,7 @@ areasRouter.get('/areas/:id/shape', async (req: Request, res: Response) => {
         areaRow = result.rows[0];
       }
     } catch (error) {
-      console.error(`[areas] Error querying admin_area shape for ${areaId}:`, error);
+      log.error(`[areas] Error querying admin_area shape for ${areaId}:`, { error: error });
       return res.status(500).json({
         success: false,
         error: { code: 'DATABASE_ERROR', message: `Failed to query shape for area ${areaId}.` },
@@ -291,7 +292,7 @@ areasRouter.get('/areas/:id/spots', async (req: Request, res: Response) => {
         },
       });
     } catch (error) {
-      console.error(`[areas] Error querying spots for area ${areaId}:`, error);
+      log.error(`[areas] Error querying spots for area ${areaId}:`, { error: error });
       return res.status(500).json({
         success: false,
         error: { code: 'DATABASE_ERROR', message: `Failed to query spots for area ${areaId}.` },

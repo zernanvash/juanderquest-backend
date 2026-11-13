@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { randomUUID } from 'crypto';
+import { log, runWithRequestId } from '../utils/logger.js';
 
 export interface ObservableRequest extends Request {
   id?: string;
@@ -71,14 +72,14 @@ export function requestTracingMiddleware(req: ObservableRequest, res: Response, 
 
     if (process.env.NODE_ENV !== 'test') {
       if (res.statusCode >= 500) {
-        console.error(JSON.stringify(logEntry));
+        log.error('http_request', logEntry);
       } else if (res.statusCode >= 400) {
-        console.warn(JSON.stringify(logEntry));
+        log.warn('http_request', logEntry);
       } else {
-        console.log(JSON.stringify(logEntry));
+        log.info('http_request', logEntry);
       }
     }
   });
 
-  next();
+  runWithRequestId(requestId, next);
 }

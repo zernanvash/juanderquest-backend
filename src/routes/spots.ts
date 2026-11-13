@@ -28,6 +28,7 @@ import { questTaskInputSchema, validateTasksWithinDistance } from '../quests/tas
 import { assertInScope, requireAreaAdmin, spotInScope, writeAdminAudit } from '../admin/scope.js';
 import { handleSpotInteraction } from '../stamps/hooks.js';
 import { getHomeTown } from '../social/homeTown.js';
+import { log } from '../utils/logger.js';
 
 const router = Router();
 const csv = (value: unknown) =>
@@ -179,7 +180,7 @@ router.get('/spots/recognize', optionalAuthenticateToken, recognizeRateLimiter, 
     res.set('Cache-Control', 'private, max-age=300');
     return res.json({ success: true, data: await recognizeSpotLocation(parsed.data.lat, parsed.data.lng, getPool()) });
   } catch (error) {
-    console.error('[spots] recognize failed:', error instanceof Error ? error.message : error);
+    log.error('[spots] recognize failed:', { error: error instanceof Error ? error.message : error });
     return res.status(503).json({
       success: false,
       error: { code: 'RECOGNIZE_UNAVAILABLE', message: 'Place recognition is unavailable right now.' },
@@ -620,7 +621,7 @@ router.post('/spots', authenticateToken, validateRequest(contributionSchema), as
         isTest: false,
       });
     } catch (err) {
-      console.error('[social:producer] Failed to record spot_posted activity:', err);
+      log.error('[social:producer] Failed to record spot_posted activity:', { error: err });
     }
   }
 
@@ -808,7 +809,7 @@ router.post(
           await pool.query(`UPDATE spots SET quest_id = $1, updated_at = NOW() WHERE id = $2`, [newQuest.id, spot.id]);
         }
       } catch (err: any) {
-        console.error('[spots:createQuest] Database persistence error:', err);
+        log.error('[spots:createQuest] Database persistence error:', { error: err });
         return res.status(500).json({
           success: false,
           error: { code: 'DATABASE_ERROR', message: 'Failed to record quest in database.' },
@@ -880,7 +881,7 @@ router.get('/spots/:id/quests', optionalAuthenticateToken, checkQAAuthorization,
         updated_at: new Date(r.updated_at).toISOString(),
       }));
     } catch (e: any) {
-      console.warn('[spots:getQuests] PG query fallback:', e.message);
+      log.warn('[spots:getQuests] PG query fallback:', { error: e.message });
       quests = db.quests.filter(
         (q) => (q.id === spot.quest_id || q.author_id === spot.created_by) && (allowTest || !q.is_test),
       );

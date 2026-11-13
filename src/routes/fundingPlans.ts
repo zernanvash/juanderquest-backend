@@ -8,6 +8,7 @@ import { validateRequest } from '../middleware/validate.js';
 import { FundingPlansService } from '../funding/plans.js';
 import { FundingError } from '../funding/transaction.js';
 import { abandonFundedAttempt } from '../funding/holds.js';
+import { log } from '../utils/logger.js';
 
 export const fundingPlansRouter = Router();
 const key = z.string().uuid();
@@ -29,7 +30,7 @@ export function fundingErrorResponse(res: Response, error: unknown) {
         message: 'A conflicting funding operation has already completed. Refresh to continue.',
       },
     });
-  console.error('[funding] command failed:', error);
+  log.error('[funding] command failed:', { error: error });
   return res.status(503).json({
     success: false,
     error: { code: 'QUEST_FUNDING_UNAVAILABLE', message: 'Quest funding is temporarily unavailable.' },

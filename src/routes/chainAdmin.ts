@@ -12,6 +12,7 @@ import {
   type ChainStateReader,
   type RoleName,
 } from '../chain/stateReader.js';
+import { log } from '../utils/logger.js';
 
 /**
  * Plan 49 §4b — admin view of the project's chain wallets and contracts.
@@ -205,7 +206,7 @@ const noStorage = (res: Response) =>
     error: { code: 'STORAGE_UNAVAILABLE', message: 'Chain registry needs the database.' },
   });
 const failure = (res: Response, code: string, err: unknown) => {
-  console.error(`[chain-admin] ${code}:`, err instanceof Error ? err.message : err);
+  log.error(`[chain-admin] ${code}:`, { error: err instanceof Error ? err.message : err });
   return res.status(500).json({ success: false, error: { code, message: 'Something went wrong. Try again.' } });
 };
 

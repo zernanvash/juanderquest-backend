@@ -5,6 +5,7 @@ import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { submissionsService } from '../services/submissions.js';
+import { log } from '../utils/logger.js';
 
 const router = Router();
 
@@ -67,7 +68,7 @@ router.post(
         data: result.data,
       });
     } catch (err: any) {
-      console.error('[submissions] creation failed:', err);
+      log.error('[submissions] creation failed:', { error: err });
       if (err?.code === '23505' && err?.constraint === 'idx_submissions_unique_pending') {
         return res.status(409).json({
           success: false,
@@ -88,7 +89,7 @@ router.post(
             return res.status(replay.statusCode || 409).json({ success: false, error: replay.error });
           }
         } catch (replayError) {
-          console.error('[submissions] idempotency replay lookup failed:', replayError);
+          log.error('[submissions] idempotency replay lookup failed:', { error: replayError });
         }
       }
       return res.status(503).json({
