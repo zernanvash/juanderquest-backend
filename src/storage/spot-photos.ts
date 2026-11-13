@@ -71,7 +71,7 @@ export class LocalStorageProvider implements SpotPhotoStorageProvider {
         const dimensions = imageSize(buffer);
         width = dimensions.width || 0;
         height = dimensions.height || 0;
-      } catch (e) {
+      } catch (_e) {
         // Fallback 0 dimensions if image header parsing fails
       }
     }
@@ -142,7 +142,7 @@ export class AzureBlobStorageProvider implements SpotPhotoStorageProvider {
         const dimensions = imageSize(buffer);
         width = dimensions.width || 0;
         height = dimensions.height || 0;
-      } catch (e) {
+      } catch (_e) {
         // Fallback 0
       }
     }

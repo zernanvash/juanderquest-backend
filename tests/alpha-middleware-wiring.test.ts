@@ -1,4 +1,4 @@
-import { checkQAAuthorization, isAuthorizedQA, AuthRequest } from '../src/middleware/auth.js';
+import { checkQAAuthorization, AuthRequest } from '../src/middleware/auth.js';
 import { db } from '../src/db/index.js';
 import { env } from '../src/config/env.js';
 import { Pool } from 'pg';

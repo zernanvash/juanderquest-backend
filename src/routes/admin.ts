@@ -303,28 +303,24 @@ router.patch(
 
         if (attempt.user_id === adminId) {
           await client.query('ROLLBACK');
-          return res
-            .status(403)
-            .json({
-              success: false,
-              error: {
-                code: 'CANNOT_REVIEW_OWN_ATTEMPT',
-                message: 'Administrators cannot approve their own quest attempts.',
-              },
-            });
+          return res.status(403).json({
+            success: false,
+            error: {
+              code: 'CANNOT_REVIEW_OWN_ATTEMPT',
+              message: 'Administrators cannot approve their own quest attempts.',
+            },
+          });
         }
 
         if (quest.author_id === adminId) {
           await client.query('ROLLBACK');
-          return res
-            .status(403)
-            .json({
-              success: false,
-              error: {
-                code: 'CREATOR_SELF_ATTEMPT',
-                message: 'Quest authors cannot review attempts on their own quests.',
-              },
-            });
+          return res.status(403).json({
+            success: false,
+            error: {
+              code: 'CREATOR_SELF_ATTEMPT',
+              message: 'Quest authors cannot review attempts on their own quests.',
+            },
+          });
         }
 
         if (attempt.status === 'completed' && action === 'approve') {
@@ -549,24 +545,20 @@ router.patch(
     }
 
     if (attempt.user_id === adminId) {
-      return res
-        .status(403)
-        .json({
-          success: false,
-          error: {
-            code: 'CANNOT_REVIEW_OWN_ATTEMPT',
-            message: 'Administrators cannot approve their own quest attempts.',
-          },
-        });
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'CANNOT_REVIEW_OWN_ATTEMPT',
+          message: 'Administrators cannot approve their own quest attempts.',
+        },
+      });
     }
 
     if (quest.author_id === adminId) {
-      return res
-        .status(403)
-        .json({
-          success: false,
-          error: { code: 'CREATOR_SELF_ATTEMPT', message: 'Quest authors cannot review attempts on their own quests.' },
-        });
+      return res.status(403).json({
+        success: false,
+        error: { code: 'CREATOR_SELF_ATTEMPT', message: 'Quest authors cannot review attempts on their own quests.' },
+      });
     }
 
     if (action === 'approve') {
@@ -792,23 +784,19 @@ router.patch(
 
     const memQuest = db.findQuestById(memAttempt.quest_id);
     if (memQuest?.author_id === adminId) {
-      return res
-        .status(403)
-        .json({
-          success: false,
-          error: { code: 'CREATOR_SELF_ATTEMPT', message: 'Quest authors cannot review tasks on their own quests.' },
-        });
+      return res.status(403).json({
+        success: false,
+        error: { code: 'CREATOR_SELF_ATTEMPT', message: 'Quest authors cannot review tasks on their own quests.' },
+      });
     }
     if (memAttempt.user_id === adminId) {
-      return res
-        .status(403)
-        .json({
-          success: false,
-          error: {
-            code: 'CANNOT_REVIEW_OWN_ATTEMPT',
-            message: 'Administrators cannot review their own quest attempts.',
-          },
-        });
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'CANNOT_REVIEW_OWN_ATTEMPT',
+          message: 'Administrators cannot review their own quest attempts.',
+        },
+      });
     }
 
     const memStep = db.findStepEvidence(id, stepOrder);
@@ -817,15 +805,13 @@ router.patch(
         .status(404)
         .json({ success: false, error: { code: 'NOT_FOUND', message: `Step ${stepOrder} not found.` } });
     if (memStep.status !== 'pending_review') {
-      return res
-        .status(409)
-        .json({
-          success: false,
-          error: {
-            code: 'STEP_NOT_PENDING_REVIEW',
-            message: `Task is currently '${memStep.status}', not pending review.`,
-          },
-        });
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'STEP_NOT_PENDING_REVIEW',
+          message: `Task is currently '${memStep.status}', not pending review.`,
+        },
+      });
     }
 
     const nowIso = new Date().toISOString();

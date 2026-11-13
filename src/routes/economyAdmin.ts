@@ -147,12 +147,10 @@ economyAdminRouter.get(
       res.setHeader('Cache-Control', 'private, no-store');
       return res.status(200).json({ success: true, data: report });
     } catch {
-      return res
-        .status(503)
-        .json({
-          success: false,
-          error: { code: 'AUDIT_UNAVAILABLE', message: 'Reconciliation could not be completed.' },
-        });
+      return res.status(503).json({
+        success: false,
+        error: { code: 'AUDIT_UNAVAILABLE', message: 'Reconciliation could not be completed.' },
+      });
     }
   },
 );
@@ -223,12 +221,10 @@ economyAdminRouter.post(
         .status(result.statusCode ?? (result.success ? 200 : 409))
         .json(result.success ? { success: true, data: result.data } : { success: false, error: result.error });
     } catch {
-      return res
-        .status(503)
-        .json({
-          success: false,
-          error: { code: 'APPEAL_REVIEW_UNAVAILABLE', message: 'Appeal review could not be committed.' },
-        });
+      return res.status(503).json({
+        success: false,
+        error: { code: 'APPEAL_REVIEW_UNAVAILABLE', message: 'Appeal review could not be committed.' },
+      });
     }
   },
 );
@@ -256,12 +252,10 @@ economyAdminRouter.post(
           success: false,
           error: { code: error.code, message: error.message },
         });
-      return res
-        .status(503)
-        .json({
-          success: false,
-          error: { code: 'APPEAL_REVIEW_UNAVAILABLE', message: 'Appeal review could not be committed.' },
-        });
+      return res.status(503).json({
+        success: false,
+        error: { code: 'APPEAL_REVIEW_UNAVAILABLE', message: 'Appeal review could not be committed.' },
+      });
     }
   },
 );
@@ -279,15 +273,13 @@ economyAdminRouter.post(
       .safeParse(req.body);
     const idempotencyKey = req.get('x-idempotency-key');
     if (!parsed.success || !idempotencyKey || idempotencyKey.length > 120) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: {
-            code: 'INVALID_SIMULATED_REFUND',
-            message: 'A spend transaction, reason and idempotency key are required.',
-          },
-        });
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_SIMULATED_REFUND',
+          message: 'A spend transaction, reason and idempotency key are required.',
+        },
+      });
     }
     try {
       const receipt = await new EconomyService(pool).refundSimulatedCosmetic(
@@ -301,12 +293,10 @@ economyAdminRouter.post(
     } catch (error) {
       if (error instanceof EconomyError)
         return res.status(409).json({ success: false, error: { code: error.code, message: error.message } });
-      return res
-        .status(503)
-        .json({
-          success: false,
-          error: { code: 'REFUND_UNAVAILABLE', message: 'Simulated correction could not be committed.' },
-        });
+      return res.status(503).json({
+        success: false,
+        error: { code: 'REFUND_UNAVAILABLE', message: 'Simulated correction could not be committed.' },
+      });
     }
   },
 );

@@ -1,5 +1,4 @@
 import {
-  MANILA_OFFSET_MS,
   weekStartUtc,
   weekStartDate,
   weekId,

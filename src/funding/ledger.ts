@@ -61,7 +61,7 @@ async function updateSnapshot(client: FundingLedgerClient, group: CommittedLedge
   snapshot.ledger = [...(snapshot.ledger || []), ...group.entries];
   snapshot.audit = [...(snapshot.audit || []), ...group.audit];
   if (group.userBalanceUpdate) {
-    const { userId, demoPoints, previousDemoPoints, balanceDeltaMjdq } = group.userBalanceUpdate;
+    const { userId, demoPoints: _demoPoints, previousDemoPoints, balanceDeltaMjdq } = group.userBalanceUpdate;
     const hasPriorLedgerBalance = Object.prototype.hasOwnProperty.call(snapshot.balances || {}, userId);
     const previous = hasPriorLedgerBalance ? Number(snapshot.balances[userId]) : previousDemoPoints * MJDQ_PER_JDQ;
     const balanceMjdq = previous + balanceDeltaMjdq;

@@ -11,7 +11,7 @@ describe('Social Follow Graph & Traveler Discovery API (/api/v1/users)', () => {
 
   const juanToken = jwt.sign({ id: juanId, seed_id: 'user-1', role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
 
-  const mariaToken = jwt.sign({ id: mariaId, seed_id: 'user-2', role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
+  const _mariaToken = jwt.sign({ id: mariaId, seed_id: 'user-2', role: 'user' }, env.JWT_SECRET, { expiresIn: '1h' });
 
   const privateToken = jwt.sign({ id: privateId, seed_id: 'user-3', role: 'user' }, env.JWT_SECRET, {
     expiresIn: '1h',

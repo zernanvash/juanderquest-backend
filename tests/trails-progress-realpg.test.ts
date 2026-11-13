@@ -7,7 +7,7 @@ import { env } from '../src/config/env.js';
 import { createTestDb, type TestDbInstance } from '../src/db/testHarness.js';
 import { setPool } from '../src/db/pool.js';
 import { db } from '../src/db/index.js';
-import { checkinTrailStop, TrailProgressError, unlockTrail } from '../src/trails/progress.js';
+import { checkinTrailStop, unlockTrail } from '../src/trails/progress.js';
 
 const describeRealPg = process.env.JDQ_REAL_PG_URL ? describe : describe.skip;
 

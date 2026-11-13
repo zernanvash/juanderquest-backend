@@ -1,5 +1,4 @@
 import { getChainConfig, parseRpcUrls, explorerAddress, explorerTx } from '../src/chain/config.js';
-import { env } from '../src/config/env.js';
 import { JsonRpcChainSource } from '../src/chain/rpc-source.js';
 
 describe('Chain Config (WP1)', () => {

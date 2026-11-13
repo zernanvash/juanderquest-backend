@@ -23,7 +23,7 @@ describe('Progression Phase 1 Remediation (R1–R8 Verification)', () => {
   const tokenAdmin = jwt.sign({ id: adminId, seed_id: 'progression-admin', role: 'admin' }, env.JWT_SECRET, {
     expiresIn: '1h',
   });
-  const tokenTraveler = jwt.sign({ id: travelerId, seed_id: 'progression-traveler', role: 'user' }, env.JWT_SECRET, {
+  const _tokenTraveler = jwt.sign({ id: travelerId, seed_id: 'progression-traveler', role: 'user' }, env.JWT_SECRET, {
     expiresIn: '1h',
   });
 

@@ -4,7 +4,7 @@ import multer from 'multer';
 import { z } from 'zod';
 import path from 'path';
 import fs from 'fs';
-import { db, QuestAttemptRow, QuestRow, QuestStepEvidenceRow, QuestStep, withinRadius } from '../db/index.js';
+import { db, QuestAttemptRow, QuestRow, QuestStepEvidenceRow, withinRadius } from '../db/index.js';
 import { getPool } from '../db/pool.js';
 import { EconomyError, EconomyService } from '../economy/service.js';
 import { isLocalEconomyProfile } from '../economy/profile.js';
@@ -16,7 +16,6 @@ import {
   verifyQuestArChallengeToken,
   signQuestQrPass,
   verifyQuestQrPassToken,
-  AR_CHALLENGE_TYP,
 } from '../auth/tokens.js';
 import { spotStore } from '../spots/store.js';
 import {
@@ -30,8 +29,8 @@ import { claimChallengeNonce, releaseChallengeNonce } from '../services/submissi
 import { detectValidatedMediaMime } from '../utils/media-mime.js';
 import { validateRequest } from '../middleware/validate.js';
 import { optionalAccuracy, optionalLat, optionalLng } from '../middleware/coerce.js';
-import { sanitizeAttemptSnapshot, sanitizeQuestForViewer, sanitizeQuestSteps } from '../quests/sanitize.js';
-import { normalizeTasks, publicTask, publicTasks } from '../quests/taskNormalize.js';
+import { sanitizeAttemptSnapshot, sanitizeQuestForViewer } from '../quests/sanitize.js';
+import { normalizeTasks } from '../quests/taskNormalize.js';
 import type { QuestTask } from '../quests/taskTypes.js';
 import { questTaskInputSchema, validateTasksWithinDistance } from '../quests/taskValidation.js';
 import { RELIC_REACH_M, relicSpot } from '../quests/relicSpot.js';
@@ -312,20 +311,16 @@ router.patch('/quests/:id/status', authenticateToken, async (req: AuthRequest, r
     if (statusPool && status === 'published') {
       const required = await statusPool.query('SELECT funding_required FROM quests WHERE id=$1', [id]);
       if (required.rows[0]?.funding_required)
-        return res
-          .status(409)
-          .json({
-            success: false,
-            error: { code: 'FUNDING_PLAN_REQUIRED', message: 'Fund this Eco-Quest before publishing it.' },
-          });
+        return res.status(409).json({
+          success: false,
+          error: { code: 'FUNDING_PLAN_REQUIRED', message: 'Fund this Eco-Quest before publishing it.' },
+        });
     }
     if (statusPool && (await hasFundingPlan(statusPool, id))) {
-      return res
-        .status(409)
-        .json({
-          success: false,
-          error: { code: 'FUNDING_PLAN_STATE', message: 'Use the funding round controls to manage this quest.' },
-        });
+      return res.status(409).json({
+        success: false,
+        error: { code: 'FUNDING_PLAN_STATE', message: 'Use the funding round controls to manage this quest.' },
+      });
     }
   } catch (error) {
     return fundingErrorResponse(res, error);
@@ -858,39 +853,31 @@ router.post('/quests/:id/attempts', authenticateToken, async (req: AuthRequest, 
       }
       if (Boolean(user.rows[0].is_test) !== Boolean(q.is_test)) {
         await client.query('ROLLBACK');
-        return res
-          .status(403)
-          .json({
-            success: false,
-            error: { code: 'SCOPE_MISMATCH', message: 'Traveler and quest scopes do not match.' },
-          });
+        return res.status(403).json({
+          success: false,
+          error: { code: 'SCOPE_MISMATCH', message: 'Traveler and quest scopes do not match.' },
+        });
       }
       if (q.author_id === userId) {
         await client.query('ROLLBACK');
-        return res
-          .status(403)
-          .json({
-            success: false,
-            error: { code: 'CREATOR_SELF_ATTEMPT', message: 'Quest authors cannot earn rewards from their own quest.' },
-          });
+        return res.status(403).json({
+          success: false,
+          error: { code: 'CREATOR_SELF_ATTEMPT', message: 'Quest authors cannot earn rewards from their own quest.' },
+        });
       }
       if (q.status !== 'published') {
         await client.query('ROLLBACK');
-        return res
-          .status(409)
-          .json({
-            success: false,
-            error: { code: 'QUEST_NOT_OPEN', message: 'This quest is not open for new attempts.' },
-          });
+        return res.status(409).json({
+          success: false,
+          error: { code: 'QUEST_NOT_OPEN', message: 'This quest is not open for new attempts.' },
+        });
       }
       if (await hasCompletedQuest(db, userId, id, client)) {
         await client.query('ROLLBACK');
-        return res
-          .status(409)
-          .json({
-            success: false,
-            error: { code: 'ALREADY_COMPLETED', message: 'You have already completed this quest.' },
-          });
+        return res.status(409).json({
+          success: false,
+          error: { code: 'ALREADY_COMPLETED', message: 'You have already completed this quest.' },
+        });
       }
       const active = await client.query(
         "SELECT * FROM quest_attempts WHERE user_id = $1 AND quest_id = $2 AND status IN ('in_progress', 'submitted') ORDER BY created_at DESC LIMIT 1 FOR UPDATE",
@@ -1491,7 +1478,7 @@ router.post(
         return recordFailure(400, 'MISSING_CHALLENGE_TOKEN', 'AR verification requires a valid challenge token.');
       }
 
-      let validAr = false;
+      const _validAr = false;
       let arClaims: any = null;
       try {
         arClaims = verifyQuestArChallengeToken(challengeToken);

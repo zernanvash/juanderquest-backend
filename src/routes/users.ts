@@ -197,12 +197,10 @@ usersRouter.get(
     res.set('Cache-Control', 'private, no-store');
     const limit = req.query.limit === undefined ? 20 : Number(req.query.limit);
     if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: 'VALIDATION_ERROR', message: 'Limit must be an integer from 1 to 50.' },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Limit must be an integer from 1 to 50.' },
+      });
     }
     try {
       const result = await db.listFollowers(
@@ -216,15 +214,13 @@ usersRouter.get(
       return res.json({ success: true, data: result });
     } catch (err) {
       const invalid = err instanceof InvalidCursorError;
-      return res
-        .status(invalid ? 400 : 500)
-        .json({
-          success: false,
-          error: {
-            code: invalid ? 'INVALID_CURSOR' : 'INTERNAL_ERROR',
-            message: invalid ? 'Invalid pagination cursor.' : 'Unable to load followers.',
-          },
-        });
+      return res.status(invalid ? 400 : 500).json({
+        success: false,
+        error: {
+          code: invalid ? 'INVALID_CURSOR' : 'INTERNAL_ERROR',
+          message: invalid ? 'Invalid pagination cursor.' : 'Unable to load followers.',
+        },
+      });
     }
   },
 );
@@ -607,12 +603,10 @@ usersRouter.put('/users/:id/follow', authenticateToken, followLimiter, async (re
   }
 
   if (Boolean(actor.is_test) !== Boolean(target.is_test)) {
-    return res
-      .status(403)
-      .json({
-        success: false,
-        error: { code: 'SCOPE_MISMATCH', message: 'Simulation travelers cannot be followed by real accounts.' },
-      });
+    return res.status(403).json({
+      success: false,
+      error: { code: 'SCOPE_MISMATCH', message: 'Simulation travelers cannot be followed by real accounts.' },
+    });
   }
 
   try {
@@ -671,7 +665,7 @@ usersRouter.put('/users/:id/follow', authenticateToken, followLimiter, async (re
         following_count: result.following_count ?? 0,
       },
     });
-  } catch (err) {
+  } catch (_err) {
     return res.status(500).json({
       success: false,
       error: { code: 'INTERNAL_ERROR', message: 'Failed to follow user.' },
@@ -694,7 +688,7 @@ usersRouter.delete('/users/:id/follow', authenticateToken, followLimiter, async 
   try {
     await db.unfollowUser(actorId, targetId);
     return res.status(204).send();
-  } catch (err) {
+  } catch (_err) {
     return res.status(500).json({
       success: false,
       error: { code: 'INTERNAL_ERROR', message: 'Failed to unfollow user.' },

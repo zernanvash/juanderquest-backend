@@ -134,7 +134,7 @@ export async function recordPromotionAssessment(input: CreateAssessmentInput): P
       throw new JuanChoiceError('FORBIDDEN', 403, 'Active admin role required.');
     }
     // Synthetic admin cannot assess real entities
-    if (Boolean(admin.is_test) && !Boolean(campaign.is_test)) {
+    if (Boolean(admin.is_test) && !campaign.is_test) {
       throw new JuanChoiceError('SCOPE_MISMATCH', 403, 'Synthetic admin cannot assess real campaigns.');
     }
     // Real administrators CAN review and assess QA campaigns (operator QA workflow)

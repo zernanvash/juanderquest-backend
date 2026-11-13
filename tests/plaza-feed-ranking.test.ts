@@ -451,7 +451,7 @@ describe('Plan 80: PlazaRanker v2 Feed Ranking, Home Town Scope & Author Diversi
     const items = res.body.data.items;
 
     const freshPopular = items.find((i: any) => i.id === 'act-merit-fresh');
-    const freshNormal = items.find((i: any) => i.id === 'act-normal-fresh');
+    const _freshNormal = items.find((i: any) => i.id === 'act-normal-fresh');
     const oldExhausted = items.find((i: any) => i.id === 'act-merit-exhausted');
 
     expect(freshPopular).toBeDefined();

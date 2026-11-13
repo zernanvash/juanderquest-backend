@@ -119,12 +119,10 @@ export function requireAreaAdmin(power: AdminPower | AdminPower[]) {
     try {
       const scope = await loadAdminScope(req.user.id);
       if (!powers.some((item) => hasAdminPower(scope, item)))
-        return res
-          .status(403)
-          .json({
-            success: false,
-            error: { code: 'FORBIDDEN', message: `The ${powers.join(' or ')} permission is required.` },
-          });
+        return res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: `The ${powers.join(' or ')} permission is required.` },
+        });
       req.adminScope = scope;
       next();
     } catch (error) {

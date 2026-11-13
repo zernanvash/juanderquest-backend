@@ -85,12 +85,10 @@ app.use('/api/v1', (req, res, next) => {
       : Array.isArray(parseCorsOrigin(env.CORS_ORIGIN)) &&
         (parseCorsOrigin(env.CORS_ORIGIN) as string[]).includes(origin || '');
   if (!allowed)
-    return res
-      .status(403)
-      .json({
-        success: false,
-        error: { code: 'INVALID_ORIGIN', message: 'Cookie-authenticated request origin is not allowed.' },
-      });
+    return res.status(403).json({
+      success: false,
+      error: { code: 'INVALID_ORIGIN', message: 'Cookie-authenticated request origin is not allowed.' },
+    });
   next();
 });
 

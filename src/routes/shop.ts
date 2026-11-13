@@ -76,12 +76,10 @@ shopRouter.put(
       .refine((v) => Object.keys(v).length > 0);
     const parsed = schema.safeParse(req.body);
     if (!parsed.success)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: 'INVALID_REQUEST', message: 'Provide one or more valid loadout slots.' },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_REQUEST', message: 'Provide one or more valid loadout slots.' },
+      });
     const pool = getPool();
     if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
     const c = await pool.connect();

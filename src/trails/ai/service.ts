@@ -1,6 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 import { cachedTrailAi } from './cache.js';
-import { createNimClient, type AiFallbackReason } from './client.js';
+import { createNimClient } from './client.js';
 import {
   parsePreferencesSchema,
   tellStorySchema,

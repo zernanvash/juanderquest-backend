@@ -7,8 +7,6 @@ import { env } from '../src/config/env.js';
 import { setPool } from '../src/db/pool.js';
 import { db as domainDb } from '../src/db/index.js';
 import { createTestDb, TestDbInstance } from '../src/db/testHarness.js';
-import { getPresentationOverview } from '../src/juanchoice/presentation-overview.js';
-import { getMonthlyOverview } from '../src/juanchoice/monthly-overview.js';
 
 describe('JuanChoice presentation overview contract', () => {
   let fixture: TestDbInstance;
@@ -18,7 +16,7 @@ describe('JuanChoice presentation overview contract', () => {
   const spotId1 = 'demo-spot-1';
   const spotId2 = 'demo-spot-2';
   const candidateId1 = randomUUID();
-  const candidateId2 = randomUUID();
+  const _candidateId2 = randomUUID();
 
   beforeAll(async () => {
     fixture = await createTestDb();

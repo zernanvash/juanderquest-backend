@@ -10,8 +10,8 @@ function encodePolyline6(coords: [number, number][]): string {
   for (const [lat, lng] of coords) {
     const latInt = Math.round(lat * 1e6);
     const lngInt = Math.round(lng * 1e6);
-    let dLat = latInt - prevLat;
-    let dLng = lngInt - prevLng;
+    const dLat = latInt - prevLat;
+    const dLng = lngInt - prevLng;
     prevLat = latInt;
     prevLng = lngInt;
 

@@ -398,7 +398,7 @@ export async function reportComment(
     throw new PlazaError('PLAZA_NOT_FOUND', 404, 'Comment not found.');
   }
 
-  const com = comRes.rows[0];
+  const _com = comRes.rows[0];
 
   const repRes = await client.query(
     `INSERT INTO social_comment_reports (comment_id, reporter_id, reason, note)

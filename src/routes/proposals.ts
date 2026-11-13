@@ -15,7 +15,7 @@ const recipientSchema = z.object({
   share_bps: z.number().int().min(1).max(10000),
 });
 
-const createProposalSchema = z.object({
+const _createProposalSchema = z.object({
   title: z.string().min(3),
   location_name: z.string().min(3),
   category: z.enum(['eco', 'cultural', 'food_trade']),
@@ -25,12 +25,12 @@ const createProposalSchema = z.object({
   recipients: z.array(recipientSchema).min(1).optional(),
 });
 
-const voteSchema = z.object({
+const _voteSchema = z.object({
   choice: z.enum(['yes', 'no']),
   idempotency_key: z.string().min(8),
 });
 
-function sendGovernanceError(res: Response, error: unknown) {
+function _sendGovernanceError(res: Response, error: unknown) {
   const code = error instanceof Error ? error.message : 'INTERNAL_ERROR';
   const status = code.includes('NOT_FOUND')
     ? 404

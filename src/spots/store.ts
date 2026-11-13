@@ -11,7 +11,7 @@ export type SpotCategory =
 export type SpotTrust = 'lgu_verified' | 'editorial' | 'open_data' | 'community';
 export type SpotSource = 'lgu' | 'editorial' | 'open_data' | 'community';
 export type { CrowdCapacityBand, CrowdStatus, CrowdConfidence, ActivityType, CrowdMetrics } from './crowd.js';
-import type { CrowdCapacityBand, CrowdStatus, ActivityType } from './crowd.js';
+import type { CrowdCapacityBand, ActivityType } from './crowd.js';
 import { calculateCrowdMetrics } from './crowd.js';
 import { rankExploreSpots, type ExploreListQuery } from './recommender.js';
 interface ActivityEvent {

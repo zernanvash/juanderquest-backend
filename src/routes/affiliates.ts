@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { db, AffiliateApplicationStatus } from '../db/index.js';
-import { authenticateToken, requireAdmin, AuthRequest } from '../middleware/auth.js';
+import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { assertInScope, auditOnSuccess, requireAreaAdmin, resolveTownAreaId } from '../admin/scope.js';
 import { getPool } from '../db/pool.js';
 import { validateRequest } from '../middleware/validate.js';
@@ -74,15 +74,13 @@ affiliatesRouter.get(
       placeCache.set(key, { expires: Date.now() + 2 * 60 * 60 * 1000, results });
       return res.json({ success: true, data: results });
     } catch {
-      return res
-        .status(502)
-        .json({
-          success: false,
-          error: {
-            code: 'PLACE_SEARCH_UNAVAILABLE',
-            message: 'Place search is temporarily unavailable. You can still place a pin manually.',
-          },
-        });
+      return res.status(502).json({
+        success: false,
+        error: {
+          code: 'PLACE_SEARCH_UNAVAILABLE',
+          message: 'Place search is temporarily unavailable. You can still place a pin manually.',
+        },
+      });
     }
   },
 );

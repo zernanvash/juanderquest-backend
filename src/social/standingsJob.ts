@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import type { Pool, PoolClient } from 'pg';
+import type { PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
 import { env } from '../config/env.js';
 import type { Queryable } from './activity.js';

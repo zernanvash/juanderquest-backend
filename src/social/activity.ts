@@ -1,5 +1,4 @@
 import { randomUUID } from 'crypto';
-import type { Pool, PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
 import { enqueueFriendActivityPush } from '../push/enqueue.js';
 

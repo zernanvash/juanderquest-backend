@@ -19,12 +19,10 @@ const fundingService = (res: Response) => {
   }
   const pool = getPool();
   if (!pool) {
-    res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'DATABASE_REQUIRED', message: 'Durable storage is required for merchant points.' },
-      });
+    res.status(503).json({
+      success: false,
+      error: { code: 'DATABASE_REQUIRED', message: 'Durable storage is required for merchant points.' },
+    });
     return null;
   }
   return new MerchantPointsService(pool);
@@ -38,12 +36,10 @@ const sendError = (res: Response, error: unknown) => {
     });
   }
   console.error('[merchant-points] command failed:', error);
-  return res
-    .status(503)
-    .json({
-      success: false,
-      error: { code: 'MERCHANT_POINTS_UNAVAILABLE', message: 'Merchant points are temporarily unavailable.' },
-    });
+  return res.status(503).json({
+    success: false,
+    error: { code: 'MERCHANT_POINTS_UNAVAILABLE', message: 'Merchant points are temporarily unavailable.' },
+  });
 };
 
 const purchaseSchema = z.object({
@@ -74,24 +70,20 @@ merchantPointsRouter.get('/merchant/points', authenticateToken, async (req: Auth
   try {
     const merchantId = await resolveOwnerMerchant(req.user!.id, false);
     if (!merchantId)
-      return res
-        .status(403)
-        .json({
-          success: false,
-          error: { code: 'MERCHANT_OWNER_REQUIRED', message: 'An active merchant owner account is required.' },
-        });
+      return res.status(403).json({
+        success: false,
+        error: { code: 'MERCHANT_OWNER_REQUIRED', message: 'An active merchant owner account is required.' },
+      });
     const data = await service.getBalance(req.user!.id, merchantId, Number(req.query.limit ?? 20));
     res.setHeader('Cache-Control', 'private, no-store');
-    return res
-      .status(200)
-      .json({
-        success: true,
-        data: {
-          ...data,
-          simulated: true,
-          notice: 'These are prototype points; no real payment or token transfer has occurred.',
-        },
-      });
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...data,
+        simulated: true,
+        notice: 'These are prototype points; no real payment or token transfer has occurred.',
+      },
+    });
   } catch (error) {
     return sendError(res, error);
   }
@@ -105,22 +97,18 @@ merchantPointsRouter.get('/merchant/vouchers', authenticateToken, async (req: Au
   }
   const pool = getPool();
   if (!pool) {
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'DATABASE_REQUIRED', message: 'Durable storage is required for merchant vouchers.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'DATABASE_REQUIRED', message: 'Durable storage is required for merchant vouchers.' },
+    });
   }
   try {
     const merchantId = await resolveOwnerMerchant(req.user!.id, false);
     if (!merchantId) {
-      return res
-        .status(403)
-        .json({
-          success: false,
-          error: { code: 'MERCHANT_OWNER_REQUIRED', message: 'An active merchant membership is required.' },
-        });
+      return res.status(403).json({
+        success: false,
+        error: { code: 'MERCHANT_OWNER_REQUIRED', message: 'An active merchant membership is required.' },
+      });
     }
     // This read validates membership and matching test/real scope.
     await new MerchantPointsService(pool).getBalance(req.user!.id, merchantId, 1);
@@ -149,12 +137,10 @@ merchantPointsRouter.post(
     try {
       const merchantId = await resolveOwnerMerchant(req.user!.id);
       if (!merchantId)
-        return res
-          .status(403)
-          .json({
-            success: false,
-            error: { code: 'MERCHANT_OWNER_REQUIRED', message: 'Only an active merchant owner may purchase points.' },
-          });
+        return res.status(403).json({
+          success: false,
+          error: { code: 'MERCHANT_OWNER_REQUIRED', message: 'Only an active merchant owner may purchase points.' },
+        });
       const data = await service.purchase(req.user!.id, merchantId, req.body.package, req.body.idempotency_key);
       return res
         .status(200)

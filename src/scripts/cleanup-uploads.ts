@@ -12,7 +12,7 @@ if (
   (process.argv[1].endsWith('cleanup-uploads.ts') || process.argv[1].endsWith('cleanup-uploads.js'))
 ) {
   runCleanupScript()
-    .then((count) => {
+    .then((_count) => {
       process.exit(0);
     })
     .catch((err) => {

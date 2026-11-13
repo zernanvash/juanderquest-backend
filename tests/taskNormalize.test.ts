@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { normalizeTasks, publicTask, publicTasks } from '../src/quests/taskNormalize.js';
+import { normalizeTasks, publicTask } from '../src/quests/taskNormalize.js';
 
 describe('Quest Builder taskNormalize', () => {
   it('normalizes legacy v1 location step to v2 QuestTask', () => {

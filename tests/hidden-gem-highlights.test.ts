@@ -35,14 +35,12 @@ describe('curated hidden gems', () => {
     store.spots[2].status = 'needs_review';
     store.spots[3].recommendation_suppressed = true;
     store.spots[4].is_test = true;
-    jest
-      .spyOn(store, 'crowd')
-      .mockImplementation((s) => ({
-        crowd_status: s.id === 'gem-5' ? 'estimated_busy' : 'unknown',
-        crowd_confidence: 'none',
-        pressure_score: 0,
-        crowd_updated_at: null,
-      }));
+    jest.spyOn(store, 'crowd').mockImplementation((s) => ({
+      crowd_status: s.id === 'gem-5' ? 'estimated_busy' : 'unknown',
+      crowd_confidence: 'none',
+      pressure_score: 0,
+      crowd_updated_at: null,
+    }));
     expect(
       hiddenGemHighlights(store, undefined, now)
         .map((s) => s.id)

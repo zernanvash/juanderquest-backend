@@ -1,11 +1,5 @@
-import {
-  rateLimit,
-  resetRateLimits,
-  getRateLimitStoreSize,
-  pruneAllExpired,
-  DEFAULT_MAX_ENTRIES_PER_POLICY,
-} from '../src/middleware/rateLimit.js';
-import { Request, Response } from 'express';
+import { rateLimit, resetRateLimits, getRateLimitStoreSize, pruneAllExpired } from '../src/middleware/rateLimit.js';
+import { Request } from 'express';
 
 describe('Phase 2: Rate Limiter Policy Separation & Actor Budgeting', () => {
   beforeEach(() => {
@@ -33,7 +27,7 @@ describe('Phase 2: Rate Limiter Policy Separation & Actor Budgeting', () => {
   };
 
   it('verifies that distinct policy IDs maintain separate budgets and do not cross-contaminate', () => {
-    let mockTime = 1000;
+    const mockTime = 1000;
     const clock = () => mockTime;
 
     const searchLimiter = rateLimit({
@@ -73,7 +67,7 @@ describe('Phase 2: Rate Limiter Policy Separation & Actor Budgeting', () => {
   });
 
   it('allocates distinct budgets to different authenticated actors sharing the same IP address (NAT scenario)', () => {
-    let mockTime = 5000;
+    const mockTime = 5000;
     const clock = () => mockTime;
 
     const limiter = rateLimit({
@@ -177,7 +171,7 @@ describe('Phase 2: Rate Limiter Policy Separation & Actor Budgeting', () => {
   });
 
   it('triggers coarse IP guard if an IP abuses multiple actors', () => {
-    let mockTime = 20_000;
+    const mockTime = 20_000;
     const clock = () => mockTime;
 
     const limiter = rateLimit({
@@ -204,7 +198,7 @@ describe('Phase 2: Rate Limiter Policy Separation & Actor Budgeting', () => {
   });
 
   it('strictly enforces bounded memory capacity when flooded with distinct unexpired keys', () => {
-    let mockTime = 50_000;
+    const mockTime = 50_000;
     const clock = () => mockTime;
 
     const maxCapacity = 10;
@@ -227,7 +221,7 @@ describe('Phase 2: Rate Limiter Policy Separation & Actor Budgeting', () => {
   });
 
   it('protects blocked abusers from eviction while evicting unblocked entries', () => {
-    let mockTime = 10_000;
+    const mockTime = 10_000;
     const clock = () => mockTime;
 
     const limiter = rateLimit({
@@ -266,7 +260,7 @@ describe('Phase 2: Rate Limiter Policy Separation & Actor Budgeting', () => {
   });
 
   it('rejects new admission with 429 when capacity is fully saturated with active abusers', () => {
-    let mockTime = 10_000;
+    const mockTime = 10_000;
     const clock = () => mockTime;
 
     const limiter = rateLimit({

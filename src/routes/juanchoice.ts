@@ -26,11 +26,7 @@ import {
   moderateCandidate,
   publishCampaign,
 } from '../juanchoice/service.js';
-import {
-  recordPromotionAssessment,
-  getLatestPromotionAssessment,
-  evaluateCandidatePromotionEligibility,
-} from '../juanchoice/promotion-safety.js';
+import { recordPromotionAssessment, evaluateCandidatePromotionEligibility } from '../juanchoice/promotion-safety.js';
 import { createMerchantOffer, createPromotionBudget, listActiveMerchantOffers } from '../juanchoice/partnerships.js';
 import { getMonthlyOverview } from '../juanchoice/monthly-overview.js';
 import { getPresentationOverview } from '../juanchoice/presentation-overview.js';
@@ -236,19 +232,15 @@ const festivalBody = z
 const requirePlatformStaff = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     if (req.user && (await isPlatformStaff(req.user.id))) return next();
-    return res
-      .status(403)
-      .json({
-        success: false,
-        error: { code: 'PLATFORM_STAFF_ONLY', message: 'Only JuanderQuest staff can change JuanChoice perks.' },
-      });
+    return res.status(403).json({
+      success: false,
+      error: { code: 'PLATFORM_STAFF_ONLY', message: 'Only JuanderQuest staff can change JuanChoice perks.' },
+    });
   } catch {
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'DATABASE_OUTAGE', message: 'Could not verify JuanderQuest staff access.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'DATABASE_OUTAGE', message: 'Could not verify JuanderQuest staff access.' },
+    });
   }
 };
 const perkControlWrites = rateLimit({
@@ -282,15 +274,13 @@ const manifestoBody = z
   })
   .strict();
 const badRequest = (res: Response, message?: string) =>
-  res
-    .status(400)
-    .json({
-      success: false,
-      error: {
-        code: 'INVALID_REQUEST',
-        message: message ?? 'Check the request and include a reason of at least 10 characters.',
-      },
-    });
+  res.status(400).json({
+    success: false,
+    error: {
+      code: 'INVALID_REQUEST',
+      message: message ?? 'Check the request and include a reason of at least 10 characters.',
+    },
+  });
 
 juanChoiceRouter.get(
   '/juanchoice/admin/perk-controls/access',
@@ -354,18 +344,16 @@ juanChoiceRouter.post(
     const parsed = suspendBody.safeParse(req.body);
     if (!parsed.success) return badRequest(res);
     try {
-      return res
-        .status(201)
-        .json({
-          success: true,
-          data: await suspendLivePerk({
-            campaignId: parsed.data.campaign_id,
-            candidateId: parsed.data.candidate_id,
-            perkKey: parsed.data.perk_key,
-            reason: parsed.data.reason,
-            actorId: req.user!.id,
-          }),
-        });
+      return res.status(201).json({
+        success: true,
+        data: await suspendLivePerk({
+          campaignId: parsed.data.campaign_id,
+          candidateId: parsed.data.candidate_id,
+          perkKey: parsed.data.perk_key,
+          reason: parsed.data.reason,
+          actorId: req.user!.id,
+        }),
+      });
     } catch (error) {
       return failure(res, error);
     }
@@ -882,20 +870,18 @@ juanChoiceRouter.post(
       return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
     try {
       const data = parsed.data;
-      return res
-        .status(201)
-        .json({
-          success: true,
-          data: await createMerchantOffer({
-            campaignId: id.data,
-            merchantId: data.merchant_id,
-            voucherId: data.voucher_id,
-            termsSnapshot: data.terms_snapshot,
-            startsAt: data.starts_at,
-            endsAt: data.ends_at,
-            isTest: data.is_test,
-          }),
-        });
+      return res.status(201).json({
+        success: true,
+        data: await createMerchantOffer({
+          campaignId: id.data,
+          merchantId: data.merchant_id,
+          voucherId: data.voucher_id,
+          termsSnapshot: data.terms_snapshot,
+          startsAt: data.starts_at,
+          endsAt: data.ends_at,
+          isTest: data.is_test,
+        }),
+      });
     } catch (error) {
       return failure(res, error);
     }
@@ -914,17 +900,15 @@ juanChoiceRouter.post(
     if (!id.success || !parsed.success)
       return res.status(400).json({ success: false, error: { code: 'INVALID_REQUEST' } });
     try {
-      return res
-        .status(201)
-        .json({
-          success: true,
-          data: await createPromotionBudget({
-            campaignId: id.data,
-            budgetMjdq: parsed.data.budget_mjdq,
-            requestReference: parsed.data.request_reference,
-            isTest: parsed.data.is_test,
-          }),
-        });
+      return res.status(201).json({
+        success: true,
+        data: await createPromotionBudget({
+          campaignId: id.data,
+          budgetMjdq: parsed.data.budget_mjdq,
+          requestReference: parsed.data.request_reference,
+          isTest: parsed.data.is_test,
+        }),
+      });
     } catch (error) {
       return failure(res, error);
     }

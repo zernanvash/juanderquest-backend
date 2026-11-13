@@ -99,7 +99,7 @@ export class AuthChallengeService {
       );
     } else {
       // Fallback in-memory
-      for (const [key, c] of this.inMemoryChallenges.entries()) {
+      for (const [_key, c] of this.inMemoryChallenges.entries()) {
         if (c.purpose === params.purpose && c.target === target && !c.consumedAt) {
           c.consumedAt = Date.now();
         }

@@ -14,7 +14,7 @@ import { rateLimit } from '../middleware/rateLimit.js';
 import { validateRequest } from '../middleware/validate.js';
 import { getFeed, getActivityById, PlazaError } from '../social/feed.js';
 import { getBoard, getTownBoard, computeHomeTowns } from '../social/standings.js';
-import { weekStartUtc, nextWeekStartUtc, weekStartDate, weekId } from '../social/time.js';
+import { weekStartUtc, nextWeekStartUtc, weekId } from '../social/time.js';
 import {
   cheer,
   uncheer,

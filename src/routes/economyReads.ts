@@ -118,12 +118,10 @@ economyReadsRouter.get('/economy/reservations/:id', travelerRead, async (req: Au
         .json({ success: false, error: { code: 'RESERVATION_NOT_FOUND', message: 'Reservation not found.' } });
     return res.json({ success: true, data: item });
   } catch {
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'ECONOMY_READ_UNAVAILABLE', message: 'Simulation data temporarily unavailable.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'ECONOMY_READ_UNAVAILABLE', message: 'Simulation data temporarily unavailable.' },
+    });
   }
 });
 economyReadsRouter.get('/economy/me/entitlements', travelerRead, async (req: AuthRequest, res: Response) => {
@@ -141,12 +139,10 @@ economyReadsRouter.get('/admin/economy/pools/:id/summary', adminRead, async (req
       return res.status(404).json({ success: false, error: { code: 'POOL_NOT_FOUND', message: 'Pool not found.' } });
     return res.json({ success: true, data: item });
   } catch {
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'ECONOMY_READ_UNAVAILABLE', message: 'Simulation data temporarily unavailable.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'ECONOMY_READ_UNAVAILABLE', message: 'Simulation data temporarily unavailable.' },
+    });
   }
 });
 economyReadsRouter.get('/admin/economy/queue', adminRead, async (_req: Request, res: Response) => {

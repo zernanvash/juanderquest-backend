@@ -16,12 +16,10 @@ const service = new CulturalQuizService(repo, progressionRepo);
 // Every quiz write is audited.
 const requireQuizPower = requireAreaAdmin('quests_quizzes');
 const outOfArea = (res: Response) =>
-  res
-    .status(403)
-    .json({
-      success: false,
-      error: { code: 'OUT_OF_AREA', message: 'This destination is outside your assigned area.' },
-    });
+  res.status(403).json({
+    success: false,
+    error: { code: 'OUT_OF_AREA', message: 'This destination is outside your assigned area.' },
+  });
 
 const quizInScope = (action?: string) => async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -56,12 +54,10 @@ const quizInScope = (action?: string) => async (req: AuthRequest, res: Response,
     }
     return next();
   } catch (err: any) {
-    return res
-      .status(500)
-      .json({
-        success: false,
-        error: { code: 'INTERNAL_ERROR', message: err?.message || 'Failed to check quiz scope.' },
-      });
+    return res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: err?.message || 'Failed to check quiz scope.' },
+    });
   }
 };
 

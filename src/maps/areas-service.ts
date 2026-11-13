@@ -1,7 +1,5 @@
-import fs from 'fs';
-import path from 'path';
 import { Pool } from 'pg';
-import { pointInPolygon, pointInMultiPolygon, computeBbox, distanceMeters, Ring } from './geometry.js';
+import { pointInPolygon, pointInMultiPolygon, distanceMeters } from './geometry.js';
 
 export interface AreaRecord {
   id: string;

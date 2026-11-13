@@ -4,7 +4,7 @@ import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { governanceStore } from './proposals.js';
 
 const router = Router();
-const feedbackSchema = z.object({
+const _feedbackSchema = z.object({
   choice: z.enum(['approve', 'disapprove']),
   idempotency_key: z.string().min(8),
   rating: z.number().int().min(1).max(5).optional(),

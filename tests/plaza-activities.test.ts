@@ -6,7 +6,6 @@ import jwt from 'jsonwebtoken';
 import { app } from '../src/app.js';
 import { env } from '../src/config/env.js';
 import { recordActivity } from '../src/social/activity.js';
-import { getFeed, getActivityById } from '../src/social/feed.js';
 
 describe('Plan 41 Phase 1: Activities, Feed & Producers', () => {
   let testDb: TestDbInstance;

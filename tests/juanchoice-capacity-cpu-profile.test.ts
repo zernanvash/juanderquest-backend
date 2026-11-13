@@ -6,7 +6,6 @@ import {
   formatCpuProfileSummaryLine,
   resolveCpuProfileMode,
   type InspectorSessionLike,
-  MAX_PROFILE_BYTES,
 } from '../scripts/juanchoice-capacity-cpu-profile.js';
 
 describe('juanchoice capacity CPU profile helper', () => {

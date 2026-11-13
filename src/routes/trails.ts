@@ -31,12 +31,10 @@ const personalTrailRateLimiter = rateLimit({
 function sendTrailProgressError(res: Response, error: unknown) {
   if (error instanceof TrailProgressError)
     return res.status(error.status).json({ success: false, error: { code: error.code, message: error.message } });
-  return res
-    .status(503)
-    .json({
-      success: false,
-      error: { code: 'TRAIL_PROGRESS_UNAVAILABLE', message: 'Trail progress could not be saved. Please try again.' },
-    });
+  return res.status(503).json({
+    success: false,
+    error: { code: 'TRAIL_PROGRESS_UNAVAILABLE', message: 'Trail progress could not be saved. Please try again.' },
+  });
 }
 
 function rewardFor(tier: string, economy: Awaited<ReturnType<typeof loadTrailEconomy>>): number {
@@ -306,21 +304,17 @@ trailsRouter.post(
   async (req: AuthRequest, res: Response) => {
     const pool = getPool();
     if (!pool)
-      return res
-        .status(503)
-        .json({
-          success: false,
-          error: { code: 'DATABASE_UNAVAILABLE', message: 'Personal trail generation is unavailable.' },
-        });
+      return res.status(503).json({
+        success: false,
+        error: { code: 'DATABASE_UNAVAILABLE', message: 'Personal trail generation is unavailable.' },
+      });
     try {
       const economy = await loadTrailEconomy(pool);
       if (!economy.personalGenerationEnabled)
-        return res
-          .status(404)
-          .json({
-            success: false,
-            error: { code: 'PERSONAL_TRAILS_DISABLED', message: 'Traveler-created trails are currently unavailable.' },
-          });
+        return res.status(404).json({
+          success: false,
+          error: { code: 'PERSONAL_TRAILS_DISABLED', message: 'Traveler-created trails are currently unavailable.' },
+        });
     } catch {
       return res
         .status(503)
@@ -328,15 +322,13 @@ trailsRouter.post(
     }
     const parsed = personalTrailSchema.safeParse(req.body ?? {});
     if (!parsed.success)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: parsed.error.issues[0]?.message ?? 'Invalid personal trail request.',
-          },
-        });
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: parsed.error.issues[0]?.message ?? 'Invalid personal trail request.',
+        },
+      });
     try {
       const result = await createPersonalTrail(pool, req.user!.id, req.header('Idempotency-Key') ?? '', parsed.data);
       return res.status(201).json({ success: true, data: result });
@@ -345,15 +337,13 @@ trailsRouter.post(
         return res.status(error.status).json({ success: false, error: { code: error.code, message: error.message } });
       if (error instanceof TrailGenerationError)
         return res.status(422).json({ success: false, error: { code: error.code, message: error.message } });
-      return res
-        .status(503)
-        .json({
-          success: false,
-          error: {
-            code: 'PERSONAL_TRAIL_FAILED',
-            message: 'Personal trail could not be created; any points charge was rolled back.',
-          },
-        });
+      return res.status(503).json({
+        success: false,
+        error: {
+          code: 'PERSONAL_TRAIL_FAILED',
+          message: 'Personal trail could not be created; any points charge was rolled back.',
+        },
+      });
     }
   },
 );
@@ -370,12 +360,10 @@ trailsRouter.post(
         .json({ success: false, error: { code: 'DATABASE_UNAVAILABLE', message: 'Trail unlock is unavailable.' } });
     const key = req.header('Idempotency-Key');
     if (!key || key.length < 8 || key.length > 200)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.' },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.' },
+      });
     try {
       return res.json({ success: true, data: await unlockTrail(pool, req.user!.id, req.params.id, key) });
     } catch (error) {
@@ -399,15 +387,13 @@ trailsRouter.post(
     const parsed = checkinSchema.safeParse(req.body ?? {});
     const position = Number(req.params.position);
     if (!parsed.success || !Number.isInteger(position) || position < 1)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'Provide a positive stop position and valid location with accuracy_m at most 100.',
-          },
-        });
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Provide a positive stop position and valid location with accuracy_m at most 100.',
+        },
+      });
     const pool = getPool();
     if (!pool)
       return res
@@ -486,12 +472,10 @@ trailsRouter.post('/admin/trails/matrix/refresh', async (req: AuthRequest, res: 
   try {
     return res.json({ success: true, data: await refreshTravelTimeMatrix(pool, costing as TrailCosting) });
   } catch {
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'MATRIX_REFRESH_FAILED', message: 'Travel matrix refresh did not complete.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'MATRIX_REFRESH_FAILED', message: 'Travel matrix refresh did not complete.' },
+    });
   }
 });
 
@@ -519,24 +503,20 @@ trailsRouter.get('/admin/trails', async (req: AuthRequest, res: Response) => {
 trailsRouter.get('/admin/trails/generations', async (_req: AuthRequest, res: Response) => {
   const pool = getPool();
   if (!pool)
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'DATABASE_UNAVAILABLE', message: 'Trail generation history is unavailable.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'DATABASE_UNAVAILABLE', message: 'Trail generation history is unavailable.' },
+    });
   try {
     const { rows } =
       await pool.query(`SELECT id,kind,requested_by,input,constraints,solver,solver_ms,objective,result,ai_model,ai_used,ai_fallback_reason,created_at
       FROM trail_generations ORDER BY created_at DESC LIMIT 100`);
     return res.json({ success: true, data: rows });
   } catch {
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'TRAIL_GENERATIONS_UNAVAILABLE', message: 'Trail generation history is unavailable.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'TRAIL_GENERATIONS_UNAVAILABLE', message: 'Trail generation history is unavailable.' },
+    });
   }
 });
 
@@ -560,12 +540,10 @@ trailsRouter.get('/admin/trails/review', async (_req: AuthRequest, res: Response
       WHERE t.source='engine' AND t.status='pending_review' ORDER BY t.created_at ASC LIMIT 100`);
     return res.json({ success: true, data: rows });
   } catch {
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'TRAIL_REVIEW_UNAVAILABLE', message: 'Trail review queue is unavailable.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'TRAIL_REVIEW_UNAVAILABLE', message: 'Trail review queue is unavailable.' },
+    });
   }
 });
 
@@ -602,15 +580,13 @@ const generationSchema = z
 trailsRouter.post('/admin/trails/generate', async (req: AuthRequest, res: Response) => {
   const parsed = generationSchema.safeParse(req.body ?? {});
   if (!parsed.success)
-    return res
-      .status(400)
-      .json({
-        success: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: parsed.error.issues[0]?.message ?? 'Invalid trail generation request.',
-        },
-      });
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: parsed.error.issues[0]?.message ?? 'Invalid trail generation request.',
+      },
+    });
   const pool = getPool();
   if (!pool)
     return res
@@ -629,12 +605,10 @@ trailsRouter.post('/admin/trails/generate', async (req: AuthRequest, res: Respon
   } catch (error) {
     if (error instanceof TrailGenerationError)
       return res.status(422).json({ success: false, error: { code: error.code, message: error.message } });
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'GENERATION_FAILED', message: 'Trail generation failed; no partial trail was saved.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'GENERATION_FAILED', message: 'Trail generation failed; no partial trail was saved.' },
+    });
   }
 });
 
@@ -662,25 +636,21 @@ const compareSolversSchema = z
 trailsRouter.post('/admin/trails/compare-solvers', async (req: AuthRequest, res: Response) => {
   const parsed = compareSolversSchema.safeParse(req.body ?? {});
   if (!parsed.success)
-    return res
-      .status(400)
-      .json({
-        success: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: parsed.error.issues[0]?.message ?? 'Invalid solver comparison request.',
-        },
-      });
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: parsed.error.issues[0]?.message ?? 'Invalid solver comparison request.',
+      },
+    });
   if (!(await cuoptEnabledWithKey()))
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: {
-          code: 'CUOPT_DISABLED',
-          message: 'cuOpt comparison requires explicit local enablement and the private owner key file.',
-        },
-      });
+    return res.status(503).json({
+      success: false,
+      error: {
+        code: 'CUOPT_DISABLED',
+        message: 'cuOpt comparison requires explicit local enablement and the private owner key file.',
+      },
+    });
   const pool = getPool();
   if (!pool)
     return res
@@ -691,19 +661,15 @@ trailsRouter.post('/admin/trails/compare-solvers', async (req: AuthRequest, res:
     const byId = new Map(allSpots.map((spot) => [spot.spotId, spot]));
     const selected = parsed.data.spot_ids.map((id) => byId.get(id));
     if (selected.some((spot) => !spot))
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: 'SPOT_SET_INVALID', message: 'Every spot must be published, public, and non-test.' },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: 'SPOT_SET_INVALID', message: 'Every spot must be published, public, and non-test.' },
+      });
     if (parsed.data.start_node && !byId.has(parsed.data.start_node))
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: 'START_SPOT_INVALID', message: 'Start spot must be a published catalog spot.' },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: 'START_SPOT_INVALID', message: 'Start spot must be a published catalog spot.' },
+      });
     const spots = selected.filter((spot): spot is NonNullable<typeof spot> => spot !== undefined);
     const values = new Map(computeSpotSignals(spots).map((signal) => [signal.spotId, signal.value]));
     const problem: TrailProblem = {
@@ -788,24 +754,20 @@ trailsRouter.post('/admin/trails/compare-solvers', async (req: AuthRequest, res:
     return res.json({ success: true, data: { local, cuopt } });
   } catch (error) {
     if (error instanceof CuoptError)
-      return res
-        .status(error.code === 'CUOPT_INFEASIBLE' ? 422 : 503)
-        .json({
-          success: false,
-          error: {
-            code: error.code,
-            message:
-              error.code === 'CUOPT_INFEASIBLE'
-                ? 'cuOpt found no route satisfying the submitted constraints.'
-                : 'cuOpt comparison is unavailable.',
-          },
-        });
-    return res
-      .status(503)
-      .json({
+      return res.status(error.code === 'CUOPT_INFEASIBLE' ? 422 : 503).json({
         success: false,
-        error: { code: 'SOLVER_COMPARISON_FAILED', message: 'Solver comparison failed; no benchmark rows were saved.' },
+        error: {
+          code: error.code,
+          message:
+            error.code === 'CUOPT_INFEASIBLE'
+              ? 'cuOpt found no route satisfying the submitted constraints.'
+              : 'cuOpt comparison is unavailable.',
+        },
       });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'SOLVER_COMPARISON_FAILED', message: 'Solver comparison failed; no benchmark rows were saved.' },
+    });
   }
 });
 
@@ -833,24 +795,19 @@ trailsRouter.post('/admin/trails/:id/publish', async (req: AuthRequest, res: Res
       [req.params.id],
     );
     if (approximate.rows[0]?.has_approximate && req.body?.confirm_approximate !== true) {
-      return res
-        .status(409)
-        .json({
-          success: false,
-          error: {
-            code: 'APPROXIMATE_LEGS_CONFIRMATION_REQUIRED',
-            message:
-              'This route has estimated straight-line legs. Review them and explicitly confirm before publishing.',
-          },
-        });
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'APPROXIMATE_LEGS_CONFIRMATION_REQUIRED',
+          message: 'This route has estimated straight-line legs. Review them and explicitly confirm before publishing.',
+        },
+      });
     }
   } catch {
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'TRAIL_UPDATE_FAILED', message: 'Trail routing quality could not be checked.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'TRAIL_UPDATE_FAILED', message: 'Trail routing quality could not be checked.' },
+    });
   }
   return updateTrailStatus(req.params.id, 'published', req.user!.id, res, true);
 });
@@ -881,12 +838,10 @@ const trailPatchSchema = z
 trailsRouter.patch('/admin/trails/:id', async (req: AuthRequest, res: Response) => {
   const parsed = trailPatchSchema.safeParse(req.body ?? {});
   if (!parsed.success)
-    return res
-      .status(400)
-      .json({
-        success: false,
-        error: { code: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid trail update.' },
-      });
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid trail update.' },
+    });
   const pool = getPool();
   if (!pool)
     return res
@@ -923,12 +878,10 @@ trailsRouter.patch('/admin/trails/:id', async (req: AuthRequest, res: Response) 
           : new Date(body.available_until);
     if (nextFrom && nextUntil && nextFrom.getTime() >= nextUntil.getTime()) {
       await client.query('ROLLBACK');
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: 'INVALID_AVAILABILITY', message: 'available_from must be earlier than available_until.' },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_AVAILABILITY', message: 'available_from must be earlier than available_until.' },
+      });
     }
 
     const tier = body.tier ?? trail.tier;
@@ -937,12 +890,10 @@ trailsRouter.patch('/admin/trails/:id', async (req: AuthRequest, res: Response) 
     let unlockRule = oldRule;
     if (body.price_points !== undefined && !['signature', 'legendary'].includes(tier)) {
       await client.query('ROLLBACK');
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: 'PRICE_NOT_ALLOWED', message: 'Only Signature and Legendary trails have a points price.' },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: 'PRICE_NOT_ALLOWED', message: 'Only Signature and Legendary trails have a points price.' },
+      });
     }
     if (body.tier !== undefined || body.price_points !== undefined) {
       if (tier === 'starter') unlockRule = { type: 'free' };
@@ -981,12 +932,10 @@ trailsRouter.patch('/admin/trails/:id', async (req: AuthRequest, res: Response) 
       const positions = body.narration.map((item) => item.position);
       if (new Set(positions).size !== positions.length) {
         await client.query('ROLLBACK');
-        return res
-          .status(400)
-          .json({
-            success: false,
-            error: { code: 'DUPLICATE_STOP_POSITION', message: 'Each stop position may be edited once per request.' },
-          });
+        return res.status(400).json({
+          success: false,
+          error: { code: 'DUPLICATE_STOP_POSITION', message: 'Each stop position may be edited once per request.' },
+        });
       }
       const existingStops = await client.query('SELECT position,spot_id FROM trail_stops WHERE trail_id=$1', [
         req.params.id,
@@ -997,12 +946,10 @@ trailsRouter.patch('/admin/trails/:id', async (req: AuthRequest, res: Response) 
         const spotId = stopsByPosition.get(item.position);
         if (!spotId) {
           await client.query('ROLLBACK');
-          return res
-            .status(400)
-            .json({
-              success: false,
-              error: { code: 'STOP_NOT_FOUND', message: `Stop position ${item.position} does not exist.` },
-            });
+          return res.status(400).json({
+            success: false,
+            error: { code: 'STOP_NOT_FOUND', message: `Stop position ${item.position} does not exist.` },
+          });
         }
         await client.query('UPDATE trail_stops SET narration=$1 WHERE trail_id=$2 AND position=$3', [
           item.text,
@@ -1023,12 +970,10 @@ trailsRouter.patch('/admin/trails/:id', async (req: AuthRequest, res: Response) 
     return res.json({ success: true, data: { ...updated.rows[0], stops: stops.rows } });
   } catch {
     await client.query('ROLLBACK').catch(() => {});
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'TRAIL_UPDATE_FAILED', message: 'Trail update failed; no partial change was saved.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'TRAIL_UPDATE_FAILED', message: 'Trail update failed; no partial change was saved.' },
+    });
   } finally {
     client.release();
   }
@@ -1047,15 +992,13 @@ async function updateTrailStatus(id: string, status: string, adminId: string, re
       [status, adminId, publish, id],
     );
     if (!result.rowCount)
-      return res
-        .status(404)
-        .json({
-          success: false,
-          error: {
-            code: 'TRAIL_NOT_REVIEWABLE',
-            message: 'Engine trail was not found or is not ready for this action.',
-          },
-        });
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'TRAIL_NOT_REVIEWABLE',
+          message: 'Engine trail was not found or is not ready for this action.',
+        },
+      });
     return res.json({ success: true, data: result.rows[0] });
   } catch {
     return res

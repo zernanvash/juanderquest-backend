@@ -39,12 +39,10 @@ async function marketplaceRedemptionGate(req: Request, res: Response, next: Next
         .status(409)
         .json({ success: false, error: { code: 'NOT_REDEEMABLE', message: 'This partner offer is coming soon.' } });
   }
-  return res
-    .status(503)
-    .json({
-      success: false,
-      error: { code: 'FEATURE_UNAVAILABLE', message: 'Merchant vouchers are under development.' },
-    });
+  return res.status(503).json({
+    success: false,
+    error: { code: 'FEATURE_UNAVAILABLE', message: 'Merchant vouchers are under development.' },
+  });
 }
 
 async function handleRedemption(voucherId: string, req: AuthRequest, res: Response) {
@@ -64,12 +62,10 @@ async function handleRedemption(voucherId: string, req: AuthRequest, res: Respon
       .json({ success: false, error: { code: 'NOT_REDEEMABLE', message: 'This partner offer is coming soon.' } });
   }
   if (!env.MARKETPLACE_ENABLED) {
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'FEATURE_UNAVAILABLE', message: 'Merchant vouchers are under development.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'FEATURE_UNAVAILABLE', message: 'Merchant vouchers are under development.' },
+    });
   }
   if (governanceStore.getControls().pause_vouchers) {
     return res.status(403).json({

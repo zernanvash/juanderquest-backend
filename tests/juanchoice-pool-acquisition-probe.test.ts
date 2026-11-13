@@ -271,7 +271,7 @@ describe('JuanChoice connection acquisition probe helper', () => {
     const mockOriginalConnect = jest.fn().mockResolvedValue({ release: () => {} });
     const pool = { connect: mockOriginalConnect } as unknown as Pool;
 
-    let callbackPhase: 'mixed_ballot_burst' | 'idle_read' | 'unscoped' = 'unscoped';
+    const callbackPhase: 'mixed_ballot_burst' | 'idle_read' | 'unscoped' = 'unscoped';
     const probe = installAcquisitionProbe(pool, () => callbackPhase);
 
     // Call setPhase to verify it is NOT used as a fallback when callback returns 'unscoped'

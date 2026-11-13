@@ -40,12 +40,10 @@ router.get('/wallet', authenticateToken, async (req: AuthRequest, res: Response)
   try {
     mjdq_balance = demoPoints !== undefined ? authoritativeBalance(demoPoints, previousMjdq) : wallet.balance_mjdq;
   } catch {
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'ACCOUNTING_UNAVAILABLE', message: 'Wallet balance temporarily unavailable.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'ACCOUNTING_UNAVAILABLE', message: 'Wallet balance temporarily unavailable.' },
+    });
   }
   const formatted_jdq = mjdq_balance / 1000;
   const jdq_governance_balance = governanceBalance;
@@ -55,12 +53,10 @@ router.get('/wallet', authenticateToken, async (req: AuthRequest, res: Response)
     try {
       explorerCoins = await new EconomyService(pool).balance(req.user!.id);
     } catch {
-      return res
-        .status(503)
-        .json({
-          success: false,
-          error: { code: 'ACCOUNTING_UNAVAILABLE', message: 'Coin balance temporarily unavailable.' },
-        });
+      return res.status(503).json({
+        success: false,
+        error: { code: 'ACCOUNTING_UNAVAILABLE', message: 'Coin balance temporarily unavailable.' },
+      });
     }
   }
 
@@ -112,12 +108,10 @@ router.post(
           error.code === 'INVALID_IDEMPOTENCY_KEY' ? 400 : error.code === 'COSMETIC_UNAVAILABLE' ? 404 : 409;
         return res.status(status).json({ success: false, error: { code: error.code, message: error.message } });
       }
-      return res
-        .status(503)
-        .json({
-          success: false,
-          error: { code: 'ACCOUNTING_UNAVAILABLE', message: 'Purchase temporarily unavailable.' },
-        });
+      return res.status(503).json({
+        success: false,
+        error: { code: 'ACCOUNTING_UNAVAILABLE', message: 'Purchase temporarily unavailable.' },
+      });
     }
   },
 );
@@ -135,12 +129,10 @@ router.get('/wallet/ledger', authenticateToken, async (req: AuthRequest, res: Re
       if (govLedger.some((entry) => !Number.isSafeInteger(entry.amount_mjdq)))
         throw new Error('LEDGER_AMOUNT_OVERFLOW');
     } catch {
-      return res
-        .status(503)
-        .json({
-          success: false,
-          error: { code: 'ACCOUNTING_UNAVAILABLE', message: 'Wallet ledger temporarily unavailable.' },
-        });
+      return res.status(503).json({
+        success: false,
+        error: { code: 'ACCOUNTING_UNAVAILABLE', message: 'Wallet ledger temporarily unavailable.' },
+      });
     }
   }
   const dbLedger = db.ledger.filter((l) => l.user_id === req.user!.id);

@@ -6,7 +6,7 @@ import { db, UserRow } from '../db/index.js';
 import { progressionRepo } from './repository.js';
 import { getExplorerLevel, getCivicLevel, getScoutLevel } from './levels.js';
 import { grantAchievementCosmetics } from '../shop/cosmetics.js';
-import { TravelerPassport, AchievementAward, CuratedCollection } from './types.js';
+import { TravelerPassport, AchievementAward } from './types.js';
 
 export class ProgressionService {
   private async awardWithCosmetics(

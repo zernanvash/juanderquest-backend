@@ -1,6 +1,5 @@
 import request from 'supertest';
 import { app } from '../src/app.js';
-import { db } from '../src/db/index.js';
 import { spotStore } from '../src/spots/store.js';
 import jwt from 'jsonwebtoken';
 import { env } from '../src/config/env.js';

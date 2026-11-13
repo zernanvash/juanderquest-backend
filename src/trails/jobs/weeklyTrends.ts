@@ -57,14 +57,12 @@ export async function runWeeklyTrailTrends(
     const areas = await loadActiveTrailAreas(pool, areaId);
     if (!areas.length) return { ...summary, skippedReason: 'no_active_areas' };
     const candidates = [
-      ...result.value.themes
-        .slice(0, 4)
-        .map((theme, index) => ({
-          key: `signature:${index}:${theme.label}`,
-          theme: theme.label,
-          tier: 'signature' as const,
-          until: null as Date | null,
-        })),
+      ...result.value.themes.slice(0, 4).map((theme, index) => ({
+        key: `signature:${index}:${theme.label}`,
+        theme: theme.label,
+        tier: 'signature' as const,
+        until: null as Date | null,
+      })),
       {
         key: 'legendary:weekly',
         theme: result.value.themes[0]?.label ?? 'seasonal discovery',

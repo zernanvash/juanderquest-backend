@@ -1,7 +1,6 @@
 import { createTestDb, TestDbInstance } from '../src/db/testHarness.js';
 import { spawn } from 'child_process';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { vouchersService } from '../src/services/vouchers.js';
 import { setPool } from '../src/db/pool.js';
 

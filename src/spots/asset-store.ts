@@ -181,7 +181,7 @@ export class SpotAssetStore {
       if (asset.status === 'pending' && Date.parse(asset.created_at) < cutoffTime) {
         try {
           await storageProvider.deletePhoto(asset.object_key);
-        } catch (e) {
+        } catch (_e) {
           // Continue cleanup even if physical deletion throws
         }
         asset.status = 'deleted';

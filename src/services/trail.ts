@@ -1,4 +1,4 @@
-import { spotStore, Spot } from '../spots/store.js';
+import { spotStore } from '../spots/store.js';
 import { CrowdStatus } from '../spots/crowd.js';
 import { calculateRoute, computeHaversineDistanceKm, RouteResponse, TravelCosting } from './routing.js';
 

@@ -149,12 +149,10 @@ router.post(
     }
 
     if (campaign.reserved_participants >= campaign.max_participants) {
-      return res
-        .status(409)
-        .json({
-          success: false,
-          error: { code: 'CAPACITY_REACHED', message: 'Campaign pre-registration slots are fully reserved.' },
-        });
+      return res.status(409).json({
+        success: false,
+        error: { code: 'CAPACITY_REACHED', message: 'Campaign pre-registration slots are fully reserved.' },
+      });
     }
 
     // Resolve referrer if ref is provided

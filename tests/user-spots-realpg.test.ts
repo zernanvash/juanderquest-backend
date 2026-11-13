@@ -3,7 +3,6 @@ import request from 'supertest';
 import { app } from '../src/app.js';
 import { db } from '../src/db/index.js';
 import { setPool } from '../src/db/pool.js';
-import { spotStore } from '../src/spots/store.js';
 import { createTestDb, type TestDbInstance } from '../src/db/testHarness.js';
 
 const realPg = process.env.JDQ_REAL_PG_URL ? describe : describe.skip;

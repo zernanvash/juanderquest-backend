@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from '@jest/globals';
 import request from 'supertest';
 import { app } from '../src/app.js';
-import { db } from '../src/db/index.js';
 import { LoginThrottle, accountLoginThrottle } from '../src/auth/loginThrottle.js';
 
 describe('Plan 72 Phase 4: Per-Account Login Throttle', () => {
@@ -43,7 +42,7 @@ describe('Plan 72 Phase 4: Per-Account Login Throttle', () => {
     });
 
     it('resets the failure count on successful login', () => {
-      let currentTime = 1_000_000;
+      const currentTime = 1_000_000;
       const throttle = new LoginThrottle({
         maxFailures: 10,
         windowMs: 15 * 60 * 1000,
@@ -98,7 +97,7 @@ describe('Plan 72 Phase 4: Per-Account Login Throttle', () => {
     });
 
     it('does not throttle a different email', () => {
-      let currentTime = 1_000_000;
+      const currentTime = 1_000_000;
       const throttle = new LoginThrottle({
         maxFailures: 10,
         windowMs: 15 * 60 * 1000,

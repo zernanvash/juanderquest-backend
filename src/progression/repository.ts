@@ -725,7 +725,7 @@ export class ProgressionRepository {
     // Strict compound fence: both lease_owner and claim_token are mandatory.
     // Raw worker names without claim tokens cannot acknowledge claims.
     let resolvedToken = claimToken;
-    let resolvedOwner = leaseOwner;
+    const resolvedOwner = leaseOwner;
 
     if (!resolvedToken && leaseOwner.includes(':')) {
       const colonIdx = leaseOwner.indexOf(':');
@@ -768,7 +768,7 @@ export class ProgressionRepository {
     if (!executor) return false;
 
     let resolvedToken = claimToken;
-    let resolvedOwner = leaseOwner;
+    const resolvedOwner = leaseOwner;
 
     if (!resolvedToken && leaseOwner.includes(':')) {
       const colonIdx = leaseOwner.indexOf(':');

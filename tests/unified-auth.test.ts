@@ -20,7 +20,7 @@ describe('Unified Sign-In, Email Recovery, and Guest Retirement', () => {
   const testEmail = 'traveler.juan@example.com';
   const testPassword = 'Password123!Safe';
   let devSignupCode: string = '';
-  let sessionToken: string = '';
+  const _sessionToken: string = '';
 
   it('rejects a forged Google ID token without creating a session', async () => {
     const forged =

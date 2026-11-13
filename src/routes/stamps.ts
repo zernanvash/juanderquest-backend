@@ -64,12 +64,10 @@ stampsRouter.post('/me/daily/claim', authenticateToken, claimLimiter, async (req
   if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
   const key = idempotencyKey(req);
   if (key !== null && (key.length < 8 || key.length > 100)) {
-    return res
-      .status(400)
-      .json({
-        success: false,
-        error: { code: 'INVALID_REQUEST', message: 'Idempotency-Key must be 8-100 characters.' },
-      });
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_REQUEST', message: 'Idempotency-Key must be 8-100 characters.' },
+    });
   }
   try {
     const data = await claimDaily(pool, req.user!.id, { idempotencyKey: key });
@@ -114,12 +112,10 @@ stampsRouter.post('/me/stamps/spend', authenticateToken, spendLimiter, async (re
   }
   const key = idempotencyKey(req);
   if (!key || key.length < 8 || key.length > 100) {
-    return res
-      .status(400)
-      .json({
-        success: false,
-        error: { code: 'INVALID_REQUEST', message: 'A valid Idempotency-Key (8-100 characters) is required.' },
-      });
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_REQUEST', message: 'A valid Idempotency-Key (8-100 characters) is required.' },
+    });
   }
   try {
     const data = await spendStamps(pool, req.user!.id, parsed.data.item, key);
@@ -361,12 +357,10 @@ stampsRouter.put('/admin/stamps/qotd', authenticateToken, requireAdmin, async (r
   if (!pool) return fail(res, new Error('STORAGE_UNAVAILABLE'));
   const parsed = scheduleSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res
-      .status(400)
-      .json({
-        success: false,
-        error: { code: 'INVALID_REQUEST', message: 'Provide manila_date (YYYY-MM-DD) and question_id.' },
-      });
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_REQUEST', message: 'Provide manila_date (YYYY-MM-DD) and question_id.' },
+    });
   }
   try {
     await scheduleQuestionOfTheDay(pool, parsed.data.manila_date, parsed.data.question_id);

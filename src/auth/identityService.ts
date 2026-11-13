@@ -1,6 +1,5 @@
 import type { Pool } from 'pg';
 import { randomUUID } from 'crypto';
-import { UserRow } from '../db/index.js';
 import { hashPassword, verifyPassword } from './crypto.js';
 
 export interface AuthIdentityRow {
@@ -228,7 +227,7 @@ export class UnifiedIdentityService {
       return res.rows[0];
     }
 
-    let existing = this.inMemoryEmails.find((e) => e.normalized_email === normalized);
+    const existing = this.inMemoryEmails.find((e) => e.normalized_email === normalized);
     if (existing) {
       existing.is_verified = isVerified;
       existing.verified_at = isVerified ? now : null;

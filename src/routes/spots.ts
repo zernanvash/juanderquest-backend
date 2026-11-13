@@ -4,7 +4,6 @@ import { z } from 'zod';
 import {
   authenticateToken,
   optionalAuthenticateToken,
-  requireAdmin,
   AuthRequest,
   isAuthorizedQA,
   checkQAAuthorization,
@@ -19,7 +18,7 @@ import { distanceKm, spotStore, taxonomy } from '../spots/store.js';
 import { assetStore } from '../spots/asset-store.js';
 import { getSpotPhotoStorageProvider } from '../storage/spot-photos.js';
 import { detectValidatedMediaMime } from '../utils/media-mime.js';
-import { fieldLogStore, FieldLogTag, SpotReportReason } from '../spots/field-logs.js';
+import { fieldLogStore } from '../spots/field-logs.js';
 import { hiddenGemHighlights } from '../spots/highlights.js';
 import { recognizeSpotLocation } from '../spots/recognize.js';
 import { sanitizeQuestForViewer } from '../quests/sanitize.js';
@@ -100,12 +99,10 @@ router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, async (req
     (lat !== undefined) !== (lng !== undefined) ||
     [lat, lng, radius, limit, offset].some((v) => v !== undefined && !Number.isFinite(v))
   ) {
-    return res
-      .status(400)
-      .json({
-        success: false,
-        error: { code: 'VALIDATION_ERROR', message: 'Valid lat/lng and radius values are required.' },
-      });
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'Valid lat/lng and radius values are required.' },
+    });
   }
   const actorId =
     req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
@@ -173,24 +170,20 @@ const recognizeRateLimiter = rateLimit({
 router.get('/spots/recognize', optionalAuthenticateToken, recognizeRateLimiter, async (req: AuthRequest, res) => {
   const parsed = recognizeQuery.safeParse(req.query);
   if (!parsed.success) {
-    return res
-      .status(400)
-      .json({
-        success: false,
-        error: { code: 'VALIDATION_ERROR', message: 'lat and lng must be inside the Philippines.' },
-      });
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'lat and lng must be inside the Philippines.' },
+    });
   }
   try {
     res.set('Cache-Control', 'private, max-age=300');
     return res.json({ success: true, data: await recognizeSpotLocation(parsed.data.lat, parsed.data.lng, getPool()) });
   } catch (error) {
     console.error('[spots] recognize failed:', error instanceof Error ? error.message : error);
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'RECOGNIZE_UNAVAILABLE', message: 'Place recognition is unavailable right now.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'RECOGNIZE_UNAVAILABLE', message: 'Place recognition is unavailable right now.' },
+    });
   }
 });
 
@@ -269,12 +262,10 @@ router.put('/spots/:id/save', authenticateToken, (req: AuthRequest, res) => {
   if (!actor)
     return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Account is unavailable.' } });
   if (spot && Boolean(spot.is_test) !== Boolean(actor.is_test))
-    return res
-      .status(403)
-      .json({
-        success: false,
-        error: { code: 'SCOPE_MISMATCH', message: 'Fictional alpha posts are read-only for real accounts.' },
-      });
+    return res.status(403).json({
+      success: false,
+      error: { code: 'SCOPE_MISMATCH', message: 'Fictional alpha posts are read-only for real accounts.' },
+    });
   const saved = spotStore.interact(req.user!.id, req.params.id, 'save', true);
   spotStore.recordActivity(req.user!.id, req.params.id, 'save');
   return res.json({ success: true, data: { saved } });
@@ -328,27 +319,23 @@ router.post(
     if (!actor)
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Account is unavailable.' } });
     if (Boolean(spot.is_test) !== Boolean(actor.is_test))
-      return res
-        .status(403)
-        .json({
-          success: false,
-          error: { code: 'SCOPE_MISMATCH', message: 'Fictional alpha posts are read-only for real accounts.' },
-        });
+      return res.status(403).json({
+        success: false,
+        error: { code: 'SCOPE_MISMATCH', message: 'Fictional alpha posts are read-only for real accounts.' },
+      });
     if (
       req.body.type === 'visit' &&
       (req.body.captured_lat === undefined ||
         req.body.captured_lng === undefined ||
         distanceKm(req.body.captured_lat, req.body.captured_lng, spot.gps_lat, spot.gps_lng) > 0.25)
     )
-      return res
-        .status(422)
-        .json({
-          success: false,
-          error: {
-            code: 'VISIT_NOT_VERIFIED',
-            message: 'A visit must include coordinates within 250 meters of the destination.',
-          },
-        });
+      return res.status(422).json({
+        success: false,
+        error: {
+          code: 'VISIT_NOT_VERIFIED',
+          message: 'A visit must include coordinates within 250 meters of the destination.',
+        },
+      });
     const recorded = spotStore.interact(req.user!.id, req.params.id, req.body.type, true);
     if (req.body.type !== 'helpful') spotStore.recordActivity(req.user!.id, req.params.id, req.body.type);
     await handleSpotInteraction(getPool(), { userId: req.user!.id, spotId: spot.id, type: req.body.type });
@@ -392,15 +379,13 @@ router.patch(
     if (!before || !spotInAdminScope(req.adminScope!, before))
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
     if (!req.adminScope!.platform && before.created_by === req.user!.id)
-      return res
-        .status(403)
-        .json({
-          success: false,
-          error: {
-            code: 'SELF_MODERATION_FORBIDDEN',
-            message: 'Platform administrator review is required for a destination you created.',
-          },
-        });
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'SELF_MODERATION_FORBIDDEN',
+          message: 'Platform administrator review is required for a destination you created.',
+        },
+      });
     const spot = spotStore.review(
       req.params.id,
       req.user!.id,

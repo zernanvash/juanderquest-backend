@@ -39,7 +39,7 @@ export function getExplorerLevel(xp: number): LevelProgression {
   };
 }
 
-export function getCivicLevel(xp: number, stamps: number): LevelProgression {
+export function getCivicLevel(xp: number, _stamps: number): LevelProgression {
   const safeXp = Math.max(0, Math.floor(xp));
   // Civic thresholds:
   // L1: 0, L2: 50, L3: 125, L4: 250, L5: 450, L6: 700...

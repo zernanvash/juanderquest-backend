@@ -36,12 +36,10 @@ router.use('/admin/area-admins', authenticateToken, requireAdmin);
 router.get('/admin/area-admins', async (_req, res) => {
   const pool = getPool();
   if (!pool)
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'DATABASE_OUTAGE', message: 'Area administrator storage is unavailable.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'DATABASE_OUTAGE', message: 'Area administrator storage is unavailable.' },
+    });
   const [assignments, audit] = await Promise.all([
     pool.query(`SELECT aa.id, aa.user_id, u.display_name, u.email, aa.area_id, a.display_name AS area_name,
                        aa.powers, aa.granted_by, aa.granted_at, aa.revoked_at
@@ -74,20 +72,16 @@ const grantSchema = z.object({
 router.post('/admin/area-admins', requireDeveloper, async (req: AuthRequest, res) => {
   const parsed = grantSchema.safeParse(req.body);
   if (!parsed.success)
-    return res
-      .status(422)
-      .json({
-        success: false,
-        error: { code: 'VALIDATION_ERROR', message: 'Choose a user, area, and at least one permission.' },
-      });
+    return res.status(422).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'Choose a user, area, and at least one permission.' },
+    });
   const pool = getPool();
   if (!pool)
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'DATABASE_OUTAGE', message: 'Area administrator storage is unavailable.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'DATABASE_OUTAGE', message: 'Area administrator storage is unavailable.' },
+    });
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -101,15 +95,13 @@ router.post('/admin/area-admins', requireDeveloper, async (req: AuthRequest, res
     const target = userResult.rows[0];
     if (target.role === 'admin' || target.role === 'qa') {
       await client.query('ROLLBACK');
-      return res
-        .status(409)
-        .json({
-          success: false,
-          error: {
-            code: 'ROLE_CONFLICT',
-            message: 'Platform administrators and QA users cannot be converted to area admins.',
-          },
-        });
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'ROLE_CONFLICT',
+          message: 'Platform administrators and QA users cannot be converted to area admins.',
+        },
+      });
     }
     const before = await client.query(
       'SELECT * FROM admin_area_assignments WHERE user_id=$1 AND area_id=$2 FOR UPDATE',
@@ -161,12 +153,10 @@ router.post('/admin/area-admins', requireDeveloper, async (req: AuthRequest, res
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
     const message = error instanceof Error ? error.message : 'Grant failed.';
-    return res
-      .status(message.includes('admin_areas') ? 404 : 500)
-      .json({
-        success: false,
-        error: { code: 'AREA_ADMIN_GRANT_FAILED', message: 'Could not save this area assignment.' },
-      });
+    return res.status(message.includes('admin_areas') ? 404 : 500).json({
+      success: false,
+      error: { code: 'AREA_ADMIN_GRANT_FAILED', message: 'Could not save this area assignment.' },
+    });
   } finally {
     client.release();
   }
@@ -181,12 +171,10 @@ router.patch('/admin/area-admins/:id', async (req: AuthRequest, res) => {
       .json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'At least one permission is required.' } });
   const pool = getPool();
   if (!pool)
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'DATABASE_OUTAGE', message: 'Area administrator storage is unavailable.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'DATABASE_OUTAGE', message: 'Area administrator storage is unavailable.' },
+    });
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -217,12 +205,10 @@ router.patch('/admin/area-admins/:id', async (req: AuthRequest, res) => {
     return res.json({ success: true, data: after.rows[0] });
   } catch {
     await client.query('ROLLBACK').catch(() => undefined);
-    return res
-      .status(500)
-      .json({
-        success: false,
-        error: { code: 'AREA_ADMIN_UPDATE_FAILED', message: 'Could not update this assignment.' },
-      });
+    return res.status(500).json({
+      success: false,
+      error: { code: 'AREA_ADMIN_UPDATE_FAILED', message: 'Could not update this assignment.' },
+    });
   } finally {
     client.release();
   }
@@ -231,12 +217,10 @@ router.patch('/admin/area-admins/:id', async (req: AuthRequest, res) => {
 router.delete('/admin/area-admins/:id', requireDeveloper, async (req: AuthRequest, res) => {
   const pool = getPool();
   if (!pool)
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'DATABASE_OUTAGE', message: 'Area administrator storage is unavailable.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'DATABASE_OUTAGE', message: 'Area administrator storage is unavailable.' },
+    });
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -292,12 +276,10 @@ router.delete('/admin/area-admins/:id', requireDeveloper, async (req: AuthReques
     return res.json({ success: true, data: { ...after.rows[0], demoted: Boolean(demoted) } });
   } catch {
     await client.query('ROLLBACK').catch(() => undefined);
-    return res
-      .status(500)
-      .json({
-        success: false,
-        error: { code: 'AREA_ADMIN_REVOKE_FAILED', message: 'Could not revoke this assignment.' },
-      });
+    return res.status(500).json({
+      success: false,
+      error: { code: 'AREA_ADMIN_REVOKE_FAILED', message: 'Could not revoke this assignment.' },
+    });
   } finally {
     client.release();
   }

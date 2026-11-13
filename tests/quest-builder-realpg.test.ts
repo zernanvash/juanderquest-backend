@@ -11,7 +11,6 @@ import { setPool } from '../src/db/pool.js';
 import { MIGRATIONS } from '../src/db/migrations.js';
 import { spotStore } from '../src/spots/store.js';
 import { createTestDb, type TestDbInstance } from '../src/db/testHarness.js';
-import { signQuestChallenge } from '../src/auth/tokens.js';
 import { invalidateSessionScopeCache } from '../src/middleware/auth.js';
 
 const realPg = process.env.JDQ_REAL_PG_URL ? describe : describe.skip;

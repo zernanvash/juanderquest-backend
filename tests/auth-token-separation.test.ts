@@ -33,17 +33,14 @@ describe('session and quest challenge token boundaries', () => {
     const baseQuest = db.quests.find((item) => item.status !== 'draft')!;
     const quest = { ...baseQuest, id: 'token-boundary-quest', marker_code: 'TOKEN-BOUNDARY-MARKER' };
     db.quests.push(quest);
-    const result = await request(app)
-      .post('/api/v1/submissions')
-      .set('Authorization', `Bearer ${session}`)
-      .send({
-        idempotency_key: 'd54f2f5b-ccdb-4f6b-a4cd-811c44b342fe',
-        quest_id: quest.id,
-        challenge_token: session,
-        captured_lat: quest.gps_lat,
-        captured_lng: quest.gps_lng,
-        captured_accuracy: 5,
-      });
+    const result = await request(app).post('/api/v1/submissions').set('Authorization', `Bearer ${session}`).send({
+      idempotency_key: 'd54f2f5b-ccdb-4f6b-a4cd-811c44b342fe',
+      quest_id: quest.id,
+      challenge_token: session,
+      captured_lat: quest.gps_lat,
+      captured_lng: quest.gps_lng,
+      captured_accuracy: 5,
+    });
     expect(result.status).toBe(401);
     expect(result.body.error.code).toBe('INVALID_CHALLENGE');
     db.quests = db.quests.filter((item) => item.id !== quest.id);

@@ -617,24 +617,20 @@ router.post(
     const verification = await verifyGoogleCredential(req.body.credential);
     if (!verification.ok) {
       return verification.reason === 'UNAVAILABLE'
-        ? res
-            .status(503)
-            .json({
-              success: false,
-              error: {
-                code: 'GOOGLE_SIGNIN_UNAVAILABLE',
-                message: 'Google sign-in is not available right now. Use email or wallet sign-in.',
-              },
-            })
-        : res
-            .status(401)
-            .json({
-              success: false,
-              error: {
-                code: 'INVALID_GOOGLE_CREDENTIAL',
-                message: 'Google could not confirm this sign-in. Please try again.',
-              },
-            });
+        ? res.status(503).json({
+            success: false,
+            error: {
+              code: 'GOOGLE_SIGNIN_UNAVAILABLE',
+              message: 'Google sign-in is not available right now. Use email or wallet sign-in.',
+            },
+          })
+        : res.status(401).json({
+            success: false,
+            error: {
+              code: 'INVALID_GOOGLE_CREDENTIAL',
+              message: 'Google could not confirm this sign-in. Please try again.',
+            },
+          });
     }
     const { profile } = verification;
     const email = db.identityService.normalizeEmail(profile.email);
@@ -694,12 +690,10 @@ router.post(
         .json({ success: true, data: { status: 'authenticated', token, user, created } });
     } catch (err) {
       console.error('[auth] google sign-in error:', err);
-      return res
-        .status(503)
-        .json({
-          success: false,
-          error: { code: 'STORAGE_UNAVAILABLE', message: 'Google sign-in is unavailable. Please try again.' },
-        });
+      return res.status(503).json({
+        success: false,
+        error: { code: 'STORAGE_UNAVAILABLE', message: 'Google sign-in is unavailable. Please try again.' },
+      });
     }
   },
 );
@@ -713,7 +707,7 @@ router.get('/auth/identities', authenticateToken, async (req: AuthRequest, res: 
       success: true,
       data: { identities },
     });
-  } catch (err) {
+  } catch (_err) {
     return res
       .status(503)
       .json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Could not load identities.' } });
@@ -749,12 +743,10 @@ router.post(
             .status(401)
             .json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Session account no longer exists.' } });
         if (!user.seed_id.startsWith('guest:') || user.role !== 'user')
-          return res
-            .status(409)
-            .json({
-              success: false,
-              error: { code: 'SESSION_EXISTS', message: 'Sign out before starting a guest account.' },
-            });
+          return res.status(409).json({
+            success: false,
+            error: { code: 'SESSION_EXISTS', message: 'Sign out before starting a guest account.' },
+          });
       } else {
         const identity = randomUUID();
         user = await db.findOrCreateUserDurable({
@@ -774,12 +766,10 @@ router.post(
       setSessionCookie(res, token, remember);
       return res.json({ success: true, data: { user, auth_method: 'guest' } });
     } catch {
-      return res
-        .status(503)
-        .json({
-          success: false,
-          error: { code: 'STORAGE_UNAVAILABLE', message: 'Guest account storage is unavailable. Please try again.' },
-        });
+      return res.status(503).json({
+        success: false,
+        error: { code: 'STORAGE_UNAVAILABLE', message: 'Guest account storage is unavailable. Please try again.' },
+      });
     }
   },
 );
@@ -1302,29 +1292,25 @@ router.post(
   validateRequest(simulatedWalletLoginSchema),
   async (req, res) => {
     if (env.NODE_ENV === 'production' || (env.NODE_ENV !== 'test' && !env.ALLOW_INSECURE_LOCAL_WALLET_AUTH))
-      return res
-        .status(403)
-        .json({
-          success: false,
-          error: {
-            code: 'SIMULATED_LOGIN_DISABLED',
-            message: 'Simulated login is unavailable on this server. Connect a wallet instead.',
-          },
-        });
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'SIMULATED_LOGIN_DISABLED',
+          message: 'Simulated login is unavailable on this server. Connect a wallet instead.',
+        },
+      });
     const { username } = req.body;
     const cleanUsername = username.trim();
     const seedId = `user-${cleanUsername.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
 
     if (reservedSimulatedSeeds.has(cleanUsername.toLowerCase()) || reservedSimulatedSeeds.has(seedId)) {
-      return res
-        .status(403)
-        .json({
-          success: false,
-          error: {
-            code: 'SIMULATED_LOGIN_RESERVED',
-            message: 'Simulated login is unavailable on this server. Connect a wallet instead.',
-          },
-        });
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'SIMULATED_LOGIN_RESERVED',
+          message: 'Simulated login is unavailable on this server. Connect a wallet instead.',
+        },
+      });
     }
 
     // Passwordless by design: anyone who knows a simulated username can enter
@@ -1332,15 +1318,13 @@ router.post(
     let user = db.usersRepo.getPool() ? await db.findUserBySeedDurable(seedId) : db.findUserBySeed(seedId);
 
     if (user && (user.role !== 'user' || Boolean(user.is_test))) {
-      return res
-        .status(403)
-        .json({
-          success: false,
-          error: {
-            code: 'SIMULATED_LOGIN_RESERVED',
-            message: 'Simulated login is unavailable on this server. Connect a wallet instead.',
-          },
-        });
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'SIMULATED_LOGIN_RESERVED',
+          message: 'Simulated login is unavailable on this server. Connect a wallet instead.',
+        },
+      });
     }
 
     if (!user) {
@@ -1498,12 +1482,10 @@ const homeTownSchema = z.object({ municipality: z.string().max(80).nullable() })
 router.put('/me/home-town', authenticateToken, async (req: AuthRequest, res: Response) => {
   const parsed = homeTownSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res
-      .status(400)
-      .json({
-        success: false,
-        error: { code: 'VALIDATION_ERROR', message: 'municipality must be a town name or null.' },
-      });
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'municipality must be a town name or null.' },
+    });
   }
   const raw = parsed.data.municipality;
   const town = raw === null || raw.trim() === '' ? null : canonicalTown(raw);

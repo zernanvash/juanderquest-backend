@@ -74,16 +74,14 @@ router.get('/admin/governance/proposals/:id', (req, res) => {
 router.post('/admin/governance/proposals/:id/screen', async (req: AuthRequest, res: Response) => {
   const parsed = screenSchema.safeParse(req.body);
   if (!parsed.success) {
-    res
-      .status(422)
-      .json({
-        success: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Complete checklist, reason, and evidence reference are required.',
-          details: parsed.error.errors,
-        },
-      });
+    res.status(422).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Complete checklist, reason, and evidence reference are required.',
+        details: parsed.error.errors,
+      },
+    });
     return;
   }
   try {
@@ -133,16 +131,14 @@ router.post('/admin/governance/proposals/:id/transition', async (req: AuthReques
 router.post('/admin/governance/proposals/:id/resolve', async (req: AuthRequest, res: Response) => {
   const parsed = resolveSchema.safeParse(req.body);
   if (!parsed.success) {
-    res
-      .status(422)
-      .json({
-        success: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Release, bond, reason, and evidence are required.',
-          details: parsed.error.errors,
-        },
-      });
+    res.status(422).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Release, bond, reason, and evidence are required.',
+        details: parsed.error.errors,
+      },
+    });
     return;
   }
   try {
@@ -179,16 +175,14 @@ router.get('/admin/governance/controls', (_req, res) => {
 router.put('/admin/governance/controls', async (req: AuthRequest, res: Response) => {
   const parsed = controlsSchema.safeParse(req.body);
   if (!parsed.success) {
-    res
-      .status(422)
-      .json({
-        success: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: 'A reason and valid control values are required.',
-          details: parsed.error.errors,
-        },
-      });
+    res.status(422).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'A reason and valid control values are required.',
+        details: parsed.error.errors,
+      },
+    });
     return;
   }
   try {

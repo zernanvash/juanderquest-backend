@@ -158,7 +158,7 @@ export function createNimClient(options: NimClientOptions = {}) {
           signal: controller.signal,
         });
         if (response.ok) responseText = await response.text();
-      } catch (error) {
+      } catch (_error) {
         if (controller.signal.aborted) throw new TrailAiError('timeout');
         throw new TrailAiError('upstream_unavailable');
       } finally {

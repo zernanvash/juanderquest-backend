@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
-import { db, calculateHaversineDistance } from '../db/index.js';
+import { db } from '../db/index.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
 import { rateLimit } from '../middleware/rateLimit.js';
@@ -69,20 +69,16 @@ router.post(
     } catch (err: any) {
       console.error('[submissions] creation failed:', err);
       if (err?.code === '23505' && err?.constraint === 'idx_submissions_unique_pending') {
-        return res
-          .status(409)
-          .json({
-            success: false,
-            error: { code: 'SUBMISSION_PENDING', message: 'A proof for this quest is already awaiting review.' },
-          });
+        return res.status(409).json({
+          success: false,
+          error: { code: 'SUBMISSION_PENDING', message: 'A proof for this quest is already awaiting review.' },
+        });
       }
       if (err?.code === '23505' && err?.constraint === 'idx_submissions_challenge_nonce') {
-        return res
-          .status(409)
-          .json({
-            success: false,
-            error: { code: 'CHALLENGE_ALREADY_USED', message: 'This challenge token has already been consumed.' },
-          });
+        return res.status(409).json({
+          success: false,
+          error: { code: 'CHALLENGE_ALREADY_USED', message: 'This challenge token has already been consumed.' },
+        });
       }
       if (err?.code === '23505' && err?.constraint === 'submissions_idempotency_key_key') {
         try {

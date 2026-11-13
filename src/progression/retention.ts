@@ -27,7 +27,7 @@ function computeOfficialStreak(rows: Array<{ round_number: number | string; stat
   return { current, longest, observed };
 }
 
-function pool(): Pool | null {
+function _pool(): Pool | null {
   return getPool();
 }
 
@@ -58,7 +58,7 @@ async function metricCount(metric: string, userId: string, start: Date, end: Dat
       [userId, start, end, isTest],
     );
     return Number(result.rows[0]?.count || 0);
-  } catch (error) {
+  } catch (_error) {
     return 0;
   }
 }
@@ -200,7 +200,7 @@ async function goalCount(row: Record<string, unknown>, client?: Queryable): Prom
       [row.is_test, row.starts_at, row.ends_at],
     );
     return Number(result.rows[0]?.count || 0);
-  } catch (error) {
+  } catch (_error) {
     return 0;
   }
 }
@@ -266,7 +266,7 @@ export async function getAchievementSharing(userId: string): Promise<boolean> {
       await p.query('SELECT share_achievements FROM user_engagement_preferences WHERE user_id = $1', [userId])
     ).rows[0];
     return Boolean(row?.share_achievements);
-  } catch (error) {
+  } catch (_error) {
     return false;
   }
 }

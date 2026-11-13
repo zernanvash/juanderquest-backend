@@ -1,6 +1,6 @@
 import { rateLimit } from '../src/middleware/rateLimit.js';
 import { createTestDb, TestDbInstance } from '../src/db/testHarness.js';
-import { Request, Response } from 'express';
+import { Request } from 'express';
 
 describe('Phase 0 Reproductions: Characterizing Pre-Fix Bugs', () => {
   let testDb: TestDbInstance;
@@ -18,7 +18,7 @@ describe('Phase 0 Reproductions: Characterizing Pre-Fix Bugs', () => {
       // Middleware A (e.g. search preview, max: 2)
       const limiterA = rateLimit({ windowMs: 60_000, max: 2 });
       // Middleware B (e.g. follow mutation, max: 5)
-      const limiterB = rateLimit({ windowMs: 60_000, max: 5 });
+      const _limiterB = rateLimit({ windowMs: 60_000, max: 5 });
 
       const mockReq = { ip: '192.168.1.100' } as Request;
       const createMockRes = () => {
@@ -42,7 +42,7 @@ describe('Phase 0 Reproductions: Characterizing Pre-Fix Bugs', () => {
       };
 
       let nextACalled = 0;
-      let nextBCalled = 0;
+      const _nextBCalled = 0;
 
       // Hit limiter A twice (reaches max 2)
       limiterA(mockReq, createMockRes(), () => {

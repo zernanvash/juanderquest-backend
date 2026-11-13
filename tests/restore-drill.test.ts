@@ -1,5 +1,4 @@
 import { createTestDb, TestDbInstance } from '../src/db/testHarness.js';
-import { db } from '../src/db/index.js';
 import { UsersRepository } from '../src/repositories/users.js';
 
 describe('Phase 6: Isolated Backup & Restore Drill', () => {

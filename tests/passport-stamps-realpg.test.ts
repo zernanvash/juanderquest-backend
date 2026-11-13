@@ -13,7 +13,6 @@ import {
   getDailyState,
   getQuestionOfTheDay,
   answerQuestionOfTheDay,
-  getStampHistory,
   recordMissionEvent,
   spendStamps,
   stampAdminStats,

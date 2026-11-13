@@ -53,5 +53,5 @@ export function hiddenGemHighlights(store: SpotStore, userId?: string, now = Dat
     .filter((s) => s.crowd_status !== 'estimated_busy')
     .sort((a, b) => b.score - a.score || a.rotation.localeCompare(b.rotation) || a.id.localeCompare(b.id))
     .slice(0, 3)
-    .map(({ score, rotation, ...spot }) => spot);
+    .map(({ score: _score, rotation: _rotation, ...spot }) => spot);
 }

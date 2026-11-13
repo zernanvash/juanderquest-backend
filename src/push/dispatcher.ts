@@ -84,7 +84,7 @@ export async function dispatchDuePushes(client: Queryable, options: DispatchOpti
       [limit],
     );
     claimedRows = claimRes.rows;
-  } catch (err: any) {
+  } catch (_err: any) {
     // Fallback for pg-mem or engines lacking FOR UPDATE SKIP LOCKED
     try {
       const selectRes = await client.query(

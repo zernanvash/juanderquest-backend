@@ -1,10 +1,7 @@
 import request from 'supertest';
-import path from 'path';
-import fs from 'fs';
 import { app } from '../src/app.js';
 import { assetStore } from '../src/spots/asset-store.js';
 import { LocalStorageProvider, AzureBlobStorageProvider } from '../src/storage/spot-photos.js';
-import { env } from '../src/config/env.js';
 import { rateLimit } from '../src/middleware/rateLimit.js';
 
 describe('Spot Photo Uploads & Storage Adapter Specification', () => {

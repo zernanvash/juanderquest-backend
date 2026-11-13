@@ -274,22 +274,20 @@ describe('Phase 3: Durable Affiliate Application & Admin Review Foundation', () 
   });
 
   test('13. Authenticated Philippine place search returns bounded locations and caches repeats', async () => {
-    const fetchSpy = jest
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify([
-            {
-              name: 'Baguio City',
-              display_name: 'Baguio City, Benguet, Philippines',
-              lat: '16.4023',
-              lon: '120.596',
-              addresstype: 'city',
-            },
-          ]),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
-      );
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            name: 'Baguio City',
+            display_name: 'Baguio City, Benguet, Philippines',
+            lat: '16.4023',
+            lon: '120.596',
+            addresstype: 'city',
+          },
+        ]),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
     try {
       const unauthorized = await request(app).get('/api/v1/affiliate/places?q=Baguio');
       expect(unauthorized.status).toBe(401);

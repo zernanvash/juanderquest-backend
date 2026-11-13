@@ -31,12 +31,10 @@ function service(res: Response) {
   }
   const pool = getPool();
   if (!pool) {
-    res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'DATABASE_REQUIRED', message: 'Quest funding requires durable storage.' },
-      });
+    res.status(503).json({
+      success: false,
+      error: { code: 'DATABASE_REQUIRED', message: 'Quest funding requires durable storage.' },
+    });
     return null;
   }
   return new SponsorshipService(pool);

@@ -24,12 +24,10 @@ export async function isDeveloper(userId: string): Promise<boolean> {
 export const requireDeveloper = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     if (req.user && (await isDeveloper(req.user.id))) return next();
-    return res
-      .status(403)
-      .json({
-        success: false,
-        error: { code: 'DEVELOPER_ONLY', message: 'Only developers can manage account roles.' },
-      });
+    return res.status(403).json({
+      success: false,
+      error: { code: 'DEVELOPER_ONLY', message: 'Only developers can manage account roles.' },
+    });
   } catch {
     return res
       .status(503)
@@ -107,23 +105,19 @@ developerRouter.put(
     if (!pool) return unavailable(res);
     const parsed = roleBody.safeParse(req.body);
     if (!parsed.success) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: 'INVALID_REQUEST', message: parsed.error.issues[0]?.message ?? 'Invalid role change.' },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_REQUEST', message: parsed.error.issues[0]?.message ?? 'Invalid role change.' },
+      });
     }
     const { role, reason } = parsed.data;
     // Scopes only mean something for admins.
     const scope = role === 'admin' ? parsed.data.admin_scope : null;
     if (req.params.id === req.user!.id) {
-      return res
-        .status(409)
-        .json({
-          success: false,
-          error: { code: 'CANNOT_CHANGE_SELF', message: 'Ask another developer to change your own role.' },
-        });
+      return res.status(409).json({
+        success: false,
+        error: { code: 'CANNOT_CHANGE_SELF', message: 'Ask another developer to change your own role.' },
+      });
     }
 
     const client = await pool.connect();

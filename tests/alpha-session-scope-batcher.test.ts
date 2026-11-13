@@ -1,4 +1,4 @@
-import { AlphaSessionScopeBatcher, AlphaBatchQueryFn } from '../src/auth/alphaSessionScopeBatcher.js';
+import { AlphaSessionScopeBatcher } from '../src/auth/alphaSessionScopeBatcher.js';
 import type { AlphaSessionScope } from '../src/repositories/users.js';
 
 describe('AlphaSessionScopeBatcher (Iteration 20b)', () => {
@@ -44,7 +44,7 @@ describe('AlphaSessionScopeBatcher (Iteration 20b)', () => {
     let resolveSecondBatch: (val: Map<string, AlphaSessionScope>) => void = () => {};
 
     let callCount = 0;
-    const mockQuery = jest.fn((ids: string[]) => {
+    const mockQuery = jest.fn((_ids: string[]) => {
       callCount++;
       return new Promise<Map<string, AlphaSessionScope>>((resolve) => {
         if (callCount === 1) {
@@ -206,7 +206,7 @@ describe('AlphaSessionScopeBatcher (Iteration 20b)', () => {
   });
 
   it('rejects 501st unresolved caller with static error and prevents leaking ID or hanging caller', async () => {
-    let resolveBatch: (val: Map<string, AlphaSessionScope>) => void = () => {};
+    const _resolveBatch: (val: Map<string, AlphaSessionScope>) => void = () => {};
     const mockQuery = jest.fn<Promise<Map<string, AlphaSessionScope>>, [string[]]>(
       (_ids: string[]) =>
         new Promise<Map<string, AlphaSessionScope>>((resolve) => {

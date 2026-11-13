@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto';
 import type { Pool, PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
 import {
@@ -254,9 +253,7 @@ export class CulturalQuizRepository {
     return rows.map((r) => this.mapAttempt(r));
   }
 
-  async listPublishedQuizzes(
-    client?: QueryExecutor,
-  ): Promise<
+  async listPublishedQuizzes(client?: QueryExecutor): Promise<
     Array<{
       quiz: CulturalQuiz;
       version: CulturalQuizVersion;

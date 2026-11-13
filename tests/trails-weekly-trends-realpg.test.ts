@@ -22,7 +22,7 @@ describeRealPg('Weekly trail trend job (isolated real PostgreSQL schema; mocked/
       VALUES ($1,'trail-weekly-actor','Trail Weekly Actor','trail-weekly-actor@example.test','user',FALSE)`,
       [actorId],
     );
-    const spotDetails = [
+    const _spotDetails = [
       ['beach', 'coast'],
       ['heritage', 'culture'],
       ['food', 'culinary'],

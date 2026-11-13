@@ -1,6 +1,6 @@
 import { getPool } from '../db/pool.js';
 import type { Queryable } from './activity.js';
-import { weekStartUtc, nextWeekStartUtc, weekStartDate, prevWeekId, manilaHour, manilaDayOfWeek } from './time.js';
+import { weekStartUtc, weekStartDate, prevWeekId, manilaHour, manilaDayOfWeek } from './time.js';
 import { notify } from './notify.js';
 
 export const PLAZA_WEEKLY_RECAP_LOCK_KEY = 410042;

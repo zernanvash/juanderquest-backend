@@ -321,12 +321,10 @@ chainAdminRouter.post('/wallets', refuseKeyLikeFields, async (req: AuthRequest, 
   } catch (err: any) {
     await client.query('ROLLBACK').catch(() => {});
     if (err?.code === '23505') {
-      return res
-        .status(409)
-        .json({
-          success: false,
-          error: { code: 'WALLET_EXISTS', message: 'This address already has that role in the registry.' },
-        });
+      return res.status(409).json({
+        success: false,
+        error: { code: 'WALLET_EXISTS', message: 'This address already has that role in the registry.' },
+      });
     }
     return failure(res, 'WALLET_CREATE_ERROR', err);
   } finally {

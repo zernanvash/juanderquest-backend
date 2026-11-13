@@ -6,7 +6,6 @@ import {
   installPoolQueryProfile,
   instrumentCallbackClientQuery,
   sqlShape,
-  type ReadQueryFocusItem,
 } from '../scripts/juanchoice-capacity-sql-profile.js';
 import { countDisposableWalletReaderBatchChecks } from '../scripts/juanchoice-capacity-reader-matcher.js';
 

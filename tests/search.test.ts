@@ -1,6 +1,5 @@
 import request from 'supertest';
 import { app } from '../src/app.js';
-import { db } from '../src/db/index.js';
 
 describe('Unified Search API (GET /api/v1/search)', () => {
   describe('Query Gating & Input Validation', () => {

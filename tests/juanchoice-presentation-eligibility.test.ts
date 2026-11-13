@@ -7,7 +7,7 @@ const { env, validatePresentationModeConfig, extractDatabaseName } = envModule;
 import { setPool } from '../src/db/pool.js';
 import { db as domainDb } from '../src/db/index.js';
 import { createTestDb, TestDbInstance } from '../src/db/testHarness.js';
-import { evaluateVoterEligibility, castBallot, JuanChoiceError } from '../src/juanchoice/service.js';
+import { evaluateVoterEligibility, castBallot } from '../src/juanchoice/service.js';
 
 describe('JuanChoice Presentation Mode Voter Eligibility Predicate & Service', () => {
   const allowedCampaignId = '11111111-1111-4111-8111-111111111111';

@@ -5,7 +5,7 @@ import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { app } from '../src/app.js';
 import { env } from '../src/config/env.js';
-import { computeWeeklyScores, computeHomeTowns, rankRows, getBoard, getTownBoard } from '../src/social/standings.js';
+import { computeWeeklyScores, computeHomeTowns, rankRows } from '../src/social/standings.js';
 import { runStandingsTick } from '../src/social/standingsJob.js';
 import { weekStartUtc, nextWeekStartUtc, weekStartDate, weekId } from '../src/social/time.js';
 

@@ -1,6 +1,5 @@
 import { createTestDb, TestDbInstance } from '../src/db/testHarness.js';
 import { setPool } from '../src/db/pool.js';
-import { db } from '../src/db/index.js';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { app } from '../src/app.js';
@@ -24,7 +23,7 @@ describe('Phase 1: Progression & Identity Foundation', () => {
     env.JWT_SECRET,
     { expiresIn: '1h' },
   );
-  const tokenPrivateUser = jwt.sign(
+  const _tokenPrivateUser = jwt.sign(
     { id: privateUserId, seed_id: 'progression-identity-private', role: 'user' },
     env.JWT_SECRET,
     { expiresIn: '1h' },

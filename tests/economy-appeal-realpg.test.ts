@@ -82,17 +82,14 @@ realPg('funded proof appeal and independent review on disposable PostgreSQL', ()
     expect(start.status).toBe(201);
     const challenge = await request(app).post(`/api/v1/quests/${questId}/challenge`).set('Authorization', auth);
     expect(challenge.status).toBe(200);
-    const proof = await request(app)
-      .post('/api/v1/submissions')
-      .set('Authorization', auth)
-      .send({
-        idempotency_key: randomUUID(),
-        quest_id: questId,
-        challenge_token: challenge.body.data.challenge_token,
-        captured_lat: 16,
-        captured_lng: 120,
-        captured_accuracy: 8,
-      });
+    const proof = await request(app).post('/api/v1/submissions').set('Authorization', auth).send({
+      idempotency_key: randomUUID(),
+      quest_id: questId,
+      challenge_token: challenge.body.data.challenge_token,
+      captured_lat: 16,
+      captured_lng: 120,
+      captured_accuracy: 8,
+    });
     expect(proof.status).toBe(201);
     const reject = await request(app)
       .patch(`/api/v1/admin/submissions/${proof.body.data.id}`)

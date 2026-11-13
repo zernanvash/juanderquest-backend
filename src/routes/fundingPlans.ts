@@ -22,22 +22,18 @@ export function fundingErrorResponse(res: Response, error: unknown) {
   if (error instanceof FundingError)
     return res.status(error.status).json({ success: false, error: { code: error.code, message: error.message } });
   if ((error as any)?.code === '23505')
-    return res
-      .status(409)
-      .json({
-        success: false,
-        error: {
-          code: 'FUNDING_PLAN_EXISTS',
-          message: 'A conflicting funding operation has already completed. Refresh to continue.',
-        },
-      });
-  console.error('[funding] command failed:', error);
-  return res
-    .status(503)
-    .json({
+    return res.status(409).json({
       success: false,
-      error: { code: 'QUEST_FUNDING_UNAVAILABLE', message: 'Quest funding is temporarily unavailable.' },
+      error: {
+        code: 'FUNDING_PLAN_EXISTS',
+        message: 'A conflicting funding operation has already completed. Refresh to continue.',
+      },
     });
+  console.error('[funding] command failed:', error);
+  return res.status(503).json({
+    success: false,
+    error: { code: 'QUEST_FUNDING_UNAVAILABLE', message: 'Quest funding is temporarily unavailable.' },
+  });
 }
 
 function service(res: Response) {
@@ -49,12 +45,10 @@ function service(res: Response) {
   }
   const pool = getPool();
   if (!pool) {
-    res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'DATABASE_REQUIRED', message: 'Quest funding requires durable storage.' },
-      });
+    res.status(503).json({
+      success: false,
+      error: { code: 'DATABASE_REQUIRED', message: 'Quest funding requires durable storage.' },
+    });
     return null;
   }
   return new FundingPlansService(pool);

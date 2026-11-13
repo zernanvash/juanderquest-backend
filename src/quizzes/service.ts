@@ -1,6 +1,6 @@
 import { perkBonus } from '../juanchoice/perks.js';
 import { randomUUID } from 'crypto';
-import type { Pool, PoolClient } from 'pg';
+import type { Pool } from 'pg';
 import { getPool } from '../db/pool.js';
 import { CulturalQuizRepository } from './repository.js';
 import { ProgressionRepository } from '../progression/repository.js';
@@ -9,12 +9,10 @@ import {
   CulturalQuiz,
   CulturalQuizVersion,
   CulturalQuizQuestion,
-  CulturalQuizOption,
   CulturalQuizAttempt,
   CulturalQuizGradedResult,
   CulturalQuizDetail,
   NearbyQuizInvitation,
-  CulturalQuizStatus,
 } from './types.js';
 
 export interface StartAttemptParams {
@@ -786,14 +784,14 @@ export class CulturalQuizService {
       const versionId = randomUUID();
       const rewardScopeId = randomUUID();
 
-      const { rows: quizRows } = await client.query(
+      const { rows: _quizRows } = await client.query(
         `INSERT INTO cultural_quizzes (id, destination_id, reward_scope_id, status, current_version, created_by, is_test)
          VALUES ($1, $2, $3, 'draft', 1, $4, $5)
          RETURNING *`,
         [quizId, params.destinationId, rewardScopeId, params.adminUserId, Boolean(params.isTest)],
       );
 
-      const { rows: vRows } = await client.query(
+      const { rows: _vRows } = await client.query(
         `INSERT INTO cultural_quiz_versions (
            id, quiz_id, version, title, description, language, radius_meters,
            xp_reward, time_limit_minutes, cooldown_hours, created_by, published_at,
@@ -1055,7 +1053,7 @@ export class CulturalQuizService {
 
       await client.query(`UPDATE cultural_quiz_versions SET published_at = NOW() WHERE id = $1`, [version.id]);
 
-      const { rows } = await client.query(
+      const { rows: _rows } = await client.query(
         `UPDATE cultural_quizzes SET status = 'published', updated_at = NOW() WHERE id = $1 RETURNING *`,
         [quiz.id],
       );
@@ -1082,7 +1080,7 @@ export class CulturalQuizService {
     return updated!;
   }
 
-  async revokeQuiz(quizId: string, reason: string): Promise<void> {
+  async revokeQuiz(quizId: string, _reason: string): Promise<void> {
     const pool = this.getPool();
     const client = await pool.connect();
     try {

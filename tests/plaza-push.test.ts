@@ -1,7 +1,7 @@
 import { createTestDb, TestDbInstance } from '../src/db/testHarness.js';
 import { setPool } from '../src/db/pool.js';
 import { db } from '../src/db/index.js';
-import { enqueuePush, enqueueFriendActivityPush } from '../src/push/enqueue.js';
+import { enqueuePush } from '../src/push/enqueue.js';
 import { dispatchDuePushes } from '../src/push/dispatcher.js';
 import { runWeeklyRecap } from '../src/social/weeklyRecapJob.js';
 import { setFcmDryRun } from '../src/push/fcm.js';
@@ -253,7 +253,7 @@ describe('Plan 41 Phase 4: Push Queue, Batching, Caps, Dispatcher & Weekly Recap
   describe('Push Dispatcher & FCM Integration', () => {
     it('claims due pushes, disables unregistered tokens, and updates status to sent', async () => {
       // Create user with invalid token and valid token
-      const tokenValid = 'fcm_mock_valid_token_001';
+      const _tokenValid = 'fcm_mock_valid_token_001';
       const tokenUnregistered = 'fcm_mock_unregistered_token_002';
 
       await testDb.pool.query(

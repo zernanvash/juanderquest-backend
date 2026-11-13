@@ -71,7 +71,7 @@ merchantsRouter.get(
     const archivedProducts = db.listMerchantProducts(merchant.id, true).filter((p) => p.is_archived);
 
     // Setup checklist calculation
-    const hasDescription = Boolean(merchant.description && merchant.description.length > 10);
+    const _hasDescription = Boolean(merchant.description && merchant.description.length > 10);
     const hasContact = Boolean(merchant.contact_email || merchant.contact_phone);
     const hasPhoto = Boolean(merchant.logo_url || merchant.banner_url);
     const hasProducts = products.length > 0;

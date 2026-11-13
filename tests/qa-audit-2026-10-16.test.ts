@@ -200,17 +200,14 @@ describe('2026-10-16 QA logic audit regression coverage', () => {
       status: 'pending',
       is_test: false,
     });
-    const blocked = await request(app)
-      .post('/api/v1/submissions')
-      .set('Authorization', `Bearer ${auditToken}`)
-      .send({
-        idempotency_key: '0f713893-6307-4bbd-8e0e-745013b7415e',
-        quest_id: auditQuestId,
-        challenge_token: 'not-even-a-valid-token',
-        captured_lat: 16.0219,
-        captured_lng: 120.2312,
-        captured_accuracy: 5,
-      });
+    const blocked = await request(app).post('/api/v1/submissions').set('Authorization', `Bearer ${auditToken}`).send({
+      idempotency_key: '0f713893-6307-4bbd-8e0e-745013b7415e',
+      quest_id: auditQuestId,
+      challenge_token: 'not-even-a-valid-token',
+      captured_lat: 16.0219,
+      captured_lng: 120.2312,
+      captured_accuracy: 5,
+    });
     expect(blocked.status).toBe(409);
     expect(blocked.body.error.code).toBe('SUBMISSION_PENDING');
 
@@ -220,17 +217,14 @@ describe('2026-10-16 QA logic audit regression coverage', () => {
       env.JWT_SECRET,
       { expiresIn: '10m' },
     );
-    const retried = await request(app)
-      .post('/api/v1/submissions')
-      .set('Authorization', `Bearer ${auditToken}`)
-      .send({
-        idempotency_key: 'e48ed53d-3a64-4a23-8588-c737d3b8f43f',
-        quest_id: auditQuestId,
-        challenge_token: challenge,
-        captured_lat: 16.0219,
-        captured_lng: 120.2312,
-        captured_accuracy: 5,
-      });
+    const retried = await request(app).post('/api/v1/submissions').set('Authorization', `Bearer ${auditToken}`).send({
+      idempotency_key: 'e48ed53d-3a64-4a23-8588-c737d3b8f43f',
+      quest_id: auditQuestId,
+      challenge_token: challenge,
+      captured_lat: 16.0219,
+      captured_lng: 120.2312,
+      captured_accuracy: 5,
+    });
     expect(retried.status).toBe(201);
     expect(retried.body.data.status).toBe('pending');
   });

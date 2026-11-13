@@ -703,9 +703,7 @@ async function reconcileSchedule(
   }
 }
 
-export async function reconcileMonthlySchedules(
-  limit = 20,
-): Promise<{
+export async function reconcileMonthlySchedules(limit = 20): Promise<{
   schedules: number;
   prepared: number;
   postponed: number;

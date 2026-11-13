@@ -74,12 +74,10 @@ profileShowcaseRouter.put(
     const earned = new Set((await earnedBadges(pool, req.user!.id)).map((b) => b.id));
     const missing = ids.filter((id) => !earned.has(id));
     if (missing.length) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: 'BADGE_NOT_EARNED', message: 'You can only equip badges you have earned.' },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: 'BADGE_NOT_EARNED', message: 'You can only equip badges you have earned.' },
+      });
     }
     await pool.query('UPDATE users SET featured_badges = $2 WHERE id = $1', [req.user!.id, ids]);
     return res.json({ success: true, data: { featured_badges: ids } });

@@ -93,12 +93,10 @@ adminShopRouter.post('/admin/shop/cosmetics', ...adminShopGuard, async (req: Aut
   if (!p) return;
   const v = itemInput.safeParse(req.body);
   if (!v.success || !validateAsset(v.data?.kind, v.data?.asset))
-    return res
-      .status(400)
-      .json({
-        success: false,
-        error: { code: 'INVALID_ASSET', message: 'Cosmetic fields or kind-specific asset are invalid.' },
-      });
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_ASSET', message: 'Cosmetic fields or kind-specific asset are invalid.' },
+    });
   const x = v.data;
   try {
     const r = await p.query(
@@ -190,12 +188,10 @@ adminShopRouter.post('/admin/shop/cosmetics/:id/grant', ...adminShopGuard, async
   if (!p) return;
   const v = z.object({ user_id: z.string().min(1), reason: z.string().min(10).max(500) }).safeParse(req.body);
   if (!v.success)
-    return res
-      .status(400)
-      .json({
-        success: false,
-        error: { code: 'INVALID_REQUEST', message: 'A user_id and reason of at least 10 characters are required.' },
-      });
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_REQUEST', message: 'A user_id and reason of at least 10 characters are required.' },
+    });
   const client = await p.connect();
   try {
     await client.query('BEGIN');
@@ -253,12 +249,10 @@ adminShopRouter.patch(
       if (!merchant)
         return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Voucher not found.' } });
       if (merchant.merchant_id.startsWith('sample-partner-') || ['m1', 'm2', 'm3'].includes(merchant.merchant_id))
-        return res
-          .status(409)
-          .json({
-            success: false,
-            error: { code: 'SAMPLE_MERCHANT', message: 'A sample merchant offer cannot be made live.' },
-          });
+        return res.status(409).json({
+          success: false,
+          error: { code: 'SAMPLE_MERCHANT', message: 'A sample merchant offer cannot be made live.' },
+        });
     }
     const r = await p.query('UPDATE vouchers SET availability=$2 WHERE id=$1 RETURNING id,availability', [
       req.params.id,

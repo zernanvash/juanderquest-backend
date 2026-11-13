@@ -118,12 +118,10 @@ export const authenticateToken = async (req: AuthRequest, res: Response, next: N
 
   const user = verifySessionToken(token);
   if (!user) {
-    return res
-      .status(401)
-      .json({
-        success: false,
-        error: { code: 'UNAUTHORIZED', message: 'Invalid or expired JWT authentication token.' },
-      });
+    return res.status(401).json({
+      success: false,
+      error: { code: 'UNAUTHORIZED', message: 'Invalid or expired JWT authentication token.' },
+    });
   }
 
   try {
@@ -137,12 +135,10 @@ export const authenticateToken = async (req: AuthRequest, res: Response, next: N
     const tokenSep = user.sep ?? 0;
     if (tokenSep !== scope.session_epoch) {
       clearSessionCookie(res);
-      return res
-        .status(401)
-        .json({
-          success: false,
-          error: { code: 'UNAUTHORIZED', message: 'Session has been revoked or expired. Please sign in again.' },
-        });
+      return res.status(401).json({
+        success: false,
+        error: { code: 'UNAUTHORIZED', message: 'Session has been revoked or expired. Please sign in again.' },
+      });
     }
     user.role = scope.role;
     req.user = user;
@@ -188,7 +184,7 @@ export const requireAdmin = async (req: AuthRequest, res: Response, next: NextFu
         },
       });
     }
-  } catch (err: any) {
+  } catch (_err: any) {
     // Fail closed on database outage/error: do NOT fall back to trusting token or stale memory
     return res.status(503).json({
       success: false,
@@ -234,12 +230,10 @@ export const checkQAAuthorization = async (req: AuthRequest, res: Response, next
       const batcher = getAlphaSessionScopeBatcher(pool);
       const scope = await batcher.lookup(req.user.id);
       if (db.usersRepo.getPool() !== pool) {
-        return res
-          .status(503)
-          .json({
-            success: false,
-            error: { code: 'DATABASE_OUTAGE', message: 'Wallet session could not be verified.' },
-          });
+        return res.status(503).json({
+          success: false,
+          error: { code: 'DATABASE_OUTAGE', message: 'Wallet session could not be verified.' },
+        });
       }
       if (!env.ALPHA_WALLET_SIMULATION_ENABLED) {
         return next();
@@ -296,7 +290,7 @@ export const authorizeQAPreview = async (req: AuthRequest, res: Response, next: 
     req.isQAAuthorized = true;
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     next();
-  } catch (err: any) {
+  } catch (_err: any) {
     // Fail closed on database outage during QA authorization check
     return res.status(503).json({
       success: false,
@@ -318,12 +312,10 @@ export const requireBoundWallet = async (req: AuthRequest, res: Response, next: 
   try {
     user = db.usersRepo.getPool() ? await db.usersRepo.findById(req.user!.id) : db.findUserById(req.user!.id);
   } catch {
-    return res
-      .status(503)
-      .json({
-        success: false,
-        error: { code: 'DATABASE_OUTAGE', message: 'Account could not be checked. Please try again.' },
-      });
+    return res.status(503).json({
+      success: false,
+      error: { code: 'DATABASE_OUTAGE', message: 'Account could not be checked. Please try again.' },
+    });
   }
   if (!user) {
     return res
