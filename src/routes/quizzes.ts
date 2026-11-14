@@ -14,6 +14,7 @@ const service = new CulturalQuizService(repo, progressionRepo);
 const nearbySchema = z.object({
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
+  include_approaching: z.boolean().optional().default(false),
 });
 
 const startAttemptSchema = z.object({
@@ -62,7 +63,12 @@ router.post('/quizzes/nearby', optionalAuthenticateToken, async (req: AuthReques
   }
 
   try {
-    const invitations = await service.getNearbyQuizzes(parsed.data.lat, parsed.data.lng, req.user?.id);
+    const invitations = await service.getNearbyQuizzes(
+      parsed.data.lat,
+      parsed.data.lng,
+      req.user?.id,
+      parsed.data.include_approaching,
+    );
 
     res.setHeader('Cache-Control', 'private, no-store');
     return res.status(200).json({
@@ -73,6 +79,22 @@ router.post('/quizzes/nearby', optionalAuthenticateToken, async (req: AuthReques
     return res.status(500).json({
       success: false,
       error: { code: 'INTERNAL_ERROR', message: err?.message || 'Failed to query nearby quizzes.' },
+    });
+  }
+});
+
+// GET /api/v1/spots/:id/quizzes - List published quizzes for a spot
+router.get('/spots/:id/quizzes', optionalAuthenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const quizzes = await service.getQuizzesForSpot(req.params.id, req.user?.id);
+    return res.status(200).json({
+      success: true,
+      data: quizzes,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: err?.message || 'Failed to fetch spot quizzes.' },
     });
   }
 });

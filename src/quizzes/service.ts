@@ -13,6 +13,7 @@ import {
   CulturalQuizGradedResult,
   CulturalQuizDetail,
   NearbyQuizInvitation,
+  SpotQuizSummary,
 } from './types.js';
 
 export interface StartAttemptParams {
@@ -98,15 +99,21 @@ export class CulturalQuizService {
     return this.pool ?? getPool()!;
   }
 
-  async getNearbyQuizzes(lat: number, lng: number, userId?: string): Promise<NearbyQuizInvitation[]> {
+  async getNearbyQuizzes(
+    lat: number,
+    lng: number,
+    userId?: string,
+    includeApproaching = false,
+  ): Promise<NearbyQuizInvitation[]> {
     const list = await this.repo.listPublishedQuizzes();
     const invitations: NearbyQuizInvitation[] = [];
+    const cutoffBufferMeters = includeApproaching ? 500 : 50;
 
     for (const item of list) {
       const distance = computeHaversineMeters(lat, lng, item.destination.gps_lat, item.destination.gps_lng);
 
-      // Offer invitation if traveler is within radius (or slight 50m buffer for GPS jitter)
-      if (distance <= item.version.radius_meters + 50) {
+      // Offer invitation if traveler is within radius + cutoff buffer (50m default, 500m when approaching)
+      if (distance <= item.version.radius_meters + cutoffBufferMeters) {
         let isCompleted = false;
         if (userId) {
           isCompleted = await this.repo.hasCompletedRewardScope(userId, item.quiz.reward_scope_id);
@@ -121,6 +128,7 @@ export class CulturalQuizService {
           description: item.version.description,
           radius_meters: item.version.radius_meters,
           distance_meters: distance,
+          in_range: distance <= item.version.radius_meters,
           xp_reward: item.version.xp_reward,
           time_limit_minutes: item.version.time_limit_minutes,
           language: item.version.language,
@@ -129,7 +137,49 @@ export class CulturalQuizService {
       }
     }
 
+    invitations.sort((a, b) => {
+      const aCompleted = Boolean(a.is_completed);
+      const bCompleted = Boolean(b.is_completed);
+      if (aCompleted !== bCompleted) return aCompleted ? 1 : -1;
+      if (a.in_range !== b.in_range) return a.in_range ? -1 : 1;
+      if (a.distance_meters !== b.distance_meters) return a.distance_meters - b.distance_meters;
+      return b.xp_reward - a.xp_reward;
+    });
+
     return invitations;
+  }
+
+  async getQuizzesForSpot(spotId: string, userId?: string): Promise<SpotQuizSummary[]> {
+    const list = await this.repo.listPublishedQuizzes();
+    const quizzes: SpotQuizSummary[] = [];
+
+    for (const item of list) {
+      if (item.quiz.destination_id !== spotId) continue;
+      const summary: SpotQuizSummary = {
+        quiz_id: item.quiz.id,
+        title: item.version.title,
+        xp_reward: item.version.xp_reward,
+        radius_meters: item.version.radius_meters,
+        language: item.version.language,
+      };
+      if (userId) {
+        summary.is_completed = await this.repo.hasCompletedRewardScope(
+          userId,
+          item.quiz.reward_scope_id,
+        );
+      }
+      quizzes.push(summary);
+    }
+
+    quizzes.sort((a, b) => {
+      const aCompleted = Boolean(a.is_completed);
+      const bCompleted = Boolean(b.is_completed);
+      if (aCompleted !== bCompleted) return aCompleted ? 1 : -1;
+      if (b.xp_reward !== a.xp_reward) return b.xp_reward - a.xp_reward;
+      return a.title.localeCompare(b.title);
+    });
+
+    return quizzes;
   }
 
   async getQuizDetail(quizId: string, userId?: string): Promise<CulturalQuizDetail | null> {

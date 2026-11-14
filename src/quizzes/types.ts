@@ -135,8 +135,18 @@ export interface NearbyQuizInvitation {
   description: string;
   radius_meters: number;
   distance_meters: number;
+  in_range: boolean;
   xp_reward: number;
   time_limit_minutes: number;
+  language: CulturalQuizLanguage;
+  is_completed?: boolean;
+}
+
+export interface SpotQuizSummary {
+  quiz_id: string;
+  title: string;
+  xp_reward: number;
+  radius_meters: number;
   language: CulturalQuizLanguage;
   is_completed?: boolean;
 }
