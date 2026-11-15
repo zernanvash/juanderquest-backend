@@ -46,11 +46,11 @@ describe('Cultural Quiz Arcade Phase 2 (Data Model, Lifelines & Scoring)', () =>
     await testDb.pool.query(
       `INSERT INTO spots (
          id, slug, name, description, category, subcategory, municipality, address,
-         gps_lat, gps_lng, price_level, source_type, source_name, trust_level, status
+         gps_lat, gps_lng, price_level, image_url, source_type, source_name, trust_level, status
        ) VALUES (
          $1, 'bolinao-quiz-arcade-spot', 'Cape Bolinao Lighthouse Arcade', 'Heritage lighthouse at Cape Bolinao.',
          'culture_heritage', 'heritage_site', 'Bolinao', 'Patar, Bolinao, Pangasinan',
-         $2, $3, 1, 'lgu', 'Bolinao Tourism', 'lgu_verified', 'published'
+         $2, $3, 1, 'https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?auto=format&fit=crop&w=1200&q=80', 'lgu', 'Bolinao Tourism', 'lgu_verified', 'published'
        ) ON CONFLICT (id) DO NOTHING`,
       [destinationId, destLat, destLng],
     );
@@ -100,16 +100,14 @@ describe('Cultural Quiz Arcade Phase 2 (Data Model, Lifelines & Scoring)', () =>
           hint: 'Only one other historic lighthouse stands taller.',
           round: 'main',
           options: [
-            { ordinal: 1, option_text: 'True', is_correct: true },
-            { ordinal: 2, option_text: 'False', is_correct: false },
-            { ordinal: 3, option_text: 'Neither', is_correct: false },
-            { ordinal: 4, option_text: 'Not a lighthouse', is_correct: false },
+            { ordinal: 1, option_text: 'Fact', is_correct: true },
+            { ordinal: 2, option_text: 'Myth', is_correct: false },
           ],
         },
         {
           ordinal: 3,
-          question_type: 'picture',
-          media_url: 'https://juanderquest.app/photos/bolinao-lighthouse.jpg',
+          question_type: 'photo_clue',
+          media_url: 'https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?auto=format&fit=crop&w=1200&q=80',
           question_text: 'Which architectural style characterizes the beacon tower seen in this photo?',
           explanation: 'The tower exhibits American architectural brickwork and colonial maritime engineering.',
           hint: 'Notice the historic masonry and observation deck.',
@@ -123,14 +121,13 @@ describe('Cultural Quiz Arcade Phase 2 (Data Model, Lifelines & Scoring)', () =>
         },
         {
           ordinal: 4,
-          question_type: 'order',
+          question_type: 'sequence_order',
           question_text: 'Order the chronological steps in navigating to Cape Bolinao from Dagupan.',
           explanation: 'Pass Lingayen, then Alaminos, then arrive at Bolinao.',
           hint: 'Travel West along the coastline.',
           round: 'special',
-          answer_payload: { order: ['opt_dagupan', 'opt_lingayen', 'opt_alaminos', 'opt_bolinao'] },
           options: [
-            { ordinal: 1, option_text: 'Depart Dagupan', is_correct: true },
+            { ordinal: 1, option_text: 'Depart Dagupan', is_correct: false },
             { ordinal: 2, option_text: 'Cross Lingayen Gulf Capital', is_correct: false },
             { ordinal: 3, option_text: 'Pass Alaminos City', is_correct: false },
             { ordinal: 4, option_text: 'Arrive at Cape Bolinao', is_correct: false },
@@ -138,12 +135,11 @@ describe('Cultural Quiz Arcade Phase 2 (Data Model, Lifelines & Scoring)', () =>
         },
         {
           ordinal: 5,
-          question_type: 'map_drop',
-          question_text: 'Drop a pin on the location of Cape Bolinao Lighthouse overlooking the West Philippine Sea.',
+          question_type: 'multiple_choice',
+          question_text: 'Where is Cape Bolinao Lighthouse located?',
           explanation: 'Located on Punta Piedra Point in Patar, Bolinao.',
           hint: 'It guards the westernmost tip of the Pangasinan peninsula.',
           round: 'lightning',
-          answer_payload: { lat: 16.3204, lng: 119.7847, radius_km: 10 },
           options: [
             { ordinal: 1, option_text: 'Punta Piedra Point', is_correct: true },
             { ordinal: 2, option_text: 'Hundred Islands', is_correct: false },
@@ -283,11 +279,16 @@ describe('Cultural Quiz Arcade Phase 2 (Data Model, Lifelines & Scoring)', () =>
     // Q3 was skipped
     const q3 = questions[2];
 
-    // Q4 order question
+    // Q4 sequence_order question
     const q4 = questions[3];
+    const q4Step1 = q4.options.find((o: any) => o.option_text === 'Depart Dagupan').id;
+    const q4Step2 = q4.options.find((o: any) => o.option_text === 'Cross Lingayen Gulf Capital').id;
+    const q4Step3 = q4.options.find((o: any) => o.option_text === 'Pass Alaminos City').id;
+    const q4Step4 = q4.options.find((o: any) => o.option_text === 'Arrive at Cape Bolinao').id;
 
-    // Q5 map drop
+    // Q5 multiple_choice
     const q5 = questions[4];
+    const q5Correct = q5.options.find((o: any) => o.ordinal === 1);
 
     const submissionPayload = {
       answers: [
@@ -296,11 +297,11 @@ describe('Cultural Quiz Arcade Phase 2 (Data Model, Lifelines & Scoring)', () =>
         { question_id: q3.id, skipped: true },
         {
           question_id: q4.id,
-          selected_order: ['opt_dagupan', 'opt_lingayen', 'opt_alaminos', 'opt_bolinao'],
+          ordered_option_ids: [q4Step1, q4Step2, q4Step3, q4Step4],
         },
         {
           question_id: q5.id,
-          selected_location: { lat: 16.3204, lng: 119.7847 },
+          selected_option_id: q5Correct.id,
         },
       ],
       style_score: 850,

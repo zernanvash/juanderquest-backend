@@ -233,7 +233,8 @@ export class CulturalQuizRepository {
     return rows.map((r) => ({
       attempt_id: r.attempt_id,
       question_id: r.question_id,
-      selected_option_id: r.selected_option_id,
+      selected_option_id: r.selected_option_id ?? null,
+      submitted_payload: r.submitted_payload ?? null,
       is_correct: Boolean(r.is_correct),
       answered_at: new Date(r.answered_at).toISOString(),
     }));

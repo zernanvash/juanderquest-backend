@@ -31,13 +31,7 @@ const submitAttemptSchema = z.object({
       z.object({
         question_id: z.string().min(1),
         selected_option_id: z.string().optional(),
-        selected_order: z.array(z.string()).optional(),
-        selected_location: z
-          .object({
-            lat: z.number().min(-90).max(90),
-            lng: z.number().min(-180).max(180),
-          })
-          .optional(),
+        ordered_option_ids: z.array(z.string().min(1)).optional(),
         skipped: z.boolean().optional(),
       }),
     )
@@ -221,11 +215,10 @@ router.post('/quizzes/:id/attempts/:attemptId/lifeline', authenticateToken, asyn
     if (msg.startsWith('LIFELINE_ALREADY_USED')) {
       return res.status(400).json({ success: false, error: { code: 'LIFELINE_ALREADY_USED', message: msg } });
     }
-    if (
-      msg.startsWith('MISSING_QUESTION_ID') ||
-      msg.startsWith('INVALID_QUESTION_ID') ||
-      msg.startsWith('LIFELINE_NOT_AVAILABLE')
-    ) {
+    if (msg.startsWith('LIFELINE_NOT_AVAILABLE')) {
+      return res.status(400).json({ success: false, error: { code: 'LIFELINE_NOT_AVAILABLE', message: msg } });
+    }
+    if (msg.startsWith('MISSING_QUESTION_ID') || msg.startsWith('INVALID_QUESTION_ID')) {
       return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: msg } });
     }
     if (msg.startsWith('ATTEMPT_NOT_FOUND')) {
@@ -281,8 +274,7 @@ router.put('/quiz-attempts/:id/submission', authenticateToken, async (req: AuthR
     const mappedAnswers = parsed.data.answers.map((a) => ({
       questionId: a.question_id,
       selectedOptionId: a.selected_option_id,
-      selectedOrder: a.selected_order,
-      selectedLocation: a.selected_location,
+      orderedOptionIds: a.ordered_option_ids,
       skipped: a.skipped,
     }));
 
@@ -315,6 +307,7 @@ router.put('/quiz-attempts/:id/submission', authenticateToken, async (req: AuthR
       msg.startsWith('MISSING_ANSWERS') ||
       msg.startsWith('DUPLICATE_ANSWERS') ||
       msg.startsWith('INVALID_OPTION_ID') ||
+      msg.startsWith('INVALID_ANSWER_PAYLOAD') ||
       msg.startsWith('INVALID_SKIP')
     ) {
       return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: msg } });
