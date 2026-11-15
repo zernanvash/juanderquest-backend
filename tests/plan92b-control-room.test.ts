@@ -97,8 +97,8 @@ realPgDescribe('Plan 92b control room (real PostgreSQL)', () => {
       } as any);
       await q(
         `INSERT INTO spots(id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,price_level,source_type,source_name,trust_level,status,town_area_id)
-         VALUES ($1,$1,$1,'Control room test spot','culture_heritage','heritage_site',$2,'',16,120,1,'lgu','test','lgu_verified','published',$3)`,
-        [spotId, municipality, town],
+         VALUES ($1,$2,$3,'Control room test spot','culture_heritage','heritage_site',$4,'',16,120,1,'lgu','test','lgu_verified','published',$5)`,
+        [spotId, spotId, spotId, municipality, town],
       );
       spotStore.spots.push({
         id: spotId,
