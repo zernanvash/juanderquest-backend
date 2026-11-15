@@ -512,9 +512,6 @@ const handleMediaUpload = (req: AuthRequest, res: any) => {
   });
 };
 
-// POST /api/v1/spot-photos - Authenticated photo upload (backward-compatible)
-router.post('/spot-photos', authenticateToken, uploadRateLimiter, handleMediaUpload);
-
 // POST /api/v1/spot-media - Authenticated rich media upload (photos & videos)
 router.post('/spot-media', authenticateToken, uploadRateLimiter, handleMediaUpload);
 

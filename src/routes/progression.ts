@@ -200,43 +200,6 @@ progressionRouter.get(
 );
 
 // ==========================================
-// 2. Curated Collections & Trails
-// ==========================================
-
-// GET /collections — Curated trails and exploration collections
-progressionRouter.get(
-  '/collections',
-  optionalAuthenticateToken,
-  checkQAAuthorization,
-  async (req: AuthRequest, res: Response) => {
-    try {
-      const allowTest = isAuthorizedQA(req);
-      if (req.user || allowTest) {
-        res.set('Cache-Control', 'private, no-store');
-      } else {
-        res.set('Cache-Control', 'public, max-age=60');
-      }
-      const userId = req.user?.id;
-      const collections = await progressionRepo.getCuratedCollections(userId, allowTest);
-
-      return res.status(200).json({
-        success: true,
-        data: {
-          items: collections,
-          total: collections.length,
-        },
-      });
-    } catch (err: any) {
-      log.error('[progression] GET /collections error:', { error: err });
-      return res.status(500).json({
-        success: false,
-        error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve collections.' },
-      });
-    }
-  },
-);
-
-// ==========================================
 // 3. Opt-in Public Achievements
 // ==========================================
 

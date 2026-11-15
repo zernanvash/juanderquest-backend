@@ -51,8 +51,8 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
     user2Token = res2.body.data.token;
   });
 
-  it('requires authentication for POST /api/v1/spot-photos', async () => {
-    const res = await request(app).post('/api/v1/spot-photos').attach('photo', validJpegBuffer, 'test.jpg');
+  it('requires authentication for POST /api/v1/spot-media', async () => {
+    const res = await request(app).post('/api/v1/spot-media').attach('photo', validJpegBuffer, 'test.jpg');
 
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('UNAUTHORIZED');
@@ -60,7 +60,7 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
 
   it('successfully uploads valid JPEG photo', async () => {
     const res = await request(app)
-      .post('/api/v1/spot-photos')
+      .post('/api/v1/spot-media')
       .set('Authorization', `Bearer ${user1Token}`)
       .attach('photo', validJpegBuffer, 'sample.jpg');
 
@@ -78,7 +78,7 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
 
   it('successfully uploads valid PNG photo', async () => {
     const res = await request(app)
-      .post('/api/v1/spot-photos')
+      .post('/api/v1/spot-media')
       .set('Authorization', `Bearer ${user1Token}`)
       .attach('photo', validPngBuffer, 'sample.png');
 
@@ -88,7 +88,7 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
 
   it('successfully uploads valid WebP photo', async () => {
     const res = await request(app)
-      .post('/api/v1/spot-photos')
+      .post('/api/v1/spot-media')
       .set('Authorization', `Bearer ${user1Token}`)
       .attach('photo', validWebpBuffer, 'sample.webp');
 
@@ -115,9 +115,9 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
     expect(asset?.media_type).toBe('video');
   });
 
-  it('successfully uploads valid WebM video clip via POST /api/v1/spot-photos (backward-compat)', async () => {
+  it('successfully uploads valid WebM video clip via POST /api/v1/spot-media', async () => {
     const res = await request(app)
-      .post('/api/v1/spot-photos')
+      .post('/api/v1/spot-media')
       .set('Authorization', `Bearer ${user1Token}`)
       .attach('photo', validWebmBuffer, 'clip.webm');
 
@@ -128,7 +128,7 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
 
   it('rejects fake MIME / invalid image or video content', async () => {
     const res = await request(app)
-      .post('/api/v1/spot-photos')
+      .post('/api/v1/spot-media')
       .set('Authorization', `Bearer ${user1Token}`)
       .attach('photo', fakeImageBuffer, 'fake.jpg');
 
@@ -138,7 +138,7 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
 
   it('rejects oversized image files exceeding 8 MB', async () => {
     const res = await request(app)
-      .post('/api/v1/spot-photos')
+      .post('/api/v1/spot-media')
       .set('Authorization', `Bearer ${user1Token}`)
       .attach('photo', oversizedImageBuffer, 'huge.jpg');
 
@@ -164,7 +164,7 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
   it('enforces asset ownership during spot creation', async () => {
     // User 1 uploads asset
     const uploadRes = await request(app)
-      .post('/api/v1/spot-photos')
+      .post('/api/v1/spot-media')
       .set('Authorization', `Bearer ${user1Token}`)
       .attach('photo', validJpegBuffer, 'user1_spot.jpg');
     const assetId = uploadRes.body.data.asset_id;
@@ -191,7 +191,7 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
     const assetIds: string[] = [];
     for (let i = 0; i < 6; i++) {
       const up = await request(app)
-        .post('/api/v1/spot-photos')
+        .post('/api/v1/spot-media')
         .set('Authorization', `Bearer ${user1Token}`)
         .attach('photo', validJpegBuffer, `img_${i}.jpg`);
       assetIds.push(up.body.data.asset_id);
@@ -215,7 +215,7 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
 
   it('transitions uploaded asset status from pending to attached upon spot creation', async () => {
     const uploadRes = await request(app)
-      .post('/api/v1/spot-photos')
+      .post('/api/v1/spot-media')
       .set('Authorization', `Bearer ${user1Token}`)
       .attach('photo', validJpegBuffer, 'attached_test.jpg');
     const assetId = uploadRes.body.data.asset_id;
@@ -242,7 +242,7 @@ describe('Spot Photo Uploads & Storage Adapter Specification', () => {
 
   it('cleans up abandoned pending uploads older than expiration hours', async () => {
     const uploadRes = await request(app)
-      .post('/api/v1/spot-photos')
+      .post('/api/v1/spot-media')
       .set('Authorization', `Bearer ${user1Token}`)
       .attach('photo', validJpegBuffer, 'abandoned.jpg');
     const assetId = uploadRes.body.data.asset_id;
