@@ -55,7 +55,7 @@ realPg('JuanChoice perk controls (real PostgreSQL)', () => {
     await fixture.pool.query(
       `INSERT INTO users(id,seed_id,display_name,email,role,admin_scope,is_test) VALUES
       ($1::text,$1::text,'JDQ staff',$1::text||'@example.test','admin','platform',FALSE),
-      ($2::text,$2::text,'Area admin',$2::text||'@example.test','admin','area',FALSE),
+      ($2::text,$2::text,'Area admin',$2::text||'@example.test','admin',NULL,FALSE),
       ($3::text,$3::text,'Traveler',$3::text||'@example.test','user',NULL,FALSE)`,
       [staff, areaAdmin, traveler],
     );
