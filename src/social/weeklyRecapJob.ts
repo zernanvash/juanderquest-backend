@@ -95,6 +95,11 @@ export async function runWeeklyRecap(client: Queryable, overrideNow?: Date, forc
     const friendCount = Number(friendsRes.rows[0]?.friend_count || 0);
     const questCount = Number(friendsRes.rows[0]?.quest_count || 0);
 
+    // 93a: skip recap when an unranked user has zero friend activity
+    if (!isRanked && friendCount === 0 && questCount === 0) {
+      continue;
+    }
+
     // 3. Suggested quest
     let suggestedQuest: string | null = null;
     if (friendCount > 0) {
@@ -102,6 +107,7 @@ export async function runWeeklyRecap(client: Queryable, overrideNow?: Date, forc
         `SELECT a.subject_title, COUNT(*)::int AS cnt
            FROM social_activities a
            JOIN user_follows f ON f.following_id = a.actor_id
+           JOIN quests q ON q.id = a.subject_id AND q.status = 'published' AND q.is_test = $4
           WHERE f.follower_id = $1
             AND a.verb = 'quest_completed'
             AND a.created_at >= $2 AND a.created_at < $3
@@ -121,15 +127,16 @@ export async function runWeeklyRecap(client: Queryable, overrideNow?: Date, forc
 
     if (!suggestedQuest) {
       const overallQRes = await client.query(
-        `SELECT subject_title, COUNT(*)::int AS cnt
-           FROM social_activities
-          WHERE verb = 'quest_completed'
-            AND created_at >= $1 AND created_at < $2
-            AND is_test = $3
-            AND subject_id NOT IN (
+        `SELECT a.subject_title, COUNT(*)::int AS cnt
+           FROM social_activities a
+           JOIN quests q ON q.id = a.subject_id AND q.status = 'published' AND q.is_test = $3
+          WHERE a.verb = 'quest_completed'
+            AND a.created_at >= $1 AND a.created_at < $2
+            AND a.is_test = $3
+            AND a.subject_id NOT IN (
               SELECT quest_id FROM submissions WHERE user_id = $4 AND status = 'approved'
             )
-          GROUP BY subject_title
+          GROUP BY a.subject_title
           ORDER BY cnt DESC
           LIMIT 1`,
         [prevWeekStart, prevWeekEnd, isTest, userId],
