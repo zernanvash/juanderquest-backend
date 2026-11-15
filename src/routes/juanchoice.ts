@@ -525,7 +525,15 @@ juanChoiceRouter.patch(
           `UPDATE juanchoice_festivals SET name=$2,municipality=$3,starts_on=$4,ends_on=$5,boost_multiplier=$6,boosts_voting=$7
             WHERE id=$1 RETURNING id,name,municipality,to_char(starts_on,'YYYY-MM-DD') AS starts_on,
             to_char(ends_on,'YYYY-MM-DD') AS ends_on,boost_multiplier,is_test,boosts_voting,created_at`,
-          [id.data, next.name, next.municipality, next.starts_on, next.ends_on, next.boost_multiplier, next.boosts_voting],
+          [
+            id.data,
+            next.name,
+            next.municipality,
+            next.starts_on,
+            next.ends_on,
+            next.boost_multiplier,
+            next.boosts_voting,
+          ],
         )
       ).rows[0];
       await client.query('COMMIT');

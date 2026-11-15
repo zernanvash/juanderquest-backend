@@ -44,7 +44,12 @@ realPg('Plan 94 festival calendar', () => {
     asAdmin(request(app).post('/api/v1/juanchoice/admin/festivals')).send(body);
 
   it('creates festivals with the voting boost switch (default on) and lists it for staff', async () => {
-    const boosted = await create({ name: 'Bangus Festival', municipality: 'Dagupan', starts_on: '2027-04-20', ends_on: '2027-04-30' });
+    const boosted = await create({
+      name: 'Bangus Festival',
+      municipality: 'Dagupan',
+      starts_on: '2027-04-20',
+      ends_on: '2027-04-30',
+    });
     expect(boosted.status).toBe(201);
     expect(boosted.body.data.boosts_voting).toBe(true);
     const quiet = await create({
@@ -62,7 +67,12 @@ realPg('Plan 94 festival calendar', () => {
   });
 
   it('edits a festival with PATCH and rejects an end before the start', async () => {
-    const created = await create({ name: 'Mango Festival', municipality: 'San Carlos', starts_on: '2027-04-10', ends_on: '2027-04-12' });
+    const created = await create({
+      name: 'Mango Festival',
+      municipality: 'San Carlos',
+      starts_on: '2027-04-10',
+      ends_on: '2027-04-12',
+    });
     const id = created.body.data.id;
     const moved = await asAdmin(request(app).patch(`/api/v1/juanchoice/admin/festivals/${id}`)).send({
       starts_on: '2027-04-11',
@@ -77,7 +87,9 @@ realPg('Plan 94 festival calendar', () => {
       ends_on: '2027-04-13',
       boosts_voting: false,
     });
-    const bad = await asAdmin(request(app).patch(`/api/v1/juanchoice/admin/festivals/${id}`)).send({ ends_on: '2027-04-01' });
+    const bad = await asAdmin(request(app).patch(`/api/v1/juanchoice/admin/festivals/${id}`)).send({
+      ends_on: '2027-04-01',
+    });
     expect(bad.status).toBe(400);
     const empty = await asAdmin(request(app).patch(`/api/v1/juanchoice/admin/festivals/${id}`)).send({});
     expect(empty.status).toBe(400);
@@ -101,7 +113,9 @@ realPg('Plan 94 festival calendar', () => {
     };
 
     const public2027 = await names(2027);
-    expect(public2027).toEqual(expect.arrayContaining(['Bangus Festival', 'Pista Dayat', 'Mango Festival', 'New Year Lights']));
+    expect(public2027).toEqual(
+      expect.arrayContaining(['Bangus Festival', 'Pista Dayat', 'Mango Festival', 'New Year Lights']),
+    );
     expect(public2027).not.toContain('QA Fiesta');
     expect(await names(2028)).toEqual(['New Year Lights']);
     expect(await names(2027, token(traveler, 'user'))).not.toContain('QA Fiesta');
