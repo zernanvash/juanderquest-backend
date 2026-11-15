@@ -96,7 +96,14 @@ const createDraftSchema = z.object({
         question_type: z
           .enum(['multiple_choice', 'true_false', 'photo_clue', 'sequence_order'])
           .default('multiple_choice'),
-        media_url: z.string().url().optional().nullable(),
+        // Spot photos are stored as http(s) URLs or root-relative /api/v1/uploads paths;
+        // the service checks the value belongs to the destination's own photos.
+        media_url: z
+          .string()
+          .max(2048)
+          .refine((v) => /^https?:\/\//i.test(v) || v.startsWith('/'), 'media_url must be an http(s) URL or a /path.')
+          .optional()
+          .nullable(),
         hint: z.string().max(500).optional().nullable(),
         round: z.enum(['main', 'special', 'lightning']).default('main'),
         answer_payload: z.any().optional().nullable(),

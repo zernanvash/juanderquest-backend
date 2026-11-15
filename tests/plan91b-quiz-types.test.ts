@@ -153,6 +153,25 @@ describe('Plan 91b: Quiz Question Types, Validation, Shuffle & Grading (Real PG)
     expect(rows[0].media_url).toBeNull();
   });
 
+  it('accepts a photo_clue that uses a relative uploads path, as live spot photos are stored', async () => {
+    const relativePhoto = '/api/v1/uploads/spot-photos/catalog-91b-relative.jpg';
+    await testDb.pool.query(
+      `INSERT INTO spot_assets (id, user_id, storage_provider, object_key, url, mime_type, status, spot_id)
+       VALUES ($1, $2, 'local', 'catalog-91b-relative.jpg', $3, 'image/jpeg', 'attached', $4)`,
+      [randomUUID(), adminId, relativePhoto, spotId],
+    );
+    const created = await request(app)
+      .post('/api/v1/admin/quizzes')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        destination_id: spotId,
+        title: 'Relative Photo Quiz',
+        description: 'Photo clue using a stored relative spot photo path',
+        questions: buildMixedQuestions({ 2: { media_url: relativePhoto } }),
+      });
+    expect(created.status).toBe(201);
+  });
+
   it('validates per-type rules and photo_clue spot photo ownership on create and update', async () => {
     // Reject non-spot photo_clue URL on create
     const badPhoto = await request(app)
