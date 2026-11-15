@@ -31,7 +31,7 @@ describe('Test quizzes are visible only to test accounts', () => {
     await testDb.pool.query(
       `INSERT INTO spots (id, slug, name, description, category, subcategory, municipality, address,
          gps_lat, gps_lng, source_type, source_name, status)
-       VALUES ($1, $1, 'Quiz Beach', 'A beach with quizzes.', 'nature_outdoors', 'beach', 'Bolinao',
+       VALUES ($1::text, $1::text, 'Quiz Beach', 'A beach with quizzes.', 'nature_outdoors', 'beach', 'Bolinao',
          'Bolinao, Pangasinan', $2, $3, 'lgu', 'Fixture', 'published')`,
       [spotId, lat, lng],
     );
