@@ -173,9 +173,7 @@ describe('Plan 91a: Proximity Quiz Radar & Multi-Quiz Endpoints', () => {
   it('sets in_range at the exact radius boundary and respects +50m vs +500m cutoff', async () => {
     // At main spot (0m away, radius 100m -> in_range: true)
     // spotApproachId is ~222m away (radius 100m -> excluded without include_approaching)
-    const defaultRes = await request(app)
-      .post('/api/v1/quizzes/nearby')
-      .send({ lat: mainLat, lng: mainLng });
+    const defaultRes = await request(app).post('/api/v1/quizzes/nearby').send({ lat: mainLat, lng: mainLng });
     expect(defaultRes.status).toBe(200);
     const defaultIds = (defaultRes.body.data as Array<{ quiz_id: string }>).map((q) => q.quiz_id);
     expect(defaultIds).toContain(qHighXpId);
@@ -185,9 +183,7 @@ describe('Plan 91a: Proximity Quiz Radar & Multi-Quiz Endpoints', () => {
     // 0.0011 deg lat ~ 122m from main spot:
     // radius_meters=100 -> in_range: false, but <= 100+50 (150m), so included in default!
     const bufferLat = mainLat + 0.0011;
-    const bufferRes = await request(app)
-      .post('/api/v1/quizzes/nearby')
-      .send({ lat: bufferLat, lng: mainLng });
+    const bufferRes = await request(app).post('/api/v1/quizzes/nearby').send({ lat: bufferLat, lng: mainLng });
     expect(bufferRes.status).toBe(200);
     const mainFromBuffer = (bufferRes.body.data as Array<any>).find((q) => q.quiz_id === qHighXpId);
     expect(mainFromBuffer).toBeDefined();

@@ -177,9 +177,7 @@ function validateQuizDraftQuestions(
       }
     } else if (qType === 'sequence_order') {
       if (q.options.length < 3 || q.options.length > 4) {
-        throw new Error(
-          `INVALID_QUIZ_DRAFT: Question ${q.ordinal} (sequence_order) must have 3 or 4 options.`,
-        );
+        throw new Error(`INVALID_QUIZ_DRAFT: Question ${q.ordinal} (sequence_order) must have 3 or 4 options.`);
       }
       for (let i = 0; i < ordinals.length; i++) {
         if (ordinals[i] !== i + 1) {
@@ -318,10 +316,7 @@ export class CulturalQuizService {
         language: item.version.language,
       };
       if (userId) {
-        summary.is_completed = await this.repo.hasCompletedRewardScope(
-          userId,
-          item.quiz.reward_scope_id,
-        );
+        summary.is_completed = await this.repo.hasCompletedRewardScope(userId, item.quiz.reward_scope_id);
       }
       quizzes.push(summary);
     }
@@ -795,15 +790,11 @@ export class CulturalQuizService {
           }
           const uniqueSubmitted = new Set(submitted.orderedOptionIds);
           if (uniqueSubmitted.size !== submitted.orderedOptionIds.length) {
-            throw new Error(
-              `INVALID_OPTION_ID: Duplicate option IDs provided for question ${q.ordinal}.`,
-            );
+            throw new Error(`INVALID_OPTION_ID: Duplicate option IDs provided for question ${q.ordinal}.`);
           }
           for (const optId of submitted.orderedOptionIds) {
             if (!optionIdsSet.has(optId)) {
-              throw new Error(
-                `INVALID_OPTION_ID: Option '${optId}' is not valid for question ${q.ordinal}.`,
-              );
+              throw new Error(`INVALID_OPTION_ID: Option '${optId}' is not valid for question ${q.ordinal}.`);
             }
           }
           const sortedOpts = [...q.options].sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0));
@@ -823,9 +814,7 @@ export class CulturalQuizService {
             typeof submitted.selectedOptionId !== 'string' ||
             submitted.selectedOptionId.length === 0
           ) {
-            throw new Error(
-              `INVALID_ANSWER_PAYLOAD: Question ${q.ordinal} (${qType}) requires selected_option_id.`,
-            );
+            throw new Error(`INVALID_ANSWER_PAYLOAD: Question ${q.ordinal} (${qType}) requires selected_option_id.`);
           }
           const selectedOpt = q.options.find((opt) => opt.id === submitted.selectedOptionId);
           if (!selectedOpt) {
