@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { ADMIN_POWERS, loadAdminScope } from '../admin/scope.js';
 import { getPool } from '../db/pool.js';
 import { db } from '../db/index.js';
-import { AuthRequest, authenticateToken, requireAdmin } from '../middleware/auth.js';
+import { AuthRequest, authenticateToken, invalidateSessionScopeCache, requireAdmin } from '../middleware/auth.js';
 import { requireDeveloper } from './developer.js';
 
 const router = Router();
@@ -147,6 +147,7 @@ router.post('/admin/area-admins', requireDeveloper, async (req: AuthRequest, res
       ],
     );
     await client.query('COMMIT');
+    invalidateSessionScopeCache(parsed.data.user_id);
     const mirror = db.findUserById(parsed.data.user_id);
     if (mirror) mirror.role = 'area_admin' as typeof mirror.role;
     return res.status(isUpdate ? 200 : 201).json({ success: true, data: assignment.rows[0] });
@@ -271,6 +272,7 @@ router.delete('/admin/area-admins/:id', requireDeveloper, async (req: AuthReques
       ],
     );
     await client.query('COMMIT');
+    invalidateSessionScopeCache(before.rows[0].user_id);
     const mirror = demoted ? db.findUserById(before.rows[0].user_id) : undefined;
     if (mirror) mirror.role = 'user';
     return res.json({ success: true, data: { ...after.rows[0], demoted: Boolean(demoted) } });

@@ -1,7 +1,7 @@
 import { Router, Response, NextFunction } from 'express';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
-import { authenticateToken, requireAdmin, AuthRequest } from '../middleware/auth.js';
+import { authenticateToken, invalidateSessionScopeCache, requireAdmin, AuthRequest } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { getPool } from '../db/pool.js';
 import { db } from '../db/index.js';
@@ -12,7 +12,7 @@ import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
 export const developerRouter = Router();
 
 const ROLES = ['user', 'admin', 'qa'] as const;
-const SCOPES = ['platform', 'area', 'developer'] as const;
+const SCOPES = ['platform', 'developer'] as const;
 
 export async function isDeveloper(userId: string): Promise<boolean> {
   const pool = getPool();
@@ -132,6 +132,16 @@ developerRouter.put(
           .status(404)
           .json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'Account not found.' } });
       }
+      if (current.role === 'area_admin') {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          success: false,
+          error: {
+            code: 'AREA_ADMIN_MANAGED_IN_AREA_ADMINS',
+            message: "Revoke this account's areas in Area admins first.",
+          },
+        });
+      }
       const updated = (
         await client.query(
           `UPDATE users SET role=$2, admin_scope=$3, updated_at=NOW() WHERE id=$1
@@ -145,6 +155,7 @@ developerRouter.put(
         [randomUUID(), req.user!.id, req.params.id, current.role, role, current.admin_scope, scope, reason],
       );
       await client.query('COMMIT');
+      invalidateSessionScopeCache(req.params.id);
       // Keep the in-memory mirror honest for routes that still read it.
       const mirror = db.findUserById(req.params.id);
       if (mirror) mirror.role = role;
