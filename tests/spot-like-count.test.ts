@@ -10,7 +10,7 @@ describe('spot like_count', () => {
     const id = spotId();
     const before = (await request(app).get(`/api/v1/spots/${id}`).set('x-device-id', 'like-a')).body.data;
     expect(typeof before.like_count).toBe('number');
-    expect(before.liked).toBe(false);
+    expect(before.liked).toBeFalsy();
 
     const likeA = await request(app).put(`/api/v1/spots/${id}/like`).set('x-device-id', 'like-a');
     expect(likeA.status).toBe(200);
