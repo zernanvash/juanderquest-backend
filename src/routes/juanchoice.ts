@@ -225,9 +225,28 @@ const festivalBody = z
     ends_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     boost_multiplier: z.number().min(1).max(3).default(1.5),
     is_test: z.boolean().default(false),
+    // Plan 94: only festivals with this on turn that week's round into a Special Festival round.
+    boosts_voting: z.boolean().default(true),
   })
   .strict()
   .refine((value) => value.ends_on >= value.starts_on, { message: 'ends_on must not be before starts_on' });
+const festivalPatch = z
+  .object({
+    name: z.string().trim().min(2).max(160).optional(),
+    municipality: z.string().trim().min(2).max(100).nullable().optional(),
+    starts_on: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    ends_on: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    boost_multiplier: z.number().min(1).max(3).optional(),
+    boosts_voting: z.boolean().optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, { message: 'Nothing to change.' });
 // JuanderQuest platform staff only (admin_scope = 'platform'), never area admins: perk switches,
 // value overrides, pausing one live perk, and editing a contender's perks before voting opens.
 const requirePlatformStaff = async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -414,7 +433,7 @@ juanChoiceRouter.get('/juanchoice/admin/festivals', authenticateToken, requireAd
     const rows = (
       await pool()
         .query(`SELECT id,name,municipality,to_char(starts_on,'YYYY-MM-DD') AS starts_on,to_char(ends_on,'YYYY-MM-DD') AS ends_on,
-       boost_multiplier,is_test,created_at FROM juanchoice_festivals ORDER BY starts_on DESC, name LIMIT 200`)
+       boost_multiplier,is_test,boosts_voting,created_at FROM juanchoice_festivals ORDER BY starts_on DESC, name LIMIT 200`)
     ).rows;
     return res.json({ success: true, data: rows });
   } catch (error) {
@@ -435,8 +454,8 @@ juanChoiceRouter.post(
     try {
       const row = (
         await pool().query(
-          `INSERT INTO juanchoice_festivals(id,name,municipality,starts_on,ends_on,boost_multiplier,is_test,created_by)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+          `INSERT INTO juanchoice_festivals(id,name,municipality,starts_on,ends_on,boost_multiplier,is_test,created_by,boosts_voting)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
           [
             randomUUID(),
             parsed.data.name,
@@ -446,12 +465,76 @@ juanChoiceRouter.post(
             parsed.data.boost_multiplier,
             parsed.data.is_test,
             req.user!.id,
+            parsed.data.boosts_voting,
           ],
         )
       ).rows[0];
       return res.status(201).json({ success: true, data: row });
     } catch (error) {
       return failure(res, error);
+    }
+  },
+);
+juanChoiceRouter.patch(
+  '/juanchoice/admin/festivals/:id',
+  authenticateToken,
+  requireAdmin,
+  rateLimit({ policyId: 'juanchoice:festival-write', windowMs: 60_000, max: 20, keyStrategy: 'actor' }),
+  async (req: AuthRequest, res) => {
+    const id = uuid.safeParse(req.params.id);
+    const parsed = festivalPatch.safeParse(req.body);
+    if (!id.success || !parsed.success)
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_REQUEST',
+          message: parsed.success ? 'Invalid festival id.' : parsed.error.issues[0]?.message,
+        },
+      });
+    const client = await pool().connect();
+    try {
+      await client.query('BEGIN');
+      const current = (
+        await client.query(
+          `SELECT name,municipality,to_char(starts_on,'YYYY-MM-DD') AS starts_on,to_char(ends_on,'YYYY-MM-DD') AS ends_on,
+            boost_multiplier,boosts_voting FROM juanchoice_festivals WHERE id=$1 FOR UPDATE`,
+          [id.data],
+        )
+      ).rows[0];
+      if (!current) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ success: false, error: { code: 'FESTIVAL_NOT_FOUND' } });
+      }
+      const next = {
+        name: parsed.data.name ?? current.name,
+        municipality: parsed.data.municipality === undefined ? current.municipality : parsed.data.municipality,
+        starts_on: parsed.data.starts_on ?? current.starts_on,
+        ends_on: parsed.data.ends_on ?? current.ends_on,
+        boost_multiplier: parsed.data.boost_multiplier ?? Number(current.boost_multiplier),
+        boosts_voting: parsed.data.boosts_voting ?? current.boosts_voting,
+      };
+      if (next.ends_on < next.starts_on) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          error: { code: 'INVALID_REQUEST', message: 'ends_on must not be before starts_on' },
+        });
+      }
+      const row = (
+        await client.query(
+          `UPDATE juanchoice_festivals SET name=$2,municipality=$3,starts_on=$4,ends_on=$5,boost_multiplier=$6,boosts_voting=$7
+            WHERE id=$1 RETURNING id,name,municipality,to_char(starts_on,'YYYY-MM-DD') AS starts_on,
+            to_char(ends_on,'YYYY-MM-DD') AS ends_on,boost_multiplier,is_test,boosts_voting,created_at`,
+          [id.data, next.name, next.municipality, next.starts_on, next.ends_on, next.boost_multiplier, next.boosts_voting],
+        )
+      ).rows[0];
+      await client.query('COMMIT');
+      return res.json({ success: true, data: row });
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      return failure(res, error);
+    } finally {
+      client.release();
     }
   },
 );
@@ -471,6 +554,39 @@ juanChoiceRouter.delete(
     }
   },
 );
+
+// Plan 94: festivals for the app's Almanac. Test festivals only for test accounts (signed-out = real).
+juanChoiceRouter.get('/calendar/festivals', optionalAuthenticateToken, async (req: AuthRequest, res) => {
+  const year = z.coerce
+    .number()
+    .int()
+    .min(2000)
+    .max(2100)
+    .safeParse(req.query.year ?? new Date().getFullYear());
+  if (!year.success)
+    return res
+      .status(400)
+      .json({ success: false, error: { code: 'INVALID_REQUEST', message: 'year must be 2000-2100.' } });
+  try {
+    const viewer = req.user
+      ? (await pool().query('SELECT is_test FROM users WHERE id=$1', [req.user.id])).rows[0]
+      : undefined;
+    const rows = (
+      await pool().query(
+        `SELECT id,name,municipality,to_char(starts_on,'YYYY-MM-DD') AS starts_on,to_char(ends_on,'YYYY-MM-DD') AS ends_on
+           FROM juanchoice_festivals
+          WHERE is_test=$1 AND starts_on <= make_date($2,12,31) AND ends_on >= make_date($2,1,1)
+          ORDER BY starts_on, name
+          LIMIT 500`,
+        [Boolean(viewer?.is_test), year.data],
+      )
+    ).rows;
+    res.setHeader('Cache-Control', req.user ? 'private, max-age=300' : 'public, max-age=300');
+    return res.json({ success: true, data: rows });
+  } catch (error) {
+    return failure(res, error);
+  }
+});
 
 juanChoiceRouter.get(
   '/juanchoice/overview',

@@ -91,6 +91,7 @@ export const MIGRATIONS = [
   '084_drop_duplicate_indexes_and_status_checks.sql',
   '085_drop_unused_tables_if_empty.sql',
   '086_quiz_types_and_media.sql',
+  '089_festival_boosts_voting.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
