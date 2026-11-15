@@ -321,59 +321,6 @@ router.post(
 );
 
 router.post(
-  '/auth/email/resend',
-  rateLimit({ policyId: 'auth:email-resend', windowMs: 60_000, max: 5 }),
-  validateRequest(z.object({ body: z.object({ email: z.string().email() }) })),
-  async (req, res) => {
-    res.setHeader('Cache-Control', 'private, no-store');
-    const { email } = req.body;
-    const normalizedEmail = db.identityService.normalizeEmail(email);
-
-    try {
-      // Checked before the account lookup and before a new code replaces the current one.
-      const allowance = await db.mailerService.checkSendAllowance(normalizedEmail);
-      if (!allowance.allowed && allowance.reason === 'DAILY_CAP')
-        return mailUnavailable(res, allowance.retryAfterSeconds);
-      const identity = allowance.allowed ? await db.identityService.findIdentity('email', normalizedEmail) : null;
-      if (!identity) {
-        // Uniform response to prevent enumeration (also when this address was sent a code moments ago)
-        return res.status(200).json({
-          success: true,
-          data: { message: 'If an account exists, a new verification code has been dispatched.' },
-        });
-      }
-
-      const challenge = await db.challengeService.createChallenge({
-        purpose: 'signup_verify',
-        targetIdentifier: normalizedEmail,
-        boundUserId: identity.user_id,
-        ttlSeconds: 600,
-      });
-
-      await db.mailerService.queueAuthEmail({
-        id: randomUUID(),
-        recipientEmail: normalizedEmail,
-        templateType: 'signup_otp',
-        code: challenge.code,
-      });
-
-      return res.status(200).json({
-        success: true,
-        data: {
-          message: 'If an account exists, a new verification code has been dispatched.',
-          dev_code: process.env.NODE_ENV !== 'production' ? challenge.code : undefined,
-        },
-      });
-    } catch (err) {
-      log.error('[auth] resend error:', { error: err });
-      return res
-        .status(503)
-        .json({ success: false, error: { code: 'STORAGE_UNAVAILABLE', message: 'Resend service unavailable.' } });
-    }
-  },
-);
-
-router.post(
   '/auth/login',
   rateLimit({ policyId: 'auth:login', windowMs: 60_000, max: 15 }),
   validateRequest(

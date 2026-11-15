@@ -43,18 +43,11 @@ describe('auth email limits on the routes', () => {
       terms_accepted: true,
     });
 
-  it('a quick resend or reset request sends nothing, keeps the first code, and looks like an unknown address', async () => {
+  it('a quick reset request sends nothing, keeps the first code, and looks like an unknown address', async () => {
     const email = 'quota.one@example.com';
     const reg = await register(email);
     expect(reg.status).toBe(201);
     expect(resendCalls()).toHaveLength(1);
-
-    const resend = await request(app).post('/api/v1/auth/email/resend').send({ email });
-    const resendUnknown = await request(app)
-      .post('/api/v1/auth/email/resend')
-      .send({ email: 'nobody.here@example.com' });
-    expect(resend.status).toBe(200);
-    expect(resend.body).toEqual(resendUnknown.body);
 
     const forgot = await request(app).post('/api/v1/auth/password/forgot').send({ email });
     const forgotUnknown = await request(app)
@@ -68,7 +61,7 @@ describe('auth email limits on the routes', () => {
     expect(verify.status).toBe(200);
   });
 
-  it('once the daily cap is reached, sign-up, resend and reset answer 503 and create nothing', async () => {
+  it('once the daily cap is reached, sign-up and reset answer 503 and create nothing', async () => {
     process.env.AUTH_MAIL_DAILY_CAP = '1';
     const email = 'quota.two@example.com';
     const reg = await register(email);
@@ -77,11 +70,9 @@ describe('auth email limits on the routes', () => {
     expect(Number(reg.headers['retry-after'])).toBeGreaterThan(0);
     expect(await db.identityService.findIdentity('email', email)).toBeNull();
 
-    for (const path of ['/api/v1/auth/email/resend', '/api/v1/auth/password/forgot']) {
-      const res = await request(app).post(path).send({ email: 'quota.one@example.com' });
-      expect(res.status).toBe(503);
-      expect(res.body.error.code).toBe('EMAIL_TEMPORARILY_UNAVAILABLE');
-    }
+    const res = await request(app).post('/api/v1/auth/password/forgot').send({ email: 'quota.one@example.com' });
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe('EMAIL_TEMPORARILY_UNAVAILABLE');
     expect(resendCalls()).toHaveLength(0);
 
     delete process.env.AUTH_MAIL_DAILY_CAP;

@@ -1,7 +1,6 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
-import { governanceStore } from './proposals.js';
 
 const router = Router();
 const _feedbackSchema = z.object({
@@ -9,20 +8,6 @@ const _feedbackSchema = z.object({
   idempotency_key: z.string().min(8),
   rating: z.number().int().min(1).max(5).optional(),
   comment: z.string().max(500).optional(),
-});
-
-router.get('/community-quests/:id', (req, res) => {
-  const proposal = governanceStore.getProposal(req.params.id);
-  if (
-    !proposal ||
-    !['scheduled', 'active', 'feedback', 'payout_pending', 'disputed', 'completed'].includes(proposal.state)
-  ) {
-    res
-      .status(404)
-      .json({ success: false, error: { code: 'COMMUNITY_QUEST_NOT_FOUND', message: 'Community Quest not found.' } });
-    return;
-  }
-  res.json({ success: true, data: proposal });
 });
 
 router.post('/community-quests/:id/feedback', authenticateToken, (_req: AuthRequest, res: Response) => {

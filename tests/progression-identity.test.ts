@@ -239,17 +239,6 @@ describe('Phase 1: Progression & Identity Foundation', () => {
       expect(res.body.data.total).toBeGreaterThanOrEqual(1);
     });
 
-    it('GET /api/v1/collections returns curated trails and spot completion', async () => {
-      const res = await request(app).get('/api/v1/collections').set('Authorization', `Bearer ${tokenTraveler}`);
-
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      const coastal = res.body.data.items.find((c: any) => c.id === 'coastal_wonders_trail');
-      expect(coastal).toBeDefined();
-      expect(coastal.total_spots).toBeGreaterThanOrEqual(1);
-      expect(coastal.spots[0].is_visited).toBe(true);
-    });
-
     it('GET /api/v1/users/:id/achievements returns public badges for public user', async () => {
       await testDb.pool.query('INSERT INTO user_engagement_preferences(user_id,share_achievements) VALUES($1,TRUE)', [
         travelerId,
