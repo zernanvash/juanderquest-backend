@@ -18,6 +18,7 @@ import {
   verifyQuestQrPassToken,
 } from '../auth/tokens.js';
 import { spotStore } from '../spots/store.js';
+import { loadAdminScope, requireAreaAdmin, spotInScope, writeAdminAudit } from '../admin/scope.js';
 import {
   optionalAuthenticateToken,
   authenticateToken,
@@ -265,6 +266,28 @@ router.get('/quests/:id', optionalAuthenticateToken, checkQAAuthorization, async
   });
 });
 
+// GET /admin/quests (Plan 92b) - every non-test quest; area admins see quests bound to in-scope spots.
+router.get(
+  '/admin/quests',
+  authenticateToken,
+  requireAreaAdmin('quests_quizzes'),
+  async (req: AuthRequest, res: Response) => {
+    const scope = req.adminScope!;
+    const status = typeof req.query.status === 'string' ? req.query.status : null;
+    const quests = db.quests
+      .filter((quest) => !quest.is_test && (!status || quest.status === status))
+      .map((quest) => ({ quest, spot: spotStore.spots.find((s) => s.quest_id === quest.id) }))
+      .filter(({ spot }) => scope.platform || (spot && spotInScope(scope, 'quests_quizzes', spot.id)))
+      .map(({ quest, spot }) => ({
+        ...sanitizeQuestForViewer(quest, false),
+        spot_id: spot?.id ?? null,
+        spot_name: spot?.name ?? null,
+        municipality: spot?.municipality ?? null,
+      }));
+    return res.json({ success: true, data: quests });
+  },
+);
+
 // PATCH /quests/:id/status - Author or admin quest lifecycle management
 router.patch('/quests/:id/status', authenticateToken, async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
@@ -280,8 +303,17 @@ router.patch('/quests/:id/status', authenticateToken, async (req: AuthRequest, r
   const spot = spotStore.spots.find((s) => s.quest_id === quest.id);
   const isAuthor = Boolean(req.user?.id && (quest.author_id === req.user.id || spot?.created_by === req.user.id));
   const isAdmin = Boolean(req.user?.role === 'admin');
+  // Plan 92b: an area admin with quests_quizzes over the quest's spot may pause or publish it.
+  let isAreaAdmin = false;
+  if (!isAuthor && !isAdmin && req.user?.role === 'area_admin' && spot) {
+    try {
+      isAreaAdmin = spotInScope(await loadAdminScope(req.user.id), 'quests_quizzes', spot.id);
+    } catch {
+      isAreaAdmin = false;
+    }
+  }
 
-  if (!isAuthor && !isAdmin) {
+  if (!isAuthor && !isAdmin && !isAreaAdmin) {
     return res.status(403).json({
       success: false,
       error: {
@@ -327,10 +359,23 @@ router.patch('/quests/:id/status', authenticateToken, async (req: AuthRequest, r
     return fundingErrorResponse(res, error);
   }
 
+  const previousStatus = quest.status;
   quest.status = status;
   quest.is_active = status === 'published';
   quest.updated_at = new Date().toISOString();
   db.upsertQuest(quest);
+  if (!isAuthor && (isAdmin || isAreaAdmin) && statusPool) {
+    await writeAdminAudit({
+      actorId: req.user!.id,
+      actorRole: req.user!.role,
+      areaId: spot?.town_area_id ?? null,
+      action: 'quest.status_changed',
+      subjectType: 'quest',
+      subjectId: quest.id,
+      before: { status: previousStatus },
+      after: { status },
+    });
+  }
 
   return res.status(200).json({
     success: true,

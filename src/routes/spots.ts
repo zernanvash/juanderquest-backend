@@ -1061,7 +1061,7 @@ router.post(
   '/spots/:id/reports',
   optionalAuthenticateToken,
   validateRequest(createReportSchema),
-  (req: AuthRequest, res) => {
+  async (req: AuthRequest, res) => {
     const spot = spotStore.spots.find((s) => s.id === req.params.id || s.slug === req.params.id);
     if (!spot) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
@@ -1071,7 +1071,7 @@ router.post(
     const reporterActor = userId ? db.findUserById(userId) : undefined;
     const reporterName = reporterActor?.display_name || req.body.reporter_name || 'Anonymous Scout';
 
-    const report = fieldLogStore.createReport(spot.id, req.body.reason, userId, reporterName, req.body.details);
+    const report = await fieldLogStore.createReport(spot.id, req.body.reason, userId, reporterName, req.body.details);
 
     return res.status(201).json({
       success: true,
@@ -1086,14 +1086,60 @@ router.post(
 );
 
 // GET /admin/spot-reports
-router.get('/admin/spot-reports', authenticateToken, requireAreaAdmin('destinations'), (req: AuthRequest, res) => {
-  const scopedSpotIds = new Set(
-    spotStore.spots.filter((spot) => spotInAdminScope(req.adminScope!, spot)).map((spot) => spot.id),
-  );
-  return res.json({
-    success: true,
-    data: fieldLogStore.listReports().filter((report) => scopedSpotIds.has(report.spot_id)),
-  });
+router.get(
+  '/admin/spot-reports',
+  authenticateToken,
+  requireAreaAdmin('destinations'),
+  async (req: AuthRequest, res) => {
+    const scopedSpotIds = new Set(
+      spotStore.spots.filter((spot) => spotInAdminScope(req.adminScope!, spot)).map((spot) => spot.id),
+    );
+    return res.json({
+      success: true,
+      data: (await fieldLogStore.listReports()).filter((report) => scopedSpotIds.has(report.spot_id)),
+    });
+  },
+);
+
+// PATCH /admin/spot-reports/:id (Plan 92b): mark a report reviewed or dismissed, with a note.
+const resolveReportSchema = z.object({
+  body: z
+    .object({
+      status: z.enum(['reviewed', 'dismissed']),
+      resolution_note: z.string().trim().min(5).max(500),
+    })
+    .strict(),
 });
+
+router.patch(
+  '/admin/spot-reports/:id',
+  authenticateToken,
+  requireAreaAdmin('destinations'),
+  validateRequest(resolveReportSchema),
+  async (req: AuthRequest, res) => {
+    const notFound = () =>
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Report not found.' } });
+    const existing = await fieldLogStore.findReport(req.params.id);
+    const spot = existing ? spotStore.spots.find((s) => s.id === existing.spot_id) : undefined;
+    if (!existing || !spot || !spotInAdminScope(req.adminScope!, spot)) return notFound();
+    const updated = await fieldLogStore.resolveReport(existing.id, {
+      status: req.body.status,
+      resolvedBy: req.user!.id,
+      note: req.body.resolution_note,
+    });
+    if (!updated) return notFound();
+    await writeAdminAudit({
+      actorId: req.user!.id,
+      actorRole: req.user!.role,
+      areaId: spot.town_area_id ?? null,
+      action: `spot_report.${req.body.status}`,
+      subjectType: 'spot_report',
+      subjectId: existing.id,
+      before: { status: existing.status },
+      after: { status: updated.status, resolution_note: updated.resolution_note },
+    });
+    return res.json({ success: true, data: updated });
+  },
+);
 
 export default router;

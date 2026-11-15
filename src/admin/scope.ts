@@ -37,27 +37,57 @@ export async function loadAdminScope(userId: string): Promise<AdminScope> {
   );
   const grants: AdminGrant[] = [];
   for (const row of assignments.rows) {
-    const tree = await pool.query(
-      `WITH RECURSIVE area_tree(id, path) AS (
-         SELECT id, ARRAY[id]::text[] FROM admin_areas WHERE id = $1
-         UNION ALL
-         SELECT child.id, tree.path || child.id
-           FROM admin_areas child JOIN area_tree tree ON child.parent_id = tree.id
-          WHERE NOT child.id = ANY(tree.path)
-       ) SELECT id FROM area_tree`,
-      [row.area_id],
-    );
+    const areaIds = await areaSubtree(pool, String(row.area_id));
     grants.push({
       areaId: String(row.area_id),
       areaName: String(row.display_name),
       powers: new Set(
         (row.powers as string[]).filter((power): power is AdminPower => ADMIN_POWERS.includes(power as AdminPower)),
       ),
-      areaIds: new Set(tree.rows.map((item) => String(item.id))),
+      areaIds,
     });
   }
   if (!grants.length) throw new Error('No active area assignments.');
   return { platform: false, grants };
+}
+
+/** An area and every area below it. */
+async function areaSubtree(pool: NonNullable<ReturnType<typeof getPool>>, areaId: string): Promise<Set<string>> {
+  const tree = await pool.query(
+    `WITH RECURSIVE area_tree(id, path) AS (
+       SELECT id, ARRAY[id]::text[] FROM admin_areas WHERE id = $1
+       UNION ALL
+       SELECT child.id, tree.path || child.id
+         FROM admin_areas child JOIN area_tree tree ON child.parent_id = tree.id
+        WHERE NOT child.id = ANY(tree.path)
+     ) SELECT id FROM area_tree`,
+    [areaId],
+  );
+  return new Set(tree.rows.map((item) => String(item.id)));
+}
+
+/**
+ * Plan 92b: the dashboard area switcher. Limits a scope to one area's subtree; an area the caller does not
+ * hold leaves no area ids, so lists come back empty instead of failing.
+ */
+export async function narrowScopeToArea(scope: AdminScope, areaId?: string | null): Promise<AdminScope> {
+  if (!areaId) return scope;
+  const pool = getPool();
+  if (!pool) return scope;
+  const subtree = await areaSubtree(pool, areaId);
+  if (scope.platform) {
+    return {
+      platform: false,
+      grants: [{ areaId, areaName: areaId, powers: new Set(ADMIN_POWERS), areaIds: subtree }],
+    };
+  }
+  return {
+    platform: false,
+    grants: scope.grants.map((grant) => ({
+      ...grant,
+      areaIds: new Set([...grant.areaIds].filter((id) => subtree.has(id))),
+    })),
+  };
 }
 
 export const hasAdminPower = (scope: AdminScope, power: AdminPower) =>
@@ -123,7 +153,9 @@ export function requireAreaAdmin(power: AdminPower | AdminPower[]) {
           success: false,
           error: { code: 'FORBIDDEN', message: `The ${powers.join(' or ')} permission is required.` },
         });
-      req.adminScope = scope;
+      // Plan 92b: list reads honour the dashboard's area switcher (`?area_id=`).
+      const areaId = req.method === 'GET' && typeof req.query.area_id === 'string' ? req.query.area_id : null;
+      req.adminScope = await narrowScopeToArea(scope, areaId);
       next();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Administrative scope could not be loaded.';

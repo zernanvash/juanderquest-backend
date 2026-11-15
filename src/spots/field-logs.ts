@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { getPool } from '../db/pool.js';
 
 export type FieldLogTag =
   'local_tip' | 'gear_alert' | 'tide_condition' | 'food_find' | 'heritage' | 'eco_watch' | 'general';
@@ -41,7 +42,27 @@ export interface SpotReport {
   details?: string;
   status: 'pending' | 'reviewed' | 'dismissed';
   created_at: string;
+  resolved_by?: string;
+  resolved_at?: string;
+  resolution_note?: string;
 }
+
+const iso = (value: unknown) => (value instanceof Date ? value.toISOString() : value ? String(value) : undefined);
+
+// Plan 92b: spot_reports rows (migration 088) in the same shape as the in-memory reports.
+const reportFromRow = (row: Record<string, unknown>): SpotReport => ({
+  id: String(row.id),
+  spot_id: String(row.spot_id),
+  user_id: row.user_id ? String(row.user_id) : undefined,
+  reporter_name: String(row.reporter_name),
+  reason: row.reason as SpotReportReason,
+  details: row.details ? String(row.details) : undefined,
+  status: row.status as SpotReport['status'],
+  created_at: iso(row.created_at)!,
+  resolved_by: row.resolved_by ? String(row.resolved_by) : undefined,
+  resolved_at: iso(row.resolved_at),
+  resolution_note: row.resolution_note ? String(row.resolution_note) : undefined,
+});
 
 const SEED_LOGS: SpotFieldLog[] = [
   // Hundred Islands National Park
@@ -163,7 +184,7 @@ const SEED_LOGS: SpotFieldLog[] = [
   },
 ];
 
-class FieldLogStore {
+export class FieldLogStore {
   private logs: SpotFieldLog[] = [...SEED_LOGS];
   private reports: SpotReport[] = [];
 
@@ -235,13 +256,13 @@ class FieldLogStore {
     };
   }
 
-  createReport(
+  async createReport(
     spotId: string,
     reason: SpotReportReason,
     userId?: string,
     reporterName?: string,
     details?: string,
-  ): SpotReport {
+  ): Promise<SpotReport> {
     const report: SpotReport = {
       id: `rep-${randomUUID().slice(0, 8)}`,
       spot_id: spotId,
@@ -253,15 +274,76 @@ class FieldLogStore {
       created_at: new Date().toISOString(),
     };
 
+    const pool = getPool();
+    if (pool) {
+      await pool.query(
+        `INSERT INTO spot_reports(id, spot_id, user_id, reporter_name, reason, details, status, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          report.id,
+          report.spot_id,
+          report.user_id ?? null,
+          report.reporter_name,
+          report.reason,
+          report.details ?? null,
+          report.status,
+          report.created_at,
+        ],
+      );
+      return report;
+    }
     this.reports.unshift(report);
     return report;
   }
 
-  listReports(spotId?: string): SpotReport[] {
+  async listReports(spotId?: string): Promise<SpotReport[]> {
+    const pool = getPool();
+    if (pool) {
+      const result = await pool.query(
+        `SELECT * FROM spot_reports WHERE ($1::text IS NULL OR spot_id = $1) ORDER BY created_at DESC, id`,
+        [spotId ?? null],
+      );
+      return result.rows.map(reportFromRow);
+    }
     if (spotId) {
       return this.reports.filter((r) => r.spot_id === spotId);
     }
     return [...this.reports];
+  }
+
+  async findReport(id: string): Promise<SpotReport | undefined> {
+    const pool = getPool();
+    if (pool) {
+      const result = await pool.query('SELECT * FROM spot_reports WHERE id = $1', [id]);
+      return result.rows[0] ? reportFromRow(result.rows[0]) : undefined;
+    }
+    return this.reports.find((r) => r.id === id);
+  }
+
+  async resolveReport(
+    id: string,
+    input: { status: 'reviewed' | 'dismissed'; resolvedBy: string; note: string },
+  ): Promise<SpotReport | undefined> {
+    const pool = getPool();
+    if (pool) {
+      const result = await pool.query(
+        `UPDATE spot_reports
+            SET status = $2, resolved_by = $3, resolved_at = NOW(), resolution_note = $4, updated_at = NOW()
+          WHERE id = $1
+          RETURNING *`,
+        [id, input.status, input.resolvedBy, input.note],
+      );
+      return result.rows[0] ? reportFromRow(result.rows[0]) : undefined;
+    }
+    const report = this.reports.find((r) => r.id === id);
+    if (!report) return undefined;
+    Object.assign(report, {
+      status: input.status,
+      resolved_by: input.resolvedBy,
+      resolved_at: new Date().toISOString(),
+      resolution_note: input.note,
+    });
+    return report;
   }
 }
 
