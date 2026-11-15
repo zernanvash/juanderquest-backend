@@ -533,6 +533,24 @@ export class SpotStore {
   isLiked(userId: string | undefined, spotId: string) {
     return !!userId && this.interactions.get(userId)?.has(`${spotId}:like`);
   }
+  // Plan 93b WP-13: likes from travelers who are not test accounts.
+  likeCounts() {
+    const counts = new Map<string, number>();
+    for (const [userId, values] of this.interactions.entries()) {
+      if (db.findUserById(userId)?.is_test) continue;
+      for (const key of values) {
+        if (!key.endsWith(':like')) continue;
+        const spotId = key.slice(0, -':like'.length);
+        counts.set(spotId, (counts.get(spotId) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }
+  // A test account still sees its own like counted.
+  likeCount(spotId: string, actorId?: string, counts = this.likeCounts()) {
+    const base = counts.get(spotId) ?? 0;
+    return actorId && db.findUserById(actorId)?.is_test && this.isLiked(actorId, spotId) ? base + 1 : base;
+  }
   trend(spotId: string) {
     return this.trendScores().get(spotId) ?? 0;
   }

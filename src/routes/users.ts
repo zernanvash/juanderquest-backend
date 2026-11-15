@@ -409,6 +409,7 @@ usersRouter.get(
     const actorId =
       req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
 
+    const likeCounts = spotStore.likeCounts();
     const spots = paged.map((spot) => {
       const crowd = spotStore.crowd(spot);
       let sourceName = spot.source_name;
@@ -453,6 +454,7 @@ usersRouter.get(
         pressure_score: crowd.pressure_score,
         saved: Boolean(spotStore.isSaved(actorId, spot.id)),
         liked: Boolean(spotStore.isLiked(actorId, spot.id)),
+        like_count: spotStore.likeCount(spot.id, actorId, likeCounts),
         trend_score: spotStore.trend(spot.id),
       };
     });

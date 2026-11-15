@@ -434,6 +434,7 @@ export interface RankedSpotItem extends Spot, CrowdMetrics {
   recommendation_reasons: string[];
   saved: boolean;
   liked: boolean;
+  like_count: number;
   trend_score: number;
 }
 
@@ -675,9 +676,12 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
   const stateFingerprint = computeStateFingerprint(store, profileUserId || q.userId, resolvedHomeTown);
   const cached = exploreCache.get(cacheKey);
   if (cached && cached.expiresAt > nowMs && cached.stateFingerprint === stateFingerprint) {
+    // Other travelers' likes do not change the fingerprint, so like counts are always fresh.
+    const freshLikes = store.likeCounts();
     const cloned = cached.items.map((item) => ({
       ...item,
       recommendation_reasons: [...item.recommendation_reasons],
+      like_count: store.likeCount(item.id, q.userId || actorKey, freshLikes),
     }));
     const offset = Math.max(0, q.offset ?? 0);
     return q.limit !== undefined ? cloned.slice(offset, offset + q.limit) : cloned.slice(offset);
@@ -691,6 +695,7 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
   const taste = buildUserTasteProfile(store, profileUserId, nowMs);
   const prefs = profileUserId ? store.getPreferences(profileUserId) : undefined;
   const trends = store.trendScores();
+  const likeCounts = store.likeCounts();
   const spotMerits = computeSpotMeritMap(store, nowMs);
   const bySpot = store.eventsBySpot();
   const centroids = computeTownCentroids(store.spots);
@@ -895,6 +900,7 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
         recommendation_reasons: reasons,
         saved: isSaved,
         liked: isLiked,
+        like_count: store.likeCount(s.id, q.userId || actorKey, likeCounts),
         trend_score: trendScore,
       };
     })

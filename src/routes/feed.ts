@@ -12,6 +12,7 @@ export interface FeedItem extends Spot {
   crowd_confidence: string;
   saved: boolean;
   liked: boolean;
+  like_count: number;
 }
 
 // Applies municipal diversity spacing: at most 2 consecutive items from the same municipality
@@ -63,6 +64,7 @@ feedRouter.get('/feed', optionalAuthenticateToken, checkQAAuthorization, (req: A
   );
 
   // 2. Score Spots with Persisted Signals
+  const likeCounts = spotStore.likeCounts();
   const scoredItems: FeedItem[] = eligibleSpots.map((spot) => {
     let score = 0;
     const reasons: string[] = [];
@@ -142,6 +144,7 @@ feedRouter.get('/feed', optionalAuthenticateToken, checkQAAuthorization, (req: A
       crowd_confidence: crowdInfo.crowd_confidence,
       saved: Boolean(spotStore.isSaved(actorId, spot.id)),
       liked: Boolean(spotStore.isLiked(actorId, spot.id)),
+      like_count: spotStore.likeCount(spot.id, actorId, likeCounts),
     };
   });
 
