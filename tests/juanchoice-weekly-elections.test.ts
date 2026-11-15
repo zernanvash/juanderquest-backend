@@ -414,6 +414,12 @@ describe('Plan 65 weekly elections on isolated real PostgreSQL', () => {
       VALUES($1,'Test Coast Festival',$2,$2,2,false)`,
         [randomUUID(), nextWeek(later)],
       );
+      // Plan 94: a festival with the voting boost switched off never names or boosts a round.
+      await fixture.pool.query(
+        `INSERT INTO juanchoice_festivals(id,name,starts_on,ends_on,boost_multiplier,is_test,boosts_voting)
+      VALUES($1,'Quiet Town Fiesta',$2,$2,2,false,false)`,
+        [randomUUID(), later],
+      );
       const outcome = await reconcileMonthlySchedulesAt(
         new Date(weeklyWindow(later, 'Asia/Manila').opensAt.getTime() + DAY),
       );
@@ -444,6 +450,14 @@ describe('Plan 65 weekly elections on isolated real PostgreSQL', () => {
         )
       ).rows[0];
       expect(festivalRound).toMatchObject({ round_tier: 'special_festival', festival_name: 'Test Coast Festival' });
+      const quietRound = (
+        await fixture.pool.query(
+          `SELECT c.festival_name FROM juanchoice_schedule_periods p
+      JOIN juanchoice_campaigns c ON c.id=p.campaign_id WHERE p.schedule_id=$1 AND p.period_start=$2`,
+          [scheduleId, later],
+        )
+      ).rows[0];
+      expect(quietRound.festival_name).toBeNull();
     },
     60_000,
   );

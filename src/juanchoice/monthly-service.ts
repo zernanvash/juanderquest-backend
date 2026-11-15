@@ -558,7 +558,7 @@ async function reconcileSchedule(
       ? (
           await client.query(
             `SELECT name,to_char(starts_on,'YYYY-MM-DD') AS starts_on,to_char(ends_on,'YYYY-MM-DD') AS ends_on,boost_multiplier
-       FROM juanchoice_festivals WHERE is_test=$1`,
+       FROM juanchoice_festivals WHERE is_test=$1 AND boosts_voting`,
             [schedule.is_test],
           )
         ).rows
