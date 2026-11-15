@@ -88,13 +88,25 @@ describe('Test quizzes are visible only to test accounts', () => {
   it('hides quiz detail across the test boundary', async () => {
     expect((await request(app).get(`/api/v1/quizzes/${testQuiz}`)).status).toBe(404);
     expect(
-      (await request(app).get(`/api/v1/quizzes/${testQuiz}`).set('Authorization', `Bearer ${token(realUser)}`)).status,
+      (
+        await request(app)
+          .get(`/api/v1/quizzes/${testQuiz}`)
+          .set('Authorization', `Bearer ${token(realUser)}`)
+      ).status,
     ).toBe(404);
     expect(
-      (await request(app).get(`/api/v1/quizzes/${realQuiz}`).set('Authorization', `Bearer ${token(testUser)}`)).status,
+      (
+        await request(app)
+          .get(`/api/v1/quizzes/${realQuiz}`)
+          .set('Authorization', `Bearer ${token(testUser)}`)
+      ).status,
     ).toBe(404);
     expect(
-      (await request(app).get(`/api/v1/quizzes/${testQuiz}`).set('Authorization', `Bearer ${token(testUser)}`)).status,
+      (
+        await request(app)
+          .get(`/api/v1/quizzes/${testQuiz}`)
+          .set('Authorization', `Bearer ${token(testUser)}`)
+      ).status,
     ).toBe(200);
   });
 
