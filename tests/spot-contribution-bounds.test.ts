@@ -72,6 +72,26 @@ describe('Spot contribution coordinate bounds (Philippine-wide)', () => {
     }
   });
 
+  it('accepts the relative path our own upload route returns as the cover image', async () => {
+    const res = await request(app)
+      .post('/api/v1/spots')
+      .set('Authorization', `Bearer ${token}`)
+      .send(basePayload({ name: 'Uploaded Cover Destination', image_url: '/api/v1/uploads/spot-photos/spot_photo_abc-123.jpg' }));
+    expect(res.status).toBe(201);
+    expect(res.body.data.image_url).toBe('/api/v1/uploads/spot-photos/spot_photo_abc-123.jpg');
+  });
+
+  it.each(['/etc/passwd', '/api/v1/uploads/spot-photos/../secret', '/api/v1/uploads/spot-photos/..', 'not a url'])(
+    'rejects image_url %s',
+    async (image_url) => {
+      const res = await request(app)
+        .post('/api/v1/spots')
+        .set('Authorization', `Bearer ${token}`)
+        .send(basePayload({ image_url }));
+      expect(res.status).toBe(400);
+    },
+  );
+
   it('rejects requests with missing required fields', async () => {
     const res = await request(app)
       .post('/api/v1/spots')
