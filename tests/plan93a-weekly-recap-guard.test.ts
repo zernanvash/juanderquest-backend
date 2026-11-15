@@ -53,10 +53,10 @@ describe('Plan 93a: Weekly recap noise & quest-suggestion guards (real PostgreSQ
     await testDb.pool.query('DELETE FROM user_notifications');
 
     // rankedUser follows friendUser; friendUser completed both a draft quest (twice) and a published quest (once)
-    await testDb.pool.query(
-      `INSERT INTO user_follows (follower_id, following_id) VALUES ($1, $2)`,
-      [rankedUserId, friendUserId],
-    );
+    await testDb.pool.query(`INSERT INTO user_follows (follower_id, following_id) VALUES ($1, $2)`, [
+      rankedUserId,
+      friendUserId,
+    ]);
     await testDb.pool.query(
       `INSERT INTO social_activities (id, event_key, actor_id, verb, subject_type, subject_id, subject_title, subject_href, municipality, created_at, is_test)
        VALUES

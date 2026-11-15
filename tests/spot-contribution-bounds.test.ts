@@ -76,7 +76,12 @@ describe('Spot contribution coordinate bounds (Philippine-wide)', () => {
     const res = await request(app)
       .post('/api/v1/spots')
       .set('Authorization', `Bearer ${token}`)
-      .send(basePayload({ name: 'Uploaded Cover Destination', image_url: '/api/v1/uploads/spot-photos/spot_photo_abc-123.jpg' }));
+      .send(
+        basePayload({
+          name: 'Uploaded Cover Destination',
+          image_url: '/api/v1/uploads/spot-photos/spot_photo_abc-123.jpg',
+        }),
+      );
     expect(res.status).toBe(201);
     expect(res.body.data.image_url).toBe('/api/v1/uploads/spot-photos/spot_photo_abc-123.jpg');
   });
