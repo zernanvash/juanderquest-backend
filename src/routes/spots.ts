@@ -231,6 +231,7 @@ router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, (req
       ...spotStore.crowd(spot),
       saved: spotStore.isSaved(actorId, spot.id),
       liked: spotStore.isLiked(actorId, spot.id),
+      like_count: spotStore.likeCount(spot.id, actorId),
       trend_score: spotStore.trend(spot.id),
       attached_assets: attached,
     },
@@ -285,7 +286,10 @@ router.put('/spots/:id/like', optionalAuthenticateToken, (req: AuthRequest, res)
     req.ip ||
     'anon';
   spotStore.interact(String(actorId), spot.id, 'like', true);
-  return res.json({ success: true, data: { liked: true, spot_id: spot.id } });
+  return res.json({
+    success: true,
+    data: { liked: true, spot_id: spot.id, like_count: spotStore.likeCount(spot.id, String(actorId)) },
+  });
 });
 
 router.delete('/spots/:id/like', optionalAuthenticateToken, (req: AuthRequest, res) => {
@@ -298,7 +302,10 @@ router.delete('/spots/:id/like', optionalAuthenticateToken, (req: AuthRequest, r
     req.ip ||
     'anon';
   spotStore.interact(String(actorId), spot.id, 'like', false);
-  return res.json({ success: true, data: { liked: false, spot_id: spot.id } });
+  return res.json({
+    success: true,
+    data: { liked: false, spot_id: spot.id, like_count: spotStore.likeCount(spot.id, String(actorId)) },
+  });
 });
 router.post(
   '/spots/:id/interactions',
