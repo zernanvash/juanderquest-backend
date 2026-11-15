@@ -2,6 +2,7 @@ import { Router, Response, NextFunction } from 'express';
 import { randomUUID, createHash, timingSafeEqual } from 'crypto';
 import multer from 'multer';
 import { z } from 'zod';
+import { httpUrl } from '../utils/http-url.js';
 import path from 'path';
 import fs from 'fs';
 import { db, QuestAttemptRow, QuestRow, QuestStepEvidenceRow, withinRadius } from '../db/index.js';
@@ -91,7 +92,7 @@ const stepEvidenceSchema = z.object({
       challenge_token: z.string().min(1).max(4096).optional(),
       action_name: z.string().max(50).optional(),
       photo_base64: z.string().max(14_000_000).optional(),
-      photo_url: z.string().url().max(2048).optional(),
+      photo_url: httpUrl(2048).optional(),
       photo_sha256: z
         .string()
         .regex(/^[a-f0-9]{64}$/i)
