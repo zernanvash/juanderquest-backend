@@ -24,8 +24,8 @@ describe('Test quizzes are visible only to test accounts', () => {
     await db.hydrateFromPg(testDb.pool);
     await testDb.pool.query(
       `INSERT INTO users (id, seed_id, display_name, email, role, is_test) VALUES
-         ($1, $1, 'Real Traveler', 'real-tq@example.test', 'user', FALSE),
-         ($2, $2, 'Test Traveler', 'test-tq@example.test', 'user', TRUE)`,
+         ($1::text, $1::text, 'Real Traveler', 'real-tq@example.test', 'user', FALSE),
+         ($2::text, $2::text, 'Test Traveler', 'test-tq@example.test', 'user', TRUE)`,
       [realUser, testUser],
     );
     await testDb.pool.query(
