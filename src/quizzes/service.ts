@@ -1,6 +1,6 @@
 import { perkBonus } from '../juanchoice/perks.js';
-import { randomUUID } from 'crypto';
-import type { Pool } from 'pg';
+import { createHash, randomUUID } from 'crypto';
+import type { Pool, PoolClient } from 'pg';
 import { getPool } from '../db/pool.js';
 import { CulturalQuizRepository } from './repository.js';
 import { ProgressionRepository } from '../progression/repository.js';
@@ -9,10 +9,12 @@ import {
   CulturalQuiz,
   CulturalQuizVersion,
   CulturalQuizQuestion,
+  CulturalQuizQuestionType,
   CulturalQuizAttempt,
   CulturalQuizGradedResult,
   CulturalQuizDetail,
   NearbyQuizInvitation,
+  SpotQuizSummary,
 } from './types.js';
 
 export interface StartAttemptParams {
@@ -31,8 +33,7 @@ export interface SubmitAttemptParams {
   answers: Array<{
     questionId: string;
     selectedOptionId?: string;
-    selectedOrder?: string[];
-    selectedLocation?: { lat: number; lng: number };
+    orderedOptionIds?: string[];
     skipped?: boolean;
   }>;
   styleScore?: number;
@@ -56,7 +57,7 @@ export interface CreateQuizDraftParams {
     questionText: string;
     explanation: string;
     sourceUrl?: string;
-    questionType?: 'multiple_choice' | 'true_false' | 'picture' | 'order' | 'map_drop';
+    questionType?: CulturalQuizQuestionType;
     mediaUrl?: string | null;
     hint?: string | null;
     round?: 'main' | 'special' | 'lightning';
@@ -69,6 +70,152 @@ export interface CreateQuizDraftParams {
   }>;
   adminUserId: string;
   isTest?: boolean;
+}
+
+function deterministicShuffle<T>(items: T[], seed: string): T[] {
+  const arr = [...items];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const hash = createHash('sha256').update(`${seed}:${i}`).digest();
+    const n = hash.readUInt32BE(0);
+    const j = n % (i + 1);
+    const tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+  }
+  return arr;
+}
+
+function sanitizeAttemptQuestions(
+  questions: CulturalQuizQuestion[],
+  attemptId: string,
+  revealAnswers = false,
+): CulturalQuizQuestion[] {
+  return questions.map((q) => {
+    const qType = q.question_type || 'multiple_choice';
+    const baseOptions =
+      qType === 'sequence_order' && !revealAnswers
+        ? deterministicShuffle(q.options, `${attemptId}:${q.id}`)
+        : q.options;
+
+    return {
+      id: q.id,
+      version_id: q.version_id,
+      ordinal: q.ordinal,
+      question_text: q.question_text,
+      explanation: revealAnswers ? q.explanation : '',
+      source_url: q.source_url,
+      question_type: qType,
+      media_url: q.media_url || null,
+      round: q.round || 'main',
+      created_at: q.created_at,
+      options: baseOptions.map((opt) => {
+        if (qType === 'sequence_order' && !revealAnswers) {
+          return {
+            id: opt.id,
+            question_id: opt.question_id,
+            option_text: opt.option_text,
+            created_at: opt.created_at,
+          };
+        }
+        return {
+          id: opt.id,
+          question_id: opt.question_id,
+          ordinal: opt.ordinal,
+          option_text: opt.option_text,
+          ...(revealAnswers ? { is_correct: opt.is_correct } : {}),
+          created_at: opt.created_at,
+        };
+      }),
+    };
+  });
+}
+
+async function fetchDestinationPhotoUrls(client: PoolClient, destinationId: string): Promise<Set<string>> {
+  const urls = new Set<string>();
+  const { rows: assetRows } = await client.query(
+    `SELECT url FROM spot_assets WHERE spot_id = $1 AND status IN ('attached', 'approved')`,
+    [destinationId],
+  );
+  for (const r of assetRows) {
+    if (typeof r.url === 'string' && r.url.trim()) {
+      urls.add(r.url.trim());
+    }
+  }
+  const { rows: spotRows } = await client.query(
+    `SELECT image_url FROM spots WHERE id = $1 AND image_url IS NOT NULL AND image_url <> ''`,
+    [destinationId],
+  );
+  for (const r of spotRows) {
+    if (typeof r.image_url === 'string' && r.image_url.trim()) {
+      urls.add(r.image_url.trim());
+    }
+  }
+  return urls;
+}
+
+function validateQuizDraftQuestions(
+  questions: CreateQuizDraftParams['questions'],
+  allowedSpotPhotoUrls: Set<string>,
+): void {
+  if (questions.length !== 5) {
+    throw new Error('INVALID_QUIZ_DRAFT: A cultural quiz draft must have exactly 5 questions.');
+  }
+  for (const q of questions) {
+    const qType = q.questionType || 'multiple_choice';
+    const ordinals = q.options.map((o) => o.ordinal).sort((a, b) => a - b);
+
+    if (qType === 'true_false') {
+      if (q.options.length !== 2) {
+        throw new Error(`INVALID_QUIZ_DRAFT: Question ${q.ordinal} (true_false) must have exactly 2 options.`);
+      }
+      if (ordinals[0] !== 1 || ordinals[1] !== 2) {
+        throw new Error(`INVALID_QUIZ_DRAFT: Question ${q.ordinal} (true_false) options must have ordinals 1 and 2.`);
+      }
+      const correctCount = q.options.filter((opt) => opt.isCorrect).length;
+      if (correctCount !== 1) {
+        throw new Error(`INVALID_QUIZ_DRAFT: Question ${q.ordinal} must have exactly 1 correct answer.`);
+      }
+    } else if (qType === 'sequence_order') {
+      if (q.options.length < 3 || q.options.length > 4) {
+        throw new Error(
+          `INVALID_QUIZ_DRAFT: Question ${q.ordinal} (sequence_order) must have 3 or 4 options.`,
+        );
+      }
+      for (let i = 0; i < ordinals.length; i++) {
+        if (ordinals[i] !== i + 1) {
+          throw new Error(
+            `INVALID_QUIZ_DRAFT: Question ${q.ordinal} (sequence_order) options must have sequential ordinals 1..${q.options.length}.`,
+          );
+        }
+      }
+    } else if (qType === 'multiple_choice' || qType === 'photo_clue') {
+      if (q.options.length !== 4) {
+        throw new Error(`INVALID_QUIZ_DRAFT: Question ${q.ordinal} must have exactly 4 options.`);
+      }
+      for (let i = 0; i < 4; i++) {
+        if (ordinals[i] !== i + 1) {
+          throw new Error(`INVALID_QUIZ_DRAFT: Question ${q.ordinal} options must have ordinals 1..4.`);
+        }
+      }
+      const correctCount = q.options.filter((opt) => opt.isCorrect).length;
+      if (correctCount !== 1) {
+        throw new Error(`INVALID_QUIZ_DRAFT: Question ${q.ordinal} must have exactly 1 correct answer.`);
+      }
+      if (qType === 'photo_clue') {
+        const url = typeof q.mediaUrl === 'string' ? q.mediaUrl.trim() : '';
+        if (!url) {
+          throw new Error(`INVALID_PHOTO_CLUE: Question ${q.ordinal} (photo_clue) requires a media_url.`);
+        }
+        if (!allowedSpotPhotoUrls.has(url)) {
+          throw new Error(
+            `INVALID_PHOTO_CLUE: Question ${q.ordinal} media_url must belong to the destination's existing spot photos.`,
+          );
+        }
+      }
+    } else {
+      throw new Error(`INVALID_QUIZ_DRAFT: Unsupported question_type '${qType}'.`);
+    }
+  }
 }
 
 // Haversine formula distance in meters
@@ -98,15 +245,21 @@ export class CulturalQuizService {
     return this.pool ?? getPool()!;
   }
 
-  async getNearbyQuizzes(lat: number, lng: number, userId?: string): Promise<NearbyQuizInvitation[]> {
+  async getNearbyQuizzes(
+    lat: number,
+    lng: number,
+    userId?: string,
+    includeApproaching = false,
+  ): Promise<NearbyQuizInvitation[]> {
     const list = await this.repo.listPublishedQuizzes();
     const invitations: NearbyQuizInvitation[] = [];
+    const cutoffBufferMeters = includeApproaching ? 500 : 50;
 
     for (const item of list) {
       const distance = computeHaversineMeters(lat, lng, item.destination.gps_lat, item.destination.gps_lng);
 
-      // Offer invitation if traveler is within radius (or slight 50m buffer for GPS jitter)
-      if (distance <= item.version.radius_meters + 50) {
+      // Offer invitation if traveler is within radius + cutoff buffer (50m default, 500m when approaching)
+      if (distance <= item.version.radius_meters + cutoffBufferMeters) {
         let isCompleted = false;
         if (userId) {
           isCompleted = await this.repo.hasCompletedRewardScope(userId, item.quiz.reward_scope_id);
@@ -121,6 +274,7 @@ export class CulturalQuizService {
           description: item.version.description,
           radius_meters: item.version.radius_meters,
           distance_meters: distance,
+          in_range: distance <= item.version.radius_meters,
           xp_reward: item.version.xp_reward,
           time_limit_minutes: item.version.time_limit_minutes,
           language: item.version.language,
@@ -129,7 +283,49 @@ export class CulturalQuizService {
       }
     }
 
+    invitations.sort((a, b) => {
+      const aCompleted = Boolean(a.is_completed);
+      const bCompleted = Boolean(b.is_completed);
+      if (aCompleted !== bCompleted) return aCompleted ? 1 : -1;
+      if (a.in_range !== b.in_range) return a.in_range ? -1 : 1;
+      if (a.distance_meters !== b.distance_meters) return a.distance_meters - b.distance_meters;
+      return b.xp_reward - a.xp_reward;
+    });
+
     return invitations;
+  }
+
+  async getQuizzesForSpot(spotId: string, userId?: string): Promise<SpotQuizSummary[]> {
+    const list = await this.repo.listPublishedQuizzes();
+    const quizzes: SpotQuizSummary[] = [];
+
+    for (const item of list) {
+      if (item.quiz.destination_id !== spotId) continue;
+      const summary: SpotQuizSummary = {
+        quiz_id: item.quiz.id,
+        title: item.version.title,
+        xp_reward: item.version.xp_reward,
+        radius_meters: item.version.radius_meters,
+        language: item.version.language,
+      };
+      if (userId) {
+        summary.is_completed = await this.repo.hasCompletedRewardScope(
+          userId,
+          item.quiz.reward_scope_id,
+        );
+      }
+      quizzes.push(summary);
+    }
+
+    quizzes.sort((a, b) => {
+      const aCompleted = Boolean(a.is_completed);
+      const bCompleted = Boolean(b.is_completed);
+      if (aCompleted !== bCompleted) return aCompleted ? 1 : -1;
+      if (b.xp_reward !== a.xp_reward) return b.xp_reward - a.xp_reward;
+      return a.title.localeCompare(b.title);
+    });
+
+    return quizzes;
   }
 
   async getQuizDetail(quizId: string, userId?: string): Promise<CulturalQuizDetail | null> {
@@ -244,27 +440,9 @@ export class CulturalQuizService {
       // Check if there is still an unexpired active attempt
       const active = await this.repo.findActiveAttempt(quiz.id, params.userId, client);
       if (active) {
-        // Return existing active attempt questions without is_correct or secret answer keys
+        // Return existing active attempt questions without is_correct, secret answer keys, or sequence ordinals
         const questions = await this.repo.findQuestionsWithOptions(active.version_id, client);
-        const sanitized = questions.map((q) => ({
-          id: q.id,
-          version_id: q.version_id,
-          ordinal: q.ordinal,
-          question_text: q.question_text,
-          explanation: '',
-          source_url: q.source_url,
-          question_type: q.question_type || 'multiple_choice',
-          media_url: q.media_url || null,
-          round: q.round || 'main',
-          created_at: q.created_at,
-          options: q.options.map((opt) => ({
-            id: opt.id,
-            question_id: opt.question_id,
-            ordinal: opt.ordinal,
-            option_text: opt.option_text,
-            created_at: opt.created_at,
-          })),
-        }));
+        const sanitized = sanitizeAttemptQuestions(questions, active.id, false);
         await client.query('COMMIT');
         return { attempt: active, questions: sanitized };
       }
@@ -304,26 +482,8 @@ export class CulturalQuizService {
       const createdAttempt = (this.repo as any).mapAttempt(attemptRows[0]);
       const questions = await this.repo.findQuestionsWithOptions(version.id, client);
 
-      // Sanitize: never reveal is_correct or answer_payload to traveler
-      const sanitized = questions.map((q) => ({
-        id: q.id,
-        version_id: q.version_id,
-        ordinal: q.ordinal,
-        question_text: q.question_text,
-        explanation: '',
-        source_url: q.source_url,
-        question_type: q.question_type || 'multiple_choice',
-        media_url: q.media_url || null,
-        round: q.round || 'main',
-        created_at: q.created_at,
-        options: q.options.map((opt) => ({
-          id: opt.id,
-          question_id: opt.question_id,
-          ordinal: opt.ordinal,
-          option_text: opt.option_text,
-          created_at: opt.created_at,
-        })),
-      }));
+      // Sanitize: never reveal is_correct, answer_payload, or sequence ordinals to traveler
+      const sanitized = sanitizeAttemptQuestions(questions, createdAttempt.id, false);
 
       await client.query('COMMIT');
       return { attempt: createdAttempt, questions: sanitized };
@@ -344,27 +504,7 @@ export class CulturalQuizService {
 
     const questions = await this.repo.findQuestionsWithOptions(attempt.version_id);
     const isFinished = attempt.status !== 'in_progress';
-
-    const mappedQuestions = questions.map((q) => ({
-      id: q.id,
-      version_id: q.version_id,
-      ordinal: q.ordinal,
-      question_text: q.question_text,
-      explanation: isFinished ? q.explanation : '',
-      source_url: q.source_url,
-      question_type: q.question_type || 'multiple_choice',
-      media_url: q.media_url || null,
-      round: q.round || 'main',
-      created_at: q.created_at,
-      options: q.options.map((opt) => ({
-        id: opt.id,
-        question_id: opt.question_id,
-        ordinal: opt.ordinal,
-        option_text: opt.option_text,
-        is_correct: isFinished ? opt.is_correct : undefined,
-        created_at: opt.created_at,
-      })),
-    }));
+    const mappedQuestions = sanitizeAttemptQuestions(questions, attempt.id, isFinished);
 
     return { attempt, questions: mappedQuestions };
   }
@@ -415,7 +555,7 @@ export class CulturalQuizService {
         throw new Error(`MISSING_QUESTION_ID: Question ID is required for the ${params.lifeline} lifeline.`);
       }
       const { rows: questionRows } = await client.query(
-        'SELECT id, hint FROM cultural_quiz_questions WHERE id = $1 AND version_id = $2',
+        'SELECT id, hint, question_type FROM cultural_quiz_questions WHERE id = $1 AND version_id = $2',
         [params.questionId, attempt.version_id],
       );
       if (!questionRows.length) {
@@ -425,6 +565,13 @@ export class CulturalQuizService {
       const usedLifelines: string[] = Array.isArray(attempt.lifelines_used) ? attempt.lifelines_used : [];
       if (usedLifelines.includes(params.lifeline)) {
         throw new Error(`LIFELINE_ALREADY_USED: Lifeline '${params.lifeline}' has already been used in this attempt.`);
+      }
+
+      const qType = (questionRows[0].question_type || 'multiple_choice') as CulturalQuizQuestionType;
+      if (params.lifeline === 'fifty_fifty' && qType !== 'multiple_choice' && qType !== 'photo_clue') {
+        throw new Error(
+          `LIFELINE_NOT_AVAILABLE: 50:50 lifeline is only available for multiple_choice and photo_clue questions.`,
+        );
       }
 
       const updatedLifelines = [...usedLifelines, params.lifeline];
@@ -451,7 +598,6 @@ export class CulturalQuizService {
           `SELECT id, is_correct FROM cultural_quiz_options WHERE question_id = $1 ORDER BY ordinal ASC`,
           [params.questionId],
         );
-        // Always leave at least two options so 50:50 never reveals the answer (e.g. on true/false).
         const removable = Math.min(2, optRows.length - 2);
         if (removable < 1) {
           throw new Error('LIFELINE_NOT_AVAILABLE: 50:50 needs at least three options.');
@@ -510,10 +656,35 @@ export class CulturalQuizService {
 
         const breakdown = questions.map((q) => {
           const ans = answers.find((a) => a.question_id === q.id);
+          const qType = q.question_type || 'multiple_choice';
+          if (qType === 'sequence_order') {
+            const sortedOpts = [...q.options].sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0));
+            const selectedIds = Array.isArray(ans?.submitted_payload?.ordered_option_ids)
+              ? ans!.submitted_payload!.ordered_option_ids!
+              : [];
+            return {
+              question_id: q.id,
+              question_text: q.question_text,
+              question_type: qType,
+              selected_option_id: '',
+              correct_option_id: '',
+              selected_option_ids: selectedIds,
+              correct_option_ids: sortedOpts.map((opt) => opt.id),
+              correct_order: sortedOpts.map((opt) => ({
+                id: opt.id,
+                ordinal: opt.ordinal ?? 0,
+                option_text: opt.option_text,
+              })),
+              is_correct: Boolean(ans?.is_correct),
+              explanation: q.explanation,
+              source_url: q.source_url,
+            };
+          }
           const correctOpt = q.options.find((opt) => opt.is_correct);
           return {
             question_id: q.id,
             question_text: q.question_text,
+            question_type: qType,
             selected_option_id: ans?.selected_option_id || '',
             correct_option_id: correctOpt?.id || '',
             is_correct: Boolean(ans?.is_correct),
@@ -576,34 +747,71 @@ export class CulturalQuizService {
 
         let isCorrect = false;
         let selectedOptId = '';
+        let selectedOptionIds: string[] | undefined;
+        let correctOptionIds: string[] | undefined;
+        let correctOrder: Array<{ id: string; ordinal: number; option_text: string }> | undefined;
+        let submittedPayload: { ordered_option_ids: string[] } | null = null;
+        const qType = q.question_type || 'multiple_choice';
         const correctOpt = q.options.find((opt) => opt.is_correct);
 
         if (submitted.skipped) {
-          // Skipped: no answer row (selected_option_id is NOT NULL) and no point.
-        } else if (q.question_type === 'order' && q.answer_payload?.order) {
-          const expectedOrder = q.answer_payload.order;
-          isCorrect =
-            Array.isArray(submitted.selectedOrder) &&
-            submitted.selectedOrder.length === expectedOrder.length &&
-            submitted.selectedOrder.every((val, idx) => val === expectedOrder[idx]);
-          if (q.options.length > 0) {
-            selectedOptId = q.options[0].id;
+          // Skipped: no answer row and no point.
+          if (qType === 'sequence_order') {
+            const sortedOpts = [...q.options].sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0));
+            correctOptionIds = sortedOpts.map((opt) => opt.id);
+            correctOrder = sortedOpts.map((opt) => ({
+              id: opt.id,
+              ordinal: opt.ordinal ?? 0,
+              option_text: opt.option_text,
+            }));
+            selectedOptionIds = [];
           }
-        } else if (q.question_type === 'map_drop' && q.answer_payload?.lat !== undefined) {
-          if (submitted.selectedLocation) {
-            const dist = computeHaversineMeters(
-              submitted.selectedLocation.lat,
-              submitted.selectedLocation.lng,
-              Number(q.answer_payload.lat),
-              Number(q.answer_payload.lng),
+        } else if (qType === 'sequence_order') {
+          if (submitted.selectedOptionId !== undefined || !Array.isArray(submitted.orderedOptionIds)) {
+            throw new Error(
+              `INVALID_ANSWER_PAYLOAD: Question ${q.ordinal} (sequence_order) requires ordered_option_ids.`,
             );
-            const radius = Number(q.answer_payload.radius_meters || Number(q.answer_payload.radius_km || 5) * 1000);
-            isCorrect = dist <= radius;
           }
-          if (q.options.length > 0) {
-            selectedOptId = q.options[0].id;
+          const optionIdsSet = new Set(q.options.map((o) => o.id));
+          if (submitted.orderedOptionIds.length !== q.options.length) {
+            throw new Error(
+              `INVALID_ANSWER_PAYLOAD: Question ${q.ordinal} requires exactly ${q.options.length} ordered option IDs.`,
+            );
           }
+          const uniqueSubmitted = new Set(submitted.orderedOptionIds);
+          if (uniqueSubmitted.size !== submitted.orderedOptionIds.length) {
+            throw new Error(
+              `INVALID_OPTION_ID: Duplicate option IDs provided for question ${q.ordinal}.`,
+            );
+          }
+          for (const optId of submitted.orderedOptionIds) {
+            if (!optionIdsSet.has(optId)) {
+              throw new Error(
+                `INVALID_OPTION_ID: Option '${optId}' is not valid for question ${q.ordinal}.`,
+              );
+            }
+          }
+          const sortedOpts = [...q.options].sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0));
+          const expectedOrder = sortedOpts.map((opt) => opt.id);
+          isCorrect = submitted.orderedOptionIds.every((id, idx) => id === expectedOrder[idx]);
+          selectedOptionIds = [...submitted.orderedOptionIds];
+          correctOptionIds = expectedOrder;
+          correctOrder = sortedOpts.map((opt) => ({
+            id: opt.id,
+            ordinal: opt.ordinal ?? 0,
+            option_text: opt.option_text,
+          }));
+          submittedPayload = { ordered_option_ids: selectedOptionIds };
         } else {
+          if (
+            submitted.orderedOptionIds !== undefined ||
+            typeof submitted.selectedOptionId !== 'string' ||
+            submitted.selectedOptionId.length === 0
+          ) {
+            throw new Error(
+              `INVALID_ANSWER_PAYLOAD: Question ${q.ordinal} (${qType}) requires selected_option_id.`,
+            );
+          }
           const selectedOpt = q.options.find((opt) => opt.id === submitted.selectedOptionId);
           if (!selectedOpt) {
             throw new Error(
@@ -617,19 +825,29 @@ export class CulturalQuizService {
         if (isCorrect) score += 1;
 
         // Save answer record
-        if (selectedOptId) {
+        if (selectedOptId || submittedPayload) {
           await client.query(
-            `INSERT INTO cultural_quiz_attempt_answers (attempt_id, question_id, selected_option_id, is_correct, answered_at)
-             VALUES ($1, $2, $3, $4, NOW())`,
-            [attemptRow.id, q.id, selectedOptId, isCorrect],
+            `INSERT INTO cultural_quiz_attempt_answers (attempt_id, question_id, selected_option_id, submitted_payload, is_correct, answered_at)
+             VALUES ($1, $2, $3, $4, $5, NOW())`,
+            [
+              attemptRow.id,
+              q.id,
+              selectedOptId || null,
+              submittedPayload ? JSON.stringify(submittedPayload) : null,
+              isCorrect,
+            ],
           );
         }
 
         breakdown.push({
           question_id: q.id,
           question_text: q.question_text,
+          question_type: qType,
           selected_option_id: selectedOptId,
-          correct_option_id: correctOpt?.id || '',
+          correct_option_id: qType === 'sequence_order' ? '' : correctOpt?.id || '',
+          ...(selectedOptionIds !== undefined ? { selected_option_ids: selectedOptionIds } : {}),
+          ...(correctOptionIds !== undefined ? { correct_option_ids: correctOptionIds } : {}),
+          ...(correctOrder !== undefined ? { correct_order: correctOrder } : {}),
           is_correct: isCorrect,
           explanation: q.explanation,
           source_url: q.source_url,
@@ -761,24 +979,14 @@ export class CulturalQuizService {
   // --- Admin Authoring & Lifecycle Operations ---
 
   async createQuizDraft(params: CreateQuizDraftParams): Promise<{ quiz: CulturalQuiz; version: CulturalQuizVersion }> {
-    if (params.questions.length !== 5) {
-      throw new Error('A cultural quiz draft must have exactly 5 questions.');
-    }
-    for (const q of params.questions) {
-      if (q.options.length !== 4) {
-        throw new Error(`Question ${q.ordinal} must have exactly 4 options.`);
-      }
-      const correctCount = q.options.filter((opt) => opt.isCorrect).length;
-      if (correctCount !== 1) {
-        throw new Error(`Question ${q.ordinal} must have exactly 1 correct answer.`);
-      }
-    }
-
     const pool = this.getPool();
     const client = await pool.connect();
 
     try {
       await client.query('BEGIN');
+
+      const allowedSpotPhotoUrls = await fetchDestinationPhotoUrls(client, params.destinationId);
+      validateQuizDraftQuestions(params.questions, allowedSpotPhotoUrls);
 
       const quizId = randomUUID();
       const versionId = randomUUID();
@@ -905,24 +1113,14 @@ export class CulturalQuizService {
     destination: { id: string; name: string; municipality: string; gps_lat: number; gps_lng: number };
     questions: CulturalQuizQuestion[];
   }> {
-    if (params.questions.length !== 5) {
-      throw new Error('A cultural quiz draft must have exactly 5 questions.');
-    }
-    for (const q of params.questions) {
-      if (q.options.length !== 4) {
-        throw new Error(`Question ${q.ordinal} must have exactly 4 options.`);
-      }
-      const correctCount = q.options.filter((opt) => opt.isCorrect).length;
-      if (correctCount !== 1) {
-        throw new Error(`Question ${q.ordinal} must have exactly 1 correct answer.`);
-      }
-    }
-
     const pool = this.getPool();
     const client = await pool.connect();
 
     try {
       await client.query('BEGIN');
+
+      const allowedSpotPhotoUrls = await fetchDestinationPhotoUrls(client, params.destinationId);
+      validateQuizDraftQuestions(params.questions, allowedSpotPhotoUrls);
 
       const { rows: quizRows } = await client.query('SELECT * FROM cultural_quizzes WHERE id = $1 FOR UPDATE', [
         quizId,
@@ -1042,12 +1240,30 @@ export class CulturalQuizService {
         throw new Error('Cannot publish quiz: exactly 5 questions are required.');
       }
       for (const q of questions) {
-        if (q.options.length !== 4) {
-          throw new Error(`Question ${q.ordinal} does not have 4 options.`);
-        }
-        const correctCount = q.options.filter((o) => o.is_correct).length;
-        if (correctCount !== 1) {
-          throw new Error(`Question ${q.ordinal} must have exactly one correct option.`);
+        const qType = q.question_type || 'multiple_choice';
+        if (qType === 'true_false') {
+          if (q.options.length !== 2) {
+            throw new Error(`Question ${q.ordinal} (true_false) must have exactly 2 options.`);
+          }
+          const correctCount = q.options.filter((o) => o.is_correct).length;
+          if (correctCount !== 1) {
+            throw new Error(`Question ${q.ordinal} must have exactly one correct option.`);
+          }
+        } else if (qType === 'sequence_order') {
+          if (q.options.length < 3 || q.options.length > 4) {
+            throw new Error(`Question ${q.ordinal} (sequence_order) must have 3 to 4 options.`);
+          }
+        } else {
+          if (q.options.length !== 4) {
+            throw new Error(`Question ${q.ordinal} does not have 4 options.`);
+          }
+          const correctCount = q.options.filter((o) => o.is_correct).length;
+          if (correctCount !== 1) {
+            throw new Error(`Question ${q.ordinal} must have exactly one correct option.`);
+          }
+          if (qType === 'photo_clue' && !q.media_url) {
+            throw new Error(`Question ${q.ordinal} (photo_clue) requires a destination photo.`);
+          }
         }
       }
 

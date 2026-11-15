@@ -1,7 +1,7 @@
 export type CulturalQuizStatus = 'draft' | 'published' | 'paused' | 'archived';
 export type CulturalQuizAttemptStatus = 'in_progress' | 'passed' | 'failed' | 'abandoned' | 'expired';
 export type CulturalQuizLanguage = 'en' | 'fil' | 'ilo' | 'pag';
-export type CulturalQuizQuestionType = 'multiple_choice' | 'true_false' | 'picture' | 'order' | 'map_drop';
+export type CulturalQuizQuestionType = 'multiple_choice' | 'true_false' | 'photo_clue' | 'sequence_order';
 export type CulturalQuizRound = 'main' | 'special' | 'lightning';
 export type CulturalQuizLifeline = 'fifty_fifty' | 'ask_local' | 'skip';
 
@@ -38,7 +38,7 @@ export interface CulturalQuizVersion {
 export interface CulturalQuizOption {
   id: string;
   question_id: string;
-  ordinal: number;
+  ordinal?: number;
   option_text: string;
   is_correct?: boolean; // stripped on public/traveler surfaces
   created_at: string;
@@ -102,7 +102,8 @@ export interface CulturalQuizAttempt {
 export interface CulturalQuizAttemptAnswer {
   attempt_id: string;
   question_id: string;
-  selected_option_id: string;
+  selected_option_id: string | null;
+  submitted_payload?: { ordered_option_ids?: string[] } | null;
   is_correct: boolean;
   answered_at: string;
 }
@@ -118,8 +119,12 @@ export interface CulturalQuizGradedResult {
   breakdown: Array<{
     question_id: string;
     question_text: string;
+    question_type?: CulturalQuizQuestionType;
     selected_option_id: string;
     correct_option_id: string;
+    selected_option_ids?: string[];
+    correct_option_ids?: string[];
+    correct_order?: Array<{ id: string; ordinal: number; option_text: string }>;
     is_correct: boolean;
     explanation: string;
     source_url?: string | null;
@@ -135,8 +140,18 @@ export interface NearbyQuizInvitation {
   description: string;
   radius_meters: number;
   distance_meters: number;
+  in_range: boolean;
   xp_reward: number;
   time_limit_minutes: number;
+  language: CulturalQuizLanguage;
+  is_completed?: boolean;
+}
+
+export interface SpotQuizSummary {
+  quiz_id: string;
+  title: string;
+  xp_reward: number;
+  radius_meters: number;
   language: CulturalQuizLanguage;
   is_completed?: boolean;
 }

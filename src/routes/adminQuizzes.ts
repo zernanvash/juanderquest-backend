@@ -94,9 +94,16 @@ const createDraftSchema = z.object({
         explanation: z.string().min(3),
         source_url: z.string().url().optional(),
         question_type: z
-          .enum(['multiple_choice', 'true_false', 'picture', 'order', 'map_drop'])
+          .enum(['multiple_choice', 'true_false', 'photo_clue', 'sequence_order'])
           .default('multiple_choice'),
-        media_url: z.string().url().optional().nullable(),
+        // Spot photos are stored as http(s) URLs or root-relative /api/v1/uploads paths;
+        // the service checks the value belongs to the destination's own photos.
+        media_url: z
+          .string()
+          .max(2048)
+          .refine((v) => /^https?:\/\//i.test(v) || v.startsWith('/'), 'media_url must be an http(s) URL or a /path.')
+          .optional()
+          .nullable(),
         hint: z.string().max(500).optional().nullable(),
         round: z.enum(['main', 'special', 'lightning']).default('main'),
         answer_payload: z.any().optional().nullable(),
@@ -105,10 +112,11 @@ const createDraftSchema = z.object({
             z.object({
               ordinal: z.number().int().min(1).max(4),
               option_text: z.string().min(1),
-              is_correct: z.boolean(),
+              is_correct: z.boolean().optional().default(false),
             }),
           )
-          .length(4),
+          .min(2)
+          .max(4),
       }),
     )
     .length(5),
@@ -185,9 +193,22 @@ router.post(
         data: result,
       });
     } catch (err: any) {
+      const message: string = err?.message || '';
+      if (message.startsWith('INVALID_PHOTO_CLUE')) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'INVALID_PHOTO_CLUE', message },
+        });
+      }
+      if (message.startsWith('INVALID_QUIZ_DRAFT')) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message },
+        });
+      }
       return res.status(500).json({
         success: false,
-        error: { code: 'INTERNAL_ERROR', message: err?.message || 'Failed to create quiz draft.' },
+        error: { code: 'INTERNAL_ERROR', message: message || 'Failed to create quiz draft.' },
       });
     }
   },

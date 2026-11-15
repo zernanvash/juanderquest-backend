@@ -90,6 +90,7 @@ export const MIGRATIONS = [
   '083_hot_foreign_key_indexes.sql',
   '084_drop_duplicate_indexes_and_status_checks.sql',
   '085_drop_unused_tables_if_empty.sql',
+  '086_quiz_types_and_media.sql',
   '087_admin_role_scope_check.sql',
 ];
 

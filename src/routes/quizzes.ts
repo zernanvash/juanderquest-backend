@@ -14,6 +14,7 @@ const service = new CulturalQuizService(repo, progressionRepo);
 const nearbySchema = z.object({
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
+  include_approaching: z.boolean().optional().default(false),
 });
 
 const startAttemptSchema = z.object({
@@ -30,13 +31,7 @@ const submitAttemptSchema = z.object({
       z.object({
         question_id: z.string().min(1),
         selected_option_id: z.string().optional(),
-        selected_order: z.array(z.string()).optional(),
-        selected_location: z
-          .object({
-            lat: z.number().min(-90).max(90),
-            lng: z.number().min(-180).max(180),
-          })
-          .optional(),
+        ordered_option_ids: z.array(z.string().min(1)).optional(),
         skipped: z.boolean().optional(),
       }),
     )
@@ -62,7 +57,12 @@ router.post('/quizzes/nearby', optionalAuthenticateToken, async (req: AuthReques
   }
 
   try {
-    const invitations = await service.getNearbyQuizzes(parsed.data.lat, parsed.data.lng, req.user?.id);
+    const invitations = await service.getNearbyQuizzes(
+      parsed.data.lat,
+      parsed.data.lng,
+      req.user?.id,
+      parsed.data.include_approaching,
+    );
 
     res.setHeader('Cache-Control', 'private, no-store');
     return res.status(200).json({
@@ -73,6 +73,22 @@ router.post('/quizzes/nearby', optionalAuthenticateToken, async (req: AuthReques
     return res.status(500).json({
       success: false,
       error: { code: 'INTERNAL_ERROR', message: err?.message || 'Failed to query nearby quizzes.' },
+    });
+  }
+});
+
+// GET /api/v1/spots/:id/quizzes - List published quizzes for a spot
+router.get('/spots/:id/quizzes', optionalAuthenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const quizzes = await service.getQuizzesForSpot(req.params.id, req.user?.id);
+    return res.status(200).json({
+      success: true,
+      data: quizzes,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: err?.message || 'Failed to fetch spot quizzes.' },
     });
   }
 });
@@ -199,11 +215,10 @@ router.post('/quizzes/:id/attempts/:attemptId/lifeline', authenticateToken, asyn
     if (msg.startsWith('LIFELINE_ALREADY_USED')) {
       return res.status(400).json({ success: false, error: { code: 'LIFELINE_ALREADY_USED', message: msg } });
     }
-    if (
-      msg.startsWith('MISSING_QUESTION_ID') ||
-      msg.startsWith('INVALID_QUESTION_ID') ||
-      msg.startsWith('LIFELINE_NOT_AVAILABLE')
-    ) {
+    if (msg.startsWith('LIFELINE_NOT_AVAILABLE')) {
+      return res.status(400).json({ success: false, error: { code: 'LIFELINE_NOT_AVAILABLE', message: msg } });
+    }
+    if (msg.startsWith('MISSING_QUESTION_ID') || msg.startsWith('INVALID_QUESTION_ID')) {
       return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: msg } });
     }
     if (msg.startsWith('ATTEMPT_NOT_FOUND')) {
@@ -259,8 +274,7 @@ router.put('/quiz-attempts/:id/submission', authenticateToken, async (req: AuthR
     const mappedAnswers = parsed.data.answers.map((a) => ({
       questionId: a.question_id,
       selectedOptionId: a.selected_option_id,
-      selectedOrder: a.selected_order,
-      selectedLocation: a.selected_location,
+      orderedOptionIds: a.ordered_option_ids,
       skipped: a.skipped,
     }));
 
@@ -293,6 +307,7 @@ router.put('/quiz-attempts/:id/submission', authenticateToken, async (req: AuthR
       msg.startsWith('MISSING_ANSWERS') ||
       msg.startsWith('DUPLICATE_ANSWERS') ||
       msg.startsWith('INVALID_OPTION_ID') ||
+      msg.startsWith('INVALID_ANSWER_PAYLOAD') ||
       msg.startsWith('INVALID_SKIP')
     ) {
       return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: msg } });
