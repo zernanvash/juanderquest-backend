@@ -8,7 +8,8 @@ describe('Phase 6: Isolated Backup & Restore Drill', () => {
   beforeAll(async () => {
     primaryDb = await createTestDb();
     isolatedRestoreDb = await createTestDb();
-  }, 30000);
+    // Two full migration runs; 30 s stopped being enough as migrations grew.
+  }, 120000);
 
   afterAll(async () => {
     if (primaryDb) await primaryDb.close();
