@@ -212,7 +212,19 @@ describe('Plan 65 weekly elections on isolated real PostgreSQL', () => {
       const standings = await request(app).get(`/api/v1/juanchoice/campaigns/${campaignId}/standings`);
       expect(standings.status).toBe(200);
       expect(JSON.stringify(standings.body)).toContain('??? Mystery perk');
-      expect(JSON.stringify(standings.body)).not.toContain(mysteries[0].key);
+      // Check the mystery owner's own row: another candidate may openly hold the same perk type,
+      // because perks come from a small shared pool.
+      const mysteryOwner = (candidates as any[]).find((c) => c.manifesto_perks.some((perk: any) => perk.is_mystery));
+      const publicOwner = standings.body.data.standings.find((row: any) => row.candidate_id === mysteryOwner.id);
+      expect(publicOwner.manifesto_perks.filter((perk: any) => perk.is_mystery)).toEqual([
+        {
+          is_mystery: true,
+          revealed: false,
+          label: '??? Mystery perk',
+          description: 'Revealed when this destination wins.',
+        },
+      ]);
+      expect(JSON.stringify(publicOwner)).not.toContain(mysteries[0].key);
     },
     60_000,
   );
