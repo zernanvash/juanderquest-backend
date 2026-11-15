@@ -245,13 +245,21 @@ export class CulturalQuizService {
     return this.pool ?? getPool()!;
   }
 
+  // Test quizzes are only for test accounts; signed-out visitors and real travelers never see them.
+  private async viewerIsTest(userId?: string): Promise<boolean> {
+    if (!userId) return false;
+    const { rows } = await this.getPool().query('SELECT is_test FROM users WHERE id = $1', [userId]);
+    return Boolean(rows[0]?.is_test);
+  }
+
   async getNearbyQuizzes(
     lat: number,
     lng: number,
     userId?: string,
     includeApproaching = false,
   ): Promise<NearbyQuizInvitation[]> {
-    const list = await this.repo.listPublishedQuizzes();
+    const viewerIsTest = await this.viewerIsTest(userId);
+    const list = (await this.repo.listPublishedQuizzes()).filter((item) => item.quiz.is_test === viewerIsTest);
     const invitations: NearbyQuizInvitation[] = [];
     const cutoffBufferMeters = includeApproaching ? 500 : 50;
 
@@ -296,7 +304,8 @@ export class CulturalQuizService {
   }
 
   async getQuizzesForSpot(spotId: string, userId?: string): Promise<SpotQuizSummary[]> {
-    const list = await this.repo.listPublishedQuizzes();
+    const viewerIsTest = await this.viewerIsTest(userId);
+    const list = (await this.repo.listPublishedQuizzes()).filter((item) => item.quiz.is_test === viewerIsTest);
     const quizzes: SpotQuizSummary[] = [];
 
     for (const item of list) {
@@ -331,6 +340,7 @@ export class CulturalQuizService {
   async getQuizDetail(quizId: string, userId?: string): Promise<CulturalQuizDetail | null> {
     const quiz = await this.repo.findQuizById(quizId);
     if (!quiz) return null;
+    if (quiz.is_test !== (await this.viewerIsTest(userId))) return null;
 
     const version = await this.repo.findVersion(quiz.id, quiz.current_version);
     if (!version) return null;
@@ -397,7 +407,9 @@ export class CulturalQuizService {
       await client.query('BEGIN');
 
       // 1. Lock user row first for hierarchy
-      await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [params.userId]);
+      const { rows: userRows } = await client.query('SELECT id, is_test FROM users WHERE id = $1 FOR UPDATE', [
+        params.userId,
+      ]);
 
       // 2. Fetch and lock quiz
       const { rows: quizRows } = await client.query('SELECT * FROM cultural_quizzes WHERE id = $1 FOR UPDATE', [
@@ -407,6 +419,9 @@ export class CulturalQuizService {
         throw new Error('QUIZ_NOT_FOUND: Cultural quiz does not exist.');
       }
       const quiz = quizRows[0];
+      if (Boolean(quiz.is_test) !== Boolean(userRows[0]?.is_test)) {
+        throw new Error('QUIZ_NOT_FOUND: Cultural quiz does not exist.');
+      }
       if (quiz.status !== 'published') {
         throw new Error(`QUIZ_NOT_AVAILABLE: Cultural quiz is currently ${quiz.status}.`);
       }
