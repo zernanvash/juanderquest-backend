@@ -1523,6 +1523,15 @@ export class MemoryDb {
     return this.users.find((u) => u.is_public && u.handle?.toLowerCase() === clean && (allowTest || !u.is_test));
   }
 
+  /** Any visibility; test accounts only when allowed. */
+  async findUserByHandleDurable(handle: string, allowTest = false): Promise<UserRow | undefined> {
+    if (this.pg) {
+      return await this.usersRepo.findByHandle(handle, allowTest);
+    }
+    const clean = handle.replace(/^@/, '').toLowerCase().trim();
+    return this.users.find((u) => u.handle?.toLowerCase() === clean && (allowTest || !u.is_test));
+  }
+
   findUserByHandle(handle: string): UserRow | undefined {
     const clean = handle.replace(/^@/, '').toLowerCase().trim();
     return this.users.find((u) => u.handle?.toLowerCase() === clean);

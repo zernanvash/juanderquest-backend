@@ -197,6 +197,18 @@ export class UsersRepository {
     return this.mapRow(rows[0]);
   }
 
+  /** Any visibility (Plan 100 WP-1: posted spots show even on private profiles). */
+  async findByHandle(rawHandle: string, allowTest = false): Promise<UserRow | undefined> {
+    if (!this.pool) return undefined;
+    const clean = rawHandle.replace(/^@/, '').toLowerCase().trim();
+    const { rows } = await this.pool.query(
+      'SELECT * FROM users WHERE LOWER(handle) = $1 AND ($2 = TRUE OR COALESCE(is_test, FALSE) = FALSE)',
+      [clean, allowTest],
+    );
+    if (!rows.length) return undefined;
+    return this.mapRow(rows[0]);
+  }
+
   async findByWalletAddress(walletAddress: string): Promise<UserRow | undefined> {
     if (!this.pool) return undefined;
     const clean = walletAddress.trim().toLowerCase();

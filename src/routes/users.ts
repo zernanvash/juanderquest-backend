@@ -281,27 +281,18 @@ usersRouter.get(
     const trimmed = rawHandle.trim();
     const clean = trimmed.replace(/^@/, '').toLowerCase();
 
-    // Allow user to view their own spots if authenticated
-    let user = req.user ? (await db.findUserByIdDurable(req.user.id)) || db.findUserById(req.user.id) : undefined;
-    if (user && user.id !== trimmed && user.handle?.toLowerCase() !== clean) {
-      user = undefined;
-    }
-
-    if (!user) {
-      user = await db.findPublicUserByHandle(clean, allowTest);
-    }
-    if (!user && (trimmed.includes('-') || trimmed.length === 36)) {
-      user = await db.findPublicUserById(trimmed, allowTest);
-    }
-    if (!user) {
-      user = await db.findUserByIdDurable(trimmed);
-      if (user && !user.is_public && (!req.user || req.user.id !== user.id)) {
-        user = undefined;
-      }
-      if (user && user.is_test && !allowTest) {
-        user = undefined;
-      }
-    }
+    // Owner 2026-11-16 (Plan 100 WP-1): published spots are public content, so they show
+    // even when the profile is private. Match the account by id, handle or seed_id (wallet
+    // accounts have `wallet:0x…` seed ids, which the app used to send).
+    const self = req.user ? (await db.findUserByIdDurable(req.user.id)) || db.findUserById(req.user.id) : undefined;
+    let user =
+      self && (self.id === trimmed || self.handle?.toLowerCase() === clean || self.seed_id === trimmed)
+        ? self
+        : undefined;
+    if (!user) user = await db.findUserByHandleDurable(clean, allowTest);
+    if (!user) user = await db.findUserByIdDurable(trimmed);
+    if (!user) user = await db.findUserBySeedDurable(trimmed);
+    if (user && user !== self && user.is_test && !allowTest) user = undefined;
 
     if (!user) {
       return res.status(404).json({
