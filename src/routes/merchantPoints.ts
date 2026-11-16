@@ -223,7 +223,10 @@ merchantPointsRouter.get(
         [merchantId, source, limit],
       );
       res.setHeader('Cache-Control', 'private, no-store');
-      return res.json({ success: true, data: { items: result.rows, simulated: true, funding_enabled: env.QUEST_FUNDING_ENABLED } });
+      return res.json({
+        success: true,
+        data: { items: result.rows, simulated: true, funding_enabled: env.QUEST_FUNDING_ENABLED },
+      });
     } catch (error) {
       return sendError(res, error);
     }

@@ -131,7 +131,9 @@ realPg('Plan 97: Quest funding admin inspection & map-pinned cultural quizzes (r
     });
 
     // Saving the same draft twice via PATCH must reuse the same non-public spot and never publish it.
-    const countAfterCreate = await fixture.pool.query('SELECT COUNT(*)::int AS cnt FROM spots WHERE id = $1', [pinSpotId]);
+    const countAfterCreate = await fixture.pool.query('SELECT COUNT(*)::int AS cnt FROM spots WHERE id = $1', [
+      pinSpotId,
+    ]);
     expect(countAfterCreate.rows[0].cnt).toBe(1);
 
     const patchRes = await request(app)
@@ -249,6 +251,7 @@ realPg('Plan 97: Quest funding admin inspection & map-pinned cultural quizzes (r
       .patch(`/api/v1/admin/quizzes/${quizId}`)
       .set(as(areaAdminId, 'area_admin'))
       .send({
+        destination_id: inAreaPost.body.data.quiz.destination_id,
         host_lines: { pin_lat: 16.386, pin_lng: 119.893 },
         title: 'Host lines pin attempt',
         description: 'The pin keys must be ignored.',

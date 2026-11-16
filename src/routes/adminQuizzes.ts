@@ -75,11 +75,7 @@ const isPinInScope = async (
 ): Promise<boolean> => {
   if (scope.platform) return true;
   await ensureAreaCache(getPool());
-  const match = matchSpotToAreas(
-    pin.lat,
-    pin.lng,
-    typeof pin.municipality === 'string' ? pin.municipality : undefined,
-  );
+  const match = matchSpotToAreas(pin.lat, pin.lng, typeof pin.municipality === 'string' ? pin.municipality : undefined);
   return (
     assertInScope(scope, 'quests_quizzes', match.townAreaId) ||
     assertInScope(scope, 'quests_quizzes', match.barangayAreaId)
@@ -154,48 +150,48 @@ const createDraftSchema = z
       .optional(),
     location_label: z.string().trim().max(160).optional(),
     title: z.string().min(3).max(200),
-  description: z.string().min(10),
-  language: z.enum(['en', 'fil', 'ilo', 'pag']).default('en'),
-  radius_meters: z.number().int().min(100).max(1000).default(200),
-  xp_reward: z.number().int().positive().default(25),
-  time_limit_minutes: z.number().int().min(5).max(120).default(30),
-  cooldown_hours: z.number().int().min(1).max(168).default(24),
-  host_lines: z.any().optional(),
-  theme: z.string().max(50).default('crt'),
-  questions: z
-    .array(
-      z.object({
-        ordinal: z.number().int().min(1).max(5),
-        question_text: z.string().min(3),
-        explanation: z.string().min(3),
-        source_url: httpUrl().optional(),
-        question_type: z
-          .enum(['multiple_choice', 'true_false', 'photo_clue', 'sequence_order'])
-          .default('multiple_choice'),
-        // Spot photos are stored as http(s) URLs or root-relative /api/v1/uploads paths;
-        // the service checks the value belongs to the destination's own photos.
-        media_url: z
-          .string()
-          .max(2048)
-          .refine((v) => /^https?:\/\//i.test(v) || v.startsWith('/'), 'media_url must be an http(s) URL or a /path.')
-          .optional()
-          .nullable(),
-        hint: z.string().max(500).optional().nullable(),
-        round: z.enum(['main', 'special', 'lightning']).default('main'),
-        answer_payload: z.any().optional().nullable(),
-        options: z
-          .array(
-            z.object({
-              ordinal: z.number().int().min(1).max(4),
-              option_text: z.string().min(1),
-              is_correct: z.boolean().optional().default(false),
-            }),
-          )
-          .min(2)
-          .max(4),
-      }),
-    )
-    .length(5),
+    description: z.string().min(10),
+    language: z.enum(['en', 'fil', 'ilo', 'pag']).default('en'),
+    radius_meters: z.number().int().min(100).max(1000).default(200),
+    xp_reward: z.number().int().positive().default(25),
+    time_limit_minutes: z.number().int().min(5).max(120).default(30),
+    cooldown_hours: z.number().int().min(1).max(168).default(24),
+    host_lines: z.any().optional(),
+    theme: z.string().max(50).default('crt'),
+    questions: z
+      .array(
+        z.object({
+          ordinal: z.number().int().min(1).max(5),
+          question_text: z.string().min(3),
+          explanation: z.string().min(3),
+          source_url: httpUrl().optional(),
+          question_type: z
+            .enum(['multiple_choice', 'true_false', 'photo_clue', 'sequence_order'])
+            .default('multiple_choice'),
+          // Spot photos are stored as http(s) URLs or root-relative /api/v1/uploads paths;
+          // the service checks the value belongs to the destination's own photos.
+          media_url: z
+            .string()
+            .max(2048)
+            .refine((v) => /^https?:\/\//i.test(v) || v.startsWith('/'), 'media_url must be an http(s) URL or a /path.')
+            .optional()
+            .nullable(),
+          hint: z.string().max(500).optional().nullable(),
+          round: z.enum(['main', 'special', 'lightning']).default('main'),
+          answer_payload: z.any().optional().nullable(),
+          options: z
+            .array(
+              z.object({
+                ordinal: z.number().int().min(1).max(4),
+                option_text: z.string().min(1),
+                is_correct: z.boolean().optional().default(false),
+              }),
+            )
+            .min(2)
+            .max(4),
+        }),
+      )
+      .length(5),
     is_test: z.boolean().optional(),
   })
   .refine((data) => Boolean(data.destination_id) || Boolean(data.pin), {
