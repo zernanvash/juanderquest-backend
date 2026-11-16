@@ -37,8 +37,8 @@ export function fundingErrorResponse(res: Response, error: unknown) {
   });
 }
 
-function service(res: Response) {
-  if (!env.QUEST_FUNDING_ENABLED) {
+function service(res: Response, allowWhenDisabled = false) {
+  if (!allowWhenDisabled && !env.QUEST_FUNDING_ENABLED) {
     res
       .status(404)
       .json({ success: false, error: { code: 'NOT_AVAILABLE', message: 'Quest funding is unavailable.' } });
@@ -63,7 +63,7 @@ function mutation(
   patch = false,
 ) {
   const handler = async (req: AuthRequest, res: Response) => {
-    const svc = service(res);
+    const svc = service(res, admin);
     if (!svc) return;
     try {
       return res.status(200).json({ success: true, data: await action(svc, req) });
@@ -122,7 +122,7 @@ for (const admin of [false, true])
     authenticateToken,
     ...(admin ? [requireAdmin] : []),
     async (req: AuthRequest, res: Response) => {
-      const svc = service(res);
+      const svc = service(res, admin);
       if (!svc) return;
       try {
         res.setHeader('Cache-Control', 'private, no-store');

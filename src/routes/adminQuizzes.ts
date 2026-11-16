@@ -2,7 +2,11 @@ import { NextFunction, Router, Response } from 'express';
 import { z } from 'zod';
 import { httpUrl } from '../utils/http-url.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
-import { auditOnSuccess, requireAreaAdmin, spotAreaIds, spotInScope } from '../admin/scope.js';
+import { assertInScope, auditOnSuccess, requireAreaAdmin, spotAreaIds, spotInScope } from '../admin/scope.js';
+import { getPool } from '../db/pool.js';
+import { ensureAreaCache, matchSpotToAreas } from '../maps/areas-service.js';
+import { recognizeSpotLocation } from '../spots/recognize.js';
+import { spotStore } from '../spots/store.js';
 import { CulturalQuizRepository } from '../quizzes/repository.js';
 import { ProgressionRepository } from '../progression/repository.js';
 import { CulturalQuizService } from '../quizzes/service.js';
@@ -37,13 +41,16 @@ const quizInScope = (action?: string) => async (req: AuthRequest, res: Response,
         .status(404)
         .json({ success: false, error: { code: 'QUIZ_NOT_FOUND', message: 'Cultural quiz not found.' } });
     }
-    // Moving a draft to another destination needs both the old and the new area.
-    if (
-      req.method === 'PATCH' &&
-      req.body?.destination_id &&
-      !spotInScope(scope, 'quests_quizzes', req.body.destination_id)
-    )
-      return outOfArea(res);
+    // Moving a draft to another destination or pin needs both the old and the new area.
+    if (req.method === 'PATCH') {
+      if (req.body?.destination_id && !spotInScope(scope, 'quests_quizzes', req.body.destination_id)) {
+        return outOfArea(res);
+      }
+      if (req.body?.pin && typeof req.body.pin.lat === 'number' && typeof req.body.pin.lng === 'number') {
+        const pinAllowed = await isPinInScope(scope, req.body.pin);
+        if (!pinAllowed) return outOfArea(res);
+      }
+    }
     if (action) {
       auditOnSuccess(req, res, {
         action,
@@ -62,23 +69,62 @@ const quizInScope = (action?: string) => async (req: AuthRequest, res: Response,
   }
 };
 
-const quizDraftInScope = (req: AuthRequest, res: Response, next: NextFunction) => {
+const isPinInScope = async (
+  scope: NonNullable<AuthRequest['adminScope']>,
+  pin: { lat: number; lng: number; municipality?: unknown },
+): Promise<boolean> => {
+  if (scope.platform) return true;
+  await ensureAreaCache(getPool());
+  const match = matchSpotToAreas(
+    pin.lat,
+    pin.lng,
+    typeof pin.municipality === 'string' ? pin.municipality : undefined,
+  );
+  return (
+    assertInScope(scope, 'quests_quizzes', match.townAreaId) ||
+    assertInScope(scope, 'quests_quizzes', match.barangayAreaId)
+  );
+};
+
+const quizDraftInScope = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const destinationId = typeof req.body?.destination_id === 'string' ? req.body.destination_id : null;
-  if (!req.adminScope!.platform && !spotInScope(req.adminScope!, 'quests_quizzes', destinationId))
+  const pin = req.body?.pin;
+  const hasPin = Boolean(pin && typeof pin.lat === 'number' && typeof pin.lng === 'number');
+
+  if (destinationId && !req.adminScope!.platform && !spotInScope(req.adminScope!, 'quests_quizzes', destinationId)) {
     return outOfArea(res);
-  if (destinationId)
+  }
+  if (hasPin && !(await isPinInScope(req.adminScope!, pin))) {
+    return outOfArea(res);
+  }
+  if (!destinationId && !hasPin && !req.adminScope!.platform) {
+    return outOfArea(res);
+  }
+
+  if (destinationId) {
     auditOnSuccess(req, res, {
       action: 'quiz.created',
       subjectType: 'spot',
       subjectId: destinationId,
       areaId: spotAreaIds(destinationId)[0] ?? null,
     });
+  }
   return next();
 };
 
-const createDraftSchema = z.object({
-  destination_id: z.string().min(1),
-  title: z.string().min(3).max(200),
+const createDraftSchema = z
+  .object({
+    destination_id: z.string().min(1).optional(),
+    pin: z
+      .object({
+        lat: z.number().min(-90).max(90),
+        lng: z.number().min(-180).max(180),
+        name: z.string().trim().min(2).max(120).optional(),
+        municipality: z.string().trim().min(2).max(120).optional(),
+      })
+      .optional(),
+    location_label: z.string().trim().max(160).optional(),
+    title: z.string().min(3).max(200),
   description: z.string().min(10),
   language: z.enum(['en', 'fil', 'ilo', 'pag']).default('en'),
   radius_meters: z.number().int().min(100).max(1000).default(200),
@@ -121,8 +167,65 @@ const createDraftSchema = z.object({
       }),
     )
     .length(5),
-  is_test: z.boolean().optional(),
-});
+    is_test: z.boolean().optional(),
+  })
+  .refine((data) => Boolean(data.destination_id) || Boolean(data.pin), {
+    message: 'Either destination_id or pin coordinates are required.',
+    path: ['destination_id'],
+  });
+
+async function resolveQuizDestinationAndHostLines(
+  data: z.infer<typeof createDraftSchema>,
+  userId: string,
+  existingDestinationId?: string,
+): Promise<{ destinationId: string; hostLines: unknown }> {
+  let destinationId = data.destination_id || existingDestinationId;
+  if (!destinationId && data.pin) {
+    let municipality = data.pin.municipality?.trim();
+    if (!municipality) {
+      const recognized = await recognizeSpotLocation(data.pin.lat, data.pin.lng, getPool());
+      municipality = recognized.municipality || 'Pangasinan';
+    }
+    const created = await spotStore.create(
+      {
+        name: data.pin.name || data.location_label || data.title,
+        description: data.description,
+        category: 'culture_heritage',
+        subcategory: 'Cultural Quiz Pin',
+        tags: ['cultural-quiz'],
+        municipality,
+        address: municipality,
+        gps_lat: data.pin.lat,
+        gps_lng: data.pin.lng,
+        price_level: null,
+        hours: {},
+        amenities: [],
+        image_url: '',
+      },
+      userId,
+    );
+    spotStore.review(created.spot.id, userId, 'unpublished', 'low', true);
+    destinationId = created.spot.id;
+  }
+
+  const pinLat = data.pin?.lat;
+  const pinLng = data.pin?.lng;
+  const label = data.location_label ?? data.pin?.name;
+  let hostLines = data.host_lines;
+  if (typeof pinLat === 'number' && typeof pinLng === 'number') {
+    const base =
+      hostLines && typeof hostLines === 'object' && !Array.isArray(hostLines)
+        ? (hostLines as Record<string, unknown>)
+        : {};
+    hostLines = {
+      ...base,
+      pin_lat: pinLat,
+      pin_lng: pinLng,
+      ...(label ? { location_label: label } : {}),
+    };
+  }
+  return { destinationId: destinationId!, hostLines };
+}
 
 // GET /api/v1/admin/quizzes - List all quizzes
 router.get('/admin/quizzes', authenticateToken, requireQuizPower, async (req: AuthRequest, res: Response) => {
@@ -158,8 +261,14 @@ router.post(
     }
 
     try {
+      const existing = await repo.findQuizById(req.params.id);
+      const { destinationId, hostLines } = await resolveQuizDestinationAndHostLines(
+        parsed.data,
+        req.user!.id,
+        existing?.destination_id,
+      );
       const result = await service.createQuizDraft({
-        destinationId: parsed.data.destination_id,
+        destinationId,
         title: parsed.data.title,
         description: parsed.data.description,
         language: parsed.data.language,
@@ -167,7 +276,7 @@ router.post(
         xpReward: parsed.data.xp_reward,
         timeLimitMinutes: parsed.data.time_limit_minutes,
         cooldownHours: parsed.data.cooldown_hours,
-        hostLines: parsed.data.host_lines,
+        hostLines,
         theme: parsed.data.theme,
         adminUserId: req.user!.id,
         isTest: parsed.data.is_test,
@@ -256,8 +365,14 @@ router.patch(
     }
 
     try {
+      const existing = await repo.findQuizById(req.params.id);
+      const { destinationId, hostLines } = await resolveQuizDestinationAndHostLines(
+        parsed.data,
+        req.user!.id,
+        existing?.destination_id,
+      );
       const result = await service.updateQuizDraft(req.params.id, {
-        destinationId: parsed.data.destination_id,
+        destinationId,
         title: parsed.data.title,
         description: parsed.data.description,
         language: parsed.data.language,
@@ -265,7 +380,7 @@ router.patch(
         xpReward: parsed.data.xp_reward,
         timeLimitMinutes: parsed.data.time_limit_minutes,
         cooldownHours: parsed.data.cooldown_hours,
-        hostLines: parsed.data.host_lines,
+        hostLines,
         theme: parsed.data.theme,
         adminUserId: req.user!.id,
         isTest: parsed.data.is_test,
