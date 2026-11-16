@@ -53,7 +53,7 @@ realPg('GET /users/:handle/spots for wallet and private accounts (Real PostgreSQ
     if (fixture) await fixture.close();
   });
 
-  const ids = (res: request.Response) => (res.body.data as Array<{ id: string }>).map((s) => s.id);
+  const ids = (res: request.Response) => (res.body.data.spots as Array<{ id: string }>).map((s) => s.id);
 
   it('the signed-in owner gets their spots by user id, handle or wallet seed id', async () => {
     const token = signSessionToken({ id: userId, seed_id: seedId, role: 'user' });
