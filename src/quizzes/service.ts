@@ -72,6 +72,20 @@ export interface CreateQuizDraftParams {
   isTest?: boolean;
 }
 
+function resolveQuizCoords(hostLines: any, spotLat: number, spotLng: number): { lat: number; lng: number } {
+  if (
+    hostLines &&
+    typeof hostLines === 'object' &&
+    typeof hostLines.pin_lat === 'number' &&
+    Number.isFinite(hostLines.pin_lat) &&
+    typeof hostLines.pin_lng === 'number' &&
+    Number.isFinite(hostLines.pin_lng)
+  ) {
+    return { lat: hostLines.pin_lat, lng: hostLines.pin_lng };
+  }
+  return { lat: spotLat, lng: spotLng };
+}
+
 function deterministicShuffle<T>(items: T[], seed: string): T[] {
   const arr = [...items];
   for (let i = arr.length - 1; i > 0; i--) {
@@ -264,7 +278,8 @@ export class CulturalQuizService {
     const cutoffBufferMeters = includeApproaching ? 500 : 50;
 
     for (const item of list) {
-      const distance = computeHaversineMeters(lat, lng, item.destination.gps_lat, item.destination.gps_lng);
+      const coords = resolveQuizCoords(item.version.host_lines, item.destination.gps_lat, item.destination.gps_lng);
+      const distance = computeHaversineMeters(lat, lng, coords.lat, coords.lng);
 
       // Offer invitation if traveler is within radius + cutoff buffer (50m default, 500m when approaching)
       if (distance <= item.version.radius_meters + cutoffBufferMeters) {
@@ -439,7 +454,8 @@ export class CulturalQuizService {
         throw new Error('DESTINATION_NOT_FOUND: Quiz destination is missing.');
       }
       const dest = destRows[0];
-      const distance = computeHaversineMeters(params.lat, params.lng, Number(dest.gps_lat), Number(dest.gps_lng));
+      const coords = resolveQuizCoords(version.host_lines, Number(dest.gps_lat), Number(dest.gps_lng));
+      const distance = computeHaversineMeters(params.lat, params.lng, coords.lat, coords.lng);
       if (distance > version.radius_meters) {
         throw new Error(`OUT_OF_RANGE: You are ${distance}m away. Must be within ${version.radius_meters}m to start.`);
       }

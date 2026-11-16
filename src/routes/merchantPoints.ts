@@ -11,8 +11,8 @@ import { log } from '../utils/logger.js';
 
 export const merchantPointsRouter = Router();
 
-const fundingService = (res: Response) => {
-  if (!env.QUEST_FUNDING_ENABLED) {
+const fundingService = (res: Response, allowWhenDisabled = false) => {
+  if (!allowWhenDisabled && !env.QUEST_FUNDING_ENABLED) {
     res
       .status(404)
       .json({ success: false, error: { code: 'NOT_AVAILABLE', message: 'Funded quest features are unavailable.' } });
@@ -133,7 +133,7 @@ merchantPointsRouter.post(
   rateLimit({ policyId: 'merchant:points-purchase', windowMs: 60_000, max: 20, keyStrategy: 'actor' }),
   validateRequest(purchaseSchema),
   async (req: AuthRequest, res: Response) => {
-    const service = fundingService(res);
+    const service = fundingService(res, true);
     if (!service) return;
     try {
       const merchantId = await resolveOwnerMerchant(req.user!.id);
@@ -176,7 +176,7 @@ merchantPointsRouter.post(
   rateLimit({ policyId: 'admin:merchant-points-adjustment', windowMs: 60_000, max: 10, keyStrategy: 'actor' }),
   validateRequest(adjustmentSchema),
   async (req: AuthRequest, res: Response) => {
-    const service = fundingService(res);
+    const service = fundingService(res, true);
     if (!service) return;
     try {
       const data = await service.adminAdjust(
@@ -199,7 +199,7 @@ merchantPointsRouter.get(
   authenticateToken,
   requireAdmin,
   async (req: AuthRequest, res: Response) => {
-    const service = fundingService(res);
+    const service = fundingService(res, true);
     if (!service) return;
     const pool = getPool()!;
     const merchantId = typeof req.query.merchant_id === 'string' ? req.query.merchant_id : null;
@@ -223,7 +223,7 @@ merchantPointsRouter.get(
         [merchantId, source, limit],
       );
       res.setHeader('Cache-Control', 'private, no-store');
-      return res.json({ success: true, data: { items: result.rows, simulated: true } });
+      return res.json({ success: true, data: { items: result.rows, simulated: true, funding_enabled: env.QUEST_FUNDING_ENABLED } });
     } catch (error) {
       return sendError(res, error);
     }
@@ -235,7 +235,7 @@ merchantPointsRouter.get(
   authenticateToken,
   requireAdmin,
   async (_req: AuthRequest, res: Response) => {
-    const service = fundingService(res);
+    const service = fundingService(res, true);
     if (!service) return;
     try {
       const pool = getPool()!;
@@ -246,7 +246,10 @@ merchantPointsRouter.get(
         reconcileFunding(pool),
       ]);
       res.setHeader('Cache-Control', 'private, no-store');
-      return res.json({ success: true, data: { accounts: accounts.rows, reconciliation, simulated: true } });
+      return res.json({
+        success: true,
+        data: { accounts: accounts.rows, reconciliation, simulated: true, funding_enabled: env.QUEST_FUNDING_ENABLED },
+      });
     } catch (error) {
       return sendError(res, error);
     }

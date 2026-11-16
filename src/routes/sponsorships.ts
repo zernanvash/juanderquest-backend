@@ -139,10 +139,14 @@ sponsorshipsRouter.get(
   authenticateToken,
   requireAdmin,
   async (req: AuthRequest, res: Response) => {
-    const svc = service(res);
-    if (!svc) return;
+    const pool = getPool();
+    if (!pool) {
+      return res.status(503).json({
+        success: false,
+        error: { code: 'DATABASE_REQUIRED', message: 'Quest funding requires durable storage.' },
+      });
+    }
     try {
-      const pool = getPool()!;
       const status = req.query.status ? String(req.query.status) : null;
       const result = await pool.query(
         `SELECT p.id,p.quest_id,p.round_number,p.mode,p.status,p.reward_points,p.fee_points,p.planned_completions,p.target_points,p.starts_at,p.ends_at,p.created_at,
@@ -151,7 +155,10 @@ sponsorshipsRouter.get(
        p.is_test FROM quest_funding_plans p WHERE ($1::text IS NULL OR p.status=$1) ORDER BY p.updated_at DESC LIMIT 200`,
         [status],
       );
-      return res.json({ success: true, data: { items: result.rows, simulated: true } });
+      return res.json({
+        success: true,
+        data: { items: result.rows, simulated: true, funding_enabled: env.QUEST_FUNDING_ENABLED },
+      });
     } catch (error) {
       return fundingErrorResponse(res, error);
     }
