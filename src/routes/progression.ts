@@ -16,7 +16,6 @@ import {
   evaluateCommunityGoals,
   getAchievementSharing,
   getEngagementSummary,
-  listCommunityGoals,
   setAchievementSharing,
 } from '../progression/retention.js';
 import { log } from '../utils/logger.js';
@@ -148,23 +147,6 @@ progressionRouter.get(
         success: false,
         error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve visits.' },
       });
-    }
-  },
-);
-
-progressionRouter.get(
-  '/community-goals',
-  optionalAuthenticateToken,
-  checkQAAuthorization,
-  async (req: AuthRequest, res: Response) => {
-    try {
-      const allowTest = isAuthorizedQA(req);
-      res.set('Cache-Control', allowTest ? 'private, no-store' : 'public, max-age=60');
-      const items = await listCommunityGoals(allowTest && req.query.include_test === 'true');
-      return res.json({ success: true, data: { items, total: items.length } });
-    } catch (err: any) {
-      log.error('[progression] GET /community-goals error:', { error: err });
-      return res.json({ success: true, data: { items: [], total: 0 } });
     }
   },
 );

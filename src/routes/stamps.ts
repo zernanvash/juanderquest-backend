@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
+import { httpUrl } from '../utils/http-url.js';
 import { authenticateToken, optionalAuthenticateToken, requireAdmin, AuthRequest } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { getPool } from '../db/pool.js';
@@ -265,7 +266,7 @@ const qotdCreateSchema = z
   .object({
     question_text: z.string().trim().min(5).max(300),
     explanation: z.string().trim().min(3).max(1000),
-    source_url: z.string().url().max(500).nullable().optional(),
+    source_url: httpUrl(500).nullable().optional(),
     options: z.array(qotdOptionSchema).length(4),
   })
   .strict();
@@ -274,7 +275,7 @@ const qotdPatchSchema = z
   .object({
     question_text: z.string().trim().min(5).max(300).optional(),
     explanation: z.string().trim().min(3).max(1000).optional(),
-    source_url: z.string().url().max(500).nullable().optional(),
+    source_url: httpUrl(500).nullable().optional(),
     active: z.boolean().optional(),
     options: z.array(qotdOptionSchema).length(4).optional(),
   })

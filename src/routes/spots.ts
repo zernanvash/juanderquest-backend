@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
+import { httpUrl } from '../utils/http-url.js';
 import {
   authenticateToken,
   optionalAuthenticateToken,
@@ -552,9 +553,7 @@ const contributionSchema = z.object({
     hours: z.record(z.string()).default({}),
     amenities: z.array(z.string()).max(20).default([]),
     // Our own upload route returns a root-relative path (/api/v1/uploads/spot-photos/<file>); accept it as-is.
-    image_url: z
-      .string()
-      .url()
+    image_url: httpUrl()
       .or(z.string().regex(/^\/api\/v1\/uploads\/spot-photos\/[A-Za-z0-9_-][A-Za-z0-9._-]*$/))
       .or(z.literal(''))
       .default(''),

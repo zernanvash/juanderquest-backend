@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
+import { httpUrl } from '../utils/http-url.js';
 import { db } from '../db/index.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
@@ -128,8 +129,8 @@ const updateProfileSchema = z.object({
     municipality: z.string().max(100).optional(),
     contact_email: z.string().trim().email().max(255).optional(),
     contact_phone: z.string().trim().min(7).max(50).optional(),
-    logo_url: z.string().url().or(z.literal('')).optional().nullable(),
-    banner_url: z.string().url().or(z.literal('')).optional().nullable(),
+    logo_url: httpUrl().or(z.literal('')).optional().nullable(),
+    banner_url: httpUrl().or(z.literal('')).optional().nullable(),
   }),
 });
 
@@ -212,7 +213,7 @@ const createProductSchema = z.object({
     description: z.string().max(1000).optional().default(''),
     price: z.number().nonnegative().optional().nullable(),
     currency: z.string().max(10).optional().default('PHP'),
-    image_url: z.string().url().or(z.literal('')).optional().nullable(),
+    image_url: httpUrl().or(z.literal('')).optional().nullable(),
     is_published: z.boolean().optional().default(true),
     display_order: z.number().int().optional().default(0),
   }),
@@ -224,7 +225,7 @@ const updateProductSchema = z.object({
     description: z.string().max(1000).optional(),
     price: z.number().nonnegative().optional().nullable(),
     currency: z.string().max(10).optional(),
-    image_url: z.string().url().or(z.literal('')).optional().nullable(),
+    image_url: httpUrl().or(z.literal('')).optional().nullable(),
     is_published: z.boolean().optional(),
     display_order: z.number().int().optional(),
   }),

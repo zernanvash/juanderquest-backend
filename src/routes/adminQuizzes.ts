@@ -1,5 +1,6 @@
 import { NextFunction, Router, Response } from 'express';
 import { z } from 'zod';
+import { httpUrl } from '../utils/http-url.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { assertInScope, auditOnSuccess, requireAreaAdmin, spotAreaIds, spotInScope } from '../admin/scope.js';
 import { getPool } from '../db/pool.js';
@@ -130,7 +131,7 @@ const createDraftSchema = z
         ordinal: z.number().int().min(1).max(5),
         question_text: z.string().min(3),
         explanation: z.string().min(3),
-        source_url: z.string().url().optional(),
+        source_url: httpUrl().optional(),
         question_type: z
           .enum(['multiple_choice', 'true_false', 'photo_clue', 'sequence_order'])
           .default('multiple_choice'),
