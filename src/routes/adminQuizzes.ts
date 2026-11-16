@@ -86,6 +86,35 @@ const isPinInScope = async (
   );
 };
 
+/**
+ * Plan 97 integration fix: the quiz radar and the start check read
+ * `host_lines.pin_lat/pin_lng` as the quiz location, so a pin may only arrive
+ * as `pin` (or the dashboard's top-level `pin_lat`/`pin_lng`), where the area
+ * scope check sees it. Pin keys inside raw `host_lines` are dropped.
+ */
+const normalizeQuizPin = (req: AuthRequest, _res: Response, next: NextFunction) => {
+  const body = req.body;
+  if (body && typeof body === 'object') {
+    const hl = body.host_lines;
+    if (hl && typeof hl === 'object' && !Array.isArray(hl)) {
+      const { pin_lat: _lat, pin_lng: _lng, ...rest } = hl as Record<string, unknown>;
+      body.host_lines = rest;
+    }
+    if (!body.pin && typeof body.pin_lat === 'number' && typeof body.pin_lng === 'number') {
+      body.pin = {
+        lat: body.pin_lat,
+        lng: body.pin_lng,
+        ...(typeof body.location_label === 'string' && body.location_label.trim().length >= 2
+          ? { name: body.location_label.trim().slice(0, 120) }
+          : {}),
+      };
+    }
+    delete body.pin_lat;
+    delete body.pin_lng;
+  }
+  next();
+};
+
 const quizDraftInScope = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const destinationId = typeof req.body?.destination_id === 'string' ? req.body.destination_id : null;
   const pin = req.body?.pin;
@@ -250,6 +279,7 @@ router.post(
   '/admin/quizzes',
   authenticateToken,
   requireQuizPower,
+  normalizeQuizPin,
   quizDraftInScope,
   async (req: AuthRequest, res: Response) => {
     const parsed = createDraftSchema.safeParse(req.body);
@@ -354,6 +384,7 @@ router.patch(
   '/admin/quizzes/:id',
   authenticateToken,
   requireQuizPower,
+  normalizeQuizPin,
   quizInScope('quiz.draft_updated'),
   async (req: AuthRequest, res: Response) => {
     const parsed = createDraftSchema.safeParse(req.body);

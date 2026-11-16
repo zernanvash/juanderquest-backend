@@ -230,5 +230,35 @@ realPg('Plan 97: Quest funding admin inspection & map-pinned cultural quizzes (r
       });
     expect(outOfAreaPatch.status).toBe(403);
     expect(outOfAreaPatch.body.error.code).toBe('OUT_OF_AREA');
+
+    // Integration fix: the dashboard's top-level pin_lat/pin_lng is scope-checked too.
+    const topLevelPatch = await request(app)
+      .patch(`/api/v1/admin/quizzes/${quizId}`)
+      .set(as(areaAdminId, 'area_admin'))
+      .send({
+        pin_lat: 16.386,
+        pin_lng: 119.893,
+        title: 'Moved by top-level pin',
+        description: 'Should be rejected on PATCH.',
+        questions,
+      });
+    expect(topLevelPatch.status).toBe(403);
+
+    // A pin smuggled inside host_lines is dropped, so the quiz stays in Dagupan.
+    const hostLinesPatch = await request(app)
+      .patch(`/api/v1/admin/quizzes/${quizId}`)
+      .set(as(areaAdminId, 'area_admin'))
+      .send({
+        host_lines: { pin_lat: 16.386, pin_lng: 119.893 },
+        title: 'Host lines pin attempt',
+        description: 'The pin keys must be ignored.',
+        questions,
+      });
+    expect(hostLinesPatch.status).toBe(200);
+    const { rows } = await fixture.pool.query(
+      `SELECT host_lines FROM cultural_quiz_versions WHERE quiz_id = $1 ORDER BY version DESC LIMIT 1`,
+      [quizId],
+    );
+    expect(rows[0]?.host_lines?.pin_lat).not.toBe(16.386);
   });
 });
