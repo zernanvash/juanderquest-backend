@@ -11,6 +11,7 @@ import {
 import { validateRequest } from '../middleware/validate.js';
 import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
 import { MAX_FEATURED_BADGES, buildShowcase, earnedBadges } from '../social/showcase.js';
+import { buildRecap, parseRecapPeriod } from '../social/recap.js';
 
 // Profile showcase (owner 2026-11-08): see src/social/showcase.ts.
 export const profileShowcaseRouter = Router();
@@ -19,6 +20,21 @@ const unavailable = (res: Response) =>
   res
     .status(503)
     .json({ success: false, error: { code: 'DATABASE_UNAVAILABLE', message: 'Profiles are unavailable right now.' } });
+
+// Plan 62 Juander Recap: the owner's season or year story (`?period=season:2026-S4` or `year:2026`).
+profileShowcaseRouter.get('/me/recap', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const pool = getPool();
+  if (!pool) return unavailable(res);
+  const period = parseRecapPeriod(typeof req.query.period === 'string' ? req.query.period : undefined);
+  if (!period) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_PERIOD', message: 'Use season:YYYY-S1..S4 or year:YYYY, not in the future.' },
+    });
+  }
+  res.setHeader('Cache-Control', 'private, no-store');
+  return res.json({ success: true, data: await buildRecap(pool, req.user!.id, period) });
+});
 
 profileShowcaseRouter.get('/me/showcase', authenticateToken, async (req: AuthRequest, res: Response) => {
   const pool = getPool();

@@ -59,7 +59,7 @@ export async function earnedBadges(client: Queryable, userId: string): Promise<S
 }
 
 /** Canonical town name for a quest/spot municipality, or null when not a Pangasinan town. */
-function pangasinanTown(name: string | null | undefined): string | null {
+export function pangasinanTown(name: string | null | undefined): string | null {
   if (!name) return null;
   const key = name.trim().toLowerCase();
   return PANGASINAN_MUNICIPALITIES.find((t) => t.toLowerCase() === key) ?? null;
