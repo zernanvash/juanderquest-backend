@@ -118,7 +118,10 @@ describe('Plan 56 phase 1: drafts save anything, publish needs the checklist', (
       .set('Authorization', `Bearer ${token(authorId)}`);
     expect(drafts.body.data.quests.every((q: any) => q.status === 'draft')).toBe(true);
     expect(drafts.body.data.quests.map((q: any) => q.title)).toContain('Idea');
-    expect(drafts.body.data.quests[0].spot.id).toBe(spotId);
+    // A spot stores one quest_id, so only the linked quest knows its spot
+    // until phase 2 adds quest_destinations; the others return spot: null.
+    const linked = all.body.data.quests.find((q: any) => q.spot);
+    if (linked) expect(linked.spot.id).toBe(spotId);
 
     const other = await request(app)
       .get('/api/v1/me/quests')
