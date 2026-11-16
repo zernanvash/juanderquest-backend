@@ -30,6 +30,7 @@ import { assertInScope, requireAreaAdmin, spotInScope, writeAdminAudit } from '.
 import { handleSpotInteraction } from '../stamps/hooks.js';
 import { getHomeTown } from '../social/homeTown.js';
 import { log } from '../utils/logger.js';
+import { publishChecklist, publishChecklistError } from '../quests/publishChecklist.js';
 
 const router = Router();
 const csv = (value: unknown) =>
@@ -639,8 +640,9 @@ router.post('/spots', authenticateToken, validateRequest(contributionSchema), as
 
 const createAuthorQuestSchema = z.object({
   body: z.object({
-    title: z.string().trim().min(5).max(100),
-    description: z.string().trim().min(15).max(1000),
+    // Plan 56: drafts save anything; publishing checks publishChecklist().
+    title: z.string().trim().min(1).max(100),
+    description: z.string().trim().max(1000).default(''),
     category: z.enum(['eco', 'cultural', 'food_trade']),
     radius_meters: z.number().int().min(50).max(500).default(200),
     reward_points: z.union([z.literal(50), z.literal(75), z.literal(100)]).default(75),
@@ -676,6 +678,10 @@ router.post(
     }
 
     const questStatus = env.QUEST_FUNDING_ENABLED ? 'draft' : (req.body.status ?? 'published');
+    if (questStatus === 'published') {
+      const missing = publishChecklist(req.body);
+      if (missing.length) return res.status(400).json(publishChecklistError(missing));
+    }
     let rawTasks = req.body.tasks || req.body.steps || [];
 
     // Backward compatibility: If no tasks/steps are provided by legacy clients, default to destination check-in task
