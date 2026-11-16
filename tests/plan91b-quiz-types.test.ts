@@ -209,15 +209,12 @@ describe('Plan 91b: Quiz Question Types, Validation, Shuffle & Grading (Real PG)
     expect(badTf.status).toBe(400);
 
     // Valid create with all 4 types
-    const created = await request(app)
-      .post('/api/v1/admin/quizzes')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({
-        destination_id: spotId,
-        title: 'Mixed 91b Quiz',
-        description: 'All four Plan 91b question types in one quiz',
-        questions: buildMixedQuestions(),
-      });
+    const created = await request(app).post('/api/v1/admin/quizzes').set('Authorization', `Bearer ${adminToken}`).send({
+      destination_id: spotId,
+      title: 'Mixed 91b Quiz',
+      description: 'All four Plan 91b question types in one quiz',
+      questions: buildMixedQuestions(),
+    });
     expect(created.status).toBe(201);
     const quizId = created.body.data.quiz.id;
 
@@ -237,15 +234,12 @@ describe('Plan 91b: Quiz Question Types, Validation, Shuffle & Grading (Real PG)
   });
 
   it('keeps sequence_order shuffle deterministic on resume without ordinal, enforces 50/50 rules, rejects malformed answers, and grades sequence right/wrong', async () => {
-    const created = await request(app)
-      .post('/api/v1/admin/quizzes')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({
-        destination_id: spotId,
-        title: 'Playable Mixed Quiz',
-        description: 'Quiz for attempt, shuffle, lifeline, and grading verification',
-        questions: buildMixedQuestions(),
-      });
+    const created = await request(app).post('/api/v1/admin/quizzes').set('Authorization', `Bearer ${adminToken}`).send({
+      destination_id: spotId,
+      title: 'Playable Mixed Quiz',
+      description: 'Quiz for attempt, shuffle, lifeline, and grading verification',
+      questions: buildMixedQuestions(),
+    });
     expect(created.status).toBe(201);
     const quizId = created.body.data.quiz.id;
 
