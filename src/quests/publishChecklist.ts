@@ -7,7 +7,10 @@ export type PublishChecklistItem = 'title' | 'description';
 export const PUBLISH_MIN_TITLE = 5;
 export const PUBLISH_MIN_DESCRIPTION = 15;
 
-export function publishChecklist(quest: { title?: string | null; description?: string | null }): PublishChecklistItem[] {
+export function publishChecklist(quest: {
+  title?: string | null;
+  description?: string | null;
+}): PublishChecklistItem[] {
   const missing: PublishChecklistItem[] = [];
   if ((quest.title ?? '').trim().length < PUBLISH_MIN_TITLE) missing.push('title');
   if ((quest.description ?? '').trim().length < PUBLISH_MIN_DESCRIPTION) missing.push('description');

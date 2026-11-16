@@ -8,7 +8,9 @@ import { publishChecklist } from '../src/quests/publishChecklist.js';
 describe('Plan 56 phase 1: drafts save anything, publish needs the checklist', () => {
   const authorId = '11111111-1111-1111-1111-111111111111';
   const otherId = '22222222-2222-2222-2222-222222222222';
-  const token = (id: string) => jwt.sign({ id, role: 'user', typ: 'session' }, env.JWT_SECRET);
+  // Same demo accounts and claims as tests/author-quests.test.ts.
+  const seeds: Record<string, string> = { [authorId]: 'demo-user-1', [otherId]: 'demo-admin-1' };
+  const token = (id: string) => jwt.sign({ id, seed_id: seeds[id], role: 'user', typ: 'session' }, env.JWT_SECRET);
   const spotId = `spot-plan56-${Date.now()}`;
   let fundingWas: boolean;
 
@@ -103,7 +105,9 @@ describe('Plan 56 phase 1: drafts save anything, publish needs the checklist', (
       .send({ title: 'Idea', category: 'cultural', status: 'draft' });
     expect(draft.status).toBe(201);
 
-    const all = await request(app).get('/api/v1/me/quests').set('Authorization', `Bearer ${token(authorId)}`);
+    const all = await request(app)
+      .get('/api/v1/me/quests')
+      .set('Authorization', `Bearer ${token(authorId)}`);
     expect(all.status).toBe(200);
     expect(all.headers['cache-control']).toContain('no-store');
     const ids = all.body.data.quests.map((q: any) => q.id);
@@ -116,10 +120,14 @@ describe('Plan 56 phase 1: drafts save anything, publish needs the checklist', (
     expect(drafts.body.data.quests.map((q: any) => q.title)).toContain('Idea');
     expect(drafts.body.data.quests[0].spot.id).toBe(spotId);
 
-    const other = await request(app).get('/api/v1/me/quests').set('Authorization', `Bearer ${token(otherId)}`);
+    const other = await request(app)
+      .get('/api/v1/me/quests')
+      .set('Authorization', `Bearer ${token(otherId)}`);
     expect(other.body.data.quests.map((q: any) => q.id)).not.toContain(draftId);
 
-    const bad = await request(app).get('/api/v1/me/quests?status=nope').set('Authorization', `Bearer ${token(authorId)}`);
+    const bad = await request(app)
+      .get('/api/v1/me/quests?status=nope')
+      .set('Authorization', `Bearer ${token(authorId)}`);
     expect(bad.status).toBe(400);
     expect((await request(app).get('/api/v1/me/quests')).status).toBe(401);
   });
