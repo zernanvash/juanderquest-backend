@@ -92,7 +92,8 @@ export async function buildRecap(client: Queryable, userId: string, period: Reca
   );
   const quests = new Map<string, { category: string | null; town: string | null }>();
   for (const r of done.rows) {
-    if (!quests.has(r.quest_id)) quests.set(r.quest_id, { category: r.category ?? null, town: pangasinanTown(r.municipality) });
+    if (!quests.has(r.quest_id))
+      quests.set(r.quest_id, { category: r.category ?? null, town: pangasinanTown(r.municipality) });
   }
   const towns = new Set<string>();
   const categories = new Map<string, number>();

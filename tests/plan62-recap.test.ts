@@ -43,7 +43,7 @@ realPgDescribe('GET /me/recap (real PostgreSQL)', () => {
     const q = (sql: string, p: unknown[] = []) => fixture.pool.query(sql, p);
     await q(
       `INSERT INTO users (id, seed_id, display_name, email, role, handle, is_public, is_test)
-       VALUES ($1, $1, 'Recap Scout', $1 || '@example.com', 'user', $2, true, false)`,
+       VALUES ($1::text, $1::text, 'Recap Scout', $1::text || '@example.com', 'user', $2, true, false)`,
       [me, me.replace(/-/g, '_')],
     );
     const quests: Array<[number, string, string, string]> = [
@@ -72,7 +72,7 @@ realPgDescribe('GET /me/recap (real PostgreSQL)', () => {
     ]) {
       await q(
         `INSERT INTO spots(id,slug,name,description,category,subcategory,municipality,address,gps_lat,gps_lng,price_level,source_type,source_name,trust_level,status,created_by,is_test,created_at)
-         VALUES ($1,$1,'Recap Spot','Test.','nature_outdoors','beach',$2,'',16.06,120.33,1,'community','test','community','published',$3,FALSE,$4)`,
+         VALUES ($1::text,$1::text,'Recap Spot','Test.','nature_outdoors','beach',$2,'',16.06,120.33,1,'community','test','community','published',$3,FALSE,$4)`,
         [id, town, id.endsWith('-a') ? me : null, inSeason],
       );
     }
