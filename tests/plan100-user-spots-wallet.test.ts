@@ -38,8 +38,8 @@ realPg('GET /users/:handle/spots for wallet and private accounts (Real PostgreSQ
     await fixture.pool.query(
       `INSERT INTO users(id, seed_id, display_name, handle, email, role, is_public, is_test, demo_points)
        VALUES($1, $2, 'Wallet Author', $3, $4, 'user', false, false, 0),
-             ($5, $5, 'Test Author', $6, $7, 'user', true, true, 0)`,
-      [userId, seedId, handle, `${userId}@example.test`, testUserId, testHandle, `${testUserId}@example.test`],
+             ($5, $6, 'Test Author', $7, $8, 'user', true, true, 0)`,
+      [userId, seedId, handle, `${userId}@example.test`, testUserId, testUserId, testHandle, `${testUserId}@example.test`],
     );
     await insertSpot(published, 'published', userId);
     await insertSpot(review, 'needs_review', userId);
