@@ -103,15 +103,6 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     description: 'Applies to new quiz drafts only; existing XP is never changed.',
   },
   {
-    key: 'quest_funding_enabled',
-    label: 'Enable traveler funded-quest creation',
-    category: 'quest_funding',
-    type: 'boolean',
-    defaultValue: true,
-    restartRequired: false,
-    description: 'Controls whether merchants and travelers can start new funded quests and sponsorships.',
-  },
-  {
     key: 'quest_funding_fee_bps',
     label: 'Quest funding platform fee (basis points)',
     category: 'quest_funding',

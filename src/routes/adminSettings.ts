@@ -63,11 +63,6 @@ adminSettingsRouter.put(
         reason: req.body.reason,
         requestId: req.id,
       });
-      if ('quest_funding_enabled' in result.values) {
-        (env as { QUEST_FUNDING_ENABLED: boolean }).QUEST_FUNDING_ENABLED = Boolean(
-          result.values.quest_funding_enabled,
-        );
-      }
       return res.status(200).json({ success: true, data: result });
     } catch (error) {
       return settingsError(res, error);

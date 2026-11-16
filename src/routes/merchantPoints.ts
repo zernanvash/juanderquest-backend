@@ -133,7 +133,7 @@ merchantPointsRouter.post(
   rateLimit({ policyId: 'merchant:points-purchase', windowMs: 60_000, max: 20, keyStrategy: 'actor' }),
   validateRequest(purchaseSchema),
   async (req: AuthRequest, res: Response) => {
-    const service = fundingService(res, true);
+    const service = fundingService(res);
     if (!service) return;
     try {
       const merchantId = await resolveOwnerMerchant(req.user!.id);
