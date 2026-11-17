@@ -542,6 +542,8 @@ realPg('Plan 61 Phase 1 — passport stamps (real PostgreSQL)', () => {
     const answered = await getQuestionOfTheDay(fixture.pool, userId, { now });
     expect(answered.answered).toBe(true);
     expect(answered.answer?.correct).toBe(true);
+    // A reload still knows the right option (the app marks it on a miss).
+    expect(answered.answer?.correct_option_id).toBe(answer.correct_option_id);
     const rows = await fixture.pool.query('SELECT COUNT(*)::int AS count FROM qotd_answers WHERE user_id = $1', [
       userId,
     ]);

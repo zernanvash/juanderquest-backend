@@ -755,8 +755,13 @@ export async function getQuestionOfTheDay(pool: Pool, userId: string | null, opt
     }
     const question = await qotdPayload(client, questionId);
     if (!question) return { date, question: null, answered: false, answer: null };
-    let answer: null | { correct: boolean; option_id: string; explanation: string | null; source_url: string | null } =
-      null;
+    let answer: null | {
+      correct: boolean;
+      option_id: string;
+      correct_option_id: string | null;
+      explanation: string | null;
+      source_url: string | null;
+    } = null;
     if (userId) {
       const answered = await client.query(
         'SELECT selected_option_id, correct FROM qotd_answers WHERE user_id = $1 AND manila_date = $2',
@@ -764,9 +769,16 @@ export async function getQuestionOfTheDay(pool: Pool, userId: string | null, opt
       );
       const row = answered.rows[0];
       if (row) {
+        // QA 2026-11-17: after answering, the app shows the right option
+        // (the answer POST returns it; a reload must too).
+        const correctOption = await client.query(
+          'SELECT id FROM qotd_options WHERE question_id = $1 AND is_correct = TRUE LIMIT 1',
+          [questionId],
+        );
         answer = {
           correct: Boolean(row.correct),
           option_id: row.selected_option_id,
+          correct_option_id: correctOption.rows[0]?.id ?? null,
           explanation: question.explanation,
           source_url: question.source_url,
         };
