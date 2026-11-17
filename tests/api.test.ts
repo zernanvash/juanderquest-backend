@@ -123,7 +123,7 @@ describe('JuanderQuest Backend REST API & QA Rules', () => {
     expect(res.body.data.every((spot: any) => spot.category === 'nature_outdoors' && spot.quest_id)).toBe(true);
   });
 
-  it('allows duplicate community spots within 50 meters and auto-publishes them', async () => {
+  it('holds a likely duplicate within 100 m for review (Plan 60) instead of publishing it', async () => {
     const login = await request(app).post('/api/v1/auth/demo-login').send({ seed_id: 'user-1' });
     const res = await request(app).post('/api/v1/spots').set('Authorization', `Bearer ${login.body.data.token}`).send({
       name: 'Hundred Islands Park',
@@ -142,7 +142,9 @@ describe('JuanderQuest Backend REST API & QA Rules', () => {
     });
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
-    expect(res.body.data.status).toBe('published');
+    expect(res.body.data.status).toBe('held');
+    expect(res.body.data.moderation_reasons).toContain('POSSIBLE_DUPLICATE');
+    expect(res.body.data.duplicate_spot?.id).toBe('spot-hundred-islands');
     expect(res.body.data.id).toBeDefined();
     expect(res.body.data.id).not.toBe('spot-hundred-islands');
   });

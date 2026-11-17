@@ -443,7 +443,7 @@ const mockUsers: UserRow[] = [
     bio: 'Pangasinan explorer & cultural heritage scout.',
     status_text: 'Exploring Hundred Islands & Bolinao 🌊',
     is_test: false,
-    created_at: new Date().toISOString(),
+    created_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
     updated_at: new Date().toISOString(),
   },
   {
@@ -462,7 +462,7 @@ const mockUsers: UserRow[] = [
     bio: null,
     status_text: null,
     is_test: false,
-    created_at: new Date().toISOString(),
+    created_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
     updated_at: new Date().toISOString(),
   },
   {
@@ -481,7 +481,7 @@ const mockUsers: UserRow[] = [
     bio: 'Eco-trail enthusiast and local food lover from Dagupan.',
     status_text: 'Tasting Dagupan bangus 🐟',
     is_test: false,
-    created_at: new Date().toISOString(),
+    created_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
     updated_at: new Date().toISOString(),
   },
   {
@@ -783,7 +783,7 @@ const mockSubmissions: SubmissionRow[] = [
     captured_accuracy: 5,
     status: 'pending',
     is_test: false,
-    created_at: new Date().toISOString(),
+    created_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
     updated_at: new Date().toISOString(),
   },
   {

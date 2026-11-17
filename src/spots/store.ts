@@ -46,7 +46,7 @@ export interface Spot {
   source_name: string;
   source_url?: string;
   trust_level: SpotTrust;
-  status: 'published' | 'needs_review' | 'unpublished';
+  status: 'published' | 'needs_review' | 'unpublished' | 'held' | 'hidden_pending_review';
   quest_id?: string;
   created_by?: string;
   created_at: string;
@@ -403,10 +403,11 @@ export class SpotStore {
   }
 
   private async persistSpot(s: Spot) {
-    if (!this.pg) return;
+    const pool = this.pg ?? getPool();
+    if (!pool) return;
     try {
-      await this.pg.query(
-        `INSERT INTO spots (id,slug,name,description,category,subcategory,tags,municipality,address,gps_lat,gps_lng,price_level,hours,amenities,good_for,best_time,image_url,source_type,source_name,source_url,trust_level,status,quest_id,created_by,is_test,created_at,updated_at,town_area_id,barangay_area_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,is_test=EXCLUDED.is_test,updated_at=EXCLUDED.updated_at,town_area_id=COALESCE(EXCLUDED.town_area_id, spots.town_area_id),barangay_area_id=COALESCE(EXCLUDED.barangay_area_id, spots.barangay_area_id)`,
+      await pool.query(
+        `INSERT INTO spots (id,slug,name,description,category,subcategory,tags,municipality,address,gps_lat,gps_lng,price_level,hours,amenities,good_for,best_time,image_url,source_type,source_name,source_url,trust_level,status,quest_id,created_by,is_test,created_at,updated_at,town_area_id,barangay_area_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,category=EXCLUDED.category,subcategory=EXCLUDED.subcategory,tags=EXCLUDED.tags,municipality=EXCLUDED.municipality,address=EXCLUDED.address,gps_lat=EXCLUDED.gps_lat,gps_lng=EXCLUDED.gps_lng,price_level=EXCLUDED.price_level,hours=EXCLUDED.hours,amenities=EXCLUDED.amenities,good_for=EXCLUDED.good_for,best_time=EXCLUDED.best_time,image_url=EXCLUDED.image_url,status=EXCLUDED.status,is_test=EXCLUDED.is_test,updated_at=EXCLUDED.updated_at,town_area_id=COALESCE(EXCLUDED.town_area_id, spots.town_area_id),barangay_area_id=COALESCE(EXCLUDED.barangay_area_id, spots.barangay_area_id)`,
         [
           s.id,
           s.slug,
@@ -441,7 +442,7 @@ export class SpotStore {
       );
     } catch {
       // Fallback for partial schemas without area columns
-      await this.pg.query(
+      await pool.query(
         `INSERT INTO spots (id,slug,name,description,category,subcategory,tags,municipality,address,gps_lat,gps_lng,price_level,hours,amenities,good_for,best_time,image_url,source_type,source_name,source_url,trust_level,status,quest_id,created_by,is_test,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,is_test=EXCLUDED.is_test,updated_at=EXCLUDED.updated_at`,
         [
           s.id,
@@ -710,6 +711,7 @@ export class SpotStore {
       'id' | 'slug' | 'source_type' | 'source_name' | 'trust_level' | 'status' | 'created_at' | 'updated_at'
     >,
     userId: string,
+    status: Spot['status'] = 'published',
   ) {
     const timestamp = new Date().toISOString();
     let baseSlug = input.name
@@ -730,7 +732,7 @@ export class SpotStore {
       source_type: 'community',
       source_name: 'JuanDerQuest Community',
       trust_level: 'community',
-      status: 'published',
+      status,
       crowd_capacity_band: 'medium',
       recommendation_suppressed: false,
       created_by: userId,
@@ -742,6 +744,53 @@ export class SpotStore {
     await this.persistSpot(spot);
     this.spots.push(spot);
     return { spot };
+  }
+
+  async updateSpot(
+    spotId: string,
+    patch: Partial<
+      Pick<
+        Spot,
+        | 'name'
+        | 'description'
+        | 'category'
+        | 'subcategory'
+        | 'tags'
+        | 'municipality'
+        | 'address'
+        | 'gps_lat'
+        | 'gps_lng'
+        | 'price_level'
+        | 'hours'
+        | 'amenities'
+        | 'good_for'
+        | 'best_time'
+        | 'image_url'
+        | 'status'
+        | 'town_area_id'
+        | 'barangay_area_id'
+      >
+    >,
+  ): Promise<Spot | undefined> {
+    const spot = this.spots.find((s) => s.id === spotId);
+    if (!spot) return undefined;
+    Object.assign(spot, patch, { updated_at: new Date().toISOString() });
+    await this.persistSpot(spot);
+    return spot;
+  }
+
+  async setModerationStatus(spotId: string, status: Spot['status']): Promise<Spot | undefined> {
+    const spot = this.spots.find((s) => s.id === spotId);
+    const updatedAt = new Date().toISOString();
+    if (spot) {
+      spot.status = status;
+      spot.updated_at = updatedAt;
+    }
+    const pool = this.pg ?? getPool();
+    if (pool) {
+      await pool.query('UPDATE spots SET status = $2, updated_at = $3 WHERE id = $1', [spotId, status, updatedAt]);
+    }
+    return spot;
   }
 }
 

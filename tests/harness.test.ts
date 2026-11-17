@@ -14,14 +14,16 @@ describe('Phase 0: Database Harness & Migration Ledger (pg-mem)', () => {
 
   it('successfully applies migrations 001-008 and verifies schema_migrations ledger', async () => {
     const ledger = await db.pool.query('SELECT filename FROM schema_migrations ORDER BY filename ASC');
-    expect(ledger.rows.map((r: any) => r.filename)).toEqual(MIGRATIONS);
+    // The ledger query sorts by filename; MIGRATIONS is run order (092 after 096).
+    expect(ledger.rows.map((r: any) => r.filename)).toEqual([...MIGRATIONS].sort());
   });
 
   it('verifies migration idempotency: running applyMigrations a second time does not fail or duplicate entries', async () => {
     await expect(applyMigrations(db.pool)).resolves.not.toThrow();
 
     const ledger = await db.pool.query('SELECT filename FROM schema_migrations ORDER BY filename ASC');
-    expect(ledger.rows.map((r: any) => r.filename)).toEqual(MIGRATIONS);
+    // The ledger query sorts by filename; MIGRATIONS is run order (092 after 096).
+    expect(ledger.rows.map((r: any) => r.filename)).toEqual([...MIGRATIONS].sort());
     expect(ledger.rows.length).toBe(MIGRATIONS.length);
   });
 

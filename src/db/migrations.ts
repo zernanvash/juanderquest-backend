@@ -97,6 +97,9 @@ export const MIGRATIONS = [
   '091_profile_progress_privacy.sql',
   '096_spot_photo_submissions.sql',
   '090_home_town_gps.sql',
+  // 092 runs after 096 (096 went live first); its notification-kind list
+  // includes 096's 'spot_photo_approved', so it must be the last to set it.
+  '092_spot_auto_filter.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
