@@ -128,6 +128,8 @@ realPgDescribe('Plan 60 destination auto-filter & moderation (real PostgreSQL)',
     );
 
     await ensureAreaCache(fixture.pool, true);
+    // Admin scope looks users up through db.usersRepo, which needs the pool too.
+    db.usersRepo.setPool(fixture.pool);
   });
 
   afterAll(async () => {
