@@ -34,6 +34,7 @@ import { optionalAccuracy, optionalLat, optionalLng } from '../middleware/coerce
 import { sanitizeAttemptSnapshot, sanitizeQuestForViewer } from '../quests/sanitize.js';
 import { normalizeTasks } from '../quests/taskNormalize.js';
 import type { QuestTask } from '../quests/taskTypes.js';
+import { publishChecklist, publishChecklistError } from '../quests/publishChecklist.js';
 import { questTaskInputSchema, validateTasksWithinDistance } from '../quests/taskValidation.js';
 import { RELIC_REACH_M, relicSpot } from '../quests/relicSpot.js';
 import { AR_GAMES, ArGame, passedSessionFor, startSession } from '../services/arGames.js';
@@ -164,6 +165,36 @@ function mapStepEvidence(row: any): QuestStepEvidenceRow {
     updated_at: new Date(row.updated_at).toISOString(),
   };
 }
+
+// GET /me/quests - Plan 56: the caller's own quests (drafts included), newest first.
+const MY_QUEST_STATUSES = ['draft', 'published', 'paused', 'archived'] as const;
+router.get('/me/quests', authenticateToken, (req: AuthRequest, res: Response) => {
+  const userId = req.user!.id;
+  const wanted = typeof req.query.status === 'string' ? req.query.status : undefined;
+  if (wanted !== undefined && !(MY_QUEST_STATUSES as readonly string[]).includes(wanted)) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_STATUS', message: `status must be one of: ${MY_QUEST_STATUSES.join(', ')}` },
+    });
+  }
+  const quests = db.quests
+    .map((q) => ({ quest: q, spot: spotStore.spots.find((s) => s.quest_id === q.id) }))
+    .filter(({ quest, spot }) => quest.author_id === userId || (!quest.author_id && spot?.created_by === userId))
+    .filter(({ quest }) => !wanted || (quest.status ?? 'published') === wanted)
+    .sort((a, b) => String(b.quest.updated_at).localeCompare(String(a.quest.updated_at)))
+    .map(({ quest, spot }) => ({
+      id: quest.id,
+      title: quest.title,
+      status: quest.status ?? 'published',
+      category: quest.category,
+      reward_points: quest.reward_points,
+      step_count: quest.steps?.length ?? 0,
+      updated_at: quest.updated_at,
+      spot: spot ? { id: spot.id, slug: spot.slug, name: spot.name } : null,
+    }));
+  res.setHeader('Cache-Control', 'private, no-store');
+  return res.json({ success: true, data: { quests } });
+});
 
 router.get('/quests', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res: Response) => {
   const category = req.query.category as string | undefined;
@@ -340,6 +371,11 @@ router.patch('/quests/:id/status', authenticateToken, async (req: AuthRequest, r
     });
   }
 
+  if (status === 'published') {
+    const missing = publishChecklist(quest);
+    if (missing.length) return res.status(400).json(publishChecklistError(missing));
+  }
+
   const statusPool = getPool();
   try {
     if (statusPool && status === 'published') {
@@ -423,8 +459,9 @@ router.get('/quests/:id/edit', authenticateToken, async (req: AuthRequest, res: 
 const patchQuestSchema = z.object({
   body: z.object({
     expected_version: z.number().int().positive().optional(),
-    title: z.string().trim().min(5).max(100).optional(),
-    description: z.string().trim().min(15).max(1000).optional(),
+    // Plan 56: drafts save anything; publishing checks publishChecklist().
+    title: z.string().trim().min(1).max(100).optional(),
+    description: z.string().trim().max(1000).optional(),
     category: z.enum(['eco', 'cultural', 'food_trade']).optional(),
     radius_meters: z.number().int().min(50).max(500).optional(),
     reward_points: z.union([z.literal(50), z.literal(75), z.literal(100)]).optional(),
@@ -487,6 +524,14 @@ router.patch(
 
     const nextStatus = status ?? quest.status ?? 'published';
     const rawTasks = tasks || steps;
+
+    if (nextStatus === 'published') {
+      const missing = publishChecklist({
+        title: title ?? quest.title,
+        description: description ?? quest.description,
+      });
+      if (missing.length) return res.status(400).json(publishChecklistError(missing));
+    }
 
     let normalizedTasks: QuestTask[] = quest.steps as QuestTask[];
     if (rawTasks !== undefined) {
