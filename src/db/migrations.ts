@@ -94,6 +94,7 @@ export const MIGRATIONS = [
   '087_admin_role_scope_check.sql',
   '088_spot_reports.sql',
   '089_festival_boosts_voting.sql',
+  '091_profile_progress_privacy.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
