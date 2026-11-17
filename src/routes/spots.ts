@@ -17,6 +17,7 @@ import { getPool } from '../db/pool.js';
 import { randomUUID } from 'crypto';
 import { distanceKm, spotStore, taxonomy } from '../spots/store.js';
 import { assetStore } from '../spots/asset-store.js';
+import { MAX_SPOT_GALLERY_PHOTOS, spotPhotoSubmissionStore } from '../spots/photo-submission-store.js';
 import { getSpotPhotoStorageProvider } from '../storage/spot-photos.js';
 import { detectValidatedMediaMime } from '../utils/media-mime.js';
 import { fieldLogStore } from '../spots/field-logs.js';
@@ -24,6 +25,7 @@ import { hiddenGemHighlights } from '../spots/highlights.js';
 import { recognizeSpotLocation } from '../spots/recognize.js';
 import { sanitizeQuestForViewer } from '../quests/sanitize.js';
 import { recordActivity } from '../social/activity.js';
+import { notify } from '../social/notify.js';
 import { normalizeTasks } from '../quests/taskNormalize.js';
 import { questTaskInputSchema, validateTasksWithinDistance } from '../quests/taskValidation.js';
 import { assertInScope, requireAreaAdmin, spotInScope, writeAdminAudit } from '../admin/scope.js';
@@ -213,7 +215,7 @@ router.get('/spots/:slug/alternatives', optionalAuthenticateToken, checkQAAuthor
   });
 });
 
-router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res) => {
+router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res) => {
   const allowTest = isAuthorizedQA(req);
   const spot = publicSpot(req.params.slug, allowTest);
   if (!spot) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
@@ -222,9 +224,32 @@ router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, (req
   }
   const actorId =
     req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
+  const pool = getPool();
   const attached = Array.from(assetStore.assets.values()).filter(
     (a) => a.spot_id === spot.id && a.status === 'attached',
   );
+  if (pool) {
+    try {
+      const { rows } = await pool.query(
+        `SELECT * FROM spot_assets WHERE spot_id = $1 AND status = 'attached' ORDER BY created_at ASC`,
+        [spot.id],
+      );
+      if (rows.length > 0) {
+        const seen = new Set(attached.map((a) => a.id));
+        for (const r of rows) {
+          if (!seen.has(r.id)) {
+            const isVideo = r.mime_type?.startsWith('video/') || r.object_key?.includes('video');
+            attached.push({
+              ...r,
+              media_type: r.media_type || (isVideo ? 'video' : 'image'),
+              created_at: new Date(r.created_at).toISOString(),
+              updated_at: new Date(r.updated_at).toISOString(),
+            });
+          }
+        }
+      }
+    } catch (_) {}
+  }
   return res.json({
     success: true,
     data: {
@@ -1144,6 +1169,218 @@ router.patch(
       before: { status: existing.status },
       after: { status: updated.status, resolution_note: updated.resolution_note },
     });
+    return res.json({ success: true, data: updated });
+  },
+);
+
+// Plan 102: Submit an uploaded photo to an existing destination for admin approval.
+const submitSpotPhotoSchema = z.object({
+  body: z
+    .object({
+      asset_id: z.string().trim().min(1).max(128),
+      caption: z.string().trim().max(240).optional(),
+    })
+    .strict(),
+});
+
+router.post(
+  '/spots/:id/photos',
+  authenticateToken,
+  uploadRateLimiter,
+  validateRequest(submitSpotPhotoSchema),
+  async (req: AuthRequest, res) => {
+    const spot = spotStore.spots.find((s) => s.id === req.params.id || s.slug === req.params.id);
+    if (!spot) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
+    }
+
+    const pool = getPool();
+    const asset = await assetStore.resolveAssetById(req.body.asset_id, pool);
+    if (!asset || asset.status === 'deleted') {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: `Asset ${req.body.asset_id} not found.` },
+      });
+    }
+    if (asset.user_id !== req.user!.id) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'UNAUTHORIZED_ATTACHMENT', message: 'Cannot submit a photo owned by another user.' },
+      });
+    }
+    if (asset.media_type === 'video' || asset.mime_type.startsWith('video/')) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Only photo uploads can be added to a destination.' },
+      });
+    }
+
+    try {
+      const submission = await spotPhotoSubmissionStore.create({
+        spotId: spot.id,
+        userId: req.user!.id,
+        assetId: asset.id,
+        caption: req.body.caption,
+      });
+      return res.status(201).json({
+        success: true,
+        data: submission,
+        message: 'Photo sent for admin review.',
+      });
+    } catch (e: any) {
+      if (e.code === 'DUPLICATE_PENDING') {
+        return res.status(409).json({
+          success: false,
+          error: { code: 'DUPLICATE_PENDING', message: e.message },
+        });
+      }
+      if (e.code === 'MAX_PENDING_REACHED') {
+        return res.status(429).json({
+          success: false,
+          error: { code: 'MAX_PENDING_REACHED', message: e.message },
+        });
+      }
+      throw e;
+    }
+  },
+);
+
+// GET /admin/spot-photos?status=pending|approved|rejected|all
+router.get('/admin/spot-photos', authenticateToken, requireAreaAdmin('destinations'), async (req: AuthRequest, res) => {
+  const rawStatus = typeof req.query.status === 'string' ? req.query.status : 'pending';
+  const status =
+    rawStatus === 'pending' || rawStatus === 'approved' || rawStatus === 'rejected' || rawStatus === 'all'
+      ? rawStatus
+      : 'pending';
+  const allowedSpotIds = new Set(
+    spotStore.spots.filter((spot) => spotInAdminScope(req.adminScope!, spot)).map((spot) => spot.id),
+  );
+  const items = await spotPhotoSubmissionStore.list({ status, allowedSpotIds });
+  return res.json({ success: true, data: items });
+});
+
+// POST /admin/spot-photos/:id/approve
+router.post(
+  '/admin/spot-photos/:id/approve',
+  authenticateToken,
+  requireAreaAdmin('destinations'),
+  async (req: AuthRequest, res) => {
+    const notFound = () =>
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Photo submission not found.' } });
+
+    const existing = await spotPhotoSubmissionStore.findById(req.params.id);
+    const spot = existing ? spotStore.spots.find((s) => s.id === existing.spot_id) : undefined;
+    if (!existing || !spot || !spotInAdminScope(req.adminScope!, spot)) return notFound();
+    if (existing.status !== 'pending') {
+      return res.status(409).json({
+        success: false,
+        error: { code: 'ALREADY_REVIEWED', message: `Photo submission is already ${existing.status}.` },
+      });
+    }
+
+    const pool = getPool();
+    const attachedCount = await spotPhotoSubmissionStore.countAttachedForSpot(spot.id);
+    if (attachedCount >= MAX_SPOT_GALLERY_PHOTOS) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'MAX_IMAGES_EXCEEDED',
+          message: `This destination already has ${MAX_SPOT_GALLERY_PHOTOS} attached photos.`,
+        },
+      });
+    }
+
+    const asset = await assetStore.resolveAssetById(existing.asset_id, pool);
+    if (!asset || asset.status === 'deleted') {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Uploaded photo asset could not be found.' },
+      });
+    }
+
+    await assetStore.attachAssetsToSpot([existing.asset_id], existing.user_id, spot.id, pool);
+    if (!spot.image_url) {
+      spot.image_url = asset.url;
+    }
+
+    const updated = await spotPhotoSubmissionStore.markApproved(existing.id, req.user!.id);
+    if (!updated) return notFound();
+
+    await writeAdminAudit({
+      actorId: req.user!.id,
+      actorRole: req.user!.role,
+      areaId: spot.town_area_id ?? null,
+      action: 'spot_photo.approved',
+      subjectType: 'spot_photo_submission',
+      subjectId: existing.id,
+      before: { status: existing.status },
+      after: { status: updated.status, asset_id: existing.asset_id, spot_id: spot.id },
+    });
+
+    if (pool) {
+      try {
+        await notify(pool, {
+          userId: existing.user_id,
+          kind: 'spot_photo_approved',
+          eventKey: `spot_photo_approved:${existing.id}`,
+          title: 'Photo approved',
+          message: `Your photo of ${spot.name} is live`,
+          href: `/explore/${spot.slug || spot.id}`,
+          isTest: Boolean(spot.is_test),
+        });
+      } catch (err) {
+        log.warn('[spots:approvePhoto] Notification skipped:', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    return res.json({ success: true, data: updated });
+  },
+);
+
+// POST /admin/spot-photos/:id/reject
+const rejectSpotPhotoSchema = z.object({
+  body: z
+    .object({
+      reason: z.string().trim().min(3).max(500),
+    })
+    .strict(),
+});
+
+router.post(
+  '/admin/spot-photos/:id/reject',
+  authenticateToken,
+  requireAreaAdmin('destinations'),
+  validateRequest(rejectSpotPhotoSchema),
+  async (req: AuthRequest, res) => {
+    const notFound = () =>
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Photo submission not found.' } });
+
+    const existing = await spotPhotoSubmissionStore.findById(req.params.id);
+    const spot = existing ? spotStore.spots.find((s) => s.id === existing.spot_id) : undefined;
+    if (!existing || !spot || !spotInAdminScope(req.adminScope!, spot)) return notFound();
+    if (existing.status !== 'pending') {
+      return res.status(409).json({
+        success: false,
+        error: { code: 'ALREADY_REVIEWED', message: `Photo submission is already ${existing.status}.` },
+      });
+    }
+
+    const updated = await spotPhotoSubmissionStore.markRejected(existing.id, req.user!.id, req.body.reason);
+    if (!updated) return notFound();
+
+    await writeAdminAudit({
+      actorId: req.user!.id,
+      actorRole: req.user!.role,
+      areaId: spot.town_area_id ?? null,
+      action: 'spot_photo.rejected',
+      subjectType: 'spot_photo_submission',
+      subjectId: existing.id,
+      before: { status: existing.status },
+      after: { status: updated.status, reject_reason: updated.reject_reason },
+    });
+
     return res.json({ success: true, data: updated });
   },
 );

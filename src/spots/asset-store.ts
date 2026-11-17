@@ -95,7 +95,35 @@ export class SpotAssetStore {
     return this.assets.get(id);
   }
 
-  async attachAssetsToSpot(assetIds: string[], userId: string, spotId: string): Promise<SpotAssetRecord[]> {
+  async resolveAssetById(id: string, pool?: Pool | null): Promise<SpotAssetRecord | undefined> {
+    const cached = this.assets.get(id);
+    if (cached) return cached;
+    const pg = pool ?? this.pg;
+    if (!pg) return undefined;
+    this.pg = pg;
+    const { rows } = await pg.query('SELECT * FROM spot_assets WHERE id = $1 LIMIT 1', [id]);
+    if (!rows.length) return undefined;
+    const r = rows[0];
+    const isVideo = r.mime_type?.startsWith('video/') || r.object_key?.includes('video');
+    const record: SpotAssetRecord = {
+      ...r,
+      media_type: r.media_type || (isVideo ? 'video' : 'image'),
+      created_at: new Date(r.created_at).toISOString(),
+      updated_at: new Date(r.updated_at).toISOString(),
+    };
+    this.assets.set(record.id, record);
+    return record;
+  }
+
+  async attachAssetsToSpot(
+    assetIds: string[],
+    userId: string,
+    spotId: string,
+    pool?: Pool | null,
+  ): Promise<SpotAssetRecord[]> {
+    if (pool && !this.pg) {
+      this.pg = pool;
+    }
     if (assetIds.length > 5) {
       const err = new Error('A spot can have at most 5 media attachments.');
       (err as any).code = 'MAX_IMAGES_EXCEEDED';
