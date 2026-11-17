@@ -17,6 +17,7 @@ import { manilaHour } from '../social/time.js';
 import { safeCosmeticsFor } from '../shop/render.js';
 import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
 import { spotStore, Spot } from '../spots/store.js';
+import { buildModerationSummary, listSpotModerationEvents } from '../spots/moderation.js';
 import { log } from '../utils/logger.js';
 
 export const usersRouter = Router();
@@ -350,6 +351,10 @@ usersRouter.get(
       }
     }
 
+    const isOwner = Boolean(req.user?.id && req.user.id === user.id);
+    const allowedStatuses = isOwner ? ['published', 'held', 'hidden_pending_review'] : ['published'];
+    const allowedStatusSet = new Set(allowedStatuses);
+
     const pool = getPool();
     let allSpots: Spot[] = [];
     if (pool) {
@@ -357,14 +362,18 @@ usersRouter.get(
         const { rows } = await pool.query(
           `SELECT * FROM spots
            WHERE created_by = $1
-             AND status = 'published'
-             AND ($2 = TRUE OR COALESCE(is_test, FALSE) = FALSE)
+             AND status = ANY($2)
+             AND ($3 = TRUE OR COALESCE(is_test, FALSE) = FALSE)
            ORDER BY created_at DESC, id DESC`,
-          [user.id, allowTest],
+          [user.id, allowedStatuses, allowTest],
         );
         const rowIds = new Set(rows.map((r: any) => r.id));
         const memSpots = spotStore.spots.filter(
-          (s) => s.created_by === user.id && s.status === 'published' && (allowTest || !s.is_test) && !rowIds.has(s.id),
+          (s) =>
+            s.created_by === user.id &&
+            allowedStatusSet.has(s.status) &&
+            (allowTest || !s.is_test) &&
+            !rowIds.has(s.id),
         );
         const mappedRows: Spot[] = rows.map((r: any) => ({
           ...r,
@@ -394,12 +403,12 @@ usersRouter.get(
       } catch (err) {
         log.error('[users] Error querying user spots from pool:', { error: err });
         allSpots = spotStore.spots
-          .filter((s) => s.created_by === user.id && s.status === 'published' && (allowTest || !s.is_test))
+          .filter((s) => s.created_by === user.id && allowedStatusSet.has(s.status) && (allowTest || !s.is_test))
           .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
       }
     } else {
       allSpots = spotStore.spots
-        .filter((s) => s.created_by === user.id && s.status === 'published' && (allowTest || !s.is_test))
+        .filter((s) => s.created_by === user.id && allowedStatusSet.has(s.status) && (allowTest || !s.is_test))
         .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
     }
 
@@ -409,9 +418,26 @@ usersRouter.get(
     const actorId =
       req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
 
+    const flaggedIds = isOwner
+      ? paged.filter((s) => s.status === 'held' || s.status === 'hidden_pending_review').map((s) => s.id)
+      : [];
+    const eventsBySpot = new Map<string, Awaited<ReturnType<typeof listSpotModerationEvents>>>();
+    if (flaggedIds.length > 0) {
+      const events = await listSpotModerationEvents(flaggedIds);
+      for (const ev of events) {
+        const list = eventsBySpot.get(ev.spot_id) ?? [];
+        list.push(ev);
+        eventsBySpot.set(ev.spot_id, list);
+      }
+    }
+
     const likeCounts = spotStore.likeCounts();
     const spots = paged.map((spot) => {
       const crowd = spotStore.crowd(spot);
+      const moderation =
+        isOwner && (spot.status === 'held' || spot.status === 'hidden_pending_review')
+          ? buildModerationSummary(spot, eventsBySpot.get(spot.id) ?? [])
+          : undefined;
       let sourceName = spot.source_name;
       if (
         !sourceName ||
@@ -456,6 +482,7 @@ usersRouter.get(
         liked: Boolean(spotStore.isLiked(actorId, spot.id)),
         like_count: spotStore.likeCount(spot.id, actorId, likeCounts),
         trend_score: spotStore.trend(spot.id),
+        ...(moderation ?? {}),
       };
     });
 

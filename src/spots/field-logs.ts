@@ -40,6 +40,7 @@ export interface SpotReport {
   reporter_name?: string;
   reason: SpotReportReason;
   details?: string;
+  weight?: number;
   status: 'pending' | 'reviewed' | 'dismissed';
   created_at: string;
   resolved_by?: string;
@@ -57,6 +58,7 @@ const reportFromRow = (row: Record<string, unknown>): SpotReport => ({
   reporter_name: String(row.reporter_name),
   reason: row.reason as SpotReportReason,
   details: row.details ? String(row.details) : undefined,
+  weight: row.weight !== undefined && row.weight !== null ? Number(row.weight) : 1,
   status: row.status as SpotReport['status'],
   created_at: iso(row.created_at)!,
   resolved_by: row.resolved_by ? String(row.resolved_by) : undefined,
@@ -262,6 +264,7 @@ export class FieldLogStore {
     userId?: string,
     reporterName?: string,
     details?: string,
+    weight = 1,
   ): Promise<SpotReport> {
     const report: SpotReport = {
       id: `rep-${randomUUID().slice(0, 8)}`,
@@ -270,6 +273,7 @@ export class FieldLogStore {
       reporter_name: reporterName || 'Anonymous Scout',
       reason,
       details: details ? details.trim() : undefined,
+      weight,
       status: 'pending',
       created_at: new Date().toISOString(),
     };
@@ -277,8 +281,8 @@ export class FieldLogStore {
     const pool = getPool();
     if (pool) {
       await pool.query(
-        `INSERT INTO spot_reports(id, spot_id, user_id, reporter_name, reason, details, status, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        `INSERT INTO spot_reports(id, spot_id, user_id, reporter_name, reason, details, weight, status, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
         [
           report.id,
           report.spot_id,
@@ -286,6 +290,7 @@ export class FieldLogStore {
           report.reporter_name,
           report.reason,
           report.details ?? null,
+          report.weight ?? 1,
           report.status,
           report.created_at,
         ],
@@ -294,6 +299,61 @@ export class FieldLogStore {
     }
     this.reports.unshift(report);
     return report;
+  }
+
+  async hasUserReportedSpot(spotId: string, userId: string): Promise<boolean> {
+    const pool = getPool();
+    if (pool) {
+      const result = await pool.query(
+        `SELECT 1 FROM spot_reports WHERE spot_id = $1 AND user_id = $2 LIMIT 1`,
+        [spotId, userId],
+      );
+      return Boolean(result.rows.length);
+    }
+    return this.reports.some((r) => r.spot_id === spotId && r.user_id === userId);
+  }
+
+  async sumPendingReportWeight(spotId: string): Promise<number> {
+    const pool = getPool();
+    if (pool) {
+      const result = await pool.query(
+        `SELECT COALESCE(SUM(weight), 0) AS total
+           FROM spot_reports
+          WHERE spot_id = $1 AND status = 'pending' AND weight > 0`,
+        [spotId],
+      );
+      return Number(result.rows[0]?.total ?? 0);
+    }
+    return this.reports
+      .filter((r) => r.spot_id === spotId && r.status === 'pending' && (r.weight ?? 1) > 0)
+      .reduce((sum, r) => sum + (r.weight ?? 1), 0);
+  }
+
+  async resolvePendingReportsForSpot(
+    spotId: string,
+    status: 'reviewed' | 'dismissed',
+    resolvedBy: string,
+    note: string,
+  ): Promise<void> {
+    const pool = getPool();
+    if (pool) {
+      await pool.query(
+        `UPDATE spot_reports
+            SET status = $2, resolved_by = $3, resolved_at = NOW(), resolution_note = $4, updated_at = NOW()
+          WHERE spot_id = $1 AND status = 'pending'`,
+        [spotId, status, resolvedBy, note],
+      );
+      return;
+    }
+    const now = new Date().toISOString();
+    for (const report of this.reports) {
+      if (report.spot_id === spotId && report.status === 'pending') {
+        report.status = status;
+        report.resolved_by = resolvedBy;
+        report.resolved_at = now;
+        report.resolution_note = note;
+      }
+    }
   }
 
   async listReports(spotId?: string): Promise<SpotReport[]> {

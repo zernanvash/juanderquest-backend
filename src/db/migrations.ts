@@ -95,6 +95,7 @@ export const MIGRATIONS = [
   '088_spot_reports.sql',
   '089_festival_boosts_voting.sql',
   '091_profile_progress_privacy.sql',
+  '092_spot_auto_filter.sql',
   '096_spot_photo_submissions.sql',
 ];
 

@@ -10,12 +10,25 @@ import {
   checkQAAuthorization,
 } from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
+import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { env } from '../config/env.js';
 import { db, QuestRow } from '../db/index.js';
 import { getPool } from '../db/pool.js';
 import { randomUUID } from 'crypto';
 import { distanceKm, spotStore, taxonomy } from '../spots/store.js';
+import {
+  applyAdminSpotModeration,
+  buildModerationSummary,
+  computeReportWeight,
+  evaluateSpotSubmission,
+  listSpotModerationEvents,
+  maybeHideSpotAfterReport,
+  reconcileSpotAfterReportResolution,
+  recordSpotModerationEvent,
+  submitSpotAppeal,
+} from '../spots/moderation.js';
+import { ensureAreaCache, matchSpotToAreas } from '../maps/areas-service.js';
 import { assetStore } from '../spots/asset-store.js';
 import { MAX_SPOT_GALLERY_PHOTOS, spotPhotoSubmissionStore } from '../spots/photo-submission-store.js';
 import { getSpotPhotoStorageProvider } from '../storage/spot-photos.js';
@@ -217,7 +230,17 @@ router.get('/spots/:slug/alternatives', optionalAuthenticateToken, checkQAAuthor
 
 router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res) => {
   const allowTest = isAuthorizedQA(req);
-  const spot = publicSpot(req.params.slug, allowTest);
+  let spot = publicSpot(req.params.slug, allowTest);
+  if (!spot && req.user?.id && validSpotIdentifier(req.params.slug)) {
+    const candidate = spotStore.spots.find(
+      (s) =>
+        (s.id === req.params.slug || s.slug === req.params.slug) &&
+        s.created_by === req.user!.id &&
+        (s.status === 'held' || s.status === 'hidden_pending_review') &&
+        (allowTest || !s.is_test),
+    );
+    if (candidate) spot = candidate;
+  }
   if (!spot) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
   if (spot.is_test) {
     res.set('X-Robots-Tag', 'noindex, nofollow');
@@ -250,6 +273,10 @@ router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, asyn
       }
     } catch (_) {}
   }
+  const moderation =
+    req.user?.id && spot.created_by === req.user.id && (spot.status === 'held' || spot.status === 'hidden_pending_review')
+      ? buildModerationSummary(spot, await listSpotModerationEvents([spot.id]))
+      : {};
   return res.json({
     success: true,
     data: {
@@ -260,6 +287,7 @@ router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, asyn
       like_count: spotStore.likeCount(spot.id, actorId),
       trend_score: spotStore.trend(spot.id),
       attached_assets: attached,
+      ...moderation,
     },
   });
 });
@@ -617,7 +645,44 @@ router.post('/spots', authenticateToken, validateRequest(contributionSchema), as
     }
   }
 
-  const result = await spotStore.create(req.body, req.user!.id);
+  const evaluation = await evaluateSpotSubmission({
+    mode: 'create',
+    userId: req.user!.id,
+    name: req.body.name,
+    description: req.body.description,
+    tags: req.body.tags,
+    gps_lat: req.body.gps_lat,
+    gps_lng: req.body.gps_lng,
+  });
+
+  if (evaluation.action === 'reject') {
+    if (evaluation.retryAfterSeconds) {
+      res.set('Retry-After', String(evaluation.retryAfterSeconds));
+    }
+    return res.status(evaluation.httpStatus).json({
+      success: false,
+      error: {
+        code: evaluation.code,
+        message: evaluation.message,
+        ...(evaluation.retryAfterSeconds !== undefined ? { retry_after_seconds: evaluation.retryAfterSeconds } : {}),
+        ...(evaluation.retryAt ? { retry_at: evaluation.retryAt } : {}),
+        ...(evaluation.existingSpot ? { existing_spot: evaluation.existingSpot } : {}),
+      },
+    });
+  }
+
+  const result = await spotStore.create(req.body, req.user!.id, evaluation.status);
+
+  await recordSpotModerationEvent({
+    spotId: result.spot.id,
+    actor: 'system',
+    decision: evaluation.status,
+    reasonCodes: evaluation.reasonCodes,
+    details: {
+      messages: evaluation.messages,
+      ...(evaluation.duplicateSpot ? { duplicate_spot: evaluation.duplicateSpot } : {}),
+    },
+  });
 
   if (assetIds.length > 0) {
     try {
@@ -659,7 +724,131 @@ router.post('/spots', authenticateToken, validateRequest(contributionSchema), as
     }
   }
 
-  return res.status(201).json({ success: true, data: result.spot });
+  return res.status(201).json({
+    success: true,
+    data: {
+      ...result.spot,
+      moderation_reasons: evaluation.reasonCodes,
+      moderation_messages: evaluation.messages,
+      ...(evaluation.duplicateSpot ? { duplicate_spot: evaluation.duplicateSpot } : {}),
+      moderation: {
+        status: evaluation.status,
+        reason_codes: evaluation.reasonCodes,
+        messages: evaluation.messages,
+        duplicate_spot: evaluation.duplicateSpot ?? null,
+      },
+    },
+  });
+});
+
+const updateContributionSchema = z.object({
+  body: contributionSchema.shape.body.partial(),
+});
+
+router.patch('/spots/:id', authenticateToken, validateRequest(updateContributionSchema), async (req: AuthRequest, res) => {
+  const existing = spotStore.spots.find((s) => s.id === req.params.id || s.slug === req.params.id);
+  if (!existing) {
+    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
+  }
+  if (existing.created_by !== req.user!.id) {
+    return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Only the author can edit this destination.' } });
+  }
+  if (existing.status === 'hidden_pending_review' || existing.status === 'unpublished') {
+    return res.status(403).json({
+      success: false,
+      error: {
+        code: 'SPOT_LOCKED_FOR_REVIEW',
+        message: 'Destinations hidden for moderator review cannot be edited directly. Submit an appeal instead.',
+      },
+    });
+  }
+
+  const nextName = req.body.name ?? existing.name;
+  const nextDescription = req.body.description ?? existing.description;
+  const nextTags = req.body.tags ?? existing.tags;
+  const nextLat = req.body.gps_lat ?? existing.gps_lat;
+  const nextLng = req.body.gps_lng ?? existing.gps_lng;
+  const nextMunicipality = req.body.municipality ?? existing.municipality;
+
+  const evaluation = await evaluateSpotSubmission({
+    mode: 'edit',
+    userId: req.user!.id,
+    editingSpotId: existing.id,
+    name: nextName,
+    description: nextDescription,
+    tags: nextTags,
+    gps_lat: nextLat,
+    gps_lng: nextLng,
+  });
+
+  if (evaluation.action === 'reject') {
+    return res.status(evaluation.httpStatus).json({
+      success: false,
+      error: {
+        code: evaluation.code,
+        message: evaluation.message,
+        ...(evaluation.existingSpot ? { existing_spot: evaluation.existingSpot } : {}),
+      },
+    });
+  }
+
+  await ensureAreaCache(getPool());
+  const areaMatch = matchSpotToAreas(nextLat, nextLng, nextMunicipality);
+  const wasPublished = existing.status === 'published';
+
+  const updated = await spotStore.updateSpot(existing.id, {
+    ...req.body,
+    status: evaluation.status,
+    town_area_id: areaMatch.townAreaId,
+    barangay_area_id: areaMatch.barangayAreaId,
+  });
+
+  await recordSpotModerationEvent({
+    spotId: existing.id,
+    actor: 'system',
+    decision: evaluation.status,
+    reasonCodes: evaluation.reasonCodes,
+    details: {
+      edited_by: req.user!.id,
+      messages: evaluation.messages,
+      ...(evaluation.duplicateSpot ? { duplicate_spot: evaluation.duplicateSpot } : {}),
+    },
+  });
+
+  if (!wasPublished && evaluation.status === 'published' && !existing.is_test) {
+    try {
+      await recordActivity(null, {
+        eventKey: `spot_posted:${existing.id}`,
+        actorId: req.user!.id,
+        verb: 'spot_posted',
+        subjectType: 'spot',
+        subjectId: existing.id,
+        subjectTitle: nextName,
+        subjectHref: `/spots/${existing.slug || existing.id}`,
+        municipality: nextMunicipality || null,
+        payload: {},
+        isTest: false,
+      });
+    } catch (err) {
+      log.error('[social:producer] Failed to record spot_posted activity on edit:', { error: err });
+    }
+  }
+
+  return res.json({
+    success: true,
+    data: {
+      ...(updated ?? existing),
+      moderation_reasons: evaluation.reasonCodes,
+      moderation_messages: evaluation.messages,
+      ...(evaluation.duplicateSpot ? { duplicate_spot: evaluation.duplicateSpot } : {}),
+      moderation: {
+        status: evaluation.status,
+        reason_codes: evaluation.reasonCodes,
+        messages: evaluation.messages,
+        duplicate_spot: evaluation.duplicateSpot ?? null,
+      },
+    },
+  });
 });
 
 const createAuthorQuestSchema = z.object({
@@ -1101,8 +1290,17 @@ router.post(
     const userId = req.user?.id;
     const reporterActor = userId ? db.findUserById(userId) : undefined;
     const reporterName = reporterActor?.display_name || req.body.reporter_name || 'Anonymous Scout';
+    const weight = await computeReportWeight(spot, userId);
 
-    const report = await fieldLogStore.createReport(spot.id, req.body.reason, userId, reporterName, req.body.details);
+    const report = await fieldLogStore.createReport(
+      spot.id,
+      req.body.reason,
+      userId,
+      reporterName,
+      req.body.details,
+      weight,
+    );
+    const hideResult = await maybeHideSpotAfterReport(spot);
 
     return res.status(201).json({
       success: true,
@@ -1110,11 +1308,49 @@ router.post(
         report_id: report.id,
         spot_id: spot.id,
         status: report.status,
+        weight,
+        spot_hidden: hideResult.hidden,
         message: 'Report received. LGU Tourism moderators will review this spot within 24 hours.',
       },
     });
   },
 );
+
+const appealSchema = z.object({
+  body: z.object({
+    note: z.string().trim().min(5).max(500),
+  }),
+});
+
+router.post('/spots/:id/appeal', authenticateToken, validateRequest(appealSchema), async (req: AuthRequest, res) => {
+  const spot = spotStore.spots.find((s) => s.id === req.params.id || s.slug === req.params.id);
+  if (!spot) {
+    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
+  }
+  if (spot.created_by !== req.user!.id) {
+    return res
+      .status(403)
+      .json({ success: false, error: { code: 'FORBIDDEN', message: 'Only the destination author can appeal.' } });
+  }
+  if (spot.status !== 'held' && spot.status !== 'hidden_pending_review') {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_STATUS', message: 'Only held or auto-hidden destinations can be appealed.' },
+    });
+  }
+  try {
+    const event = await submitSpotAppeal(spot, req.user!.id, req.body.note);
+    return res.status(201).json({ success: true, data: event });
+  } catch (err: any) {
+    if (err.code === 'ALREADY_APPEALED') {
+      return res.status(409).json({
+        success: false,
+        error: { code: 'ALREADY_APPEALED', message: err.message },
+      });
+    }
+    throw err;
+  }
+});
 
 // GET /admin/spot-reports
 router.get(
@@ -1128,6 +1364,95 @@ router.get(
     return res.json({
       success: true,
       data: (await fieldLogStore.listReports()).filter((report) => scopedSpotIds.has(report.spot_id)),
+    });
+  },
+);
+
+// GET /admin/spot-moderation (Plan 60): flagged destinations (held, auto-hidden, appealed) in admin scope.
+router.get(
+  '/admin/spot-moderation',
+  authenticateToken,
+  requireAreaAdmin('destinations'),
+  async (req: AuthRequest, res) => {
+    const scopedSpots = spotStore.spots.filter((spot) => spotInAdminScope(req.adminScope!, spot));
+    const events = await listSpotModerationEvents(scopedSpots.map((s) => s.id));
+    const eventsBySpot = new Map<string, typeof events>();
+    for (const ev of events) {
+      const list = eventsBySpot.get(ev.spot_id) ?? [];
+      list.push(ev);
+      eventsBySpot.set(ev.spot_id, list);
+    }
+
+    const flagged = scopedSpots
+      .filter((spot) => {
+        if (spot.status === 'held' || spot.status === 'hidden_pending_review') return true;
+        const spotEvents = eventsBySpot.get(spot.id) ?? [];
+        return spotEvents.some((e) => e.decision === 'appealed') && spot.status !== 'published';
+      })
+      .map((spot) => {
+        const spotEvents = eventsBySpot.get(spot.id) ?? [];
+        return {
+          ...spot,
+          ...buildModerationSummary(spot, spotEvents),
+        };
+      });
+
+    return res.json({ success: true, data: flagged });
+  },
+);
+
+const moderateSpotSchema = z.object({
+  body: z
+    .object({
+      action: z.enum(['publish', 'keep_hidden', 'remove']),
+      note: z.string().trim().min(5).max(500),
+    })
+    .strict(),
+});
+
+router.post(
+  '/admin/spots/:id/moderate',
+  authenticateToken,
+  requireAreaAdmin('destinations'),
+  validateRequest(moderateSpotSchema),
+  async (req: AuthRequest, res) => {
+    const spot = spotStore.spots.find((s) => s.id === req.params.id || s.slug === req.params.id);
+    if (!spot || !spotInAdminScope(req.adminScope!, spot)) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
+    }
+    if (!req.adminScope!.platform && spot.created_by === req.user!.id) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'SELF_MODERATION_FORBIDDEN',
+          message: 'Platform administrator review is required for a destination you created.',
+        },
+      });
+    }
+    const beforeStatus = spot.status;
+    await applyAdminSpotModeration({
+      spot,
+      adminId: req.user!.id,
+      action: req.body.action,
+      note: req.body.note,
+    });
+    await writeAdminAudit({
+      actorId: req.user!.id,
+      actorRole: req.user!.role,
+      areaId: spot.town_area_id ?? null,
+      action: `spot.moderation.${req.body.action}`,
+      subjectType: 'spot',
+      subjectId: spot.id,
+      before: { status: beforeStatus },
+      after: { status: spot.status, note: req.body.note },
+    });
+    const events = await listSpotModerationEvents([spot.id]);
+    return res.json({
+      success: true,
+      data: {
+        ...spot,
+        ...buildModerationSummary(spot, events),
+      },
     });
   },
 );
@@ -1159,6 +1484,7 @@ router.patch(
       note: req.body.resolution_note,
     });
     if (!updated) return notFound();
+    await reconcileSpotAfterReportResolution(spot, req.body.status, req.user!.id, req.body.resolution_note);
     await writeAdminAudit({
       actorId: req.user!.id,
       actorRole: req.user!.role,
@@ -1384,5 +1710,6 @@ router.post(
     return res.json({ success: true, data: updated });
   },
 );
+forwardAsyncRouteErrors(router);
 
 export default router;

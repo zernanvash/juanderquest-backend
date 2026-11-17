@@ -105,12 +105,12 @@ describe('Spot contribution coordinate bounds (Philippine-wide)', () => {
     expect(res.status).toBe(400);
   });
 
-  it('documents current duplicate/retry semantics: identical posts create distinct spots', async () => {
+  it('rejects identical repeat submission by the same author (Plan 60)', async () => {
     const payload = basePayload({ name: 'Retry Semantics Destination' });
     const first = await request(app).post('/api/v1/spots').set('Authorization', `Bearer ${token}`).send(payload);
     const second = await request(app).post('/api/v1/spots').set('Authorization', `Bearer ${token}`).send(payload);
     expect(first.status).toBe(201);
-    expect(second.status).toBe(201);
-    expect(second.body.data.id).not.toBe(first.body.data.id);
+    expect(second.status).toBe(409);
+    expect(second.body.error.code).toBe('DUPLICATE_SPOT');
   });
 });
