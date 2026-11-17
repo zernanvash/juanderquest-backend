@@ -19,7 +19,14 @@ import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
 import { getPool } from '../db/pool.js';
 import { devGoogleCredentialsEnabled, verifyGoogleCredential } from '../auth/google.js';
 import { accountLoginThrottle } from '../auth/loginThrottle.js';
-import { canonicalTown, getHomeTown, setHomeTown } from '../social/homeTown.js';
+import {
+  canonicalTown,
+  getHomeTown,
+  getHomeTownState,
+  recordHomeTownSighting,
+  setHomeTown,
+  setHomeTownGps,
+} from '../social/homeTown.js';
 import { PANGASINAN_MUNICIPALITIES } from './affiliates.js';
 import { log } from '../utils/logger.js';
 
@@ -1416,18 +1423,29 @@ router.get('/auth/me', authenticateToken, async (req: AuthRequest, res: Response
   });
 });
 
-// Home town (owner 2026-11-08): chosen by the traveler; decides My Town.
+// Home town (Plan 100 WP-7): GPS-derived by default (5 distinct days in 30), with an off switch for manual selection.
 router.get('/me/home-town', authenticateToken, async (req: AuthRequest, res: Response) => {
   res.setHeader('Cache-Control', 'private, no-store');
+  const state = await getHomeTownState(req.user!.id);
   return res.json({
     success: true,
-    data: { home_municipality: await getHomeTown(req.user!.id), options: PANGASINAN_MUNICIPALITIES },
+    data: { ...state, options: PANGASINAN_MUNICIPALITIES },
   });
 });
 
 const homeTownSchema = z.object({ municipality: z.string().max(80).nullable() });
 
 router.put('/me/home-town', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const current = await getHomeTownState(req.user!.id);
+  if (current.home_town_gps) {
+    return res.status(409).json({
+      success: false,
+      error: {
+        code: 'GPS_HOME_TOWN_ENABLED',
+        message: 'Turn off GPS home town in Settings before choosing manually.',
+      },
+    });
+  }
   const parsed = homeTownSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({
@@ -1442,8 +1460,44 @@ router.put('/me/home-town', authenticateToken, async (req: AuthRequest, res: Res
       .status(400)
       .json({ success: false, error: { code: 'UNKNOWN_TOWN', message: 'Choose a town in Pangasinan.' } });
   }
-  await setHomeTown(req.user!.id, town);
-  return res.json({ success: true, data: { home_municipality: town } });
+  await setHomeTown(req.user!.id, town, 'manual');
+  return res.json({
+    success: true,
+    data: { home_municipality: town, home_town_source: 'manual', home_town_gps: false },
+  });
+});
+
+const homeTownGpsSchema = z.object({ enabled: z.boolean() });
+
+router.put('/me/home-town/gps', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const parsed = homeTownGpsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'enabled must be a boolean.' },
+    });
+  }
+  const state = await setHomeTownGps(req.user!.id, parsed.data.enabled);
+  return res.json({ success: true, data: state });
+});
+
+const sightingSchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  accuracy: z.number().min(0),
+  is_mocked: z.boolean().optional().default(false),
+});
+
+router.post('/me/home-town/sighting', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const parsed = sightingSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'Invalid location sighting payload.' },
+    });
+  }
+  const result = await recordHomeTownSighting(req.user!.id, parsed.data);
+  return res.json({ success: true, data: result });
 });
 
 // First-run tutorials (owner 2026-11-04): which ones this account has seen, so

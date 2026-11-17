@@ -96,6 +96,7 @@ export const MIGRATIONS = [
   '089_festival_boosts_voting.sql',
   '091_profile_progress_privacy.sql',
   '096_spot_photo_submissions.sql',
+  '090_home_town_gps.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so

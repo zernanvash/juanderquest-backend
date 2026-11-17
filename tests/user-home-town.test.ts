@@ -40,12 +40,20 @@ describe('home town chosen by the traveler (migration 081)', () => {
 
   const auth = () => ({ Authorization: `Bearer ${token}` });
 
-  it('a new account has no home town and gets the town list', async () => {
+  it('a new account has no home town, defaults GPS on, and gets the town list', async () => {
     const res = await request(app).get('/api/v1/me/home-town').set(auth());
     expect(res.status).toBe(200);
     expect(res.body.data.home_municipality).toBeNull();
+    expect(res.body.data.home_town_gps).toBe(true);
     expect(res.body.data.options).toContain('Dagupan City');
     expect(res.body.data.options.length).toBe(48);
+
+    const blocked = await request(app).put('/api/v1/me/home-town').set(auth()).send({ municipality: 'Dagupan City' });
+    expect(blocked.status).toBe(409);
+
+    const off = await request(app).put('/api/v1/me/home-town/gps').set(auth()).send({ enabled: false });
+    expect(off.status).toBe(200);
+    expect(off.body.data.home_town_gps).toBe(false);
   });
 
   it('stores the canonical spelling and shows it on /auth/me', async () => {
