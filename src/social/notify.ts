@@ -2,7 +2,8 @@ import { randomUUID } from 'crypto';
 import { runIsolatedProducer, type Queryable } from './activity.js';
 import { enqueuePush } from '../push/enqueue.js';
 
-export type NotificationKind = 'follow' | 'cheer' | 'comment' | 'overtaken' | 'weekly_recap' | 'weekly_champion';
+export type NotificationKind =
+  'follow' | 'cheer' | 'comment' | 'overtaken' | 'weekly_recap' | 'weekly_champion' | 'spot_photo_approved';
 
 export interface NotifyInput {
   userId: string;
