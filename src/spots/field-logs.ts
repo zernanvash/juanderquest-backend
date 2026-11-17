@@ -304,10 +304,10 @@ export class FieldLogStore {
   async hasUserReportedSpot(spotId: string, userId: string): Promise<boolean> {
     const pool = getPool();
     if (pool) {
-      const result = await pool.query(
-        `SELECT 1 FROM spot_reports WHERE spot_id = $1 AND user_id = $2 LIMIT 1`,
-        [spotId, userId],
-      );
+      const result = await pool.query(`SELECT 1 FROM spot_reports WHERE spot_id = $1 AND user_id = $2 LIMIT 1`, [
+        spotId,
+        userId,
+      ]);
       return Boolean(result.rows.length);
     }
     return this.reports.some((r) => r.spot_id === spotId && r.user_id === userId);

@@ -11,12 +11,7 @@ import { fieldLogStore } from './field-logs.js';
 export type SpotHoldReasonCode = 'TEXT_BLOCKED' | 'OUTSIDE_BOUNDARY' | 'POSSIBLE_DUPLICATE';
 
 export type ModerationEventDecision =
-  | 'published'
-  | 'held'
-  | 'hidden_pending_review'
-  | 'appealed'
-  | 'removed'
-  | 'kept_hidden';
+  'published' | 'held' | 'hidden_pending_review' | 'appealed' | 'removed' | 'kept_hidden';
 
 export interface SpotModerationEvent {
   id: string;
@@ -330,8 +325,7 @@ function eventFromRow(row: Record<string, unknown>): SpotModerationEvent {
     actor: String(row.actor),
     decision: row.decision as ModerationEventDecision,
     reason_codes: Array.isArray(row.reason_codes) ? row.reason_codes.map(String) : [],
-    details:
-      typeof row.details === 'object' && row.details !== null ? (row.details as Record<string, unknown>) : {},
+    details: typeof row.details === 'object' && row.details !== null ? (row.details as Record<string, unknown>) : {},
     created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
   };
 }

@@ -274,7 +274,9 @@ router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, asyn
     } catch (_) {}
   }
   const moderation =
-    req.user?.id && spot.created_by === req.user.id && (spot.status === 'held' || spot.status === 'hidden_pending_review')
+    req.user?.id &&
+    spot.created_by === req.user.id &&
+    (spot.status === 'held' || spot.status === 'hidden_pending_review')
       ? buildModerationSummary(spot, await listSpotModerationEvents([spot.id]))
       : {};
   return res.json({
@@ -745,111 +747,118 @@ const updateContributionSchema = z.object({
   body: contributionSchema.shape.body.partial(),
 });
 
-router.patch('/spots/:id', authenticateToken, validateRequest(updateContributionSchema), async (req: AuthRequest, res) => {
-  const existing = spotStore.spots.find((s) => s.id === req.params.id || s.slug === req.params.id);
-  if (!existing) {
-    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
-  }
-  if (existing.created_by !== req.user!.id) {
-    return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Only the author can edit this destination.' } });
-  }
-  if (existing.status === 'hidden_pending_review' || existing.status === 'unpublished') {
-    return res.status(403).json({
-      success: false,
-      error: {
-        code: 'SPOT_LOCKED_FOR_REVIEW',
-        message: 'Destinations hidden for moderator review cannot be edited directly. Submit an appeal instead.',
-      },
-    });
-  }
-
-  const nextName = req.body.name ?? existing.name;
-  const nextDescription = req.body.description ?? existing.description;
-  const nextTags = req.body.tags ?? existing.tags;
-  const nextLat = req.body.gps_lat ?? existing.gps_lat;
-  const nextLng = req.body.gps_lng ?? existing.gps_lng;
-  const nextMunicipality = req.body.municipality ?? existing.municipality;
-
-  const evaluation = await evaluateSpotSubmission({
-    mode: 'edit',
-    userId: req.user!.id,
-    editingSpotId: existing.id,
-    name: nextName,
-    description: nextDescription,
-    tags: nextTags,
-    gps_lat: nextLat,
-    gps_lng: nextLng,
-  });
-
-  if (evaluation.action === 'reject') {
-    return res.status(evaluation.httpStatus).json({
-      success: false,
-      error: {
-        code: evaluation.code,
-        message: evaluation.message,
-        ...(evaluation.existingSpot ? { existing_spot: evaluation.existingSpot } : {}),
-      },
-    });
-  }
-
-  await ensureAreaCache(getPool());
-  const areaMatch = matchSpotToAreas(nextLat, nextLng, nextMunicipality);
-  const wasPublished = existing.status === 'published';
-
-  const updated = await spotStore.updateSpot(existing.id, {
-    ...req.body,
-    status: evaluation.status,
-    town_area_id: areaMatch.townAreaId,
-    barangay_area_id: areaMatch.barangayAreaId,
-  });
-
-  await recordSpotModerationEvent({
-    spotId: existing.id,
-    actor: 'system',
-    decision: evaluation.status,
-    reasonCodes: evaluation.reasonCodes,
-    details: {
-      edited_by: req.user!.id,
-      messages: evaluation.messages,
-      ...(evaluation.duplicateSpot ? { duplicate_spot: evaluation.duplicateSpot } : {}),
-    },
-  });
-
-  if (!wasPublished && evaluation.status === 'published' && !existing.is_test) {
-    try {
-      await recordActivity(null, {
-        eventKey: `spot_posted:${existing.id}`,
-        actorId: req.user!.id,
-        verb: 'spot_posted',
-        subjectType: 'spot',
-        subjectId: existing.id,
-        subjectTitle: nextName,
-        subjectHref: `/spots/${existing.slug || existing.id}`,
-        municipality: nextMunicipality || null,
-        payload: {},
-        isTest: false,
-      });
-    } catch (err) {
-      log.error('[social:producer] Failed to record spot_posted activity on edit:', { error: err });
+router.patch(
+  '/spots/:id',
+  authenticateToken,
+  validateRequest(updateContributionSchema),
+  async (req: AuthRequest, res) => {
+    const existing = spotStore.spots.find((s) => s.id === req.params.id || s.slug === req.params.id);
+    if (!existing) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
     }
-  }
+    if (existing.created_by !== req.user!.id) {
+      return res
+        .status(403)
+        .json({ success: false, error: { code: 'FORBIDDEN', message: 'Only the author can edit this destination.' } });
+    }
+    if (existing.status === 'hidden_pending_review' || existing.status === 'unpublished') {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'SPOT_LOCKED_FOR_REVIEW',
+          message: 'Destinations hidden for moderator review cannot be edited directly. Submit an appeal instead.',
+        },
+      });
+    }
 
-  return res.json({
-    success: true,
-    data: {
-      ...(updated ?? existing),
-      moderation_reasons: evaluation.reasonCodes,
-      moderation_messages: evaluation.messages,
-      ...(evaluation.duplicateSpot ? { duplicate_spot: evaluation.duplicateSpot } : {}),
-      moderation: {
-        status: evaluation.status,
-        reason_codes: evaluation.reasonCodes,
+    const nextName = req.body.name ?? existing.name;
+    const nextDescription = req.body.description ?? existing.description;
+    const nextTags = req.body.tags ?? existing.tags;
+    const nextLat = req.body.gps_lat ?? existing.gps_lat;
+    const nextLng = req.body.gps_lng ?? existing.gps_lng;
+    const nextMunicipality = req.body.municipality ?? existing.municipality;
+
+    const evaluation = await evaluateSpotSubmission({
+      mode: 'edit',
+      userId: req.user!.id,
+      editingSpotId: existing.id,
+      name: nextName,
+      description: nextDescription,
+      tags: nextTags,
+      gps_lat: nextLat,
+      gps_lng: nextLng,
+    });
+
+    if (evaluation.action === 'reject') {
+      return res.status(evaluation.httpStatus).json({
+        success: false,
+        error: {
+          code: evaluation.code,
+          message: evaluation.message,
+          ...(evaluation.existingSpot ? { existing_spot: evaluation.existingSpot } : {}),
+        },
+      });
+    }
+
+    await ensureAreaCache(getPool());
+    const areaMatch = matchSpotToAreas(nextLat, nextLng, nextMunicipality);
+    const wasPublished = existing.status === 'published';
+
+    const updated = await spotStore.updateSpot(existing.id, {
+      ...req.body,
+      status: evaluation.status,
+      town_area_id: areaMatch.townAreaId,
+      barangay_area_id: areaMatch.barangayAreaId,
+    });
+
+    await recordSpotModerationEvent({
+      spotId: existing.id,
+      actor: 'system',
+      decision: evaluation.status,
+      reasonCodes: evaluation.reasonCodes,
+      details: {
+        edited_by: req.user!.id,
         messages: evaluation.messages,
-        duplicate_spot: evaluation.duplicateSpot ?? null,
+        ...(evaluation.duplicateSpot ? { duplicate_spot: evaluation.duplicateSpot } : {}),
       },
-    },
-  });
-});
+    });
+
+    if (!wasPublished && evaluation.status === 'published' && !existing.is_test) {
+      try {
+        await recordActivity(null, {
+          eventKey: `spot_posted:${existing.id}`,
+          actorId: req.user!.id,
+          verb: 'spot_posted',
+          subjectType: 'spot',
+          subjectId: existing.id,
+          subjectTitle: nextName,
+          subjectHref: `/spots/${existing.slug || existing.id}`,
+          municipality: nextMunicipality || null,
+          payload: {},
+          isTest: false,
+        });
+      } catch (err) {
+        log.error('[social:producer] Failed to record spot_posted activity on edit:', { error: err });
+      }
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        ...(updated ?? existing),
+        moderation_reasons: evaluation.reasonCodes,
+        moderation_messages: evaluation.messages,
+        ...(evaluation.duplicateSpot ? { duplicate_spot: evaluation.duplicateSpot } : {}),
+        moderation: {
+          status: evaluation.status,
+          reason_codes: evaluation.reasonCodes,
+          messages: evaluation.messages,
+          duplicate_spot: evaluation.duplicateSpot ?? null,
+        },
+      },
+    });
+  },
+);
 
 const createAuthorQuestSchema = z.object({
   body: z.object({

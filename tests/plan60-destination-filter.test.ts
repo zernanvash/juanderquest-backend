@@ -52,9 +52,30 @@ realPgDescribe('Plan 60 destination auto-filter & moderation (real PostgreSQL)',
     const newDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
 
     const users = [
-      { id: platformId, handle: 'p60platform', name: 'Platform Admin', role: 'admin', scope: 'developer', createdAt: oldDate },
-      { id: areaAdminId, handle: 'p60dagupan', name: 'Dagupan Admin', role: 'area_admin', scope: null, createdAt: oldDate },
-      { id: outsiderAdminId, handle: 'p60launion', name: 'La Union Admin', role: 'area_admin', scope: null, createdAt: oldDate },
+      {
+        id: platformId,
+        handle: 'p60platform',
+        name: 'Platform Admin',
+        role: 'admin',
+        scope: 'developer',
+        createdAt: oldDate,
+      },
+      {
+        id: areaAdminId,
+        handle: 'p60dagupan',
+        name: 'Dagupan Admin',
+        role: 'area_admin',
+        scope: null,
+        createdAt: oldDate,
+      },
+      {
+        id: outsiderAdminId,
+        handle: 'p60launion',
+        name: 'La Union Admin',
+        role: 'area_admin',
+        scope: null,
+        createdAt: oldDate,
+      },
       { id: veteranId, handle: 'p60veteran', name: 'Veteran Scout', role: 'user', scope: null, createdAt: oldDate },
       { id: veteran2Id, handle: 'p60veteran2', name: 'Veteran Two', role: 'user', scope: null, createdAt: oldDate },
       { id: veteran3Id, handle: 'p60veteran3', name: 'Veteran Three', role: 'user', scope: null, createdAt: oldDate },
@@ -94,11 +115,11 @@ realPgDescribe('Plan 60 destination auto-filter & moderation (real PostgreSQL)',
       type: 'Polygon',
       coordinates: [
         [
-          [120.30, 16.01],
+          [120.3, 16.01],
           [120.37, 16.01],
           [120.37, 16.08],
-          [120.30, 16.08],
-          [120.30, 16.01],
+          [120.3, 16.08],
+          [120.3, 16.01],
         ],
       ],
     };
@@ -112,7 +133,7 @@ realPgDescribe('Plan 60 destination auto-filter & moderation (real PostgreSQL)',
        ON CONFLICT (id) DO UPDATE SET boundary = EXCLUDED.boundary`,
       [
         [119.8, 15.8, 120.8, 16.4],
-        [120.30, 16.01, 120.37, 16.08],
+        [120.3, 16.01, 120.37, 16.08],
         JSON.stringify(dagupanBox),
         [120.2, 16.4, 120.5, 16.8],
       ],
@@ -244,7 +265,9 @@ realPgDescribe('Plan 60 destination auto-filter & moderation (real PostgreSQL)',
     expect(nearDupRes.body.data.status).toBe('held');
     expect(nearDupRes.body.data.moderation_reasons).toContain('POSSIBLE_DUPLICATE');
     expect(nearDupRes.body.data.duplicate_spot?.name).toBe('Dagupan Sunset Boardwalk');
-    expect(nearDupRes.body.data.moderation_messages.join(' ')).toMatch(/Is this the same as Dagupan Sunset Boardwalk\?/i);
+    expect(nearDupRes.body.data.moderation_messages.join(' ')).toMatch(
+      /Is this the same as Dagupan Sunset Boardwalk\?/i,
+    );
   });
 
   it('enforces daily velocity caps by account age (3/day for <7d accounts, 10/day for older)', async () => {
