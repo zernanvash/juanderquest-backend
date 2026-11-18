@@ -177,7 +177,8 @@ realPgDescribe('Plan 107 Suki Card (real PostgreSQL)', () => {
     expect(res.status).toBe(503);
     expect(res.body.error.code).toBe('SUKI_DISABLED');
     const owner = `Bearer ${token(ownerId)}`;
-    const alice = `Bearer ${token(aliceId)}`;
+    // A customer the later HTTP tests don't use, so the visit rate limit (6/min) is not spent here.
+    const alice = `Bearer ${token(unverifiedId)}`;
     const routes: Array<[string, string, string, Record<string, unknown>?]> = [
       ['get', '/api/v1/suki/programs', alice],
       ['get', '/api/v1/suki/programs/suki_x', alice],
@@ -603,8 +604,8 @@ realPgDescribe('Plan 107 Suki Card (real PostgreSQL)', () => {
     ] as Array<[string, Date]>) {
       await fixture.pool.query(
         `INSERT INTO users(id, seed_id, display_name, email, handle, role, is_public, is_test, created_at)
-         VALUES ($1,$2,$1,$3,$4,'user',TRUE,FALSE,$5)`,
-        [id, `${id}-seed`, `${id}@test.local`, id.replace(/-/g, ''), created.toISOString()],
+         VALUES ($1,$2,$6,$3,$4,'user',TRUE,FALSE,$5)`,
+        [id, `${id}-seed`, `${id}@test.local`, id.replace(/-/g, ''), created.toISOString(), id],
       );
     }
     const date = manilaDateString(day(10));
