@@ -325,6 +325,16 @@ affiliatesRouter.post(
           },
         });
       }
+      if (err.code === 'REAPPLY_EXISTING_APPLICATION') {
+        return res.status(409).json({
+          success: false,
+          error: {
+            code: 'REAPPLY_EXISTING_APPLICATION',
+            message: err.message,
+            application_id: err.applicationId,
+          },
+        });
+      }
       if (err.code === 'STORAGE_UNAVAILABLE') {
         return res.status(503).json({
           success: false,

@@ -2371,6 +2371,20 @@ export class MemoryDb {
       error.code = 'ACTIVE_APPLICATION_EXISTS';
       throw error;
     }
+    // Owner 2026-11-18: a rejected applicant re-applies on the same application
+    // (resubmit or appeal), not with a new one, while re-applications remain.
+    const reopenable = this.affiliate_applications.find(
+      (a) =>
+        a.user_id === payload.user_id &&
+        a.status === 'rejected' &&
+        (a.resubmission_count ?? 0) < MAX_AFFILIATE_REAPPLICATIONS,
+    );
+    if (reopenable) {
+      const error: any = new Error('Edit and resubmit or appeal your rejected application instead.');
+      error.code = 'REAPPLY_EXISTING_APPLICATION';
+      error.applicationId = reopenable.id;
+      throw error;
+    }
 
     const now = new Date().toISOString();
     const id = `app_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;

@@ -206,7 +206,7 @@ realPgDescribe('Affiliate application resubmit and appeal after rejection (real 
     expect((await pgRow(id)).status).toBe('rejected');
   });
 
-  it('cannot resubmit or appeal a pending or approved application, or while another is active', async () => {
+  it('cannot resubmit or appeal a pending or approved application, nor start a new one after a rejection', async () => {
     const user = 'ra-user-7';
     const as = token(user);
     const created = await api('post', '/affiliate/applications', as).send(payload);
@@ -219,20 +219,14 @@ realPgDescribe('Affiliate application resubmit and appeal after rejection (real 
     expect((await api('post', `/affiliate/applications/${id}/appeal`, as).send(appealBody)).status).toBe(400);
 
     expect((await decide(id, 'rejected', 'No.')).status).toBe(200);
-    // A second, new application is active: the old rejected one cannot be re-opened beside it.
+    // Owner 2026-11-18: no new application while the rejected one can be re-opened.
     const second = await api('post', '/affiliate/applications', as).send({ ...payload, business_name: 'Second Shop' });
-    expect(second.status).toBe(201);
-    const conflict = await api('post', `/affiliate/applications/${id}/appeal`, as).send(appealBody);
-    expect(conflict.status).toBe(409);
-    expect(conflict.body.error.code).toBe('ACTIVE_APPLICATION_EXISTS');
+    expect(second.status).toBe(409);
+    expect(second.body.error).toMatchObject({ code: 'REAPPLY_EXISTING_APPLICATION', application_id: id });
 
-    expect((await decide(second.body.data.id, 'approved')).status).toBe(200);
-    const approvedResubmit = await api('post', `/affiliate/applications/${second.body.data.id}/resubmit`, as).send(
-      payload,
-    );
-    expect(approvedResubmit.status).toBe(400);
-    expect(
-      (await api('post', `/affiliate/applications/${second.body.data.id}/appeal`, as).send(appealBody)).status,
-    ).toBe(400);
+    expect((await api('post', `/affiliate/applications/${id}/resubmit`, as).send(payload)).status).toBe(200);
+    expect((await decide(id, 'approved')).status).toBe(200);
+    expect((await api('post', `/affiliate/applications/${id}/resubmit`, as).send(payload)).status).toBe(400);
+    expect((await api('post', `/affiliate/applications/${id}/appeal`, as).send(appealBody)).status).toBe(400);
   });
 });
