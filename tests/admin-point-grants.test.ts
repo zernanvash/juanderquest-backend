@@ -70,15 +70,18 @@ realPg('admin Give mJDQ (isolated real PostgreSQL)', () => {
     db.usersRepo.setPool(fixture.pool);
     await fixture.pool.query(
       `INSERT INTO users(id, seed_id, display_name, email, handle, role, demo_points) VALUES
-       ($1,$1,'Grant Admin',$2,NULL,'admin',0),
-       ($3,$3,'Grant Traveler',$4,$5,'user',100),
-       ($6,$6,'Area Admin',$7,NULL,'area_admin',0)`,
+       ($1,$2,'Grant Admin',$3,NULL,'admin',0),
+       ($4,$5,'Grant Traveler',$6,$7,'user',100),
+       ($8,$9,'Area Admin',$10,NULL,'area_admin',0)`,
       [
+        adminId,
         adminId,
         `${adminId}@test.invalid`,
         userId,
+        userId,
         `${userId}@test.invalid`,
         `traveler${suffix}`,
+        areaAdminId,
         areaAdminId,
         `${areaAdminId}@test.invalid`,
       ],
