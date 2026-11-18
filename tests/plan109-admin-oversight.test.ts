@@ -292,6 +292,14 @@ realPg('Plan 109: Admin funding oversight, crowd monitoring, controls & quizzes 
     expect(reqRes.status).toBe(409);
     expect(reqRes.body.error.code).toBe('SPONSORING_SUSPENDED');
 
+    // A suspended merchant can still decline an open request.
+    const declineRes = await request(app)
+      .post(`/api/v1/sponsorships/${sp1.id}/decline`)
+      .set(authHeader(merchantOwnerId, 'user'))
+      .send({ idempotency_key: randomUUID() });
+    expect(declineRes.status).toBe(200);
+    expect(declineRes.body.data.status).toBe('declined');
+
     // Merchant funding list & detail endpoints report suspended status
     const mfList = await request(app).get('/api/v1/admin/merchant-funding').set(authHeader(adminId, 'admin'));
     expect(mfList.status).toBe(200);

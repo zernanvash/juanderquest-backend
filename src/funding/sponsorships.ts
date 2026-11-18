@@ -234,7 +234,7 @@ function validTerms(terms: Terms) {
   }
 }
 
-async function assertOwner(client: any, actorId: string, merchantId: string, scope: boolean) {
+async function assertOwner(client: any, actorId: string, merchantId: string, scope: boolean, allowSuspended = false) {
   const row = (
     await client.query(
       `SELECT m.id,m.is_test,m.status,m.is_published,m.sponsoring_suspended,mm.role,mm.status AS membership_status,u.is_test AS user_scope
@@ -252,7 +252,7 @@ async function assertOwner(client: any, actorId: string, merchantId: string, sco
   ) {
     throw new FundingError('MERCHANT_OWNER_REQUIRED', 403, 'An active published merchant owner is required.');
   }
-  if (row.sponsoring_suspended) {
+  if (row.sponsoring_suspended && !allowSuspended) {
     throw new FundingError('SPONSORING_SUSPENDED', 409, 'Merchant sponsoring is currently suspended.');
   }
   if (Boolean(row.is_test) !== scope || Boolean(row.user_scope) !== scope)
@@ -810,7 +810,7 @@ export class SponsorshipService {
         if (sponsorship.requested_by !== actorId || !['requested', 'countered'].includes(sponsorship.status))
           throw new FundingError('SPONSORSHIP_STATE', 409, 'Only the requesting author may withdraw an open request.');
       } else {
-        await assertOwner(tx.client, actorId, sponsorship.merchant_id, Boolean(plan.is_test));
+        await assertOwner(tx.client, actorId, sponsorship.merchant_id, Boolean(plan.is_test), true); // a suspended merchant may still decline
         if (!['requested', 'countered'].includes(sponsorship.status))
           throw new FundingError('SPONSORSHIP_STATE', 409, 'Only an open request can be declined.');
       }
