@@ -55,10 +55,12 @@ realPgDescribe('Affiliate application resubmit and appeal after rejection (real 
       [adminId, `${adminId}-seed`],
     );
     for (const id of applicants) {
-      await fixture.pool.query(
-        `INSERT INTO users(id,seed_id,display_name,email,role) VALUES ($1,$2,$4,$3,'user')`,
-        [id, `${id}-seed`, `${id}@test.local`, id],
-      );
+      await fixture.pool.query(`INSERT INTO users(id,seed_id,display_name,email,role) VALUES ($1,$2,$4,$3,'user')`, [
+        id,
+        `${id}-seed`,
+        `${id}@test.local`,
+        id,
+      ]);
     }
     await db.hydrateFromPg(fixture.pool);
   });
@@ -117,7 +119,9 @@ realPgDescribe('Affiliate application resubmit and appeal after rejection (real 
 
   it('appeals a rejection, shows it in the review queue and approves it', async () => {
     const id = await rejectedApplication('ra-user-2', 'Business could not be verified.');
-    const short = await api('post', `/affiliate/applications/${id}/appeal`, token('ra-user-2')).send({ message: 'pls' });
+    const short = await api('post', `/affiliate/applications/${id}/appeal`, token('ra-user-2')).send({
+      message: 'pls',
+    });
     expect(short.status).toBe(400);
 
     const message = 'We registered with the LGU last week; permit number 2026-123.';

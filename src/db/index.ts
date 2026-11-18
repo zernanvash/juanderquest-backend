@@ -176,12 +176,7 @@ export interface QuestAttemptRow {
 }
 
 export type AffiliateApplicationStatus =
-  | 'received'
-  | 'in_review'
-  | 'approved'
-  | 'rejected'
-  | 'needs_changes'
-  | 'appealed';
+  'received' | 'in_review' | 'approved' | 'rejected' | 'needs_changes' | 'appealed';
 
 // Owner 2026-11-18: a rejected application may be edited and resubmitted, or appealed, this many times in total.
 export const MAX_AFFILIATE_REAPPLICATIONS = 3;
@@ -2366,7 +2361,10 @@ export class MemoryDb {
     const existingActive = this.affiliate_applications.find(
       (a) =>
         a.user_id === payload.user_id &&
-        (a.status === 'received' || a.status === 'in_review' || a.status === 'needs_changes' || a.status === 'appealed'),
+        (a.status === 'received' ||
+          a.status === 'in_review' ||
+          a.status === 'needs_changes' ||
+          a.status === 'appealed'),
     );
     if (existingActive) {
       const error: any = new Error('You already have an active application under review.');
@@ -2564,7 +2562,9 @@ export class MemoryDb {
   // times, and only while the applicant has no other application awaiting review.
   private assertCanReapply(app: AffiliateApplicationRow): void {
     if ((app.resubmission_count ?? 0) >= MAX_AFFILIATE_REAPPLICATIONS) {
-      const err: any = new Error(`A rejected application can be resubmitted or appealed ${MAX_AFFILIATE_REAPPLICATIONS} times.`);
+      const err: any = new Error(
+        `A rejected application can be resubmitted or appealed ${MAX_AFFILIATE_REAPPLICATIONS} times.`,
+      );
       err.code = 'REAPPLY_LIMIT_REACHED';
       throw err;
     }
@@ -2572,7 +2572,10 @@ export class MemoryDb {
       (a) =>
         a.id !== app.id &&
         a.user_id === app.user_id &&
-        (a.status === 'received' || a.status === 'in_review' || a.status === 'needs_changes' || a.status === 'appealed'),
+        (a.status === 'received' ||
+          a.status === 'in_review' ||
+          a.status === 'needs_changes' ||
+          a.status === 'appealed'),
     );
     if (otherActive) {
       const err: any = new Error('You already have an active application under review.');
@@ -2604,7 +2607,14 @@ export class MemoryDb {
     const version = (app.version || 1) + 1;
     const resubmissionCount = (app.resubmission_count ?? 0) + 1;
     const rejectionReason = app.applicant_feedback ?? null;
-    const audit = this.buildApplicationAudit(app.id, userId, 'rejected', 'appealed', version, `Applicant appeal: ${message}`);
+    const audit = this.buildApplicationAudit(
+      app.id,
+      userId,
+      'rejected',
+      'appealed',
+      version,
+      `Applicant appeal: ${message}`,
+    );
 
     await this.runDurableTransaction([
       {
