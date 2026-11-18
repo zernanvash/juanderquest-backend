@@ -415,7 +415,11 @@ async function acceptTerms(
 export class SponsorshipService {
   constructor(private readonly pool: Pool) {}
 
-  async directory(questId: string, actorId: string, options: { q?: string; page?: number; lat?: number; lng?: number }) {
+  async directory(
+    questId: string,
+    actorId: string,
+    options: { q?: string; page?: number; lat?: number; lng?: number },
+  ) {
     const client = await this.pool.connect();
     try {
       const quest = (

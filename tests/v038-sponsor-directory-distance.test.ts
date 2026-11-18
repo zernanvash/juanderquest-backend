@@ -42,8 +42,8 @@ realPg('sponsor directory distance (disposable PostgreSQL)', () => {
     db.usersRepo.setPool(fixture.pool);
     env.QUEST_FUNDING_ENABLED = true;
     await fixture.pool.query(
-      'INSERT INTO users(id,seed_id,display_name,email,role,demo_points) VALUES($1,$1,$1,$2,$3,0)',
-      [authorId, `${authorId}@example.test`, 'user'],
+      'INSERT INTO users(id,seed_id,display_name,email,role,demo_points) VALUES($1,$2,$3,$4,$5,0)',
+      [authorId, authorId, authorId, `${authorId}@example.test`, 'user'],
     );
     db.users.push({
       id: authorId,
