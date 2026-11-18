@@ -87,7 +87,12 @@ router.post(
       action: `submission.bulk_${action}`,
       subjectType: 'submission',
       subjectId: updatedIds[0] ?? ids[0],
-      after: { count: updatedIds.length, updated_ids: updatedIds, skipped_count: skipped.length, rejection_reason: rejection_reason ?? null },
+      after: {
+        count: updatedIds.length,
+        updated_ids: updatedIds,
+        skipped_count: skipped.length,
+        rejection_reason: rejection_reason ?? null,
+      },
     });
     return res.status(200).json({
       success: true,

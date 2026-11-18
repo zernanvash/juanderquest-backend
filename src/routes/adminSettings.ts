@@ -228,8 +228,7 @@ adminSettingsRouter.get(
 
     const minSupportedBuild = Number(settingsSnapshot.values.app_min_supported_build ?? 1);
     const announcementText = String(settingsSnapshot.values.app_announcement_text ?? '').trim();
-    const announcementSeverity =
-      settingsSnapshot.values.app_announcement_severity === 'warning' ? 'warning' : 'info';
+    const announcementSeverity = settingsSnapshot.values.app_announcement_severity === 'warning' ? 'warning' : 'info';
     const announcementUntil = String(settingsSnapshot.values.app_announcement_until ?? '').trim();
 
     return res.status(200).json({

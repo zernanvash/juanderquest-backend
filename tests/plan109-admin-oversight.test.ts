@@ -514,9 +514,7 @@ realPg('Plan 109: Admin funding oversight, crowd monitoring, controls & quizzes 
       [`push-a-${randomUUID()}`, `push-b-${randomUUID()}`, travelerId],
     );
 
-    const ovBefore = await request(app)
-      .get('/api/v1/admin/mobile-app/overview')
-      .set(authHeader(adminId, 'admin'));
+    const ovBefore = await request(app).get('/api/v1/admin/mobile-app/overview').set(authHeader(adminId, 'admin'));
     expect(ovBefore.status).toBe(200);
     expect(ovBefore.body.data.devices.total_registered).toBeGreaterThanOrEqual(2);
     expect(ovBefore.body.data.devices.active_7d).toBeGreaterThanOrEqual(1);
@@ -661,9 +659,7 @@ realPg('Plan 109: Admin funding oversight, crowd monitoring, controls & quizzes 
     expect(createRes.status).toBe(201);
     const quizId = createRes.body.data.quiz.id;
 
-    const pubRes = await request(app)
-      .post(`/api/v1/admin/quizzes/${quizId}/publish`)
-      .set(authHeader(adminId, 'admin'));
+    const pubRes = await request(app).post(`/api/v1/admin/quizzes/${quizId}/publish`).set(authHeader(adminId, 'admin'));
     expect(pubRes.status).toBe(200);
 
     const startRes = await request(app)

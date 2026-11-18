@@ -1073,7 +1073,10 @@ export async function getCrowdSuggestions(
   }
 
   // 2. Evaluate recurring_peak per spot (same dow+hour busy >=3 of last 4 weeks)
-  const recurringBySpot = new Map<string, Map<string, { dow: number; hour: number; weeks: number; peakPressure: number }>>();
+  const recurringBySpot = new Map<
+    string,
+    Map<string, { dow: number; hour: number; weeks: number; peakPressure: number }>
+  >();
   for (const r of recurringRes.rows) {
     const spotId = String(r.spot_id);
     const spot = spotById.get(spotId);
