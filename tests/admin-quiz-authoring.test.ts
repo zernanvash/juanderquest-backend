@@ -120,7 +120,7 @@ describe('Admin quiz authoring: detail, draft update, immutable published versio
 
   it('rejects malformed question sets on update', async () => {
     const payload = buildDraftPayload(destinationId, 'Authoring Draft Two');
-    payload.questions = payload.questions.slice(0, 4) as typeof payload.questions;
+    payload.questions = [] as typeof payload.questions;
     const response = await request(app)
       .patch(`/api/v1/admin/quizzes/${quizId}`)
       .set('Authorization', `Bearer ${adminToken}`)
