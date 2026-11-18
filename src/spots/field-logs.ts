@@ -23,7 +23,17 @@ export interface SpotFieldLog {
   helpful_user_ids: string[];
   created_at: string;
   is_verified_visit?: boolean;
+  /** v0.3.1: set when the author edits the note. */
+  edited_at?: string;
 }
+
+/** v0.3.1: a note hides once this many different people report it. */
+export const NOTE_REPORT_HIDE_THRESHOLD = 3;
+export const NOTE_REPORT_REASONS = ['spam', 'offensive', 'false_info', 'other'] as const;
+export type NoteReportReason = (typeof NOTE_REPORT_REASONS)[number];
+
+export type NoteActionResult<T> =
+  { ok: true; value: T } | { ok: false; code: 'NOT_FOUND' | 'FORBIDDEN' | 'ALREADY_REPORTED' };
 
 export type SpotReportReason =
   | 'inaccurate_location'
@@ -189,10 +199,13 @@ const SEED_LOGS: SpotFieldLog[] = [
 export class FieldLogStore {
   private logs: SpotFieldLog[] = [...SEED_LOGS];
   private reports: SpotReport[] = [];
+  /** v0.3.1: note id → reporter ids (and reasons), kept with the notes. */
+  private noteReports = new Map<string, Map<string, NoteReportReason>>();
+  private hiddenNotes = new Set<string>();
 
   list(spotId: string): SpotFieldLog[] {
     return this.logs
-      .filter((l) => l.spot_id === spotId)
+      .filter((l) => l.spot_id === spotId && !this.hiddenNotes.has(l.id))
       .sort((a, b) => {
         // Helpful count primary, then recency
         if (b.helpful_count !== a.helpful_count) {
@@ -233,6 +246,49 @@ export class FieldLogStore {
 
     this.logs.unshift(log);
     return log;
+  }
+
+  private findNote(spotId: string, logId: string) {
+    return this.logs.find((l) => l.spot_id === spotId && l.id === logId && !this.hiddenNotes.has(l.id));
+  }
+
+  /** v0.3.1: only the author edits their note. */
+  update(spotId: string, logId: string, userId: string, content: string): NoteActionResult<SpotFieldLog> {
+    const log = this.findNote(spotId, logId);
+    if (!log) return { ok: false, code: 'NOT_FOUND' };
+    if (log.user_id !== userId) return { ok: false, code: 'FORBIDDEN' };
+    log.content = content.trim();
+    log.edited_at = new Date().toISOString();
+    return { ok: true, value: log };
+  }
+
+  /** v0.3.1: the author (or an admin) deletes a note. */
+  remove(spotId: string, logId: string, userId: string, isAdmin = false): NoteActionResult<string> {
+    const log = this.findNote(spotId, logId);
+    if (!log) return { ok: false, code: 'NOT_FOUND' };
+    if (log.user_id !== userId && !isAdmin) return { ok: false, code: 'FORBIDDEN' };
+    this.logs = this.logs.filter((l) => l.id !== logId);
+    this.noteReports.delete(logId);
+    return { ok: true, value: logId };
+  }
+
+  /** v0.3.1: any signed-in traveler except the author reports a note, once. */
+  reportNote(
+    spotId: string,
+    logId: string,
+    userId: string,
+    reason: NoteReportReason,
+  ): NoteActionResult<{ reports: number; hidden: boolean }> {
+    const log = this.findNote(spotId, logId);
+    if (!log) return { ok: false, code: 'NOT_FOUND' };
+    if (log.user_id === userId) return { ok: false, code: 'FORBIDDEN' };
+    const reporters = this.noteReports.get(logId) ?? new Map<string, NoteReportReason>();
+    if (reporters.has(userId)) return { ok: false, code: 'ALREADY_REPORTED' };
+    reporters.set(userId, reason);
+    this.noteReports.set(logId, reporters);
+    const hidden = reporters.size >= NOTE_REPORT_HIDE_THRESHOLD;
+    if (hidden) this.hiddenNotes.add(logId);
+    return { ok: true, value: { reports: reporters.size, hidden } };
   }
 
   toggleHelpful(spotId: string, logId: string, userId: string): { helpful_count: number; is_helpful: boolean } | null {

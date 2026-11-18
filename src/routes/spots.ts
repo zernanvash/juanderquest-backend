@@ -33,7 +33,7 @@ import { assetStore } from '../spots/asset-store.js';
 import { MAX_SPOT_GALLERY_PHOTOS, spotPhotoSubmissionStore } from '../spots/photo-submission-store.js';
 import { getSpotPhotoStorageProvider } from '../storage/spot-photos.js';
 import { detectValidatedMediaMime } from '../utils/media-mime.js';
-import { fieldLogStore } from '../spots/field-logs.js';
+import { fieldLogStore, NOTE_REPORT_REASONS } from '../spots/field-logs.js';
 import { hiddenGemHighlights } from '../spots/highlights.js';
 import { recognizeSpotLocation } from '../spots/recognize.js';
 import { sanitizeQuestForViewer } from '../quests/sanitize.js';
@@ -1273,6 +1273,67 @@ router.post(
       success: true,
       data: result,
     });
+  },
+);
+
+// v0.3.1: the author edits or deletes their note; any other signed-in traveler reports it.
+const noteActionLimiter = rateLimit({
+  policyId: 'spots:note-actions',
+  windowMs: 60_000,
+  max: 20,
+  keyStrategy: 'actor',
+});
+const NOTE_ERRORS = {
+  NOT_FOUND: [404, 'Note not found.'],
+  FORBIDDEN: [403, 'You cannot do that to this note.'],
+  ALREADY_REPORTED: [409, 'You already reported this note.'],
+} as const;
+const sendNoteError = (res: import('express').Response, code: keyof typeof NOTE_ERRORS) =>
+  res.status(NOTE_ERRORS[code][0]).json({ success: false, error: { code, message: NOTE_ERRORS[code][1] } });
+const findSpotForNote = (id: string) => spotStore.spots.find((s) => s.id === id || s.slug === id);
+
+const updateNoteSchema = z.object({ body: z.object({ content: z.string().trim().min(1).max(1000) }).strict() });
+router.patch(
+  ['/spots/:id/comments/:logId', '/spots/:id/field-logs/:logId'],
+  authenticateToken,
+  noteActionLimiter,
+  validateRequest(updateNoteSchema),
+  (req: AuthRequest, res) => {
+    const spot = findSpotForNote(req.params.id);
+    if (!spot) return sendNoteError(res, 'NOT_FOUND');
+    const result = fieldLogStore.update(spot.id, req.params.logId, req.user!.id, req.body.content);
+    if (!result.ok) return sendNoteError(res, result.code);
+    return res.json({ success: true, data: result.value });
+  },
+);
+
+router.delete(
+  ['/spots/:id/comments/:logId', '/spots/:id/field-logs/:logId'],
+  authenticateToken,
+  noteActionLimiter,
+  (req: AuthRequest, res) => {
+    const spot = findSpotForNote(req.params.id);
+    if (!spot) return sendNoteError(res, 'NOT_FOUND');
+    const result = fieldLogStore.remove(spot.id, req.params.logId, req.user!.id, req.user!.role === 'admin');
+    if (!result.ok) return sendNoteError(res, result.code);
+    return res.json({ success: true, data: { id: result.value, deleted: true } });
+  },
+);
+
+const reportNoteSchema = z.object({
+  body: z.object({ reason: z.enum(NOTE_REPORT_REASONS).default('other') }).strict(),
+});
+router.post(
+  ['/spots/:id/comments/:logId/report', '/spots/:id/field-logs/:logId/report'],
+  authenticateToken,
+  noteActionLimiter,
+  validateRequest(reportNoteSchema),
+  (req: AuthRequest, res) => {
+    const spot = findSpotForNote(req.params.id);
+    if (!spot) return sendNoteError(res, 'NOT_FOUND');
+    const result = fieldLogStore.reportNote(spot.id, req.params.logId, req.user!.id, req.body.reason);
+    if (!result.ok) return sendNoteError(res, result.code);
+    return res.status(201).json({ success: true, data: result.value });
   },
 );
 
