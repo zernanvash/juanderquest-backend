@@ -491,4 +491,70 @@ realPg('Plan 109: Admin funding oversight, crowd monitoring, controls & quizzes 
     expect(bulkApprove.status).toBe(200);
     expect(bulkApprove.body.data.updated_ids).toEqual(expect.arrayContaining([subA, subB]));
   });
+
+  it('WP-5: mobile app overview aggregates builds/push/preferences and app_version reflects settings', async () => {
+    await fixture.pool.query(
+      `INSERT INTO user_devices(id, user_id, token, platform, app_build, last_seen_at)
+       VALUES
+        ($1, $3, $1 || '_token_placeholder_123456', 'android', 5, NOW()),
+        ($2, $4, $2 || '_token_placeholder_123456', 'android', 3, NOW() - INTERVAL '15 days')`,
+      [`dev-a-${randomUUID()}`, `dev-b-${randomUUID()}`, travelerId, authorId],
+    );
+    await fixture.pool.query(
+      `INSERT INTO user_notification_preferences(user_id, push_overtaken, push_friend_activity, push_social, push_weekly_recap, quiet_hours)
+       VALUES ($1, TRUE, FALSE, TRUE, TRUE, TRUE)
+       ON CONFLICT (user_id) DO NOTHING`,
+      [travelerId],
+    );
+    await fixture.pool.query(
+      `INSERT INTO push_deliveries(id, user_id, category, collapse_key, title, body, href, status, is_test)
+       VALUES
+        ($1, $3, 'social', 'k1', 'Hi', 'Cheer', '/plaza', 'sent', FALSE),
+        ($2, $3, 'social', 'k2', 'Hi', 'Cheer', '/plaza', 'failed', FALSE)`,
+      [`push-a-${randomUUID()}`, `push-b-${randomUUID()}`, travelerId],
+    );
+
+    const ovBefore = await request(app)
+      .get('/api/v1/admin/mobile-app/overview')
+      .set(authHeader(adminId, 'admin'));
+    expect(ovBefore.status).toBe(200);
+    expect(ovBefore.body.data.devices.total_registered).toBeGreaterThanOrEqual(2);
+    expect(ovBefore.body.data.devices.active_7d).toBeGreaterThanOrEqual(1);
+    expect(ovBefore.body.data.push_7d.totals.sent).toBeGreaterThanOrEqual(1);
+    expect(ovBefore.body.data.push_7d.totals.failed).toBeGreaterThanOrEqual(1);
+    expect(ovBefore.body.data.notification_preferences.total_profiles).toBeGreaterThanOrEqual(1);
+
+    // Update min supported build and announcement banner through optimistic concurrency settings API
+    const rev = ovBefore.body.data.settings.revision;
+    const futureUntil = new Date(Date.now() + 86_400_000).toISOString();
+    const putRes = await request(app)
+      .put('/api/v1/admin/settings')
+      .set(authHeader(adminId, 'admin'))
+      .send({
+        expected_revision: rev,
+        reason: 'WP-5 release floor and maintenance banner',
+        changes: {
+          app_min_supported_build: 4,
+          app_announcement_text: 'Maintenance tonight 11 PM PHT',
+          app_announcement_severity: 'warning',
+          app_announcement_until: futureUntil,
+        },
+      });
+    expect(putRes.status).toBe(200);
+
+    const verRes = await request(app).get('/api/v1/app/version');
+    expect(verRes.status).toBe(200);
+    expect(verRes.body.data.min_supported_build).toBe(4);
+    expect(verRes.body.data.announcement).toEqual({
+      text: 'Maintenance tonight 11 PM PHT',
+      severity: 'warning',
+      until: futureUntil,
+    });
+
+    // Area admins cannot read mobile-app overview
+    const areaDenied = await request(app)
+      .get('/api/v1/admin/mobile-app/overview')
+      .set(authHeader(areaAdminId, 'area_admin'));
+    expect(areaDenied.status).toBe(403);
+  });
 });

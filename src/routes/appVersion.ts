@@ -2,9 +2,11 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
+import { SettingsService } from '../settings/service.js';
 import { log } from '../utils/logger.js';
 
 export const appVersionRouter = Router();
+const appSettingsService = new SettingsService();
 const LATEST_ANDROID_APK =
   'https://github.com/zernanvash/juanderquest-mobile/releases/latest/download/juanderquest-latest.apk';
 
@@ -164,13 +166,37 @@ export const getLatestAppVersion = (): AppVersionData => {
   return fallback;
 };
 
-// GET /api/v1/app/version -> Get latest app version info
-appVersionRouter.get('/app/version', (_req: Request, res: Response) => {
+// GET /api/v1/app/version -> Get latest app version info + dynamic min build & announcement
+appVersionRouter.get('/app/version', async (_req: Request, res: Response) => {
   const versionData = getLatestAppVersion();
+  let minSupportedBuild = versionData.minSupportedBuildNumber ?? versionData.minSupportedVersionCode ?? 1;
+  let announcement: { text: string; severity: 'info' | 'warning'; until: string | null } | null = null;
+  try {
+    const settings = await appSettingsService.getSettings();
+    const configuredMin = Number(settings.values.app_min_supported_build ?? 1);
+    if (Number.isInteger(configuredMin) && configuredMin >= 1) {
+      minSupportedBuild = configuredMin;
+    }
+    const text = String(settings.values.app_announcement_text ?? '').trim();
+    const severity = settings.values.app_announcement_severity === 'warning' ? 'warning' : 'info';
+    const untilRaw = String(settings.values.app_announcement_until ?? '').trim();
+    const untilMs = untilRaw ? Date.parse(untilRaw) : NaN;
+    const isExpired = Boolean(untilRaw) && Number.isFinite(untilMs) && untilMs <= Date.now();
+    if (text && !isExpired) {
+      announcement = { text, severity, until: untilRaw || null };
+    }
+  } catch {
+    // Settings table or pool unavailable (e.g. unit test without PG) - preserve fallback behavior.
+  }
+
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({
     success: true,
-    data: versionData,
+    data: {
+      ...versionData,
+      min_supported_build: minSupportedBuild,
+      announcement,
+    },
   });
 });
 

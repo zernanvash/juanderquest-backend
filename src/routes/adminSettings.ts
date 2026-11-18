@@ -164,4 +164,135 @@ adminSettingsRouter.get(
   },
 );
 
+// GET /api/v1/admin/mobile-app/overview - Aggregate release, device build distribution, push 7d, opt-in rates
+adminSettingsRouter.get(
+  '/admin/mobile-app/overview',
+  authenticateToken,
+  requireAdmin,
+  async (_req: AuthRequest, res: Response) => {
+    const pool = getPool();
+    if (!pool) {
+      return res.status(503).json({
+        success: false,
+        error: { code: 'STORAGE_UNAVAILABLE', message: 'PostgreSQL is required for mobile app telemetry.' },
+      });
+    }
+    const versionData = getLatestAppVersion();
+    const latestBuild = Number(versionData.buildNumber ?? versionData.versionCode ?? 1);
+    const settingsSnapshot = await service.getSettings();
+
+    const [{ rows: deviceRows }, { rows: pushRows }, { rows: prefRows }] = await Promise.all([
+      pool.query(
+        `SELECT COALESCE(app_build, 0)::int AS app_build,
+                COUNT(*)::int AS devices,
+                COUNT(*) FILTER (WHERE last_seen_at >= NOW() - INTERVAL '7 days')::int AS active_7d,
+                COUNT(*) FILTER (WHERE last_seen_at >= NOW() - INTERVAL '30 days')::int AS active_30d
+         FROM user_devices
+         WHERE disabled_at IS NULL
+         GROUP BY COALESCE(app_build, 0)
+         ORDER BY app_build DESC`,
+      ),
+      pool.query(
+        `SELECT category,
+                COUNT(*) FILTER (WHERE status = 'sent')::int AS sent,
+                COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
+                COUNT(*) FILTER (WHERE status = 'skipped')::int AS skipped,
+                COUNT(*)::int AS total
+         FROM push_deliveries
+         WHERE is_test = FALSE AND created_at >= NOW() - INTERVAL '7 days'
+         GROUP BY category
+         ORDER BY category`,
+      ),
+      pool.query(
+        `SELECT COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE push_overtaken)::int AS overtaken,
+                COUNT(*) FILTER (WHERE push_friend_activity)::int AS friend_activity,
+                COUNT(*) FILTER (WHERE push_social)::int AS social,
+                COUNT(*) FILTER (WHERE push_weekly_recap)::int AS weekly_recap,
+                COUNT(*) FILTER (WHERE quiet_hours)::int AS quiet_hours
+         FROM user_notification_preferences`,
+      ),
+    ]);
+
+    const totalDevices = deviceRows.reduce((sum: number, r: any) => sum + Number(r.devices || 0), 0);
+    const active7d = deviceRows.reduce((sum: number, r: any) => sum + Number(r.active_7d || 0), 0);
+    const active30d = deviceRows.reduce((sum: number, r: any) => sum + Number(r.active_30d || 0), 0);
+    const onLatestCount = deviceRows
+      .filter((r: any) => Number(r.app_build) >= latestBuild)
+      .reduce((sum: number, r: any) => sum + Number(r.devices || 0), 0);
+    const onLatestPct = totalDevices > 0 ? Math.round((onLatestCount / totalDevices) * 1000) / 10 : 0;
+
+    const pRow = prefRows[0] ?? {};
+    const prefTotal = Number(pRow.total ?? 0);
+    const pct = (count: number) => (prefTotal > 0 ? Math.round((count / prefTotal) * 1000) / 10 : 0);
+
+    const minSupportedBuild = Number(settingsSnapshot.values.app_min_supported_build ?? 1);
+    const announcementText = String(settingsSnapshot.values.app_announcement_text ?? '').trim();
+    const announcementSeverity =
+      settingsSnapshot.values.app_announcement_severity === 'warning' ? 'warning' : 'info';
+    const announcementUntil = String(settingsSnapshot.values.app_announcement_until ?? '').trim();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        observed_at: new Date().toISOString(),
+        version: {
+          version_name: versionData.versionName,
+          version_code: versionData.versionCode,
+          build_number: latestBuild,
+          commit_hash: versionData.commitHash,
+          changelog: versionData.changelog,
+          download_url: versionData.downloadUrl,
+          published_at: versionData.publishedAt,
+        },
+        devices: {
+          total_registered: totalDevices,
+          active_7d: active7d,
+          active_30d: active30d,
+          latest_build: latestBuild,
+          on_latest_count: onLatestCount,
+          on_latest_pct: onLatestPct,
+          by_build: deviceRows.map((r: any) => ({
+            app_build: Number(r.app_build),
+            devices: Number(r.devices),
+            active_7d: Number(r.active_7d),
+            active_30d: Number(r.active_30d),
+          })),
+        },
+        push_7d: {
+          by_category: pushRows.map((r: any) => ({
+            category: r.category,
+            sent: Number(r.sent),
+            failed: Number(r.failed),
+            skipped: Number(r.skipped),
+            total: Number(r.total),
+          })),
+          totals: {
+            sent: pushRows.reduce((s: number, r: any) => s + Number(r.sent || 0), 0),
+            failed: pushRows.reduce((s: number, r: any) => s + Number(r.failed || 0), 0),
+            skipped: pushRows.reduce((s: number, r: any) => s + Number(r.skipped || 0), 0),
+          },
+        },
+        notification_preferences: {
+          total_profiles: prefTotal,
+          rates: {
+            overtaken_pct: pct(Number(pRow.overtaken ?? 0)),
+            friend_activity_pct: pct(Number(pRow.friend_activity ?? 0)),
+            social_pct: pct(Number(pRow.social ?? 0)),
+            weekly_recap_pct: pct(Number(pRow.weekly_recap ?? 0)),
+            quiet_hours_pct: pct(Number(pRow.quiet_hours ?? 0)),
+          },
+        },
+        settings: {
+          revision: settingsSnapshot.revision,
+          app_min_supported_build: minSupportedBuild,
+          app_announcement_text: announcementText,
+          app_announcement_severity: announcementSeverity,
+          app_announcement_until: announcementUntil,
+        },
+      },
+    });
+  },
+);
+
 export default adminSettingsRouter;

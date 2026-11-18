@@ -3,7 +3,7 @@ export type SettingValue = string | number | boolean;
 export interface SettingDefinition {
   key: string;
   label: string;
-  category: 'branding_support' | 'quiz_defaults' | 'quest_funding' | 'trail_economy' | 'stamps';
+  category: 'branding_support' | 'quiz_defaults' | 'quest_funding' | 'trail_economy' | 'stamps' | 'mobile_app';
   type: 'email' | 'url' | 'text' | 'integer' | 'boolean' | 'string';
   defaultValue: SettingValue;
   min?: number;
@@ -396,6 +396,47 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     restartRequired: false,
     description: 'Shields a traveler may hold at once. Shields never grant stamps.',
   },
+  {
+    key: 'app_min_supported_build',
+    label: 'Minimum supported mobile build',
+    category: 'mobile_app',
+    type: 'integer',
+    defaultValue: 1,
+    min: 1,
+    max: 999999,
+    restartRequired: false,
+    description: 'Mobile builds lower than this number receive min_supported_build from /app/version.',
+  },
+  {
+    key: 'app_announcement_text',
+    label: 'Mobile in-app announcement text',
+    category: 'mobile_app',
+    type: 'text',
+    defaultValue: '',
+    maxLength: 140,
+    restartRequired: false,
+    description: 'Short plain-text banner shown inside the mobile app (max 140 characters). Leave empty to hide.',
+  },
+  {
+    key: 'app_announcement_severity',
+    label: 'Mobile announcement severity',
+    category: 'mobile_app',
+    type: 'string',
+    defaultValue: 'info',
+    allowedValues: ['info', 'warning'],
+    restartRequired: false,
+    description: 'Display severity for the in-app announcement banner.',
+  },
+  {
+    key: 'app_announcement_until',
+    label: 'Mobile announcement expiry (ISO timestamp)',
+    category: 'mobile_app',
+    type: 'text',
+    defaultValue: '',
+    maxLength: 40,
+    restartRequired: false,
+    description: 'Optional ISO-8601 expiry timestamp after which /app/version stops returning the banner.',
+  },
 ];
 
 export const SETTINGS_BY_KEY: ReadonlyMap<string, SettingDefinition> = new Map(
@@ -440,6 +481,9 @@ export function validateSettingValue(definition: SettingDefinition, raw: unknown
       if (value.length > (definition.maxLength ?? 280))
         return { ok: false, message: `${definition.label} is too long.` };
       if (/[<>]/.test(value)) return { ok: false, message: `${definition.label} must be plain text without HTML.` };
+      if (definition.key === 'app_announcement_until' && value && !Number.isFinite(Date.parse(value))) {
+        return { ok: false, message: `${definition.label} must be a valid ISO date/time.` };
+      }
       return { ok: true, value };
     }
     case 'string': {
