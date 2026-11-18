@@ -312,4 +312,84 @@ realPg('Plan 109: Admin funding oversight, crowd monitoring, controls & quizzes 
     expect(resumeRes.status).toBe(200);
     expect(resumeRes.body.data.sponsoring_suspended).toBe(false);
   });
+
+  it('WP-2: crowd overview buckets in Manila time, scopes area admins, masks <3 buckets, and excludes test data by default', async () => {
+    const dagupanSpotId = `p109-spot-dag-${randomUUID()}`;
+    const bolinaoSpotId = `p109-spot-bol-${randomUUID()}`;
+    const testSpotId = `p109-spot-test-${randomUUID()}`;
+    const subId = `p109-sub-${randomUUID()}`;
+
+    await fixture.pool.query(
+      `INSERT INTO spots(id, slug, name, description, category, subcategory, municipality, address, gps_lat, gps_lng,
+                         source_type, source_name, trust_level, status, crowd_capacity_band, town_area_id, is_test)
+       VALUES
+         ($1::text, $1::text, 'Dagupan Plaza', 'Town plaza', 'culture_heritage', 'Plaza', 'Dagupan City', 'Dagupan', 16.043, 120.333, 'editorial', 'Admin', 'lgu_verified', 'published', 'medium', 'town:p109-dagupan', FALSE),
+         ($2::text, $2::text, 'Bolinao Falls', 'Scenic falls', 'nature', 'Waterfalls', 'Bolinao', 'Bolinao', 16.386, 119.893, 'editorial', 'Admin', 'lgu_verified', 'published', 'medium', 'town:p109-bolinao', FALSE),
+         ($3::text, $3::text, 'QA Test Spot', 'Test spot', 'nature', 'Park', 'Dagupan City', 'Dagupan', 16.044, 120.334, 'editorial', 'Admin', 'lgu_verified', 'published', 'medium', 'town:p109-dagupan', TRUE)`,
+      [dagupanSpotId, bolinaoSpotId, testSpotId],
+    );
+
+    const qId = await seedQuest('Plan 109 Crowd Quest');
+    await fixture.pool.query(
+      `INSERT INTO submissions(id, idempotency_key, user_id, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy, status)
+       VALUES ($1::text, $1::text, $2::text, $3::text, 'MK', 16.043, 120.333, 5, 'approved')`,
+      [subId, travelerId, qId],
+    );
+    // 2026-11-10T23:30:00Z -> 2026-11-11 07:30:00+08 (Manila next day!)
+    await fixture.pool.query(
+      `INSERT INTO verified_visits(id, user_id, spot_id, source_submission_id, occurred_at, is_test)
+       VALUES ($1::uuid, $2, $3, $4, '2026-11-10T23:30:00Z', FALSE)`,
+      [randomUUID(), travelerId, dagupanSpotId, subId],
+    );
+
+    // Also add 1 activity event on Bolinao spot and 1 on QA test spot
+    await fixture.pool.query(
+      `INSERT INTO spot_activity_events(id, user_id, spot_id, activity_type, created_at, is_test)
+       VALUES
+         ($1, $2, $3, 'view', '2026-11-11T04:00:00Z', FALSE),
+         ($4, $2, $5, 'visit', '2026-11-11T04:00:00Z', TRUE)`,
+      [randomUUID(), travelerId, bolinaoSpotId, randomUUID(), testSpotId],
+    );
+
+    // Platform admin overview (test excluded by default)
+    const platRes = await request(app)
+      .get('/api/v1/admin/crowd/overview?from=2026-11-10&to=2026-11-12&granularity=day')
+      .set(authHeader(adminId, 'admin'));
+    expect(platRes.status).toBe(200);
+    expect(platRes.body.data.kpis.verified_visits).toBe(1);
+    const manilaBucket = platRes.body.data.timeseries.find((b: any) => b.bucket === '2026-11-11');
+    expect(manilaBucket?.verified_visits).toBe(1);
+    expect(platRes.body.data.timeseries.find((b: any) => b.bucket === '2026-11-10')).toBeUndefined();
+    expect(platRes.body.data.top_destinations.some((d: any) => d.spot_id === testSpotId)).toBe(false);
+    expect(platRes.body.data.top_destinations.some((d: any) => d.spot_id === bolinaoSpotId)).toBe(true);
+
+    // Platform admin with include_test=true sees test spot
+    const platTestRes = await request(app)
+      .get('/api/v1/admin/crowd/overview?from=2026-11-10&to=2026-11-12&include_test=true')
+      .set(authHeader(adminId, 'admin'));
+    expect(platTestRes.status).toBe(200);
+    expect(platTestRes.body.data.top_destinations.some((d: any) => d.spot_id === testSpotId)).toBe(true);
+
+    // Area admin sees only Dagupan spot, and small counts (<3) are masked as '<3'
+    const areaRes = await request(app)
+      .get('/api/v1/admin/crowd/overview?from=2026-11-10&to=2026-11-12&include_test=true')
+      .set(authHeader(areaAdminId, 'area_admin'));
+    expect(areaRes.status).toBe(200);
+    expect(areaRes.body.data.privacy_masked).toBe(true);
+    expect(areaRes.body.data.kpis.verified_visits).toBe('<3');
+    expect(areaRes.body.data.top_destinations.map((d: any) => d.spot_id)).toEqual([dagupanSpotId]);
+
+    // Area admin cannot drill into out-of-scope Bolinao spot
+    const outRes = await request(app)
+      .get(`/api/v1/admin/crowd/spots/${bolinaoSpotId}?from=2026-11-10&to=2026-11-12`)
+      .set(authHeader(areaAdminId, 'area_admin'));
+    expect(outRes.status).toBe(404);
+
+    // Heatmap returns 7x24 = 168 cells
+    const hmRes = await request(app)
+      .get('/api/v1/admin/crowd/heatmap?from=2026-11-10&to=2026-11-12')
+      .set(authHeader(adminId, 'admin'));
+    expect(hmRes.status).toBe(200);
+    expect(hmRes.body.data.cells).toHaveLength(168);
+  });
 });
