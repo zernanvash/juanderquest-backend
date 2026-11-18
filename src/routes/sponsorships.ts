@@ -89,6 +89,8 @@ sponsorshipsRouter.get('/sponsor-directory', authenticateToken, async (req: Auth
       data: await svc.directory(questId, req.user!.id, {
         q: String(req.query.q ?? ''),
         page: Number(req.query.page ?? 1),
+        lat: req.query.lat === undefined || req.query.lat === '' ? undefined : Number(req.query.lat),
+        lng: req.query.lng === undefined || req.query.lng === '' ? undefined : Number(req.query.lng),
       }),
     });
   } catch (error) {
