@@ -19,6 +19,7 @@ import { usersRouter } from './routes/users.js';
 import appVersionRouter from './routes/appVersion.js';
 import routesRouter from './routes/routes.js';
 import analyticsRouter from './routes/analytics.js';
+import { adminCrowdRouter } from './routes/adminCrowd.js';
 import { progressionRouter } from './routes/progression.js';
 import { juanChoiceRouter } from './routes/juanchoice.js';
 import { affiliatesRouter } from './routes/affiliates.js';
@@ -120,6 +121,7 @@ app.use('/api/v1', submissionsRouter);
 // platform-only /admin guard. Unmatched requests continue to that guard below.
 app.use('/api/v1', spotsRouter);
 app.use('/api/v1', analyticsRouter);
+app.use('/api/v1', adminCrowdRouter);
 app.use('/api/v1', adminAreaAdminsRouter);
 // Internal economy profile gate must run before the broad /admin middleware.
 app.use('/api/v1', economyReadsRouter);

@@ -35,7 +35,8 @@ const submitAttemptSchema = z.object({
         skipped: z.boolean().optional(),
       }),
     )
-    .length(5),
+    .min(1)
+    .max(5),
   style_score: z.number().int().min(0).max(100000).optional(),
   streak_max: z.number().int().min(0).max(5).optional(),
   idempotency_key: z.string().max(100).optional(),

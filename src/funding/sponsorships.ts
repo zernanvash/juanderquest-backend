@@ -237,7 +237,7 @@ function validTerms(terms: Terms) {
 async function assertOwner(client: any, actorId: string, merchantId: string, scope: boolean) {
   const row = (
     await client.query(
-      `SELECT m.id,m.is_test,m.status,m.is_published,mm.role,mm.status AS membership_status,u.is_test AS user_scope
+      `SELECT m.id,m.is_test,m.status,m.is_published,m.sponsoring_suspended,mm.role,mm.status AS membership_status,u.is_test AS user_scope
        FROM merchants m JOIN merchant_memberships mm ON mm.merchant_id=m.id AND mm.user_id=$2
        JOIN users u ON u.id=mm.user_id WHERE m.id=$1 FOR UPDATE OF m,mm`,
       [merchantId, actorId],
@@ -251,6 +251,9 @@ async function assertOwner(client: any, actorId: string, merchantId: string, sco
     row.membership_status !== 'active'
   ) {
     throw new FundingError('MERCHANT_OWNER_REQUIRED', 403, 'An active published merchant owner is required.');
+  }
+  if (row.sponsoring_suspended) {
+    throw new FundingError('SPONSORING_SUSPENDED', 409, 'Merchant sponsoring is currently suspended.');
   }
   if (Boolean(row.is_test) !== scope || Boolean(row.user_scope) !== scope)
     throw new FundingError('SCOPE_MISMATCH', 403, 'Merchant and account scopes do not match.');
@@ -492,11 +495,13 @@ export class SponsorshipService {
           throw new FundingError('FUNDING_PLAN_STATE', 409, 'This round is not accepting sponsor requests.');
         const merchant = (
           await tx.client.query(
-            "SELECT id,is_test FROM merchants WHERE id=$1 AND status='active' AND is_published=TRUE FOR UPDATE",
+            "SELECT id,is_test,sponsoring_suspended FROM merchants WHERE id=$1 AND status='active' AND is_published=TRUE FOR UPDATE",
             [merchantId],
           )
         ).rows[0];
         if (!merchant) throw new FundingError('MERCHANT_NOT_FOUND', 404, 'Active published merchant not found.');
+        if (merchant.sponsoring_suspended)
+          throw new FundingError('SPONSORING_SUSPENDED', 409, 'Merchant sponsoring is currently suspended.');
         if (Boolean(merchant.is_test) !== Boolean(plan.is_test))
           throw new FundingError('SCOPE_MISMATCH', 409, 'Merchant and quest scopes do not match.');
         await assertVoucher(tx.client, merchantId, terms.voucher_id, terms.voucher_qty);
@@ -770,6 +775,11 @@ export class SponsorshipService {
             409,
             'The counter changed or this is not your sponsorship request.',
           );
+        const merchantRow = (
+          await tx.client.query('SELECT sponsoring_suspended FROM merchants WHERE id=$1', [sponsorship.merchant_id])
+        ).rows[0];
+        if (merchantRow?.sponsoring_suspended)
+          throw new FundingError('SPONSORING_SUSPENDED', 409, 'Merchant sponsoring is currently suspended.');
         const terms = {
           points: Number(sponsorship.counter_points ?? sponsorship.points),
           voucher_id: sponsorship.voucher_id,

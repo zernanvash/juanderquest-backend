@@ -204,12 +204,16 @@ sponsorshipsRouter.get(
     }
     try {
       const status = req.query.status ? String(req.query.status) : null;
+      const includeTest = req.query.include_test === 'true';
       const result = await pool.query(
-        `SELECT p.id,p.quest_id,p.round_number,p.mode,p.status,p.reward_points,p.fee_points,p.planned_completions,p.target_points,p.starts_at,p.ends_at,p.created_at,
+        `SELECT p.id,p.quest_id,q.title AS quest_title,p.round_number,p.mode,p.status,p.reward_points,p.fee_points,p.planned_completions,p.target_points,p.starts_at,p.ends_at,p.created_at,
+       p.holds_paused,p.admin_flagged,
        COALESCE((SELECT SUM(c.committed_points) FROM quest_funding_contributions c WHERE c.plan_id=p.id AND c.is_test=p.is_test),0)::bigint AS committed_points,
        COALESCE((SELECT COUNT(*) FROM quest_funding_holds h WHERE h.plan_id=p.id AND h.status='held'),0)::int AS live_holds,
-       p.is_test FROM quest_funding_plans p WHERE ($1::text IS NULL OR p.status=$1) ORDER BY p.updated_at DESC LIMIT 200`,
-        [status],
+       p.is_test FROM quest_funding_plans p JOIN quests q ON q.id=p.quest_id
+       WHERE ($1::text IS NULL OR p.status=$1) AND ($2::boolean = TRUE OR p.is_test = FALSE)
+       ORDER BY p.updated_at DESC LIMIT 200`,
+        [status, includeTest],
       );
       return res.json({
         success: true,

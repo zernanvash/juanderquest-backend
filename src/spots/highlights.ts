@@ -24,7 +24,7 @@ export function hiddenGemHighlights(store: SpotStore, userId?: string, now = Dat
       (s) =>
         s.status === 'published' &&
         !s.is_test &&
-        !s.recommendation_suppressed &&
+        !store.isSuppressed(s, now) &&
         !establishedLandmarks.has(s.slug) &&
         s.id !== 'spot-hundred-islands' &&
         (['editorial', 'lgu_verified'].includes(s.trust_level) || Boolean(s.reviewed_by && s.reviewed_at)),

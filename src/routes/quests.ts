@@ -205,10 +205,11 @@ router.get('/quests', optionalAuthenticateToken, checkQAAuthorization, async (re
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   }
 
-  // Filter out archived or draft quests for general public
+  // Filter out archived or draft quests for general public, featuring pinned quests first (WP-4).
   const quests = db
     .listQuests(category, allowTest)
     .filter((q) => q.status !== 'archived' && (q.status !== 'draft' || isAuthorizedQA(req)))
+    .sort((a, b) => Number(Boolean(b.is_featured)) - Number(Boolean(a.is_featured)))
     .map((quest) => sanitizeQuestForViewer(quest, false));
   if (env.QUEST_FUNDING_ENABLED) {
     const pool = getPool();
@@ -319,6 +320,123 @@ router.get(
         municipality: spot?.municipality ?? null,
       }));
     return res.json({ success: true, data: quests });
+  },
+);
+
+const featureQuestSchema = z.object({
+  body: z.object({
+    featured: z.boolean(),
+  }),
+});
+
+router.post(
+  '/admin/quests/:id/feature',
+  authenticateToken,
+  requireAreaAdmin('quests_quizzes'),
+  validateRequest(featureQuestSchema),
+  async (req: AuthRequest, res: Response) => {
+    const scope = req.adminScope!;
+    const quest = db.findQuestById(req.params.id, true);
+    if (!quest) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Quest not found.' } });
+    }
+    const spot = spotStore.spots.find((s) => s.quest_id === quest.id);
+    if (!scope.platform && (!spot || !spotInScope(scope, 'quests_quizzes', spot.id))) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'AREA_FORBIDDEN', message: 'Quest is outside your assigned administrative areas.' },
+      });
+    }
+    const beforeFeatured = Boolean(quest.is_featured);
+    quest.is_featured = req.body.featured;
+    quest.updated_at = new Date().toISOString();
+    db.upsertQuest(quest);
+    await writeAdminAudit({
+      actorId: req.user!.id,
+      actorRole: req.user!.role,
+      areaId: spot?.town_area_id ?? null,
+      action: 'quest.featured_changed',
+      subjectType: 'quest',
+      subjectId: quest.id,
+      before: { is_featured: beforeFeatured },
+      after: { is_featured: quest.is_featured },
+    });
+    return res.json({
+      success: true,
+      data: sanitizeQuestForViewer(quest, false),
+    });
+  },
+);
+
+const bulkPauseQuestsSchema = z.object({
+  body: z.object({
+    destination_id: z.string().min(1),
+    reason: z.string().trim().min(3).max(500).optional(),
+  }),
+});
+
+router.post(
+  '/admin/quests/bulk-pause',
+  authenticateToken,
+  requireAreaAdmin('quests_quizzes'),
+  validateRequest(bulkPauseQuestsSchema),
+  async (req: AuthRequest, res: Response) => {
+    const scope = req.adminScope!;
+    const spot = spotStore.spots.find((s) => s.id === req.body.destination_id || s.slug === req.body.destination_id);
+    if (!spot) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
+    }
+    if (!scope.platform && !spotInScope(scope, 'quests_quizzes', spot.id)) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'AREA_FORBIDDEN', message: 'Destination is outside your assigned administrative areas.' },
+      });
+    }
+    const spotNameLower = spot.name.trim().toLowerCase();
+    const candidates = db.quests.filter(
+      (q) =>
+        !q.is_test &&
+        (q.status === 'published' || (!q.status && q.is_active)) &&
+        (spot.quest_id === q.id || q.location_name.trim().toLowerCase() === spotNameLower),
+    );
+    const pool = getPool();
+    const pausedIds: string[] = [];
+    const skippedFunded: string[] = [];
+    for (const quest of candidates) {
+      if (pool && (await hasFundingPlan(pool, quest.id))) {
+        skippedFunded.push(quest.id);
+        continue;
+      }
+      quest.status = 'paused';
+      quest.is_active = false;
+      quest.updated_at = new Date().toISOString();
+      db.upsertQuest(quest);
+      pausedIds.push(quest.id);
+    }
+    await writeAdminAudit({
+      actorId: req.user!.id,
+      actorRole: req.user!.role,
+      areaId: spot.town_area_id ?? null,
+      action: 'quest.bulk_paused',
+      subjectType: 'spot',
+      subjectId: spot.id,
+      after: {
+        destination_id: spot.id,
+        paused_ids: pausedIds,
+        skipped_funded: skippedFunded,
+        reason: req.body.reason ?? null,
+      },
+    });
+    return res.json({
+      success: true,
+      data: {
+        destination_id: spot.id,
+        destination_name: spot.name,
+        paused_count: pausedIds.length,
+        paused_ids: pausedIds,
+        skipped_funded: skippedFunded,
+      },
+    });
   },
 );
 

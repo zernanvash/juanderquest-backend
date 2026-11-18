@@ -26,8 +26,12 @@ export async function fundingSettings(client: PoolClient) {
 
 export async function lockPlan(client: PoolClient, id: string, actorId?: string, admin = false) {
   const result = await client.query(
-    `SELECT p.*, q.author_id, q.is_test AS quest_scope, q.version AS current_quest_version
-     FROM quest_funding_plans p JOIN quests q ON q.id=p.quest_id WHERE p.id=$1 FOR UPDATE OF p`,
+    `SELECT p.*, q.author_id, q.title AS quest_title, q.is_test AS quest_scope, q.version AS current_quest_version,
+            cu.display_name AS creator_display_name
+     FROM quest_funding_plans p
+     JOIN quests q ON q.id=p.quest_id
+     LEFT JOIN users cu ON cu.id=p.created_by
+     WHERE p.id=$1 FOR UPDATE OF p`,
     [id],
   );
   const plan = result.rows[0];
@@ -425,9 +429,9 @@ export class FundingPlansService {
     return result;
   }
 
-  async cancel(actorId: string, id: string, key: string) {
-    const result = await fundingCommand(this.pool, actorId, 'funding.cancel', key, { id }, async (tx) => {
-      const plan = await lockPlan(tx.client, id, actorId);
+  async cancel(actorId: string, id: string, key: string, admin = false) {
+    const result = await fundingCommand(this.pool, actorId, 'funding.cancel', key, { id, admin }, async (tx) => {
+      const plan = await lockPlan(tx.client, id, actorId, admin);
       if (!['draft', 'pending_sponsors', 'scheduled'].includes(plan.status))
         throw new FundingError('FUNDING_PLAN_STATE', 409, 'An active round must be closed instead.');
       await finalizePlan(tx, plan, actorId, 'cancelled');
@@ -437,9 +441,9 @@ export class FundingPlansService {
     return result;
   }
 
-  async extend(actorId: string, id: string, endsAt: string, key: string) {
-    return fundingCommand(this.pool, actorId, 'funding.extend', key, { id, endsAt }, async (tx) => {
-      const plan = await lockPlan(tx.client, id, actorId);
+  async extend(actorId: string, id: string, endsAt: string, key: string, admin = false) {
+    return fundingCommand(this.pool, actorId, 'funding.extend', key, { id, endsAt, admin }, async (tx) => {
+      const plan = await lockPlan(tx.client, id, actorId, admin);
       if (!['active', 'scheduled'].includes(plan.status) || Date.parse(endsAt) <= new Date(plan.ends_at).getTime())
         throw new FundingError('FUNDING_WINDOW_INVALID', 409, 'The new end date must extend an open round.');
       validateWindow({ ...plan, ends_at: endsAt }, await fundingSettings(tx.client));
@@ -452,21 +456,38 @@ export class FundingPlansService {
     });
   }
 
-  async get(actorId: string, id: string, admin = false) {
+  async get(actorId: string, id: string, admin = false, platformAdmin = admin) {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
       const plan = await lockPlan(client, id, actorId, admin);
       const contributions = await client.query(
-        'SELECT * FROM quest_funding_contributions WHERE plan_id=$1 ORDER BY created_at,id',
+        `SELECT c.*, u.display_name AS author_display_name, m.name AS merchant_name
+           FROM quest_funding_contributions c
+           LEFT JOIN users u ON u.id = c.funder_user_id
+           LEFT JOIN merchants m ON m.id = c.merchant_id
+          WHERE c.plan_id=$1
+          ORDER BY c.created_at,c.id`,
         [id],
       );
       const holds = await client.query(
-        'SELECT * FROM quest_funding_holds WHERE plan_id=$1 ORDER BY created_at DESC LIMIT 200',
+        `SELECT h.*, u.display_name AS raw_traveler_name
+           FROM quest_funding_holds h
+           LEFT JOIN users u ON u.id = h.user_id
+          WHERE h.plan_id=$1
+          ORDER BY h.created_at DESC LIMIT 200`,
         [id],
       );
+      const formattedHolds = holds.rows.map((h: any) => {
+        const suffix = String(h.user_id ?? '').slice(-4) || '0000';
+        const { raw_traveler_name, ...rest } = h;
+        return {
+          ...rest,
+          traveler_label: platformAdmin ? raw_traveler_name || `Traveler #${suffix}` : `Traveler #${suffix}`,
+        };
+      });
       const sponsorships = await client.query(
-        `SELECT s.*, m.name AS merchant_name
+        `SELECT s.*, m.name AS merchant_name, m.sponsoring_suspended
            FROM quest_sponsorships s
            LEFT JOIN merchants m ON m.id = s.merchant_id
           WHERE s.plan_id=$1
@@ -482,8 +503,12 @@ export class FundingPlansService {
       await client.query('COMMIT');
       return {
         ...plan,
-        contributions: contributions.rows,
-        holds: holds.rows,
+        contributions: contributions.rows.map((c: any) => ({
+          ...c,
+          funder_name:
+            c.funder_kind === 'merchant' ? c.merchant_name || c.merchant_id : c.author_display_name || c.funder_user_id,
+        })),
+        holds: formattedHolds,
         sponsorships: evaluatedSponsorships,
         simulated: true,
       };

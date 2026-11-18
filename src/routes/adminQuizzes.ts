@@ -191,7 +191,8 @@ const createDraftSchema = z
             .max(4),
         }),
       )
-      .length(5),
+      .min(1)
+      .max(5),
     is_test: z.boolean().optional(),
   })
   .refine((data) => Boolean(data.destination_id) || Boolean(data.pin), {

@@ -575,7 +575,7 @@ function computeStateFingerprint(
   for (const [, set] of store.interactions.entries()) {
     globalInteractionsCount += set.size;
   }
-  const spotsSig = `${store.spots.length}:${store.spots.map((s) => `${s.id}:${s.status}:${s.recommendation_suppressed ? 1 : 0}`).join(',')}`;
+  const spotsSig = `${store.spots.length}:${store.spots.map((s) => `${s.id}:${s.status}:${store.isSuppressed(s) ? 1 : 0}:${s.recommendation_suppressed_until || ''}`).join(',')}`;
   return `${homeTown ?? ''}|${userInteractionsSig}|${prefsSig}|${followsSig}|${subsCount}|${globalInteractionsCount}|${store.activityEvents.length}|${spotsSig}`;
 }
 
@@ -706,7 +706,7 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
   const tier3Centroid = tier3Town ? centroids.get(tier3Town.toLowerCase()) : undefined;
 
   const eligibleSpots = store.spots.filter(
-    (s) => s.status === 'published' && !s.recommendation_suppressed && (q.allowTest || !s.is_test),
+    (s) => s.status === 'published' && !store.isSuppressed(s, nowMs) && (q.allowTest || !s.is_test),
   );
 
   const scored = eligibleSpots

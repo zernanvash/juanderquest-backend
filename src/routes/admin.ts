@@ -15,7 +15,7 @@ import { settleReward } from '../funding/rewardSettlement.js';
 import { hasFundingPlan } from '../funding/holds.js';
 import { publishFunding, FundingError } from '../funding/transaction.js';
 import { governanceStore } from './proposals.js';
-import { isAreaScopedAdminRoute } from '../admin/scope.js';
+import { isAreaScopedAdminRoute, writeAdminAudit } from '../admin/scope.js';
 import { log } from '../utils/logger.js';
 
 const router = Router();
@@ -28,13 +28,83 @@ router.use('/admin', authenticateToken, (req: AuthRequest, res: Response, next) 
 
 router.get('/admin/submissions', (req: AuthRequest, res: Response) => {
   const statusFilter = req.query.status as string | undefined;
-  const submissions = db.listAllSubmissions(statusFilter);
+  const spotByQuestId = new Map(spotStore.spots.filter((s) => s.quest_id).map((s) => [s.quest_id!, s]));
+  const submissions = db.listAllSubmissions(statusFilter).map((s) => {
+    const quest = db.findQuestById(s.quest_id, true);
+    const spot = spotByQuestId.get(s.quest_id);
+    return {
+      ...s,
+      quest_location: quest?.location_name ?? '',
+      spot_id: spot?.id ?? null,
+      spot_name: spot?.name ?? quest?.location_name ?? '',
+    };
+  });
 
   return res.status(200).json({
     success: true,
     data: submissions,
   });
 });
+
+const bulkReviewSchema = z.object({
+  body: z.object({
+    ids: z.array(z.string().min(1)).min(1).max(100),
+    action: z.enum(['approve', 'reject']),
+    rejection_reason: z.string().trim().min(3).max(500).optional(),
+  }),
+});
+
+router.post(
+  '/admin/submissions/bulk-review',
+  validateRequest(bulkReviewSchema),
+  async (req: AuthRequest, res: Response) => {
+    const { ids, action, rejection_reason } = req.body;
+    const adminId = req.user!.id;
+    if (action === 'reject' && !rejection_reason) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Rejection reason is required when rejecting submissions.' },
+      });
+    }
+    const updatedIds: string[] = [];
+    const skipped: Array<{ id: string; reason: string }> = [];
+    const failed: Array<{ id: string; error: string }> = [];
+    for (const id of ids) {
+      try {
+        const result = await submissionsService.reviewSubmission(id, action, adminId, rejection_reason);
+        if (!result.success) {
+          skipped.push({ id, reason: result.error?.message || result.error?.code || 'skipped' });
+        } else {
+          updatedIds.push(id);
+        }
+      } catch (err) {
+        failed.push({ id, error: err instanceof Error ? err.message : 'failed' });
+      }
+    }
+    await writeAdminAudit({
+      actorId: adminId,
+      actorRole: req.user!.role,
+      action: `submission.bulk_${action}`,
+      subjectType: 'submission',
+      subjectId: updatedIds[0] ?? ids[0],
+      after: {
+        count: updatedIds.length,
+        updated_ids: updatedIds,
+        skipped_count: skipped.length,
+        rejection_reason: rejection_reason ?? null,
+      },
+    });
+    return res.status(200).json({
+      success: true,
+      data: {
+        updated_count: updatedIds.length,
+        updated_ids: updatedIds,
+        skipped,
+        failed,
+      },
+    });
+  },
+);
 
 const reviewSchema = z.object({
   body: z.object({
