@@ -6,6 +6,8 @@ import { feeForReward, targetForCompletions } from './allocate.js';
 import { FundingError, fundingCommand, type FundingTx } from './transaction.js';
 import type { PointAccountRef } from './ledger.js';
 import { notifyPlanStakeholders } from './notifications.js';
+import { runIsolatedProducer } from '../social/activity.js';
+import { announceNearbyQuest } from '../social/nearbyQuest.js';
 import { evaluateConditions } from './sponsorships.js';
 
 export interface PlanTerms {
@@ -74,6 +76,22 @@ export async function setQuestFundingState(client: PoolClient, questId: string, 
     status,
     state === 'active',
   ]);
+  // A funded quest goes live here; tell nearby travelers (first publish only, savepoint-isolated).
+  if (status === 'published') {
+    await runIsolatedProducer(client, '[nearby-quest] Funded quest announcement failed:', async () => {
+      const quest = (
+        await client.query('SELECT id,title,location_name,gps_lat,gps_lng,author_id,is_test FROM quests WHERE id=$1', [
+          questId,
+        ])
+      ).rows[0];
+      if (quest)
+        await announceNearbyQuest(client, {
+          ...quest,
+          gps_lat: Number(quest.gps_lat),
+          gps_lng: Number(quest.gps_lng),
+        });
+    });
+  }
 }
 
 export async function refreshQuestMirror(pool: Pool, questId: string) {

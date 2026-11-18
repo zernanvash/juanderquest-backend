@@ -104,6 +104,8 @@ export const MIGRATIONS = [
   '097_admin_point_grants.sql',
   '098_sponsorship_conditions.sql',
   '101_affiliate_reapply_appeal.sql',
+  // Owner 2026-11-18: nearby-quest push; re-sets the notification kind list (092's list + nearby_quest).
+  '102_nearby_quest_push.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so

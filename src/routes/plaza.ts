@@ -234,6 +234,7 @@ const notificationPrefSchema = z.object({
     push_friend_activity: z.boolean().optional(),
     push_social: z.boolean().optional(),
     push_weekly_recap: z.boolean().optional(),
+    push_nearby_quest: z.boolean().optional(),
     quiet_hours: z.boolean().optional(),
   }),
 });
@@ -939,6 +940,7 @@ plazaRouter.get(
           push_friend_activity: true,
           push_social: true,
           push_weekly_recap: true,
+          push_nearby_quest: true,
           quiet_hours: true,
         },
       });
@@ -946,7 +948,7 @@ plazaRouter.get(
 
     try {
       const r = await pool.query(
-        `SELECT push_overtaken, push_friend_activity, push_social, push_weekly_recap, quiet_hours
+        `SELECT push_overtaken, push_friend_activity, push_social, push_weekly_recap, push_nearby_quest, quiet_hours
            FROM user_notification_preferences
           WHERE user_id = $1`,
         [req.user!.id],
@@ -959,6 +961,7 @@ plazaRouter.get(
             push_friend_activity: true,
             push_social: true,
             push_weekly_recap: true,
+            push_nearby_quest: true,
             quiet_hours: true,
           },
         });
@@ -971,6 +974,7 @@ plazaRouter.get(
           push_friend_activity: Boolean(row.push_friend_activity),
           push_social: Boolean(row.push_social),
           push_weekly_recap: Boolean(row.push_weekly_recap),
+          push_nearby_quest: row.push_nearby_quest !== false,
           quiet_hours: Boolean(row.quiet_hours),
         },
       });
@@ -999,7 +1003,8 @@ plazaRouter.put(
       const body = req.body;
       const r = await pool.query(
         `INSERT INTO user_notification_preferences (
-           user_id, push_overtaken, push_friend_activity, push_social, push_weekly_recap, quiet_hours, updated_at
+           user_id, push_overtaken, push_friend_activity, push_social, push_weekly_recap, quiet_hours,
+           push_nearby_quest, updated_at
          ) VALUES (
            $1,
            COALESCE($2, TRUE),
@@ -1007,6 +1012,7 @@ plazaRouter.put(
            COALESCE($4, TRUE),
            COALESCE($5, TRUE),
            COALESCE($6, TRUE),
+           COALESCE($7, TRUE),
            NOW()
          )
          ON CONFLICT (user_id) DO UPDATE SET
@@ -1015,8 +1021,9 @@ plazaRouter.put(
            push_social = COALESCE($4, user_notification_preferences.push_social),
            push_weekly_recap = COALESCE($5, user_notification_preferences.push_weekly_recap),
            quiet_hours = COALESCE($6, user_notification_preferences.quiet_hours),
+           push_nearby_quest = COALESCE($7, user_notification_preferences.push_nearby_quest),
            updated_at = NOW()
-         RETURNING push_overtaken, push_friend_activity, push_social, push_weekly_recap, quiet_hours`,
+         RETURNING push_overtaken, push_friend_activity, push_social, push_weekly_recap, push_nearby_quest, quiet_hours`,
         [
           req.user!.id,
           body.push_overtaken ?? null,
@@ -1024,6 +1031,7 @@ plazaRouter.put(
           body.push_social ?? null,
           body.push_weekly_recap ?? null,
           body.quiet_hours ?? null,
+          body.push_nearby_quest ?? null,
         ],
       );
       const row = r.rows[0];
@@ -1034,6 +1042,7 @@ plazaRouter.put(
           push_friend_activity: Boolean(row.push_friend_activity),
           push_social: Boolean(row.push_social),
           push_weekly_recap: Boolean(row.push_weekly_recap),
+          push_nearby_quest: row.push_nearby_quest !== false,
           quiet_hours: Boolean(row.quiet_hours),
         },
       });

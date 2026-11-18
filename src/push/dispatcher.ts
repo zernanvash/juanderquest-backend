@@ -131,7 +131,9 @@ export async function dispatchDuePushes(client: Queryable, options: DispatchOpti
           ? prefs.push_friend_activity
           : row.category === 'social'
             ? prefs.push_social
-            : prefs.push_weekly_recap;
+            : row.category === 'nearby_quest'
+              ? prefs.push_nearby_quest
+              : prefs.push_weekly_recap;
 
     if (!categoryAllowed) {
       await client.query("UPDATE push_deliveries SET status = 'skipped', skip_reason = 'PREF_OFF' WHERE id = $1", [
@@ -148,7 +150,8 @@ export async function dispatchDuePushes(client: Queryable, options: DispatchOpti
       totalSent >= 6 ||
       (row.category === 'overtaken' && catSent >= 1) ||
       (row.category === 'friend_activity' && catSent >= 2) ||
-      (row.category === 'social' && catSent >= 4);
+      (row.category === 'social' && catSent >= 4) ||
+      (row.category === 'nearby_quest' && catSent >= 1);
 
     if (overCap) {
       await client.query("UPDATE push_deliveries SET status = 'skipped', skip_reason = 'CAP_REACHED' WHERE id = $1", [
@@ -181,7 +184,9 @@ export async function dispatchDuePushes(client: Queryable, options: DispatchOpti
           ? 'plaza_friends'
           : row.category === 'social'
             ? 'plaza_social'
-            : 'plaza_recap';
+            : row.category === 'nearby_quest'
+              ? 'nearby_quests'
+              : 'plaza_recap';
 
     const sendRes = await fcm(tokens, {
       title,

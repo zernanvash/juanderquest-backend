@@ -35,6 +35,7 @@ import { sanitizeAttemptSnapshot, sanitizeQuestForViewer } from '../quests/sanit
 import { normalizeTasks } from '../quests/taskNormalize.js';
 import type { QuestTask } from '../quests/taskTypes.js';
 import { publishChecklist, publishChecklistError } from '../quests/publishChecklist.js';
+import { scheduleNearbyQuestAnnouncement } from '../social/nearbyQuest.js';
 import { questTaskInputSchema, validateTasksWithinDistance } from '../quests/taskValidation.js';
 import { RELIC_REACH_M, relicSpot } from '../quests/relicSpot.js';
 import { AR_GAMES, ArGame, passedSessionFor, startSession } from '../services/arGames.js';
@@ -401,6 +402,7 @@ router.patch('/quests/:id/status', authenticateToken, async (req: AuthRequest, r
   quest.is_active = status === 'published';
   quest.updated_at = new Date().toISOString();
   db.upsertQuest(quest);
+  if (status === 'published' && previousStatus !== 'published') scheduleNearbyQuestAnnouncement(quest);
   if (!isAuthor && (isAdmin || isAreaAdmin) && statusPool) {
     await writeAdminAudit({
       actorId: req.user!.id,
@@ -574,6 +576,7 @@ router.patch(
 
     // Version bump: draft updates in place; published increments version (Plan 43 §4.1)
     const newVersion = quest.status === 'draft' ? currentVersion : currentVersion + 1;
+    const previousStatus = quest.status;
     const nowIso = new Date().toISOString();
 
     if (title !== undefined) quest.title = title;
@@ -621,6 +624,7 @@ router.patch(
     }
 
     db.upsertQuest(quest);
+    if (quest.status === 'published' && previousStatus !== 'published') scheduleNearbyQuestAnnouncement(quest);
 
     return res.status(200).json({
       success: true,

@@ -10,7 +10,8 @@ export type NotificationKind =
   | 'weekly_recap'
   | 'weekly_champion'
   | 'spot_photo_approved'
-  | 'spot_moderation';
+  | 'spot_moderation'
+  | 'nearby_quest';
 
 export interface NotifyInput {
   userId: string;
