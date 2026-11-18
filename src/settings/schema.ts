@@ -3,7 +3,7 @@ export type SettingValue = string | number | boolean;
 export interface SettingDefinition {
   key: string;
   label: string;
-  category: 'branding_support' | 'quiz_defaults' | 'quest_funding' | 'trail_economy' | 'stamps';
+  category: 'branding_support' | 'quiz_defaults' | 'quest_funding' | 'trail_economy' | 'stamps' | 'notifications';
   type: 'email' | 'url' | 'text' | 'integer' | 'boolean' | 'string';
   defaultValue: SettingValue;
   min?: number;
@@ -318,6 +318,16 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     max: 10000,
     restartRequired: false,
     description: 'Off-chain mJDQ points awarded once after all trail stops are verified.',
+  },
+  {
+    key: 'nearby_quest_push_enabled',
+    label: 'Nearby quest notifications',
+    category: 'notifications',
+    type: 'boolean',
+    defaultValue: true,
+    restartRequired: false,
+    description:
+      'Tell travelers when a new quest is published within 10 km of their home town (at most one push a day).',
   },
   {
     key: 'stamps_weekly_cap',

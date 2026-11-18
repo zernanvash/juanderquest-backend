@@ -19,7 +19,7 @@ export interface EnqueuePushInput {
    * funding and sponsorships. Always on (no preference toggle) and exempt from
    * the social daily caps; quiet hours still apply.
    */
-  category: 'overtaken' | 'friend_activity' | 'social' | 'weekly_recap' | 'account';
+  category: 'overtaken' | 'friend_activity' | 'social' | 'weekly_recap' | 'account' | 'nearby_quest';
   collapseKey: string;
   notificationId?: string | null;
   title: string;
@@ -34,6 +34,7 @@ export interface UserNotificationPreferences {
   push_friend_activity: boolean;
   push_social: boolean;
   push_weekly_recap: boolean;
+  push_nearby_quest: boolean;
   quiet_hours: boolean;
 }
 
@@ -42,12 +43,13 @@ const DEFAULT_PREFERENCES: UserNotificationPreferences = {
   push_friend_activity: true,
   push_social: true,
   push_weekly_recap: true,
+  push_nearby_quest: true,
   quiet_hours: true,
 };
 
 export async function getUserPreferences(client: Queryable, userId: string): Promise<UserNotificationPreferences> {
   const res = await client.query(
-    `SELECT push_overtaken, push_friend_activity, push_social, push_weekly_recap, quiet_hours
+    `SELECT push_overtaken, push_friend_activity, push_social, push_weekly_recap, push_nearby_quest, quiet_hours
        FROM user_notification_preferences
       WHERE user_id = $1`,
     [userId],
@@ -63,6 +65,7 @@ export async function getUserPreferences(client: Queryable, userId: string): Pro
     push_friend_activity: Boolean(row.push_friend_activity),
     push_social: Boolean(row.push_social),
     push_weekly_recap: Boolean(row.push_weekly_recap),
+    push_nearby_quest: row.push_nearby_quest !== false,
     quiet_hours: Boolean(row.quiet_hours),
   };
 }
@@ -88,6 +91,7 @@ export async function checkDailyCaps(
     social: 0,
     weekly_recap: 0,
     account: 0,
+    nearby_quest: 0,
   };
 
   for (const r of res.rows) {
@@ -120,7 +124,9 @@ export async function enqueuePush(client: Queryable, input: EnqueuePushInput, ov
             ? prefs.push_social
             : input.category === 'weekly_recap'
               ? prefs.push_weekly_recap
-              : false;
+              : input.category === 'nearby_quest'
+                ? prefs.push_nearby_quest
+                : false;
 
   if (!categoryAllowed) {
     await client.query(
@@ -155,7 +161,8 @@ export async function enqueuePush(client: Queryable, input: EnqueuePushInput, ov
     (totalSent >= 6 ||
       (input.category === 'overtaken' && catSent >= 1) ||
       (input.category === 'friend_activity' && catSent >= 2) ||
-      (input.category === 'social' && catSent >= 4));
+      (input.category === 'social' && catSent >= 4) ||
+      (input.category === 'nearby_quest' && catSent >= 1));
 
   if (isOverCap) {
     await client.query(

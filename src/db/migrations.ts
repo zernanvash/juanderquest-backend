@@ -103,6 +103,8 @@ export const MIGRATIONS = [
   // Owner 2026-11-18: admin Give mJDQ + Amoy anchor (after 092, the last to run before it).
   '097_admin_point_grants.sql',
   '098_sponsorship_conditions.sql',
+  // Owner 2026-11-18: nearby-quest push; re-sets the notification kind list (092's list + nearby_quest).
+  '102_nearby_quest_push.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so

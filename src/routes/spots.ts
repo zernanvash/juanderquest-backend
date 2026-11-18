@@ -46,6 +46,7 @@ import { handleSpotInteraction } from '../stamps/hooks.js';
 import { getHomeTown } from '../social/homeTown.js';
 import { log } from '../utils/logger.js';
 import { publishChecklist, publishChecklistError } from '../quests/publishChecklist.js';
+import { scheduleNearbyQuestAnnouncement } from '../social/nearbyQuest.js';
 
 const router = Router();
 const csv = (value: unknown) =>
@@ -1097,6 +1098,7 @@ router.post(
     if (!spot.quest_id) {
       spot.quest_id = newQuest.id;
     }
+    if (newQuest.status === 'published') scheduleNearbyQuestAnnouncement(newQuest);
 
     return res.status(201).json({
       success: true,
