@@ -182,7 +182,18 @@ realPgDescribe('Plan 107 Suki Card (real PostgreSQL)', () => {
     const routes: Array<[string, string, string, Record<string, unknown>?]> = [
       ['get', '/api/v1/suki/programs', alice],
       ['get', '/api/v1/suki/programs/suki_x', alice],
-      ['post', '/api/v1/suki/visits', alice, { standee: 'https://juanderquest.app/suki/x?v=1&s=00', lat: 16, lng: 120, accuracy_m: 5, idempotency_key: 'disabled-1' }],
+      [
+        'post',
+        '/api/v1/suki/visits',
+        alice,
+        {
+          standee: 'https://juanderquest.app/suki/x?v=1&s=00',
+          lat: 16,
+          lng: 120,
+          accuracy_m: 5,
+          idempotency_key: 'disabled-1',
+        },
+      ],
       ['post', '/api/v1/suki/pass', alice, { program_id: 'suki_x' }],
       ['get', '/api/v1/suki/pass/status?program_id=suki_x', alice],
       ['get', '/api/v1/merchant/suki', owner],
@@ -195,7 +206,10 @@ realPgDescribe('Plan 107 Suki Card (real PostgreSQL)', () => {
       ['get', '/api/v1/merchant/suki/stats', owner],
     ];
     for (const [method, path, auth, body] of routes) {
-      const r = await (request(app) as any)[method](path).set('Authorization', auth).send(body ?? {});
+      const agent = request(app) as any;
+      const r = await agent[method](path)
+        .set('Authorization', auth)
+        .send(body ?? {});
       expect([path, r.status, r.body.error?.code]).toEqual([path, 503, 'SUKI_DISABLED']);
     }
     const mine = await request(app)
