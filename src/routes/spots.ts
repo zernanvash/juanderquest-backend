@@ -252,12 +252,43 @@ router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, asyn
   const attached = Array.from(assetStore.assets.values()).filter(
     (a) => a.spot_id === spot.id && a.status === 'attached',
   );
+  let sponsors: Array<{ name: string; logo: string | null; quest_id: string }> = [];
   if (pool) {
     try {
-      const { rows } = await pool.query(
-        `SELECT * FROM spot_assets WHERE spot_id = $1 AND status = 'attached' ORDER BY created_at ASC`,
-        [spot.id],
-      );
+      const [assetsResult, sponsorsResult] = await Promise.all([
+        pool
+          .query(`SELECT * FROM spot_assets WHERE spot_id = $1 AND status = 'attached' ORDER BY created_at ASC`, [
+            spot.id,
+          ])
+          .catch(() => ({ rows: [] as any[] })),
+        pool
+          .query(
+            `SELECT DISTINCT ON (s.merchant_id)
+               m.name, m.logo_url AS logo, p.quest_id
+             FROM quest_sponsorships s
+             JOIN quest_funding_plans p ON p.id = s.plan_id
+             JOIN quests q ON q.id = p.quest_id
+             JOIN merchants m ON m.id = s.merchant_id
+             LEFT JOIN reviewed_quest_spot_bindings b
+               ON b.quest_id = q.id AND b.spot_id = $1 AND b.status = 'active'
+             WHERE s.status = 'accepted'
+               AND p.status IN ('active', 'closing')
+               AND q.is_active = TRUE
+               AND q.status = 'published'
+               AND s.is_test = $2 AND p.is_test = $2 AND q.is_test = $2
+               AND (
+                 b.spot_id = $1
+                 OR q.id = $3
+                 OR EXISTS (SELECT 1 FROM spots sp2 WHERE sp2.id = $1 AND sp2.quest_id = q.id)
+                 OR (abs(q.gps_lat - $4) <= 0.0015 AND abs(q.gps_lng - $5) <= 0.0015)
+               )
+             ORDER BY s.merchant_id, s.created_at, s.id
+             LIMIT 20`,
+            [spot.id, Boolean(spot.is_test), spot.quest_id || '', Number(spot.gps_lat), Number(spot.gps_lng)],
+          )
+          .catch(() => ({ rows: [] as any[] })),
+      ]);
+      const rows = assetsResult.rows;
       if (rows.length > 0) {
         const seen = new Set(attached.map((a) => a.id));
         for (const r of rows) {
@@ -272,6 +303,11 @@ router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, asyn
           }
         }
       }
+      sponsors = sponsorsResult.rows.map((r: any) => ({
+        name: String(r.name),
+        logo: r.logo ? String(r.logo) : null,
+        quest_id: String(r.quest_id),
+      }));
     } catch (_) {}
   }
   const moderation =
@@ -290,6 +326,7 @@ router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, asyn
       like_count: spotStore.likeCount(spot.id, actorId),
       trend_score: spotStore.trend(spot.id),
       attached_assets: attached,
+      sponsors,
       ...moderation,
     },
   });

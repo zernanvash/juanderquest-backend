@@ -21,7 +21,11 @@ const terms = z.object({
 
 export function fundingErrorResponse(res: Response, error: unknown) {
   if (error instanceof FundingError)
-    return res.status(error.status).json({ success: false, error: { code: error.code, message: error.message } });
+    return res.status(error.status).json({
+      success: false,
+      error: { code: error.code, message: error.message },
+      ...(error.data !== undefined ? { data: error.data } : {}),
+    });
   if ((error as any)?.code === '23505')
     return res.status(409).json({
       success: false,

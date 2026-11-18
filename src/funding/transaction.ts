@@ -10,6 +10,7 @@ export class FundingError extends Error {
     readonly code: string,
     readonly status: number,
     message: string,
+    readonly data?: unknown,
   ) {
     super(message);
   }
@@ -18,6 +19,7 @@ export class FundingError extends Error {
 export interface FundingTx {
   client: PoolClient;
   groups: CommittedLedgerGroup[];
+  auditMetadata?: Record<string, unknown>;
   transfer(input: MovePointsInput): Promise<CommittedLedgerGroup>;
 }
 
@@ -74,7 +76,7 @@ export async function fundingCommand<T>(
       actor_id: actorId,
       subject_type: 'quest_funding_command',
       subject_id: String((result as any)?.id ?? (payload as any)?.id ?? (payload as any)?.questId ?? key),
-      metadata: { idempotency_key: key, request: payload },
+      metadata: { idempotency_key: key, request: payload, ...(tx.auditMetadata ?? {}) },
       created_at: new Date().toISOString(),
     };
     await client.query(

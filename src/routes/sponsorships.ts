@@ -21,6 +21,13 @@ const baseTerms = z
     message: z.string().max(500).nullable().optional(),
   })
   .strict();
+const conditionSchema = z
+  .object({
+    type: z.enum(['same_town', 'visits_shop', 'min_players', 'creator_good_standing']),
+    value: z.number().int().min(1).max(1000).optional(),
+  })
+  .strict();
+const conditionsArraySchema = z.array(conditionSchema).max(4);
 
 function service(res: Response) {
   if (!env.QUEST_FUNDING_ENABLED) {
@@ -57,7 +64,11 @@ function mutation(
         return res.status(200).json({ success: true, data: await action(svc, req) });
       } catch (error) {
         if (error instanceof FundingError)
-          return res.status(error.status).json({ success: false, error: { code: error.code, message: error.message } });
+          return res.status(error.status).json({
+            success: false,
+            error: { code: error.code, message: error.message },
+            ...(error.data !== undefined ? { data: error.data } : {}),
+          });
         return fundingErrorResponse(res, error);
       }
     },
@@ -97,13 +108,56 @@ mutation(
 );
 mutation(
   '/sponsorships/:id/accept',
-  z.object({ terms_version: z.number().int().positive(), idempotency_key: key }).strict(),
-  (svc, req) => svc.accept(req.user!.id, req.params.id, req.body.terms_version, req.body.idempotency_key),
+  z
+    .object({
+      terms_version: z.number().int().positive(),
+      idempotency_key: key,
+      acknowledge_unmet: z.boolean().optional(),
+    })
+    .strict(),
+  (svc, req) =>
+    svc.accept(
+      req.user!.id,
+      req.params.id,
+      req.body.terms_version,
+      req.body.idempotency_key,
+      req.body.acknowledge_unmet,
+    ),
 );
 mutation(
   '/sponsorships/:id/counter',
-  z.object({ ...baseTerms.shape, terms_version: z.number().int().positive(), idempotency_key: key }).strict(),
+  z
+    .object({
+      ...baseTerms.shape,
+      terms_version: z.number().int().positive(),
+      idempotency_key: key,
+      conditions: conditionsArraySchema.optional(),
+    })
+    .strict(),
   (svc, req) => svc.counter(req.user!.id, req.params.id, req.body, req.body.terms_version, req.body.idempotency_key),
+);
+sponsorshipsRouter.put(
+  '/sponsorships/:id/conditions',
+  authenticateToken,
+  rateLimit({ policyId: 'quest:sponsorship-command', windowMs: 60_000, max: 30, keyStrategy: 'actor' }),
+  validateRequest(z.object({ body: z.object({ conditions: conditionsArraySchema }).strict() })),
+  async (req: AuthRequest, res: Response) => {
+    const svc = service(res);
+    if (!svc) return;
+    try {
+      return res
+        .status(200)
+        .json({ success: true, data: await svc.setConditions(req.user!.id, req.params.id, req.body.conditions) });
+    } catch (error) {
+      if (error instanceof FundingError)
+        return res.status(error.status).json({
+          success: false,
+          error: { code: error.code, message: error.message },
+          ...(error.data !== undefined ? { data: error.data } : {}),
+        });
+      return fundingErrorResponse(res, error);
+    }
+  },
 );
 mutation(
   '/sponsorships/:id/accept-counter',

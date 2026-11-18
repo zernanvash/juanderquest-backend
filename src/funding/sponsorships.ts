@@ -1,9 +1,211 @@
 import { randomUUID } from 'crypto';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
+import { withinRadius } from '../db/index.js';
 import { canonicalSettings } from '../settings/schema.js';
 import { FundingError, fundingCommand, type FundingTx } from './transaction.js';
 import { activateIfFunded, ensurePlanAccounts, lockPlan, refreshQuestMirror } from './plans.js';
 import { insertFundingNotification, notifyMerchantOwners } from './notifications.js';
+
+export type SponsorshipConditionType = 'same_town' | 'visits_shop' | 'min_players' | 'creator_good_standing';
+
+export interface SponsorshipConditionInput {
+  type: SponsorshipConditionType;
+  value?: number;
+}
+
+export interface EvaluatedSponsorshipCondition {
+  type: SponsorshipConditionType;
+  value?: number;
+  met: boolean | 'unknown';
+  detail: string;
+}
+
+const VALID_CONDITION_TYPES = new Set<SponsorshipConditionType>([
+  'same_town',
+  'visits_shop',
+  'min_players',
+  'creator_good_standing',
+]);
+
+export function normalizeTown(raw: string | null | undefined): string {
+  if (!raw) return '';
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/\bsta\.\s*/g, 'santa ')
+    .replace(/\bsto\.\s*/g, 'santo ')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+city$/i, '')
+    .trim();
+}
+
+export function normalizeConditionsInput(raw: unknown): SponsorshipConditionInput[] {
+  if (!Array.isArray(raw)) {
+    throw new FundingError('INVALID_CONDITIONS', 400, 'Conditions must be an array.');
+  }
+  if (raw.length > 4) {
+    throw new FundingError('INVALID_CONDITIONS', 400, 'At most 4 conditions may be specified.');
+  }
+  const seen = new Set<SponsorshipConditionType>();
+  const normalized: SponsorshipConditionInput[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') {
+      throw new FundingError('INVALID_CONDITIONS', 400, 'Each condition must be an object.');
+    }
+    const type = (item as any).type as SponsorshipConditionType;
+    if (!VALID_CONDITION_TYPES.has(type) || seen.has(type)) {
+      throw new FundingError('INVALID_CONDITIONS', 400, 'Conditions contain an invalid or duplicate type.');
+    }
+    seen.add(type);
+    if (type === 'min_players') {
+      const value = Number((item as any).value);
+      if (!Number.isInteger(value) || value < 1 || value > 1000) {
+        throw new FundingError('INVALID_CONDITIONS', 400, 'min_players requires an integer value between 1 and 1000.');
+      }
+      normalized.push({ type, value });
+    } else {
+      if ((item as any).value !== undefined && (item as any).value !== null) {
+        throw new FundingError('INVALID_CONDITIONS', 400, `Condition ${type} does not take a value.`);
+      }
+      normalized.push({ type });
+    }
+  }
+  return normalized;
+}
+
+export async function evaluateConditions(
+  client: Pick<PoolClient, 'query'>,
+  sponsorship: {
+    plan_id: string;
+    merchant_id: string;
+    requested_by?: string;
+    conditions?: unknown;
+  },
+): Promise<EvaluatedSponsorshipCondition[]> {
+  const rawList = Array.isArray(sponsorship.conditions) ? sponsorship.conditions : [];
+  if (rawList.length === 0) return [];
+
+  const metaRes = await client.query(
+    `SELECT q.id AS quest_id, q.author_id, q.location_name, q.gps_lat AS quest_lat, q.gps_lng AS quest_lng,
+            q.steps AS quest_steps, q.is_test,
+            (SELECT s.municipality FROM spots s WHERE s.quest_id = q.id ORDER BY s.created_at DESC LIMIT 1) AS spot_municipality,
+            (SELECT s2.municipality FROM reviewed_quest_spot_bindings b JOIN spots s2 ON s2.id = b.spot_id
+              WHERE b.quest_id = q.id AND b.status = 'active' ORDER BY b.created_at DESC LIMIT 1) AS bound_municipality,
+            m.name AS merchant_name, m.municipality AS merchant_municipality,
+            aa.name AS town_area_name,
+            app.municipality AS app_municipality, app.gps_lat AS shop_lat, app.gps_lng AS shop_lng
+       FROM quest_funding_plans p
+       JOIN quests q ON q.id = p.quest_id
+       JOIN merchants m ON m.id = $2
+       LEFT JOIN admin_areas aa ON aa.id = m.town_area_id
+       LEFT JOIN merchant_affiliate_applications app ON app.id = m.source_application_id
+      WHERE p.id = $1`,
+    [sponsorship.plan_id, sponsorship.merchant_id],
+  );
+  const meta = metaRes.rows[0];
+  if (!meta) return [];
+
+  const out: EvaluatedSponsorshipCondition[] = [];
+  for (const raw of rawList) {
+    const cond = raw as SponsorshipConditionInput;
+    if (cond.type === 'same_town') {
+      const questTownRaw = String(meta.spot_municipality || meta.bound_municipality || meta.location_name || '').trim();
+      const shopTownRaw = String(
+        meta.town_area_name || meta.app_municipality || meta.merchant_municipality || '',
+      ).trim();
+      const qNorm = normalizeTown(questTownRaw);
+      const sNorm = normalizeTown(shopTownRaw);
+      const met = Boolean(qNorm && sNorm && qNorm === sNorm);
+      let detail: string;
+      if (!qNorm || !sNorm) {
+        detail = !qNorm ? 'Quest town is unknown' : 'Shop town is unknown';
+      } else if (met) {
+        detail = `Quest and shop are both in ${questTownRaw}`;
+      } else {
+        detail = `Quest is in ${questTownRaw}; shop is in ${shopTownRaw}`;
+      }
+      out.push({ type: 'same_town', met, detail });
+    } else if (cond.type === 'visits_shop') {
+      const shopLat = meta.shop_lat != null ? Number(meta.shop_lat) : NaN;
+      const shopLng = meta.shop_lng != null ? Number(meta.shop_lng) : NaN;
+      if (!Number.isFinite(shopLat) || !Number.isFinite(shopLng)) {
+        out.push({
+          type: 'visits_shop',
+          met: 'unknown',
+          detail: 'Shop location has no GPS coordinates yet',
+        });
+      } else {
+        const points: Array<[number, number]> = [];
+        const qLat = Number(meta.quest_lat);
+        const qLng = Number(meta.quest_lng);
+        if (Number.isFinite(qLat) && Number.isFinite(qLng)) points.push([qLat, qLng]);
+        const steps = Array.isArray(meta.quest_steps) ? meta.quest_steps : [];
+        for (const step of steps) {
+          const sLat = step?.verification?.fence?.lat ?? step?.gps_lat;
+          const sLng = step?.verification?.fence?.lng ?? step?.gps_lng;
+          if (sLat != null && sLng != null && Number.isFinite(Number(sLat)) && Number.isFinite(Number(sLng))) {
+            points.push([Number(sLat), Number(sLng)]);
+          }
+        }
+        let anyOk = false;
+        let minDistance = Infinity;
+        for (const [lat, lng] of points) {
+          const check = withinRadius(lat, lng, shopLat, shopLng, 300);
+          if (Number.isFinite(check.distance) && check.distance < minDistance) {
+            minDistance = check.distance;
+          }
+          if (check.ok) anyOk = true;
+        }
+        const detail =
+          points.length === 0 || !Number.isFinite(minDistance)
+            ? 'Quest has no GPS coordinates'
+            : anyOk
+              ? `Visits within 300 m of shop (${Math.round(minDistance)} m)`
+              : `Closest stop is ${Math.round(minDistance)} m from shop (needs ≤ 300 m)`;
+        out.push({ type: 'visits_shop', met: anyOk, detail });
+      }
+    } else if (cond.type === 'min_players') {
+      const target = Number(cond.value ?? 1);
+      const countRes = await client.query(
+        `SELECT COUNT(DISTINCT qa.user_id)::int AS cnt
+           FROM quest_attempts qa
+           JOIN users u ON u.id = qa.user_id
+          WHERE qa.quest_id = $1 AND qa.status = 'completed' AND u.is_test = $2`,
+        [meta.quest_id, Boolean(meta.is_test)],
+      );
+      const completed = Number(countRes.rows[0]?.cnt ?? 0);
+      out.push({
+        type: 'min_players',
+        value: target,
+        met: completed >= target,
+        detail: `${completed} of ${target} players`,
+      });
+    } else if (cond.type === 'creator_good_standing') {
+      const creatorId = meta.author_id || sponsorship.requested_by;
+      const standingRes = await client.query(
+        `SELECT
+           EXISTS (SELECT 1 FROM account_emails ae WHERE ae.user_id = $1 AND ae.is_verified = TRUE) AS email_verified,
+           EXISTS (
+             SELECT 1 FROM spots sp
+              WHERE sp.created_by = $1
+                AND sp.status IN ('held', 'hidden_pending_review', 'unpublished', 'rejected')
+           ) AS has_bad_spot`,
+        [creatorId],
+      );
+      const row = standingRes.rows[0];
+      const emailVerified = Boolean(row?.email_verified);
+      const hasBadSpot = Boolean(row?.has_bad_spot);
+      const met = emailVerified && !hasBadSpot;
+      const detail = met
+        ? 'Verified creator in good standing'
+        : !emailVerified
+          ? 'Creator email is not verified'
+          : 'Creator has a held or hidden destination';
+      out.push({ type: 'creator_good_standing', met, detail });
+    }
+  }
+  return out;
+}
 
 type Terms = {
   points: number;
@@ -75,7 +277,14 @@ async function sponsorshipForUpdate(client: any, id: string) {
   return result.rows[0];
 }
 
-async function acceptTerms(tx: FundingTx, sponsorship: any, terms: Terms, actorId: string, merchantAccepts: boolean) {
+async function acceptTerms(
+  tx: FundingTx,
+  sponsorship: any,
+  terms: Terms,
+  actorId: string,
+  merchantAccepts: boolean,
+  acknowledgeUnmet = false,
+) {
   const plan = await lockPlan(tx.client, sponsorship.plan_id);
   if (
     !['pending_sponsors', 'active'].includes(plan.status) ||
@@ -92,6 +301,17 @@ async function acceptTerms(tx: FundingTx, sponsorship: any, terms: Terms, actorI
       403,
       'Only the requesting destination author may accept a counter.',
     );
+  const evaluatedConditions = await evaluateConditions(tx.client, sponsorship);
+  const unmet = evaluatedConditions.filter((c) => c.met !== true);
+  if (unmet.length > 0 && (!merchantAccepts || !acknowledgeUnmet)) {
+    throw new FundingError('CONDITIONS_NOT_MET', 409, 'Deal conditions are not met yet.', {
+      conditions: evaluatedConditions,
+    });
+  }
+  const override = merchantAccepts && unmet.length > 0 && acknowledgeUnmet;
+  if (override) {
+    tx.auditMetadata = { override: true, accepted_with_unmet: unmet };
+  }
   await assertVoucher(tx.client, sponsorship.merchant_id, terms.voucher_id, terms.voucher_qty);
 
   if (terms.points > 0) {
@@ -149,8 +369,11 @@ async function acceptTerms(tx: FundingTx, sponsorship: any, terms: Terms, actorI
   }
   const updated = (
     await tx.client.query(
-      `UPDATE quest_sponsorships SET status='accepted',points=$2,voucher_id=$3,voucher_qty=$4,promo=$5,message=$6,responded_by=$7,responded_at=NOW(),updated_at=NOW()
-     WHERE id=$1 RETURNING *`,
+      `UPDATE quest_sponsorships
+          SET status='accepted',points=$2,voucher_id=$3,voucher_qty=$4,promo=$5,message=$6,responded_by=$7,responded_at=NOW(),updated_at=NOW(),
+              accepted_with_unmet=$8::jsonb,
+              override_acknowledged_at=CASE WHEN $9 THEN NOW() ELSE NULL END
+        WHERE id=$1 RETURNING *`,
       [
         sponsorship.id,
         terms.points,
@@ -159,6 +382,8 @@ async function acceptTerms(tx: FundingTx, sponsorship: any, terms: Terms, actorI
         terms.promo,
         terms.message ?? null,
         actorId,
+        override ? JSON.stringify(unmet) : null,
+        override,
       ],
     )
   ).rows[0];
@@ -184,7 +409,7 @@ async function acceptTerms(tx: FundingTx, sponsorship: any, terms: Terms, actorI
       '/merchant/funding',
     );
   if (plan.status === 'pending_sponsors') await activateIfFunded(tx, plan);
-  return updated;
+  return { ...updated, conditions: evaluatedConditions };
 }
 
 export class SponsorshipService {
@@ -370,8 +595,16 @@ export class SponsorshipService {
     });
   }
 
-  async counter(actorId: string, id: string, terms: Terms, version: number, key: string) {
+  async counter(
+    actorId: string,
+    id: string,
+    terms: Terms & { conditions?: SponsorshipConditionInput[] },
+    version: number,
+    key: string,
+  ) {
     validTerms(terms);
+    const hasConditions = terms.conditions !== undefined;
+    const validatedConditions = hasConditions ? normalizeConditionsInput(terms.conditions) : undefined;
     return fundingCommand(this.pool, actorId, 'sponsorship.counter', key, { id, terms, version }, async (tx) => {
       const sponsorship = await sponsorshipForUpdate(tx.client, id);
       if (sponsorship.status !== 'requested' || Number(sponsorship.terms_version) !== version)
@@ -391,8 +624,18 @@ export class SponsorshipService {
       );
       const result = await tx.client.query(
         `UPDATE quest_sponsorships SET status='countered',counter_points=$2,counter_voucher_qty=$3,counter_promo=$4,counter_message=$5,
-           terms_version=terms_version+1,responded_by=$6,responded_at=NOW(),updated_at=NOW() WHERE id=$1 RETURNING *`,
-        [id, terms.points, terms.voucher_qty, terms.promo, terms.message ?? null, actorId],
+             conditions=CASE WHEN $7 THEN $8::jsonb ELSE conditions END,
+             terms_version=terms_version+1,responded_by=$6,responded_at=NOW(),updated_at=NOW() WHERE id=$1 RETURNING *`,
+        [
+          id,
+          terms.points,
+          terms.voucher_qty,
+          terms.promo,
+          terms.message ?? null,
+          actorId,
+          hasConditions,
+          JSON.stringify(validatedConditions ?? []),
+        ],
       );
       const title =
         (await tx.client.query('SELECT title FROM quests WHERE id=$1', [plan.quest_id])).rows[0]?.title ??
@@ -406,29 +649,72 @@ export class SponsorshipService {
         message: `The merchant proposed revised sponsorship terms for “${title}”. Review them before accepting.`,
         href: `/funding?quest_id=${encodeURIComponent(plan.quest_id)}`,
       });
-      return result.rows[0];
+      const updatedRow = result.rows[0];
+      return { ...updatedRow, conditions: await evaluateConditions(tx.client, updatedRow) };
     });
   }
 
-  async accept(actorId: string, id: string, version: number, key: string) {
-    const result = await fundingCommand(this.pool, actorId, 'sponsorship.accept', key, { id, version }, async (tx) => {
-      const sponsorship = await sponsorshipForUpdate(tx.client, id);
-      if (sponsorship.status !== 'requested' || Number(sponsorship.terms_version) !== version)
-        throw new FundingError('SPONSORSHIP_TERMS_CHANGED', 409, 'Refresh this request before accepting it.');
-      return acceptTerms(
-        tx,
-        sponsorship,
-        {
-          points: Number(sponsorship.points),
-          voucher_id: sponsorship.voucher_id,
-          voucher_qty: Number(sponsorship.voucher_qty),
-          promo: Boolean(sponsorship.promo),
-          message: sponsorship.message,
-        },
-        actorId,
-        true,
-      );
-    });
+  async setConditions(actorId: string, id: string, rawConditions: unknown) {
+    const validated = normalizeConditionsInput(rawConditions);
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const sponsorship = await sponsorshipForUpdate(client, id);
+      if (!['requested', 'countered'].includes(sponsorship.status)) {
+        throw new FundingError('SPONSORSHIP_STATE', 409, 'Only an open sponsorship request can update conditions.');
+      }
+      const plan = await lockPlan(client, sponsorship.plan_id);
+      if (
+        !['pending_sponsors', 'active'].includes(plan.status) ||
+        new Date(sponsorship.expires_at).getTime() <= Date.now()
+      ) {
+        throw new FundingError('SPONSORSHIP_STATE', 409, 'This sponsorship request is no longer open.');
+      }
+      await assertOwner(client, actorId, sponsorship.merchant_id, Boolean(plan.is_test));
+      const updated = (
+        await client.query(
+          'UPDATE quest_sponsorships SET conditions=$2::jsonb,updated_at=NOW() WHERE id=$1 RETURNING *',
+          [id, JSON.stringify(validated)],
+        )
+      ).rows[0];
+      const evaluated = await evaluateConditions(client, updated);
+      await client.query('COMMIT');
+      return { ...updated, conditions: evaluated };
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async accept(actorId: string, id: string, version: number, key: string, acknowledgeUnmet = false) {
+    const result = await fundingCommand(
+      this.pool,
+      actorId,
+      'sponsorship.accept',
+      key,
+      acknowledgeUnmet ? { id, version, acknowledge_unmet: true } : { id, version },
+      async (tx) => {
+        const sponsorship = await sponsorshipForUpdate(tx.client, id);
+        if (sponsorship.status !== 'requested' || Number(sponsorship.terms_version) !== version)
+          throw new FundingError('SPONSORSHIP_TERMS_CHANGED', 409, 'Refresh this request before accepting it.');
+        return acceptTerms(
+          tx,
+          sponsorship,
+          {
+            points: Number(sponsorship.points),
+            voucher_id: sponsorship.voucher_id,
+            voucher_qty: Number(sponsorship.voucher_qty),
+            promo: Boolean(sponsorship.promo),
+            message: sponsorship.message,
+          },
+          actorId,
+          true,
+          acknowledgeUnmet,
+        );
+      },
+    );
     const quest = (
       await this.pool.query(
         'SELECT p.quest_id FROM quest_sponsorships s JOIN quest_funding_plans p ON p.id=s.plan_id WHERE s.id=$1',
@@ -544,7 +830,13 @@ export class SponsorshipService {
           ORDER BY s.updated_at DESC,s.id LIMIT 100`,
         [actorId, status ?? null],
       );
-      return { items: result.rows, simulated: true };
+      const items = await Promise.all(
+        result.rows.map(async (row) => ({
+          ...row,
+          conditions: await evaluateConditions(client, row),
+        })),
+      );
+      return { items, simulated: true };
     } finally {
       client.release();
     }

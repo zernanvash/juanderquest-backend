@@ -6,6 +6,7 @@ import { feeForReward, targetForCompletions } from './allocate.js';
 import { FundingError, fundingCommand, type FundingTx } from './transaction.js';
 import type { PointAccountRef } from './ledger.js';
 import { notifyPlanStakeholders } from './notifications.js';
+import { evaluateConditions } from './sponsorships.js';
 
 export interface PlanTerms {
   mode: 'budget' | 'window';
@@ -442,15 +443,25 @@ export class FundingPlansService {
         [id],
       );
       const sponsorships = await client.query(
-        'SELECT * FROM quest_sponsorships WHERE plan_id=$1 ORDER BY created_at,id',
+        `SELECT s.*, m.name AS merchant_name
+           FROM quest_sponsorships s
+           LEFT JOIN merchants m ON m.id = s.merchant_id
+          WHERE s.plan_id=$1
+          ORDER BY s.created_at,s.id`,
         [id],
+      );
+      const evaluatedSponsorships = await Promise.all(
+        sponsorships.rows.map(async (row) => ({
+          ...row,
+          conditions: await evaluateConditions(client, row),
+        })),
       );
       await client.query('COMMIT');
       return {
         ...plan,
         contributions: contributions.rows,
         holds: holds.rows,
-        sponsorships: sponsorships.rows,
+        sponsorships: evaluatedSponsorships,
         simulated: true,
       };
     } catch (error) {

@@ -31,9 +31,9 @@ export async function publicFundingSummaries(pool: Pool, questIds: string[], isT
       [planIds, isTest],
     ),
     pool.query(
-      `SELECT s.plan_id,m.name,m.logo_url
+      `SELECT s.plan_id,s.merchant_id,m.name,m.logo_url
          FROM quest_sponsorships s JOIN merchants m ON m.id=s.merchant_id
-        WHERE s.plan_id=ANY($1::text[]) AND s.status='accepted' AND s.promo=TRUE AND s.is_test=$2
+        WHERE s.plan_id=ANY($1::text[]) AND s.status='accepted' AND s.is_test=$2
         ORDER BY s.created_at,s.id`,
       [planIds, isTest],
     ),
@@ -50,7 +50,13 @@ export async function publicFundingSummaries(pool: Pool, questIds: string[], isT
 
   const availableByPlan = new Map(contributions.rows.map((row: any) => [row.plan_id, Number(row.available_points)]));
   const sponsorsByPlan = new Map<string, Array<{ name: string; logo: string | null }>>();
+  const seenSponsorKey = new Map<string, Set<string>>();
   for (const row of sponsorRows.rows) {
+    const key = String(row.merchant_id ?? row.name);
+    const seen = seenSponsorKey.get(row.plan_id) ?? new Set<string>();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    seenSponsorKey.set(row.plan_id, seen);
     const entries = sponsorsByPlan.get(row.plan_id) ?? [];
     entries.push({ name: row.name, logo: row.logo_url ?? null });
     sponsorsByPlan.set(row.plan_id, entries);
