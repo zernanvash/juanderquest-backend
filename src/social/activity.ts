@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { getPool } from '../db/pool.js';
 import { enqueueFriendActivityPush } from '../push/enqueue.js';
+import { publishAfterCommit, publishBroadcast } from '../realtime/bus.js';
 
 export type ActivityVerb =
   | 'quest_completed'
@@ -127,6 +128,7 @@ export async function recordActivity(
   }
 
   const inserted = res.rows[0];
+  if (!inserted.is_test) publishAfterCommit(queryable, () => publishBroadcast({ type: 'plaza_activity', id: inserted.id }));
 
   if (FRIEND_PUSH_VERBS.includes(input.verb)) {
     try {

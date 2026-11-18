@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { MJDQ_PER_JDQ, type AuditEvent, type LedgerEntry } from '../governance/store.js';
+import { publishAfterCommit, publishToUser } from '../realtime/bus.js';
 
 export interface FundingLedgerClient {
   query(text: string, params?: unknown[]): Promise<any>;
@@ -134,6 +135,7 @@ export async function movePoints(client: FundingLedgerClient, input: MovePointsI
       await client.query('UPDATE users SET demo_points = $2, updated_at = NOW() WHERE id = $1', [userId, next]);
       balances.set(userId, next);
       userBalanceUpdate = { userId, demoPoints: next, previousDemoPoints, balanceDeltaMjdq: delta * MJDQ_PER_JDQ };
+      publishAfterCommit(client, () => publishToUser(userId, { type: 'points', balance: next }));
     }
   }
 

@@ -6,6 +6,7 @@ import type { CommittedLedgerGroup } from './ledger.js';
 import { FundingError } from './transaction.js';
 
 import { recordActivity, runIsolatedProducer } from '../social/activity.js';
+import { publishAfterCommit, publishToUser } from '../realtime/bus.js';
 
 export interface RewardSettlementClient {
   query(text: string, params?: any[]): Promise<any>;
@@ -147,6 +148,7 @@ export async function settleReward(input: SettleRewardInput): Promise<SettleRewa
       );
       const newPoints = balance.rows[0]?.demo_points;
       if (newPoints === undefined) throw new Error('USER_NOT_FOUND');
+      publishAfterCommit(client, () => publishToUser(userId, { type: 'points', balance: Number(newPoints) }));
       const governanceResult =
         rewardPoints > 0
           ? await governanceStore.creditQuestReward(userId, questId, referenceId, rewardPoints, actorId, client)
@@ -159,6 +161,7 @@ export async function settleReward(input: SettleRewardInput): Promise<SettleRewa
   }
 
   const newPoints = db.applyDemoPointsDelta(userId, rewardPoints);
+  publishToUser(userId, { type: 'points', balance: Number(newPoints) });
   const governanceResult =
     rewardPoints > 0
       ? await governanceStore.creditQuestReward(userId, questId, referenceId, rewardPoints, actorId)

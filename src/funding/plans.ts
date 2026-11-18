@@ -6,6 +6,7 @@ import { feeForReward, targetForCompletions } from './allocate.js';
 import { FundingError, fundingCommand, type FundingTx } from './transaction.js';
 import type { PointAccountRef } from './ledger.js';
 import { notifyPlanStakeholders } from './notifications.js';
+import { publishAfterCommit, publishBroadcast } from '../realtime/bus.js';
 import { evaluateConditions } from './sponsorships.js';
 
 export interface PlanTerms {
@@ -69,11 +70,15 @@ export async function setQuestFundingState(client: PoolClient, questId: string, 
       : ['closed', 'expired', 'cancelled'].includes(state)
         ? 'paused'
         : 'draft';
-  await client.query('UPDATE quests SET status=$2,is_active=$3,updated_at=NOW() WHERE id=$1', [
-    questId,
-    status,
-    state === 'active',
-  ]);
+  const updated = await client.query(
+    'UPDATE quests SET status=$2,is_active=$3,updated_at=NOW() WHERE id=$1 RETURNING id,title,is_test',
+    [questId, status, state === 'active'],
+  );
+  const quest = updated?.rows?.[0];
+  if (state === 'active' && quest && !quest.is_test)
+    publishAfterCommit(client, () =>
+      publishBroadcast({ type: 'quest_published', id: String(quest.id), title: String(quest.title), town: null }),
+    );
 }
 
 export async function refreshQuestMirror(pool: Pool, questId: string) {

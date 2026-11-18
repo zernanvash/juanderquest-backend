@@ -7,6 +7,7 @@ import { canonicalSettings } from '../settings/schema.js';
 import { env } from '../config/env.js';
 import { movePoints } from '../funding/ledger.js';
 import { publishFunding } from '../funding/transaction.js';
+import { publishAfterCommit, publishToUser } from '../realtime/bus.js';
 
 export interface ServiceResult<T> {
   success: boolean;
@@ -258,6 +259,8 @@ export class VouchersService {
             };
           }
           newDemoPoints = updateRows[0].demo_points;
+          const balance = Number(newDemoPoints);
+          publishAfterCommit(client, () => publishToUser(userId, { type: 'points', balance }));
           govResult = await governanceStore.consumePoints(
             userId,
             voucher.cost_points,
