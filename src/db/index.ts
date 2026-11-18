@@ -278,6 +278,7 @@ export interface QuestRow {
   marker_code: string;
   marker_image_url: string | null;
   is_active: boolean;
+  is_featured?: boolean;
   is_test?: boolean;
   created_at: string;
   updated_at: string;
@@ -1066,6 +1067,7 @@ export class MemoryDb {
       marker_code: row.marker_code,
       marker_image_url: row.marker_image_url,
       is_active: row.is_active,
+      is_featured: Boolean(row.is_featured),
       is_test: Boolean(row.is_test),
       author_id: row.author_id ?? null,
       status: row.status ?? 'published',
@@ -1403,12 +1405,13 @@ export class MemoryDb {
     if (existing) Object.assign(existing, quest);
     else this.quests.push(quest);
     this.persist(
-      `INSERT INTO quests (id, title, description, category, location_name, gps_lat, gps_lng, radius_meters, reward_points, marker_code, marker_image_url, is_active, author_id, status, version, steps)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+      `INSERT INTO quests (id, title, description, category, location_name, gps_lat, gps_lng, radius_meters, reward_points, marker_code, marker_image_url, is_active, is_featured, author_id, status, version, steps)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
        ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, description=EXCLUDED.description, category=EXCLUDED.category,
          location_name=EXCLUDED.location_name, gps_lat=EXCLUDED.gps_lat, gps_lng=EXCLUDED.gps_lng,
          radius_meters=EXCLUDED.radius_meters, reward_points=EXCLUDED.reward_points, marker_code=EXCLUDED.marker_code,
          marker_image_url=EXCLUDED.marker_image_url, is_active=EXCLUDED.is_active,
+         is_featured=EXCLUDED.is_featured,
          author_id=COALESCE(EXCLUDED.author_id, quests.author_id),
          status=EXCLUDED.status, version=EXCLUDED.version, steps=EXCLUDED.steps,
          updated_at=NOW()`,
@@ -1425,6 +1428,7 @@ export class MemoryDb {
         quest.marker_code,
         quest.marker_image_url,
         quest.is_active,
+        Boolean(quest.is_featured),
         quest.author_id ?? null,
         quest.status ?? 'published',
         quest.version ?? 1,

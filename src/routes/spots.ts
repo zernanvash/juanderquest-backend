@@ -450,6 +450,8 @@ const spotReviewSchema = z.object({
     status: z.enum(['published', 'needs_review', 'unpublished']),
     crowd_capacity_band: z.enum(['low', 'medium', 'high']),
     recommendation_suppressed: z.boolean().default(false),
+    recommendation_suppressed_until: z.string().datetime().nullable().optional(),
+    suppress_hours: z.number().min(1).max(168).optional(),
   }),
 });
 // Read-only list: quiz authors (quests_quizzes) also need their area's destinations for the quiz destination picker.
@@ -462,14 +464,23 @@ router.get(
     const spots = spotStore.spots.filter(
       (s) => spotInAdminScope(scope, s) || spotInScope(scope, 'quests_quizzes', s.id),
     );
-    return res.json({ success: true, data: spots.map((s) => ({ ...s, ...spotStore.crowd(s) })) });
+    const now = Date.now();
+    return res.json({
+      success: true,
+      data: spots.map((s) => {
+        spotStore.isSuppressed(s, now);
+        return { ...s, ...spotStore.crowd(s, now) };
+      }),
+    });
   },
 );
 router.get('/admin/spots/:id', authenticateToken, requireAreaAdmin('destinations'), (req: AuthRequest, res) => {
   const spot = spotStore.spots.find((s) => s.id === req.params.id || s.slug === req.params.id);
   if (!spot || !spotInAdminScope(req.adminScope!, spot))
     return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });
-  return res.json({ success: true, data: { ...spot, ...spotStore.crowd(spot) } });
+  const now = Date.now();
+  spotStore.isSuppressed(spot, now);
+  return res.json({ success: true, data: { ...spot, ...spotStore.crowd(spot, now) } });
 });
 router.patch(
   '/admin/spots/:id',
@@ -488,12 +499,19 @@ router.patch(
           message: 'Platform administrator review is required for a destination you created.',
         },
       });
+    const suppressed = Boolean(req.body.recommendation_suppressed);
+    const suppressedUntil = !suppressed
+      ? null
+      : typeof req.body.suppress_hours === 'number'
+        ? new Date(Date.now() + req.body.suppress_hours * 3_600_000).toISOString()
+        : (req.body.recommendation_suppressed_until ?? null);
     const spot = spotStore.review(
       req.params.id,
       req.user!.id,
       req.body.status,
       req.body.crowd_capacity_band,
-      req.body.recommendation_suppressed,
+      suppressed,
+      suppressedUntil,
     );
     if (!spot)
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Spot not found.' } });

@@ -55,6 +55,7 @@ export interface Spot {
   reviewed_by?: string;
   reviewed_at?: string;
   recommendation_suppressed?: boolean;
+  recommendation_suppressed_until?: string | null;
   town_area_id?: string | null;
   barangay_area_id?: string | null;
   is_test?: boolean;
@@ -369,6 +370,9 @@ export class SpotStore {
         hours: r.hours || {},
         created_at: new Date(r.created_at).toISOString(),
         updated_at: new Date(r.updated_at).toISOString(),
+        recommendation_suppressed_until: r.recommendation_suppressed_until
+          ? new Date(r.recommendation_suppressed_until).toISOString()
+          : null,
       }));
     else for (const spot of this.spots) await this.persistSpot(spot);
     const { rows: preferences } = await pool.query('SELECT * FROM discovery_preferences');
@@ -621,6 +625,27 @@ export class SpotStore {
     return calculateCrowdMetrics(events, spot.crowd_capacity_band || 'medium', now);
   }
 
+  isSuppressed(spot: Spot, nowMs = Date.now()): boolean {
+    if (!spot.recommendation_suppressed) return false;
+    if (spot.recommendation_suppressed_until) {
+      const untilMs = Date.parse(spot.recommendation_suppressed_until);
+      if (Number.isFinite(untilMs) && untilMs <= nowMs) {
+        spot.recommendation_suppressed = false;
+        spot.recommendation_suppressed_until = null;
+        if (this.pg) {
+          this.pg
+            .query(
+              'UPDATE spots SET recommendation_suppressed=FALSE,recommendation_suppressed_until=NULL,updated_at=NOW() WHERE id=$1',
+              [spot.id],
+            )
+            .catch(() => {});
+        }
+        return false;
+      }
+    }
+    return true;
+  }
+
   alternatives(source: Spot, userId?: string, limit = 3) {
     const prefs = userId ? this.getPreferences(userId) : undefined;
     const bySpot = this.eventsBySpot();
@@ -630,7 +655,7 @@ export class SpotStore {
         (s) =>
           s.id !== source.id &&
           s.status === 'published' &&
-          !s.recommendation_suppressed &&
+          !this.isSuppressed(s, now) &&
           this.crowd(s, now, bySpot).crowd_status !== 'estimated_busy',
       )
       .map((s) => {
@@ -682,20 +707,22 @@ export class SpotStore {
     status: 'published' | 'needs_review' | 'unpublished',
     band: CrowdCapacityBand,
     suppressed = false,
+    suppressedUntil: string | null = null,
   ) {
     const spot = this.spots.find((s) => s.id === spotId);
     if (!spot) return undefined;
     spot.status = status;
     spot.crowd_capacity_band = band;
     spot.recommendation_suppressed = suppressed;
+    spot.recommendation_suppressed_until = suppressed ? suppressedUntil : null;
     spot.reviewed_by = adminId;
     spot.reviewed_at = new Date().toISOString();
     spot.updated_at = spot.reviewed_at;
     if (this.pg)
       this.pg
         .query(
-          'UPDATE spots SET status=$1,crowd_capacity_band=$2,recommendation_suppressed=$3,reviewed_by=$4,reviewed_at=$5,updated_at=$5 WHERE id=$6',
-          [status, band, suppressed, adminId, spot.reviewed_at, spot.id],
+          'UPDATE spots SET status=$1,crowd_capacity_band=$2,recommendation_suppressed=$3,recommendation_suppressed_until=$4,reviewed_by=$5,reviewed_at=$6,updated_at=$6 WHERE id=$7',
+          [status, band, suppressed, spot.recommendation_suppressed_until, adminId, spot.reviewed_at, spot.id],
         )
         .catch(() => {});
     return spot;

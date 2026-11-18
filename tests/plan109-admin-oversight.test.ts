@@ -392,4 +392,103 @@ realPg('Plan 109: Admin funding oversight, crowd monitoring, controls & quizzes 
     expect(hmRes.status).toBe(200);
     expect(hmRes.body.data.cells).toHaveLength(168);
   });
+
+  it('WP-4: temporary spot suppression auto-unsuppresses, quest feature/bulk-pause work, and submissions bulk-review works', async () => {
+    const wp4SpotId = `p109-wp4-spot-${randomUUID()}`;
+    const wp4QuestA = `p109-wp4-qa-${randomUUID()}`;
+    const wp4QuestB = `p109-wp4-qb-${randomUUID()}`;
+
+    await fixture.pool.query(
+      `INSERT INTO quests(id, title, description, category, location_name, gps_lat, gps_lng, radius_meters,
+        reward_points, marker_code, marker_image_url, author_id, status, version, steps, is_active, is_featured, is_test)
+       VALUES
+        ($1, 'Alpha Non-Featured', 'Desc', 'eco', 'Dagupan Pier', 16.04, 120.33, 100, 20, $3, '', $4, 'published', 1, '[]'::jsonb, TRUE, FALSE, FALSE),
+        ($2, 'Beta To Feature', 'Desc', 'eco', 'Dagupan Pier', 16.04, 120.33, 100, 20, $5, '', $4, 'published', 1, '[]'::jsonb, TRUE, FALSE, FALSE)`,
+      [wp4QuestA, wp4QuestB, `mk-${wp4QuestA}`, authorId, `mk-${wp4QuestB}`],
+    );
+    await fixture.pool.query(
+      `INSERT INTO spots(id, slug, name, description, category, subcategory, municipality, address, gps_lat, gps_lng,
+                         source_type, source_name, trust_level, status, crowd_capacity_band, quest_id, town_area_id, is_test)
+       VALUES
+        ($1::text, $1::text, 'Dagupan Pier', 'Pier', 'nature', 'Park', 'Dagupan City', 'Dagupan', 16.04, 120.33, 'editorial', 'Admin', 'lgu_verified', 'published', 'medium', $2, 'town:p109-dagupan', FALSE)`,
+      [wp4SpotId, wp4QuestA],
+    );
+    const subA = `p109-wp4-subA-${randomUUID()}`;
+    const subB = `p109-wp4-subB-${randomUUID()}`;
+    await fixture.pool.query(
+      `INSERT INTO submissions(id, idempotency_key, user_id, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy, status)
+       VALUES
+        ($1::text, $1::text, $3::text, $4::text, $5, 16.04, 120.33, 5, 'pending'),
+        ($2::text, $2::text, $6::text, $7::text, $8, 16.04, 120.33, 5, 'pending')`,
+      [subA, subB, travelerId, wp4QuestA, `mk-${wp4QuestA}`, areaAdminId, wp4QuestB, `mk-${wp4QuestB}`],
+    );
+
+    await spotStore.hydrateFromPg(fixture.pool);
+    await db.hydrateFromPg(fixture.pool);
+
+    // 1. Spot temporary suppression with past expiry auto-unsuppresses
+    const futureRes = await request(app)
+      .patch(`/api/v1/admin/spots/${wp4SpotId}`)
+      .set(authHeader(adminId, 'admin'))
+      .send({ status: 'published', crowd_capacity_band: 'high', recommendation_suppressed: true, suppress_hours: 4 });
+    expect(futureRes.status).toBe(200);
+    expect(futureRes.body.data.crowd_capacity_band).toBe('high');
+    expect(futureRes.body.data.recommendation_suppressed).toBe(true);
+    expect(futureRes.body.data.recommendation_suppressed_until).toBeTruthy();
+
+    const expiredIso = new Date(Date.now() - 60_000).toISOString();
+    const pastRes = await request(app)
+      .patch(`/api/v1/admin/spots/${wp4SpotId}`)
+      .set(authHeader(adminId, 'admin'))
+      .send({
+        status: 'published',
+        crowd_capacity_band: 'low',
+        recommendation_suppressed: true,
+        recommendation_suppressed_until: expiredIso,
+      });
+    expect(pastRes.status).toBe(200);
+
+    const listSpots = await request(app).get('/api/v1/admin/spots').set(authHeader(adminId, 'admin'));
+    const reloaded = listSpots.body.data.find((s: any) => s.id === wp4SpotId);
+    expect(reloaded.recommendation_suppressed).toBe(false);
+    expect(reloaded.recommendation_suppressed_until).toBeNull();
+    expect(reloaded.crowd_capacity_band).toBe('low');
+
+    // 2. Quest feature pins to top of /api/v1/quests
+    const featRes = await request(app)
+      .post(`/api/v1/admin/quests/${wp4QuestB}/feature`)
+      .set(authHeader(adminId, 'admin'))
+      .send({ featured: true });
+    expect(featRes.status).toBe(200);
+    expect(featRes.body.data.is_featured).toBe(true);
+
+    const pubQuests = await request(app).get('/api/v1/quests');
+    expect(pubQuests.status).toBe(200);
+    const idxB = pubQuests.body.data.findIndex((q: any) => q.id === wp4QuestB);
+    const idxA = pubQuests.body.data.findIndex((q: any) => q.id === wp4QuestA);
+    expect(idxB).toBeGreaterThanOrEqual(0);
+    expect(idxA).toBeGreaterThan(idxB);
+
+    // 3. Bulk pause quests by destination
+    const bulkPauseRes = await request(app)
+      .post('/api/v1/admin/quests/bulk-pause')
+      .set(authHeader(areaAdminId, 'area_admin'))
+      .send({ destination_id: wp4SpotId, reason: 'Overcrowding hold' });
+    expect(bulkPauseRes.status).toBe(200);
+    expect(bulkPauseRes.body.data.paused_ids).toEqual(expect.arrayContaining([wp4QuestA, wp4QuestB]));
+
+    // 4. Bulk review submissions (reject requires reason; bulk approve updates pending rows)
+    const badBulk = await request(app)
+      .post('/api/v1/admin/submissions/bulk-review')
+      .set(authHeader(adminId, 'admin'))
+      .send({ ids: [subA], action: 'reject' });
+    expect(badBulk.status).toBe(400);
+
+    const bulkApprove = await request(app)
+      .post('/api/v1/admin/submissions/bulk-review')
+      .set(authHeader(adminId, 'admin'))
+      .send({ ids: [subA, subB], action: 'approve' });
+    expect(bulkApprove.status).toBe(200);
+    expect(bulkApprove.body.data.updated_ids).toEqual(expect.arrayContaining([subA, subB]));
+  });
 });
