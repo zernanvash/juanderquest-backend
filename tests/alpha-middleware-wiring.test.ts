@@ -482,6 +482,53 @@ describe('Iteration 20c: AlphaSessionScopeBatcher Middleware Wiring & Fail-Close
     findUserSpy.mockRestore();
   });
 
+  it('email/password sessions see the same alpha simulation as wallet sessions (owner 2026-11-18)', async () => {
+    const noPoolRepo = {
+      getPool: () => null,
+      findById: jest.fn(),
+    };
+    Object.defineProperty(db, 'usersRepo', { value: noPoolRepo, configurable: true, writable: true });
+
+    const findUserSpy = jest.spyOn(db, 'findUserById').mockReturnValue({
+      id: 'email-user',
+      seed_id: 'usr-abc123def456',
+      display_name: 'Memory Traveler',
+      email: 'mem@test.com',
+      avatar_url: '',
+      role: 'user',
+      demo_points: 100,
+      mjdq_balance: 100000,
+      jdq_governance_balance: 15,
+      scout_reputation: 250,
+      is_public: false,
+      handle: null,
+      bio: null,
+      status_text: null,
+      is_test: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    const req: AuthRequest = {
+      method: 'GET',
+      query: {},
+      headers: {},
+      user: { id: 'email-user', seed_id: 'usr-abc123def456', role: 'user' },
+    } as any;
+    const res = createMockRes();
+    let nextCalled = false;
+
+    await checkQAAuthorization(req, res, () => {
+      nextCalled = true;
+    });
+
+    expect(findUserSpy).toHaveBeenCalledWith('email-user');
+    expect(nextCalled).toBe(true);
+    expect(req.isQAAuthorized).toBe(true);
+
+    findUserSpy.mockRestore();
+  });
+
   it('does not invoke batcher or authorize simulation when ALPHA_WALLET_SIMULATION_ENABLED is false', async () => {
     Reflect.set(env, 'ALPHA_WALLET_SIMULATION_ENABLED', false);
 

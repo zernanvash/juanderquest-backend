@@ -213,9 +213,12 @@ export const checkQAAuthorization = async (req: AuthRequest, res: Response, next
 
   if (!requestedQA) {
     req.isQAAuthorized = false;
-    // Laptop alpha: a real, durable wallet session sees the seeded simulation
-    // in normal read surfaces. The flag is off in every other environment.
-    const travelerSession = req.user?.seed_id?.startsWith('wallet:') || req.user?.seed_id?.startsWith('guest:');
+    // Laptop alpha: every real, durable signed-in session sees the seeded
+    // simulation in normal read surfaces. The flag is off in every other
+    // environment. Owner 2026-11-18: email/password accounts saw an empty
+    // Plaza while wallet and guest sessions saw the scouts; all sign-in
+    // methods now see the same data.
+    const travelerSession = Boolean(req.user?.seed_id);
     if (!env.ALPHA_WALLET_SIMULATION_ENABLED || !travelerSession || req.method !== 'GET' || !req.user) return next();
     const pool = db.usersRepo.getPool();
     if (!pool) {
