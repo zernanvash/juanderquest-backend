@@ -6,7 +6,7 @@ import { env } from '../src/config/env.js';
 import { db } from '../src/db/index.js';
 import { setPool } from '../src/db/pool.js';
 import { createTestDb, TestDbInstance } from '../src/db/testHarness.js';
-import { ANCHOR_TAG, grantFingerprint, GRANT_DAILY_CAP } from '../src/admin/pointGrants.js';
+import { ANCHOR_TAG, grantFingerprint, GRANT_DAILY_CAP, PointGrantService } from '../src/admin/pointGrants.js';
 import { runBadgeMintTick, type BadgeChain, type BadgeReceipt } from '../src/chain/badgeMinter.js';
 
 // Owner 2026-11-18: "build the give mjdq feature in dashboard (for beta testing, simulated points for now)
@@ -196,16 +196,17 @@ realPg('admin Give mJDQ (isolated real PostgreSQL)', () => {
     expect((await give({ user_id: 'missing', points: 5, reason: 'ghost', idempotency_key: randomUUID() })).status).toBe(
       404,
     );
-    // 250 already given today; fill up to the cap, then one more is refused.
+    // 250 already given today; fill up to the cap (service directly: the route is rate limited),
+    // then one more is refused.
+    const service = new PointGrantService(fixture.pool);
     let left = GRANT_DAILY_CAP - 250;
     while (left > 0) {
       const chunk = Math.min(1000, left);
-      const ok = await give({ user_id: userId, points: chunk, reason: 'fill', idempotency_key: randomUUID() });
-      expect(ok.status).toBe(201);
+      await service.grant({ adminId, userId, points: chunk, reason: 'fill', idempotencyKey: randomUUID() });
       left -= chunk;
     }
-    const over = await give({ user_id: userId, points: 1, reason: 'one more', idempotency_key: randomUUID() });
-    expect(over.status).toBe(429);
-    expect(over.body.error.code).toBe('DAILY_CAP_REACHED');
+    await expect(
+      service.grant({ adminId, userId, points: 1, reason: 'one more', idempotencyKey: randomUUID() }),
+    ).rejects.toMatchObject({ code: 'DAILY_CAP_REACHED', status: 429 });
   });
 });
