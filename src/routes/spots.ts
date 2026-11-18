@@ -1096,7 +1096,12 @@ router.post(
     // Update in-memory state
     db.upsertQuest(newQuest);
     if (questStatus === 'published' && !newQuest.is_test)
-      publishBroadcast({ type: 'quest_published', id: newQuest.id, title: newQuest.title, town: spot.municipality ?? null });
+      publishBroadcast({
+        type: 'quest_published',
+        id: newQuest.id,
+        title: newQuest.title,
+        town: spot.municipality ?? null,
+      });
     if (!spot.quest_id) {
       spot.quest_id = newQuest.id;
     }

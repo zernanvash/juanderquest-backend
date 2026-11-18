@@ -128,7 +128,8 @@ export async function recordActivity(
   }
 
   const inserted = res.rows[0];
-  if (!inserted.is_test) publishAfterCommit(queryable, () => publishBroadcast({ type: 'plaza_activity', id: inserted.id }));
+  if (!inserted.is_test)
+    publishAfterCommit(queryable, () => publishBroadcast({ type: 'plaza_activity', id: inserted.id }));
 
   if (FRIEND_PUSH_VERBS.includes(input.verb)) {
     try {
