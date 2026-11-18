@@ -175,7 +175,16 @@ export interface QuestAttemptRow {
   completed_at?: string | null;
 }
 
-export type AffiliateApplicationStatus = 'received' | 'in_review' | 'approved' | 'rejected' | 'needs_changes';
+export type AffiliateApplicationStatus =
+  | 'received'
+  | 'in_review'
+  | 'approved'
+  | 'rejected'
+  | 'needs_changes'
+  | 'appealed';
+
+// Owner 2026-11-18: a rejected application may be edited and resubmitted, or appealed, this many times in total.
+export const MAX_AFFILIATE_REAPPLICATIONS = 3;
 
 export interface AffiliateApplicationRow {
   id: string;
@@ -200,6 +209,11 @@ export interface AffiliateApplicationRow {
   reviewer_id?: string | null;
   reviewer_notes?: string | null;
   reviewed_at?: string | null;
+  resubmission_count?: number;
+  previous_rejection_reason?: string | null;
+  resubmitted_at?: string | null;
+  appeal_message?: string | null;
+  appealed_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1118,6 +1132,11 @@ export class MemoryDb {
         reviewer_id: row.reviewer_id ?? null,
         reviewer_notes: row.reviewer_notes ?? null,
         reviewed_at: row.reviewed_at ? toIso(row.reviewed_at) : null,
+        resubmission_count: row.resubmission_count != null ? Number(row.resubmission_count) : 0,
+        previous_rejection_reason: row.previous_rejection_reason ?? null,
+        resubmitted_at: row.resubmitted_at ? toIso(row.resubmitted_at) : null,
+        appeal_message: row.appeal_message ?? null,
+        appealed_at: row.appealed_at ? toIso(row.appealed_at) : null,
         created_at: toIso(row.created_at),
         updated_at: toIso(row.updated_at),
       }));
@@ -2263,7 +2282,8 @@ export class MemoryDb {
   findAffiliateApplicationByUser(userId: string): AffiliateApplicationRow | undefined {
     const userApps = this.affiliate_applications.filter((a) => a.user_id === userId);
     const active = userApps.find(
-      (a) => a.status === 'received' || a.status === 'in_review' || a.status === 'needs_changes',
+      (a) =>
+        a.status === 'received' || a.status === 'in_review' || a.status === 'needs_changes' || a.status === 'appealed',
     );
     if (active) return active;
     return userApps[0];
@@ -2346,7 +2366,7 @@ export class MemoryDb {
     const existingActive = this.affiliate_applications.find(
       (a) =>
         a.user_id === payload.user_id &&
-        (a.status === 'received' || a.status === 'in_review' || a.status === 'needs_changes'),
+        (a.status === 'received' || a.status === 'in_review' || a.status === 'needs_changes' || a.status === 'appealed'),
     );
     if (existingActive) {
       const error: any = new Error('You already have an active application under review.');
@@ -2435,11 +2455,13 @@ export class MemoryDb {
       err.code = 'FORBIDDEN';
       throw err;
     }
-    if (app.status !== 'needs_changes') {
-      const err: any = new Error('Only applications marked needs_changes can be resubmitted.');
+    if (app.status !== 'needs_changes' && app.status !== 'rejected') {
+      const err: any = new Error('Only applications marked needs_changes or rejected can be resubmitted.');
       err.code = 'INVALID_STATE_TRANSITION';
       throw err;
     }
+    const fromRejected = app.status === 'rejected';
+    if (fromRejected) this.assertCanReapply(app);
 
     const now = new Date().toISOString();
     const oldStatus = app.status;
@@ -2467,8 +2489,10 @@ export class MemoryDb {
       oldStatus,
       'received',
       next.version,
-      'Applicant resubmission',
+      fromRejected ? 'Applicant resubmission after rejection' : 'Applicant resubmission',
     );
+    const rejectionReason = app.applicant_feedback ?? null;
+    const resubmissionCount = (app.resubmission_count ?? 0) + 1;
 
     // Durable first: application update, then the audit row that references it.
     await this.runDurableTransaction([
@@ -2497,6 +2521,16 @@ export class MemoryDb {
           app.id,
         ],
       },
+      ...(fromRejected
+        ? [
+            {
+              query: `UPDATE merchant_affiliate_applications
+               SET resubmission_count = $1, previous_rejection_reason = $2, resubmitted_at = NOW()
+               WHERE id = $3`,
+              params: [resubmissionCount, rejectionReason, app.id],
+            },
+          ]
+        : []),
       this.applicationAuditStatement(audit),
     ]);
 
@@ -2515,6 +2549,80 @@ export class MemoryDb {
     app.gps_lat = next.gps_lat;
     app.gps_lng = next.gps_lng;
     app.preferred_contact_method = next.preferred_contact_method;
+    app.applicant_feedback = null;
+    if (fromRejected) {
+      app.resubmission_count = resubmissionCount;
+      app.previous_rejection_reason = rejectionReason;
+      app.resubmitted_at = now;
+    }
+    app.updated_at = now;
+    this.merchant_application_audits.push(audit);
+    return app;
+  }
+
+  // A rejected application is re-opened in place (resubmit or appeal), at most MAX_AFFILIATE_REAPPLICATIONS
+  // times, and only while the applicant has no other application awaiting review.
+  private assertCanReapply(app: AffiliateApplicationRow): void {
+    if ((app.resubmission_count ?? 0) >= MAX_AFFILIATE_REAPPLICATIONS) {
+      const err: any = new Error(`A rejected application can be resubmitted or appealed ${MAX_AFFILIATE_REAPPLICATIONS} times.`);
+      err.code = 'REAPPLY_LIMIT_REACHED';
+      throw err;
+    }
+    const otherActive = this.affiliate_applications.some(
+      (a) =>
+        a.id !== app.id &&
+        a.user_id === app.user_id &&
+        (a.status === 'received' || a.status === 'in_review' || a.status === 'needs_changes' || a.status === 'appealed'),
+    );
+    if (otherActive) {
+      const err: any = new Error('You already have an active application under review.');
+      err.code = 'ACTIVE_APPLICATION_EXISTS';
+      throw err;
+    }
+  }
+
+  async appealAffiliateApplication(id: string, userId: string, message: string): Promise<AffiliateApplicationRow> {
+    const app = this.findAffiliateApplicationById(id);
+    if (!app) {
+      const err: any = new Error('Application not found');
+      err.code = 'APPLICATION_NOT_FOUND';
+      throw err;
+    }
+    if (app.user_id !== userId) {
+      const err: any = new Error('Forbidden');
+      err.code = 'FORBIDDEN';
+      throw err;
+    }
+    if (app.status !== 'rejected') {
+      const err: any = new Error('Only rejected applications can be appealed.');
+      err.code = 'INVALID_STATE_TRANSITION';
+      throw err;
+    }
+    this.assertCanReapply(app);
+
+    const now = new Date().toISOString();
+    const version = (app.version || 1) + 1;
+    const resubmissionCount = (app.resubmission_count ?? 0) + 1;
+    const rejectionReason = app.applicant_feedback ?? null;
+    const audit = this.buildApplicationAudit(app.id, userId, 'rejected', 'appealed', version, `Applicant appeal: ${message}`);
+
+    await this.runDurableTransaction([
+      {
+        query: `UPDATE merchant_affiliate_applications
+         SET status = 'appealed', version = $1, resubmission_count = $2, previous_rejection_reason = $3,
+             appeal_message = $4, appealed_at = NOW(), applicant_feedback = NULL, updated_at = NOW()
+         WHERE id = $5`,
+        params: [version, resubmissionCount, rejectionReason, message, app.id],
+      },
+      this.applicationAuditStatement(audit),
+    ]);
+
+    app.status = 'appealed';
+    app.version = version;
+    app.resubmission_count = resubmissionCount;
+    app.previous_rejection_reason = rejectionReason;
+    app.appeal_message = message;
+    app.appealed_at = now;
     app.applicant_feedback = null;
     app.updated_at = now;
     this.merchant_application_audits.push(audit);

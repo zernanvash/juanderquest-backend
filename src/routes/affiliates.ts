@@ -364,10 +364,48 @@ const resubmitApplicationSchema = z.object({
   }),
 });
 
-// POST /api/v1/affiliate/applications/:id/resubmit (Owner resubmit after revision requested)
+// Owner 2026-11-18: rejected applicants re-open the same application (resubmit or appeal); bound per actor.
+const reapplyRateLimit = rateLimit({
+  policyId: 'affiliate:reapply',
+  windowMs: 60 * 60_000,
+  max: 5,
+  keyStrategy: 'actor',
+});
+
+const reapplyError = (res: Response, err: any, action: string) => {
+  if (err.code === 'APPLICATION_NOT_FOUND') {
+    return res
+      .status(404)
+      .json({ success: false, error: { code: 'APPLICATION_NOT_FOUND', message: 'Application not found' } });
+  }
+  if (err.code === 'FORBIDDEN') {
+    return res
+      .status(403)
+      .json({ success: false, error: { code: 'FORBIDDEN', message: 'Not authorized to edit this application' } });
+  }
+  if (err.code === 'INVALID_STATE_TRANSITION') {
+    return res.status(400).json({ success: false, error: { code: 'INVALID_STATE_TRANSITION', message: err.message } });
+  }
+  if (err.code === 'REAPPLY_LIMIT_REACHED' || err.code === 'ACTIVE_APPLICATION_EXISTS') {
+    return res.status(409).json({ success: false, error: { code: err.code, message: err.message } });
+  }
+  if (err.code === 'STORAGE_UNAVAILABLE') {
+    return res.status(503).json({
+      success: false,
+      error: {
+        code: 'STORAGE_UNAVAILABLE',
+        message: `The ${action} could not be saved durably. Nothing changed — please retry.`,
+      },
+    });
+  }
+  return res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+};
+
+// POST /api/v1/affiliate/applications/:id/resubmit (Owner resubmit after revision requested or rejection)
 affiliatesRouter.post(
   '/affiliate/applications/:id/resubmit',
   authenticateToken,
+  reapplyRateLimit,
   validateRequest(resubmitApplicationSchema),
   async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
@@ -379,31 +417,29 @@ affiliatesRouter.post(
         data: updated,
       });
     } catch (err: any) {
-      if (err.code === 'APPLICATION_NOT_FOUND') {
-        return res
-          .status(404)
-          .json({ success: false, error: { code: 'APPLICATION_NOT_FOUND', message: 'Application not found' } });
-      }
-      if (err.code === 'FORBIDDEN') {
-        return res
-          .status(403)
-          .json({ success: false, error: { code: 'FORBIDDEN', message: 'Not authorized to edit this application' } });
-      }
-      if (err.code === 'INVALID_STATE_TRANSITION') {
-        return res
-          .status(400)
-          .json({ success: false, error: { code: 'INVALID_STATE_TRANSITION', message: err.message } });
-      }
-      if (err.code === 'STORAGE_UNAVAILABLE') {
-        return res.status(503).json({
-          success: false,
-          error: {
-            code: 'STORAGE_UNAVAILABLE',
-            message: 'The resubmission could not be saved durably. Nothing changed — please retry.',
-          },
-        });
-      }
-      return res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+      return reapplyError(res, err, 'resubmission');
+    }
+  },
+);
+
+const appealApplicationSchema = z.object({
+  body: z.object({
+    message: z.string().trim().min(10, 'Tell the reviewers why in at least 10 characters').max(1000),
+  }),
+});
+
+// POST /api/v1/affiliate/applications/:id/appeal (Owner appeals a rejection; same application, status appealed)
+affiliatesRouter.post(
+  '/affiliate/applications/:id/appeal',
+  authenticateToken,
+  reapplyRateLimit,
+  validateRequest(appealApplicationSchema),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const updated = await db.appealAffiliateApplication(req.params.id, req.user!.id, req.body.message);
+      return res.status(200).json({ success: true, data: updated });
+    } catch (err: any) {
+      return reapplyError(res, err, 'appeal');
     }
   },
 );
