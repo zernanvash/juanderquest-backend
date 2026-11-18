@@ -80,10 +80,9 @@ export async function setQuestFundingState(client: PoolClient, questId: string, 
   if (status === 'published') {
     await runIsolatedProducer(client, '[nearby-quest] Funded quest announcement failed:', async () => {
       const quest = (
-        await client.query(
-          'SELECT id,title,location_name,gps_lat,gps_lng,author_id,is_test FROM quests WHERE id=$1',
-          [questId],
-        )
+        await client.query('SELECT id,title,location_name,gps_lat,gps_lng,author_id,is_test FROM quests WHERE id=$1', [
+          questId,
+        ])
       ).rows[0];
       if (quest)
         await announceNearbyQuest(client, {

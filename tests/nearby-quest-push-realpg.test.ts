@@ -195,7 +195,9 @@ realPg('nearby quest push (real PostgreSQL)', () => {
 
   it('the notification-preferences API reads and writes push_nearby_quest', async () => {
     const token = jwt.sign({ id: ids.near, seed_id: ids.near, role: 'user', typ: 'session' }, env.JWT_SECRET);
-    const before = await request(app).get('/api/v1/me/notification-preferences').set('Authorization', `Bearer ${token}`);
+    const before = await request(app)
+      .get('/api/v1/me/notification-preferences')
+      .set('Authorization', `Bearer ${token}`);
     expect(before.status).toBe(200);
     expect(before.body.data.push_nearby_quest).toBe(true);
     const put = await request(app)
@@ -220,7 +222,9 @@ realPg('nearby quest push (real PostgreSQL)', () => {
         title: 'Bonuan boardwalk',
         description: 'Walk the Bonuan boardwalk and check in at the end.',
         category: 'eco',
-        steps: [{ step_order: 1, title: 'Arrive', description: 'Check in.', checkpoint_type: 'location', required: true }],
+        steps: [
+          { step_order: 1, title: 'Arrive', description: 'Check in.', checkpoint_type: 'location', required: true },
+        ],
       });
     expect(res.status).toBe(201);
     await waitForNearbyQuestAnnouncements();
@@ -242,7 +246,9 @@ realPg('nearby quest push (real PostgreSQL)', () => {
           title: 'Bonuan fish port visit',
           description: 'Visit the fish port early in the morning.',
           category: 'eco',
-          steps: [{ step_order: 1, title: 'Arrive', description: 'Check in.', checkpoint_type: 'location', required: true }],
+          steps: [
+            { step_order: 1, title: 'Arrive', description: 'Check in.', checkpoint_type: 'location', required: true },
+          ],
         });
       expect(res.status).toBe(201);
       await waitForNearbyQuestAnnouncements();
