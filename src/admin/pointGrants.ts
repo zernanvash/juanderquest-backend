@@ -139,16 +139,20 @@ export class PointGrantService {
     try {
       await client.query('BEGIN');
       await lockGovernanceSnapshot(client as any);
-      const replay = await client.query('SELECT id, user_id, points FROM admin_point_grants WHERE admin_id=$1 AND idempotency_key=$2', [
-        input.adminId,
-        input.idempotencyKey,
-      ]);
+      const replay = await client.query(
+        'SELECT id, user_id, points FROM admin_point_grants WHERE admin_id=$1 AND idempotency_key=$2',
+        [input.adminId, input.idempotencyKey],
+      );
       if (replay.rows[0]) {
         await client.query('COMMIT');
         committed = true;
         const r = replay.rows[0];
         if (r.user_id !== input.userId || Number(r.points) !== input.points)
-          throw new PointGrantError('IDEMPOTENCY_CONFLICT', 409, 'This request key was already used for another grant.');
+          throw new PointGrantError(
+            'IDEMPOTENCY_CONFLICT',
+            409,
+            'This request key was already used for another grant.',
+          );
         return { grant: await this.get(r.id), replayed: true };
       }
 

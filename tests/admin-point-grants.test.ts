@@ -103,7 +103,11 @@ realPg('admin Give mJDQ (isolated real PostgreSQL)', () => {
   });
 
   it('only platform admins can look up or give', async () => {
-    const asUser = await give({ user_id: userId, points: 5, reason: 'nope', idempotency_key: randomUUID() }, userId, 'user');
+    const asUser = await give(
+      { user_id: userId, points: 5, reason: 'nope', idempotency_key: randomUUID() },
+      userId,
+      'user',
+    );
     expect(asUser.status).toBe(403);
     const asArea = await give(
       { user_id: userId, points: 5, reason: 'nope', idempotency_key: randomUUID() },
@@ -173,9 +177,8 @@ realPg('admin Give mJDQ (isolated real PostgreSQL)', () => {
     const tick = await runBadgeMintTick(fixture.pool, chain, options);
     expect(tick.sent).toBeTruthy();
     expect(chain.anchors).toHaveLength(1);
-    const row = (
-      await fixture.pool.query(`SELECT anchor_hash FROM admin_point_grants WHERE user_id=$1`, [userId])
-    ).rows[0];
+    const row = (await fixture.pool.query(`SELECT anchor_hash FROM admin_point_grants WHERE user_id=$1`, [userId]))
+      .rows[0];
     expect(chain.anchors[0].data).toBe(ANCHOR_TAG + row.anchor_hash.slice(2));
 
     await runBadgeMintTick(fixture.pool, chain, options);
@@ -189,7 +192,9 @@ realPg('admin Give mJDQ (isolated real PostgreSQL)', () => {
   });
 
   it('rejects bad amounts and enforces the daily cap per admin', async () => {
-    expect((await give({ user_id: userId, points: 0, reason: 'zero', idempotency_key: randomUUID() })).status).toBe(400);
+    expect((await give({ user_id: userId, points: 0, reason: 'zero', idempotency_key: randomUUID() })).status).toBe(
+      400,
+    );
     expect((await give({ user_id: userId, points: 1001, reason: 'big', idempotency_key: randomUUID() })).status).toBe(
       400,
     );

@@ -490,7 +490,14 @@ export async function sendNextAnchor(
     );
     result.sent = txHash;
   } catch (err) {
-    const outcome = await requeueOrFail(pool, cmd.id, attempt, options.maxAttempts, `Send failed: ${shortError(err)}`, now);
+    const outcome = await requeueOrFail(
+      pool,
+      cmd.id,
+      attempt,
+      options.maxAttempts,
+      `Send failed: ${shortError(err)}`,
+      now,
+    );
     result[outcome] += 1;
   }
 }
