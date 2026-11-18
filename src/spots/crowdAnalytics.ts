@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
-import { type AdminScope } from '../admin/scope.js';
+import { type AdminScope, writeAdminAudit } from '../admin/scope.js';
 import { calculateCrowdMetrics, type ActivityEventInput, type CrowdCapacityBand } from './crowd.js';
+import { spotStore } from './store.js';
 
 export type CrowdGranularity = 'day' | 'week' | 'month';
 
@@ -912,5 +913,388 @@ export async function getCrowdSpotDetail(pool: Pool, scope: AdminScope, spotId: 
         status: score >= busyThreshold ? 'estimated_busy' : score >= busyThreshold * 0.4 ? 'moderate' : 'quiet',
       };
     }),
+  };
+}
+
+export type CrowdSuggestionRule = 'busy_now' | 'recurring_peak' | 'proof_anomaly';
+
+export interface CrowdSuggestionAction {
+  action_key: string;
+  label: string;
+  method?: 'POST' | 'PATCH';
+  path?: string;
+  body?: Record<string, unknown>;
+  navigate_to?: string;
+}
+
+export interface CrowdSuggestion {
+  spot_id: string;
+  spot_name: string;
+  municipality: string;
+  suggestion_key: CrowdSuggestionRule;
+  rule_label: string;
+  evidence: string;
+  metrics: Record<string, number | string | null>;
+  alternatives?: Array<{ id: string; name: string; municipality: string; crowd_status: string }>;
+  actions: CrowdSuggestionAction[];
+}
+
+export async function getCrowdSuggestions(
+  pool: Pool,
+  scope: AdminScope,
+  options: CrowdQueryOptions,
+): Promise<{ suggestions: CrowdSuggestion[] }> {
+  const includeTest = scope.platform && Boolean(options.includeTest);
+  const spots = await loadScopedSpots(pool, scope, options, includeTest);
+  if (!spots.length) return { suggestions: [] };
+
+  const spotIds = spots.map((s: any) => String(s.id));
+  const spotById = new Map(spots.map((s: any) => [String(s.id), s]));
+
+  const [dismissRes, planRes, questRes, busyRes, recurringRes, proofRes] = await Promise.all([
+    pool.query(
+      `SELECT spot_id, suggestion_key
+         FROM crowd_suggestion_dismissals
+        WHERE spot_id = ANY($1::text[]) AND dismissed_until > NOW()`,
+      [spotIds],
+    ),
+    pool.query(
+      `SELECT s.id AS spot_id, p.id AS plan_id
+         FROM spots s
+         JOIN quest_funding_plans p ON p.quest_id = s.quest_id
+        WHERE s.id = ANY($1::text[])
+          AND p.status IN ('active', 'scheduled')
+          AND COALESCE(p.holds_paused, FALSE) = FALSE`,
+      [spotIds],
+    ),
+    pool.query(
+      `SELECT s.id AS spot_id, q.id AS quest_id
+         FROM spots s
+         JOIN quests q ON q.id = s.quest_id OR LOWER(q.location_name) = LOWER(s.name)
+        WHERE s.id = ANY($1::text[])
+          AND COALESCE(q.status, 'published') = 'published'
+          AND COALESCE(q.is_test, FALSE) = FALSE`,
+      [spotIds],
+    ),
+    pool.query(
+      `WITH pts AS (
+         SELECT sae.spot_id,
+                DATE_TRUNC('hour', sae.created_at AT TIME ZONE 'Asia/Manila') AS hr,
+                CASE sae.activity_type
+                  WHEN 'view' THEN 0.25
+                  WHEN 'directions' THEN 3
+                  WHEN 'save' THEN 2
+                  WHEN 'visit' THEN 5
+                  ELSE 0
+                END AS weight
+           FROM spot_activity_events sae
+          WHERE sae.spot_id = ANY($1::text[])
+            AND ($2::boolean = TRUE OR COALESCE(sae.is_test, FALSE) = FALSE)
+            AND sae.created_at >= NOW() - INTERVAL '3 hours'
+         UNION ALL
+         SELECT vv.spot_id,
+                DATE_TRUNC('hour', vv.occurred_at AT TIME ZONE 'Asia/Manila') AS hr,
+                5 AS weight
+           FROM verified_visits vv
+          WHERE vv.spot_id = ANY($1::text[])
+            AND vv.revoked_at IS NULL
+            AND ($2::boolean = TRUE OR COALESCE(vv.is_test, FALSE) = FALSE)
+            AND vv.occurred_at >= NOW() - INTERVAL '3 hours'
+       )
+       SELECT spot_id, hr, SUM(weight)::numeric AS pressure
+         FROM pts
+        GROUP BY spot_id, hr
+        ORDER BY spot_id, hr`,
+      [spotIds, includeTest],
+    ),
+    pool.query(
+      `WITH wk_pts AS (
+         SELECT sae.spot_id,
+                EXTRACT(DOW FROM sae.created_at AT TIME ZONE 'Asia/Manila')::int AS dow,
+                EXTRACT(HOUR FROM sae.created_at AT TIME ZONE 'Asia/Manila')::int AS hour,
+                DATE_TRUNC('week', sae.created_at AT TIME ZONE 'Asia/Manila') AS wk,
+                CASE sae.activity_type
+                  WHEN 'view' THEN 0.25
+                  WHEN 'directions' THEN 3
+                  WHEN 'save' THEN 2
+                  WHEN 'visit' THEN 5
+                  ELSE 0
+                END AS weight
+           FROM spot_activity_events sae
+          WHERE sae.spot_id = ANY($1::text[])
+            AND ($2::boolean = TRUE OR COALESCE(sae.is_test, FALSE) = FALSE)
+            AND sae.created_at >= NOW() - INTERVAL '28 days'
+         UNION ALL
+         SELECT vv.spot_id,
+                EXTRACT(DOW FROM vv.occurred_at AT TIME ZONE 'Asia/Manila')::int AS dow,
+                EXTRACT(HOUR FROM vv.occurred_at AT TIME ZONE 'Asia/Manila')::int AS hour,
+                DATE_TRUNC('week', vv.occurred_at AT TIME ZONE 'Asia/Manila') AS wk,
+                5 AS weight
+           FROM verified_visits vv
+          WHERE vv.spot_id = ANY($1::text[])
+            AND vv.revoked_at IS NULL
+            AND ($2::boolean = TRUE OR COALESCE(vv.is_test, FALSE) = FALSE)
+            AND vv.occurred_at >= NOW() - INTERVAL '28 days'
+       )
+       SELECT spot_id, dow, hour, wk, SUM(weight)::numeric AS pressure
+         FROM wk_pts
+        GROUP BY spot_id, dow, hour, wk`,
+      [spotIds, includeTest],
+    ),
+    pool.query(
+      `SELECT sp.id AS spot_id,
+              sub.user_id,
+              COUNT(*)::int AS total_cnt,
+              COUNT(*) FILTER (WHERE sub.status = 'pending')::int AS pending_cnt
+         FROM submissions sub
+         JOIN spots sp ON sp.quest_id = sub.quest_id
+        WHERE sp.id = ANY($1::text[])
+          AND ($2::boolean = TRUE OR COALESCE(sub.is_test, FALSE) = FALSE)
+          AND sub.created_at >= NOW() - INTERVAL '7 days'
+        GROUP BY sp.id, sub.user_id`,
+      [spotIds, includeTest],
+    ),
+  ]);
+
+  const dismissed = new Set(dismissRes.rows.map((r: any) => `${r.spot_id}:${r.suggestion_key}`));
+  const activePlanBySpot = new Map<string, string>();
+  for (const r of planRes.rows) {
+    if (!activePlanBySpot.has(String(r.spot_id))) activePlanBySpot.set(String(r.spot_id), String(r.plan_id));
+  }
+  const hasPublishedQuest = new Set(questRes.rows.map((r: any) => String(r.spot_id)));
+
+  // 1. Evaluate busy_now per spot (2+ consecutive busy Manila hours in last 3h)
+  const hoursBySpot = new Map<string, Array<{ ms: number; pressure: number }>>();
+  for (const r of busyRes.rows) {
+    const id = String(r.spot_id);
+    const list = hoursBySpot.get(id) ?? [];
+    list.push({ ms: new Date(r.hr).getTime(), pressure: Number(r.pressure) });
+    hoursBySpot.set(id, list);
+  }
+
+  // 2. Evaluate recurring_peak per spot (same dow+hour busy >=3 of last 4 weeks)
+  const recurringBySpot = new Map<string, Map<string, { dow: number; hour: number; weeks: number; peakPressure: number }>>();
+  for (const r of recurringRes.rows) {
+    const spotId = String(r.spot_id);
+    const spot = spotById.get(spotId);
+    if (!spot) continue;
+    const band = (spot.crowd_capacity_band || 'medium') as CrowdCapacityBand;
+    const threshold = BUSY_THRESHOLD[band] ?? 15;
+    const pressure = Number(r.pressure);
+    if (pressure < threshold) continue;
+    const slotKey = `${r.dow}:${r.hour}`;
+    const map = recurringBySpot.get(spotId) ?? new Map();
+    const cur = map.get(slotKey) ?? { dow: Number(r.dow), hour: Number(r.hour), weeks: 0, peakPressure: 0 };
+    cur.weeks += 1;
+    cur.peakPressure = Math.max(cur.peakPressure, pressure);
+    map.set(slotKey, cur);
+    recurringBySpot.set(spotId, map);
+  }
+
+  // 3. Evaluate proof_anomaly per spot
+  const proofStatsBySpot = new Map<string, { maxPerUser: number; accountsOver3: number; pendingTotal: number }>();
+  for (const r of proofRes.rows) {
+    const spotId = String(r.spot_id);
+    const total = Number(r.total_cnt || 0);
+    const pending = Number(r.pending_cnt || 0);
+    const cur = proofStatsBySpot.get(spotId) ?? { maxPerUser: 0, accountsOver3: 0, pendingTotal: 0 };
+    cur.maxPerUser = Math.max(cur.maxPerUser, total);
+    if (total >= 3) cur.accountsOver3 += 1;
+    cur.pendingTotal += pending;
+    proofStatsBySpot.set(spotId, cur);
+  }
+
+  const suggestions: CrowdSuggestion[] = [];
+
+  for (const spot of spots) {
+    const spotId = String(spot.id);
+    const band = (spot.crowd_capacity_band || 'medium') as CrowdCapacityBand;
+    const threshold = BUSY_THRESHOLD[band] ?? 15;
+    const storeSpot = spotStore.spots.find((s) => s.id === spotId);
+
+    // Rule 1: busy_now
+    if (!dismissed.has(`${spotId}:busy_now`)) {
+      const hrs = (hoursBySpot.get(spotId) ?? []).sort((a, b) => a.ms - b.ms);
+      let consecutiveBusy = 0;
+      let maxConsecutive = 0;
+      let prevMs = -1;
+      let maxPressure = 0;
+      for (const h of hrs) {
+        if (h.pressure >= threshold) {
+          consecutiveBusy = prevMs >= 0 && h.ms - prevMs === 3_600_000 ? consecutiveBusy + 1 : 1;
+          prevMs = h.ms;
+          maxConsecutive = Math.max(maxConsecutive, consecutiveBusy);
+          maxPressure = Math.max(maxPressure, h.pressure);
+        } else {
+          consecutiveBusy = 0;
+          prevMs = -1;
+        }
+      }
+      if (maxConsecutive >= 2) {
+        const actions: CrowdSuggestionAction[] = [];
+        if (!spot.recommendation_suppressed) {
+          actions.push({
+            action_key: 'suppress_spot_4h',
+            label: 'Suppress from Explore (4 h)',
+            method: 'PATCH',
+            path: `/admin/spots/${encodeURIComponent(spotId)}`,
+            body: {
+              status: spot.status || 'published',
+              crowd_capacity_band: band,
+              recommendation_suppressed: true,
+              suppress_hours: 4,
+            },
+          });
+        }
+        const planId = activePlanBySpot.get(spotId);
+        if (planId) {
+          actions.push({
+            action_key: 'pause_funding_holds',
+            label: 'Pause new quest holds',
+            method: 'POST',
+            path: `/admin/funding-plans/${encodeURIComponent(planId)}/pause-holds`,
+            body: { reason: `Busy-now diversion suggestion at ${spot.name}` },
+          });
+        } else if (hasPublishedQuest.has(spotId)) {
+          actions.push({
+            action_key: 'bulk_pause_quests',
+            label: 'Pause destination quests',
+            method: 'POST',
+            path: '/admin/quests/bulk-pause',
+            body: { destination_id: spotId, reason: `Busy-now crowd diversion at ${spot.name}` },
+          });
+        }
+        suggestions.push({
+          spot_id: spotId,
+          spot_name: String(spot.name),
+          municipality: String(spot.municipality),
+          suggestion_key: 'busy_now',
+          rule_label: 'Busy now',
+          evidence: `Pressure peaked at ${Math.round(maxPressure * 10) / 10} across ${maxConsecutive} consecutive Manila hours (band "${band}" threshold: ${threshold}).`,
+          metrics: { consecutive_hours: maxConsecutive, peak_pressure: Math.round(maxPressure * 10) / 10, threshold },
+          actions,
+        });
+      }
+    }
+
+    // Rule 2: recurring_peak
+    if (!dismissed.has(`${spotId}:recurring_peak`)) {
+      const slotMap = recurringBySpot.get(spotId);
+      const topSlot = slotMap
+        ? Array.from(slotMap.values())
+            .filter((s) => s.weeks >= 3)
+            .sort((a, b) => b.weeks - a.weeks || b.peakPressure - a.peakPressure)[0]
+        : undefined;
+      if (topSlot) {
+        const alternatives = storeSpot
+          ? spotStore.alternatives(storeSpot, undefined, 2).map((a: any) => ({
+              id: String(a.id),
+              name: String(a.name),
+              municipality: String(a.municipality),
+              crowd_status: String(a.crowd_status ?? 'quiet'),
+            }))
+          : [];
+        const actions: CrowdSuggestionAction[] = [
+          {
+            action_key: 'open_quests',
+            label: 'Time-window or adjust quest',
+            navigate_to: `/quests?q=${encodeURIComponent(String(spot.name))}`,
+          },
+        ];
+        if (!spot.recommendation_suppressed) {
+          actions.push({
+            action_key: 'suppress_spot_2h',
+            label: 'Temporarily suppress (2 h)',
+            method: 'PATCH',
+            path: `/admin/spots/${encodeURIComponent(spotId)}`,
+            body: {
+              status: spot.status || 'published',
+              crowd_capacity_band: band,
+              recommendation_suppressed: true,
+              suppress_hours: 2,
+            },
+          });
+        }
+        suggestions.push({
+          spot_id: spotId,
+          spot_name: String(spot.name),
+          municipality: String(spot.municipality),
+          suggestion_key: 'recurring_peak',
+          rule_label: 'Recurring peak',
+          evidence: `${DOW_LABELS[topSlot.dow] ?? 'Day'} ${String(topSlot.hour).padStart(2, '0')}:00 PHT exceeded capacity threshold (${threshold}) in ${topSlot.weeks} of the last 4 weeks.`,
+          metrics: { dow: topSlot.dow, hour: topSlot.hour, weeks_busy: topSlot.weeks, threshold },
+          alternatives,
+          actions,
+        });
+      }
+    }
+
+    // Rule 3: proof_anomaly
+    if (!dismissed.has(`${spotId}:proof_anomaly`)) {
+      const pStats = proofStatsBySpot.get(spotId);
+      const suppressedSubmissions = Boolean(spot.recommendation_suppressed) && (pStats?.pendingTotal ?? 0) > 0;
+      if (pStats && (pStats.maxPerUser >= 3 || suppressedSubmissions)) {
+        suggestions.push({
+          spot_id: spotId,
+          spot_name: String(spot.name),
+          municipality: String(spot.municipality),
+          suggestion_key: 'proof_anomaly',
+          rule_label: 'Proof anomaly',
+          evidence:
+            suppressedSubmissions && pStats.maxPerUser < 3
+              ? `${pStats.pendingTotal} pending proof submission(s) received while destination is suppressed.`
+              : `Up to ${pStats.maxPerUser} proofs in 7 days from a single account (${pStats.accountsOver3} flagged account(s))${suppressedSubmissions ? '; spot currently suppressed' : ''}.`,
+          metrics: {
+            max_per_account_7d: pStats.maxPerUser,
+            flagged_accounts: pStats.accountsOver3,
+            pending_total: pStats.pendingTotal,
+          },
+          actions: [
+            {
+              action_key: 'review_proof_queue',
+              label: 'Review in Proof queue',
+              navigate_to: `/submissions?dest=${encodeURIComponent(String(spot.name))}`,
+            },
+          ],
+        });
+      }
+    }
+  }
+
+  return { suggestions };
+}
+
+export async function dismissCrowdSuggestion(
+  pool: Pool,
+  scope: AdminScope,
+  actorId: string,
+  actorRole: string,
+  spotId: string,
+  suggestionKey: CrowdSuggestionRule,
+) {
+  const spots = await loadScopedSpots(pool, scope, { spotId }, scope.platform);
+  const spot = spots[0];
+  if (!spot) return null;
+
+  const { rows } = await pool.query(
+    `INSERT INTO crowd_suggestion_dismissals(spot_id, suggestion_key, dismissed_until, dismissed_by)
+     VALUES ($1, $2, NOW() + INTERVAL '24 hours', $3)
+     ON CONFLICT (spot_id, suggestion_key)
+     DO UPDATE SET dismissed_until = EXCLUDED.dismissed_until, dismissed_by = EXCLUDED.dismissed_by
+     RETURNING spot_id, suggestion_key, dismissed_until`,
+    [spotId, suggestionKey, actorId],
+  );
+  await writeAdminAudit({
+    actorId,
+    actorRole,
+    action: 'crowd.suggestion_dismissed',
+    subjectType: 'spot',
+    subjectId: spotId,
+    after: { suggestion_key: suggestionKey, dismissed_until: rows[0].dismissed_until },
+  });
+  return {
+    spot_id: String(rows[0].spot_id),
+    suggestion_key: String(rows[0].suggestion_key),
+    dismissed_until: new Date(rows[0].dismissed_until).toISOString(),
   };
 }

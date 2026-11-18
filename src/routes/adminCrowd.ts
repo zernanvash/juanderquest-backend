@@ -3,7 +3,13 @@ import { z } from 'zod';
 import { requireAreaAdmin } from '../admin/scope.js';
 import { getPool } from '../db/pool.js';
 import { authenticateToken, type AuthRequest } from '../middleware/auth.js';
-import { getCrowdHeatmap, getCrowdOverview, getCrowdSpotDetail } from '../spots/crowdAnalytics.js';
+import {
+  dismissCrowdSuggestion,
+  getCrowdHeatmap,
+  getCrowdOverview,
+  getCrowdSpotDetail,
+  getCrowdSuggestions,
+} from '../spots/crowdAnalytics.js';
 import { log } from '../utils/logger.js';
 
 export const adminCrowdRouter = Router();
@@ -135,6 +141,88 @@ adminCrowdRouter.get(
       return res.status(503).json({
         success: false,
         error: { code: 'CROWD_ANALYTICS_UNAVAILABLE', message: 'Unable to load destination crowd detail.' },
+      });
+    }
+  },
+);
+
+adminCrowdRouter.get(
+  '/admin/crowd/suggestions',
+  authenticateToken,
+  requireAreaAdmin('analytics'),
+  async (req: AuthRequest, res: Response) => {
+    const pool = getPool();
+    if (!pool) {
+      return res.status(503).json({
+        success: false,
+        error: { code: 'DATABASE_OUTAGE', message: 'Crowd analytics storage is unavailable.' },
+      });
+    }
+    const opts = parseQuery(req);
+    if (!opts) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid suggestion filter parameters.' },
+      });
+    }
+    try {
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.json({ success: true, data: await getCrowdSuggestions(pool, req.adminScope!, opts) });
+    } catch (error) {
+      log.error('[admin-crowd] suggestions failed:', { error });
+      return res.status(503).json({
+        success: false,
+        error: { code: 'CROWD_SUGGESTIONS_UNAVAILABLE', message: 'Unable to compute crowd control suggestions.' },
+      });
+    }
+  },
+);
+
+const dismissSchema = z.object({
+  spot_id: z.string().trim().min(1).max(200),
+  suggestion_key: z.enum(['busy_now', 'recurring_peak', 'proof_anomaly']),
+});
+
+adminCrowdRouter.post(
+  '/admin/crowd/suggestions/dismiss',
+  authenticateToken,
+  requireAreaAdmin('analytics'),
+  async (req: AuthRequest, res: Response) => {
+    const pool = getPool();
+    if (!pool) {
+      return res.status(503).json({
+        success: false,
+        error: { code: 'DATABASE_OUTAGE', message: 'Crowd analytics storage is unavailable.' },
+      });
+    }
+    const parsed = dismissSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'spot_id and valid suggestion_key are required.' },
+      });
+    }
+    try {
+      const result = await dismissCrowdSuggestion(
+        pool,
+        req.adminScope!,
+        req.user!.id,
+        req.user!.role,
+        parsed.data.spot_id,
+        parsed.data.suggestion_key,
+      );
+      if (!result) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Destination not found or outside your assigned area.' },
+        });
+      }
+      return res.json({ success: true, data: result });
+    } catch (error) {
+      log.error('[admin-crowd] dismiss suggestion failed:', { error });
+      return res.status(503).json({
+        success: false,
+        error: { code: 'CROWD_SUGGESTIONS_UNAVAILABLE', message: 'Unable to dismiss suggestion.' },
       });
     }
   },

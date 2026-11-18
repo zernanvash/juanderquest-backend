@@ -557,4 +557,68 @@ realPg('Plan 109: Admin funding oversight, crowd monitoring, controls & quizzes 
       .set(authHeader(areaAdminId, 'area_admin'));
     expect(areaDenied.status).toBe(403);
   });
+
+  it('WP-6: crowd suggestions detect busy_now and proof_anomaly with Apply actions and 24h dismiss', async () => {
+    const busySpotId = `p109-wp6-spot-${randomUUID()}`;
+    const anomalyQuestId = `p109-wp6-q-${randomUUID()}`;
+    await fixture.pool.query(
+      `INSERT INTO quests(id, title, description, category, location_name, gps_lat, gps_lng, radius_meters,
+        reward_points, marker_code, marker_image_url, author_id, status, version, steps, is_active, is_test)
+       VALUES ($1, 'WP6 Crowd Quest', 'Desc', 'eco', 'Dagupan Market', 16.04, 120.33, 100, 20, $2, '', $3, 'published', 1, '[]'::jsonb, TRUE, FALSE)`,
+      [anomalyQuestId, `mk-${anomalyQuestId}`, authorId],
+    );
+    await fixture.pool.query(
+      `INSERT INTO spots(id, slug, name, description, category, subcategory, municipality, address, gps_lat, gps_lng,
+                         source_type, source_name, trust_level, status, crowd_capacity_band, quest_id, town_area_id, is_test)
+       VALUES ($1::text, $1::text, 'Dagupan Market', 'Market', 'nature', 'Park', 'Dagupan City', 'Dagupan', 16.04, 120.33, 'editorial', 'Admin', 'lgu_verified', 'published', 'low', $2, 'town:p109-dagupan', FALSE)`,
+      [busySpotId, anomalyQuestId],
+    );
+
+    // Seed pressure >= 8 across 2 distinct consecutive Manila hours inside the last 3h window
+    // Use NOW() - 125 min and NOW() - 65 min so they are strictly in two consecutive clock hours inside 3h.
+    for (const offsetSql of [`NOW() - INTERVAL '125 minutes'`, `NOW() - INTERVAL '65 minutes'`]) {
+      await fixture.pool.query(
+        `INSERT INTO spot_activity_events(id, user_id, spot_id, activity_type, created_at, is_test)
+         VALUES
+           ($1, $3, $4, 'visit', ${offsetSql}, FALSE),
+           ($2, $3, $4, 'directions', ${offsetSql}, FALSE)`,
+        [randomUUID(), randomUUID(), travelerId, busySpotId],
+      );
+    }
+
+    // Seed 3 submissions from same account (2 rejected + 1 pending) -> proof_anomaly
+    const statuses = ['rejected', 'rejected', 'pending'];
+    for (let i = 0; i < 3; i += 1) {
+      const sId = `p109-wp6-sub-${i}-${randomUUID()}`;
+      await fixture.pool.query(
+        `INSERT INTO submissions(id, idempotency_key, user_id, quest_id, scanned_marker_code, captured_lat, captured_lng, captured_accuracy, status)
+         VALUES ($1::text, $1::text, $2::text, $3::text, $4, 16.04, 120.33, 5, $5)`,
+        [sId, travelerId, anomalyQuestId, `mk-${anomalyQuestId}`, statuses[i]],
+      );
+    }
+
+    const sugRes = await request(app)
+      .get(`/api/v1/admin/crowd/suggestions?spot_id=${busySpotId}`)
+      .set(authHeader(areaAdminId, 'area_admin'));
+    expect(sugRes.status).toBe(200);
+    const keys = sugRes.body.data.suggestions.map((s: any) => s.suggestion_key);
+    expect(keys).toContain('busy_now');
+    expect(keys).toContain('proof_anomaly');
+
+    const busySug = sugRes.body.data.suggestions.find((s: any) => s.suggestion_key === 'busy_now');
+    expect(busySug.actions.some((a: any) => a.path?.includes(`/admin/spots/${busySpotId}`))).toBe(true);
+
+    // Dismiss proof_anomaly for 24h
+    const disRes = await request(app)
+      .post('/api/v1/admin/crowd/suggestions/dismiss')
+      .set(authHeader(areaAdminId, 'area_admin'))
+      .send({ spot_id: busySpotId, suggestion_key: 'proof_anomaly' });
+    expect(disRes.status).toBe(200);
+    expect(disRes.body.data.suggestion_key).toBe('proof_anomaly');
+
+    const afterDismiss = await request(app)
+      .get(`/api/v1/admin/crowd/suggestions?spot_id=${busySpotId}`)
+      .set(authHeader(areaAdminId, 'area_admin'));
+    expect(afterDismiss.body.data.suggestions.map((s: any) => s.suggestion_key)).not.toContain('proof_anomaly');
+  });
 });
