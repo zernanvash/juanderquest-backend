@@ -171,8 +171,8 @@ function validateQuizDraftQuestions(
   questions: CreateQuizDraftParams['questions'],
   allowedSpotPhotoUrls: Set<string>,
 ): void {
-  if (questions.length !== 5) {
-    throw new Error('INVALID_QUIZ_DRAFT: A cultural quiz draft must have exactly 5 questions.');
+  if (questions.length < 1 || questions.length > 5) {
+    throw new Error('INVALID_QUIZ_DRAFT: A cultural quiz draft must have between 1 and 5 questions.');
   }
   for (const q of questions) {
     const qType = q.questionType || 'multiple_choice';
@@ -742,16 +742,16 @@ export class CulturalQuizService {
 
       // 3. Load questions and grade answers
       const questions = await this.repo.findQuestionsWithOptions(attemptRow.version_id, client);
-      if (questions.length !== 5) {
-        throw new Error('INVALID_QUIZ_CONFIGURATION: Quiz must have 5 questions.');
+      if (questions.length < 1 || questions.length > 5) {
+        throw new Error('INVALID_QUIZ_CONFIGURATION: Quiz must have between 1 and 5 questions.');
       }
 
       // Validate answer count and uniqueness
-      if (params.answers.length !== 5) {
-        throw new Error(`MISSING_ANSWERS: Expected 5 answers, received ${params.answers.length}.`);
+      if (params.answers.length !== questions.length) {
+        throw new Error(`MISSING_ANSWERS: Expected ${questions.length} answers, received ${params.answers.length}.`);
       }
       const answeredQIds = new Set(params.answers.map((a) => a.questionId));
-      if (answeredQIds.size !== 5) {
+      if (answeredQIds.size !== questions.length) {
         throw new Error('DUPLICATE_ANSWERS: Duplicate question answers provided.');
       }
 
@@ -874,7 +874,8 @@ export class CulturalQuizService {
         });
       }
 
-      const passed = score >= 4;
+      const passThreshold = Math.max(1, Math.round(questions.length * 0.8));
+      const passed = score >= passThreshold;
       const finalStatus = passed ? 'passed' : 'failed';
 
       // 4. Progression & XP Award logic
@@ -982,7 +983,7 @@ export class CulturalQuizService {
         attempt: finalAttempt,
         passed,
         score,
-        total_questions: 5,
+        total_questions: questions.length,
         xp_awarded: xpToAward,
         already_completed_prior: alreadyCompletedPrior,
         cooldown_until: cooldownUntil,
@@ -1256,8 +1257,8 @@ export class CulturalQuizService {
       if (!version) throw new Error('Quiz version not found.');
 
       const questions = await this.repo.findQuestionsWithOptions(version.id, client);
-      if (questions.length !== 5) {
-        throw new Error('Cannot publish quiz: exactly 5 questions are required.');
+      if (questions.length < 1 || questions.length > 5) {
+        throw new Error('Cannot publish quiz: between 1 and 5 questions are required.');
       }
       for (const q of questions) {
         const qType = q.question_type || 'multiple_choice';

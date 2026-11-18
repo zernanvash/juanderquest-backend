@@ -621,4 +621,73 @@ realPg('Plan 109: Admin funding oversight, crowd monitoring, controls & quizzes 
       .set(authHeader(areaAdminId, 'area_admin'));
     expect(afterDismiss.body.data.suggestions.map((s: any) => s.suggestion_key)).not.toContain('proof_anomaly');
   });
+
+  it('WP-7: allows creating, publishing, starting, and grading a 1-question quiz', async () => {
+    const spotId = `p109-wp7-spot-${randomUUID()}`;
+    await fixture.pool.query(
+      `INSERT INTO spots(id, slug, name, description, category, subcategory, municipality, address, gps_lat, gps_lng,
+                         source_type, source_name, trust_level, status, town_area_id, is_test)
+       VALUES ($1::text, $1::text, 'Lingayen Capitol Quiz Spot', 'Spot', 'culture_heritage', 'Heritage', 'Dagupan City', 'Dagupan', 16.04, 120.33, 'editorial', 'Admin', 'lgu_verified', 'published', 'town:p109-dagupan', FALSE)`,
+      [spotId],
+    );
+
+    const createRes = await request(app)
+      .post('/api/v1/admin/quizzes')
+      .set(authHeader(adminId, 'admin'))
+      .send({
+        destination_id: spotId,
+        title: 'One Question Heritage Quiz',
+        description: 'Testing a minimal single-question cultural quiz end to end.',
+        language: 'en',
+        radius_meters: 300,
+        xp_reward: 35,
+        time_limit_minutes: 15,
+        cooldown_hours: 12,
+        questions: [
+          {
+            ordinal: 1,
+            question_type: 'multiple_choice',
+            question_text: 'Where is the capitol located?',
+            explanation: 'It sits beside Lingayen Gulf.',
+            options: [
+              { ordinal: 1, option_text: 'Lingayen', is_correct: true },
+              { ordinal: 2, option_text: 'Vigan', is_correct: false },
+              { ordinal: 3, option_text: 'Baguio', is_correct: false },
+              { ordinal: 4, option_text: 'Iloilo', is_correct: false },
+            ],
+          },
+        ],
+      });
+    expect(createRes.status).toBe(201);
+    const quizId = createRes.body.data.quiz.id;
+
+    const pubRes = await request(app)
+      .post(`/api/v1/admin/quizzes/${quizId}/publish`)
+      .set(authHeader(adminId, 'admin'));
+    expect(pubRes.status).toBe(200);
+
+    const startRes = await request(app)
+      .post(`/api/v1/quizzes/${quizId}/attempts`)
+      .set(authHeader(travelerId, 'user'))
+      .send({ lat: 16.04, lng: 120.33 });
+    expect(startRes.status).toBe(201);
+    const attemptId = startRes.body.data.attempt.id;
+    const questions = startRes.body.data.questions;
+    expect(questions).toHaveLength(1);
+
+    const rightOpt = questions[0].options.find((o: any) => o.option_text === 'Lingayen');
+    expect(rightOpt).toBeTruthy();
+
+    const submitRes = await request(app)
+      .put(`/api/v1/quiz-attempts/${attemptId}/submission`)
+      .set(authHeader(travelerId, 'user'))
+      .send({
+        answers: [{ question_id: questions[0].id, selected_option_id: rightOpt.id }],
+      });
+    expect(submitRes.status).toBe(200);
+    expect(submitRes.body.data.passed).toBe(true);
+    expect(submitRes.body.data.score).toBe(1);
+    expect(submitRes.body.data.total_questions).toBe(1);
+    expect(submitRes.body.data.xp_awarded).toBeGreaterThanOrEqual(35);
+  });
 });
