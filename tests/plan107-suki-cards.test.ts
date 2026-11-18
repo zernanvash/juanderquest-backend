@@ -533,6 +533,11 @@ realPgDescribe('Plan 107 Suki Card (real PostgreSQL)', () => {
     const row = mine.body.data.items.find((item: any) => item.code === 'JDQ-ABC123-DEF456');
     expect(row.used_at).toBeTruthy();
     expect(row.merchant.name).toBe('Aling Nena Cafe');
+
+    // Dashboard "Used: X of Y" on the vouchers page.
+    const vouchers = await request(app).get('/api/v1/admin/vouchers').set('Authorization', `Bearer ${token(platformId)}`);
+    expect(vouchers.status).toBe(200);
+    expect(vouchers.body.data.find((v: any) => v.id === 'p107-voucher')).toMatchObject({ redeemed_count: 1, used_count: 1 });
   });
 
   it('merchant stats are aggregates with pseudonyms only', async () => {

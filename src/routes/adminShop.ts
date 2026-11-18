@@ -81,7 +81,11 @@ adminShopRouter.get('/admin/vouchers', ...voucherGuard, async (req: AuthRequest,
   const p = poolOrFail(res);
   if (!p) return;
   const r = await p.query(
-    `SELECT v.*,m.name AS merchant_name,v.partner_label AS partner_label,m.town_area_id AS merchant_town_area_id FROM vouchers v JOIN merchants m ON m.id=v.merchant_id WHERE v.is_active=TRUE ORDER BY v.sort_order,v.id`,
+    // Plan 107: redeemed / used-at-the-counter counts for the dashboard's "Used: X of Y".
+    `SELECT v.*,m.name AS merchant_name,v.partner_label AS partner_label,m.town_area_id AS merchant_town_area_id,
+       (SELECT COUNT(*)::int FROM redemptions r WHERE r.voucher_id=v.id) AS redeemed_count,
+       (SELECT COUNT(r.used_at)::int FROM redemptions r WHERE r.voucher_id=v.id) AS used_count
+     FROM vouchers v JOIN merchants m ON m.id=v.merchant_id WHERE v.is_active=TRUE ORDER BY v.sort_order,v.id`,
   );
   res.json({
     success: true,
