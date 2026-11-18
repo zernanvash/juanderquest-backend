@@ -6,6 +6,17 @@ import { authenticateToken, requireAdmin, type AuthRequest } from '../middleware
 import { rateLimit } from '../middleware/rateLimit.js';
 import { validateRequest } from '../middleware/validate.js';
 import { FundingPlansService } from '../funding/plans.js';
+import {
+  getPlanTransactions,
+  getPlanTreasury,
+  getMerchantFundingDetail,
+  listMerchantFunding,
+  releaseStuckHold,
+  setMerchantSponsoringSuspended,
+  setPlanFlagged,
+  setPlanHoldsPaused,
+} from '../funding/adminOversight.js';
+import { writeAdminAudit } from '../admin/scope.js';
 import { FundingError } from '../funding/transaction.js';
 import { abandonFundedAttempt } from '../funding/holds.js';
 import { log } from '../utils/logger.js';
@@ -130,12 +141,221 @@ for (const admin of [false, true])
       if (!svc) return;
       try {
         res.setHeader('Cache-Control', 'private, no-store');
-        return res.json({ success: true, data: await svc.get(req.user!.id, req.params.id, admin) });
+        return res.json({
+          success: true,
+          data: await svc.get(req.user!.id, req.params.id, admin, admin && req.user?.role === 'admin'),
+        });
       } catch (error) {
         return fundingErrorResponse(res, error);
       }
     },
   );
+
+fundingPlansRouter.get(
+  '/admin/funding-plans/:id/treasury',
+  authenticateToken,
+  requireAdmin,
+  async (req: AuthRequest, res: Response) => {
+    const svc = service(res, true);
+    if (!svc) return;
+    try {
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.json({ success: true, data: await getPlanTreasury(svc.pool, req.params.id) });
+    } catch (error) {
+      return fundingErrorResponse(res, error);
+    }
+  },
+);
+
+fundingPlansRouter.get(
+  '/admin/funding-plans/:id/transactions',
+  authenticateToken,
+  requireAdmin,
+  async (req: AuthRequest, res: Response) => {
+    const svc = service(res, true);
+    if (!svc) return;
+    try {
+      const type = typeof req.query.type === 'string' && req.query.type.trim() ? req.query.type.trim() : null;
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.json({ success: true, data: await getPlanTransactions(svc.pool, req.params.id, type) });
+    } catch (error) {
+      return fundingErrorResponse(res, error);
+    }
+  },
+);
+
+mutation(
+  '/admin/funding-plans/:id/extend',
+  z
+    .object({
+      ends_at: z.string().datetime({ offset: true }),
+      reason: z.string().trim().max(500).optional(),
+      idempotency_key: key,
+    })
+    .strict(),
+  async (svc, req) => {
+    const updated = await svc.extend(req.user!.id, req.params.id, req.body.ends_at, req.body.idempotency_key, true);
+    await writeAdminAudit({
+      actorId: req.user!.id,
+      actorRole: req.user!.role,
+      action: 'funding_plan.extended',
+      subjectType: 'quest_funding_plan',
+      subjectId: req.params.id,
+      after: { ends_at: req.body.ends_at, reason: req.body.reason ?? null },
+    }).catch(() => undefined);
+    return updated;
+  },
+  true,
+);
+
+mutation(
+  '/admin/funding-plans/:id/cancel',
+  z.object({ reason: z.string().trim().max(500).optional(), idempotency_key: key }).strict(),
+  async (svc, req) => {
+    const cancelled = await svc.cancel(req.user!.id, req.params.id, req.body.idempotency_key, true);
+    await writeAdminAudit({
+      actorId: req.user!.id,
+      actorRole: req.user!.role,
+      action: 'funding_plan.cancelled',
+      subjectType: 'quest_funding_plan',
+      subjectId: req.params.id,
+      after: { status: cancelled.status, reason: req.body.reason ?? null },
+    }).catch(() => undefined);
+    return cancelled;
+  },
+  true,
+);
+
+mutation(
+  '/admin/funding-plans/:id/pause-holds',
+  z.object({ reason: z.string().trim().min(5).max(500), idempotency_key: key }).strict(),
+  (svc, req) =>
+    setPlanHoldsPaused(
+      svc.pool,
+      { id: req.user!.id, role: req.user!.role },
+      req.params.id,
+      true,
+      req.body.reason,
+      req.body.idempotency_key,
+    ),
+  true,
+);
+
+mutation(
+  '/admin/funding-plans/:id/resume-holds',
+  z.object({ reason: z.string().trim().max(500).optional(), idempotency_key: key }).strict(),
+  (svc, req) =>
+    setPlanHoldsPaused(
+      svc.pool,
+      { id: req.user!.id, role: req.user!.role },
+      req.params.id,
+      false,
+      req.body.reason,
+      req.body.idempotency_key,
+    ),
+  true,
+);
+
+mutation(
+  '/admin/funding-plans/:id/flag',
+  z
+    .object({
+      flagged: z.boolean().default(true),
+      note: z.string().trim().min(5).max(500),
+      idempotency_key: key,
+    })
+    .strict(),
+  (svc, req) =>
+    setPlanFlagged(
+      svc.pool,
+      { id: req.user!.id, role: req.user!.role },
+      req.params.id,
+      req.body.flagged,
+      req.body.note,
+      req.body.idempotency_key,
+    ),
+  true,
+);
+
+mutation(
+  '/admin/funding-holds/:id/release',
+  z.object({ reason: z.string().trim().max(500).optional(), idempotency_key: key }).strict(),
+  (svc, req) =>
+    releaseStuckHold(
+      svc.pool,
+      { id: req.user!.id, role: req.user!.role },
+      req.params.id,
+      req.body.reason,
+      req.body.idempotency_key,
+    ),
+  true,
+);
+
+fundingPlansRouter.get(
+  '/admin/merchant-funding',
+  authenticateToken,
+  requireAdmin,
+  async (req: AuthRequest, res: Response) => {
+    const svc = service(res, true);
+    if (!svc) return;
+    try {
+      const includeTest = req.query.include_test === 'true';
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.json({
+        success: true,
+        data: { items: await listMerchantFunding(svc.pool, includeTest), simulated: true },
+      });
+    } catch (error) {
+      return fundingErrorResponse(res, error);
+    }
+  },
+);
+
+fundingPlansRouter.get(
+  '/admin/merchant-funding/:merchantId',
+  authenticateToken,
+  requireAdmin,
+  async (req: AuthRequest, res: Response) => {
+    const svc = service(res, true);
+    if (!svc) return;
+    try {
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.json({ success: true, data: await getMerchantFundingDetail(svc.pool, req.params.merchantId) });
+    } catch (error) {
+      return fundingErrorResponse(res, error);
+    }
+  },
+);
+
+mutation(
+  '/admin/merchants/:id/sponsoring/suspend',
+  z.object({ reason: z.string().trim().min(5).max(500), idempotency_key: key }).strict(),
+  (svc, req) =>
+    setMerchantSponsoringSuspended(
+      svc.pool,
+      { id: req.user!.id, role: req.user!.role },
+      req.params.id,
+      true,
+      req.body.reason,
+      req.body.idempotency_key,
+    ),
+  true,
+);
+
+mutation(
+  '/admin/merchants/:id/sponsoring/resume',
+  z.object({ reason: z.string().trim().max(500).optional(), idempotency_key: key }).strict(),
+  (svc, req) =>
+    setMerchantSponsoringSuspended(
+      svc.pool,
+      { id: req.user!.id, role: req.user!.role },
+      req.params.id,
+      false,
+      req.body.reason,
+      req.body.idempotency_key,
+    ),
+  true,
+);
 
 fundingPlansRouter.get('/quests/:id/funding-plan', authenticateToken, async (req: AuthRequest, res: Response) => {
   const svc = service(res);

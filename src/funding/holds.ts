@@ -148,6 +148,13 @@ export async function startFundedAttempt(pool: Pool, questId: string, userId: st
     ) {
       throw new FundingError('QUEST_NOT_OPEN', 409, 'This funding round is not open for new attempts.');
     }
+    if (plan.holds_paused) {
+      throw new FundingError(
+        'FUNDING_HOLDS_PAUSED',
+        409,
+        'New reward reservations are temporarily paused for this quest.',
+      );
+    }
     if (plan.quest_version !== quest.version)
       throw new FundingError('FUNDING_PLAN_STATE', 409, 'The quest changed after funding was agreed.');
     const contributions = await client.query(
