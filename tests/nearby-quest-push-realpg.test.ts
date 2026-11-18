@@ -76,7 +76,7 @@ realPg('nearby quest push (real PostgreSQL)', () => {
     const addUser = (id: string, town: string, isTest = false) =>
       fixture.pool.query(
         `INSERT INTO users(id,seed_id,display_name,email,role,demo_points,home_municipality,is_test)
-         VALUES($1,$1,$1,$2,'user',0,$3,$4)`,
+         VALUES($1::text,$1::text,$1::text,$2,'user',0,$3,$4)`,
         [id, `${id}@example.test`, town, isTest],
       );
     await addUser(ids.near, 'Dagupan City');
