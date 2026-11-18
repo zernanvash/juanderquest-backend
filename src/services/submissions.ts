@@ -14,6 +14,7 @@ import { settleReward } from '../funding/rewardSettlement.js';
 import { hasFundingPlan, requireFundingHold } from '../funding/holds.js';
 import { FundingError, publishFunding } from '../funding/transaction.js';
 import type { CommittedLedgerGroup } from '../funding/ledger.js';
+import { publishAfterCommit, publishToUser } from '../realtime/bus.js';
 
 // Single-use challenge nonces are claimed in memory before any await so that
 // concurrent requests cannot both pass the replay check. Entries expire shortly
@@ -827,6 +828,14 @@ export class SubmissionsService {
         }
 
         const updatedSub = this.mapSubmissionRow(updatedSubRows[0]);
+        publishAfterCommit(client, () =>
+          publishToUser(updatedSub.user_id, {
+            type: 'submission',
+            id: updatedSub.id,
+            quest_id: updatedSub.quest_id,
+            status: updatedSub.status,
+          }),
+        );
 
         let awardedPoints = 0;
         let awardedExplorerCoins: string | undefined;

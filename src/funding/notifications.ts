@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 import { runIsolatedProducer } from '../social/activity.js';
 import { enqueuePush } from '../push/enqueue.js';
+import { publishAfterCommit, publishToUser } from '../realtime/bus.js';
 
 export type FundingNotificationKind = 'quest_funding' | 'sponsorship' | 'quest_reward';
 
@@ -39,6 +40,15 @@ export async function insertFundingNotification(client: Pick<PoolClient, 'query'
   );
   const notificationId = inserted.rows?.[0]?.id as string | undefined;
   if (!notificationId) return; // duplicate event: no second push either
+  publishAfterCommit(client, () =>
+    publishToUser(input.userId, {
+      type: 'notification',
+      id: notificationId,
+      kind: input.kind,
+      title: input.title,
+      href: input.href,
+    }),
+  );
   // Same transaction (sent only if the business action commits), but isolated
   // in a savepoint so a push-queue problem can never roll back the action.
   await runIsolatedProducer(client as any, '[funding:push] Failed to enqueue push:', async () => {
@@ -106,7 +116,10 @@ export async function notifyPlanStakeholders(
     [plan.id, plan.is_test],
   );
   const href = `/quests/${encodeURIComponent(plan.quest_id)}`;
-  for (const recipient of recipients.rows)
+  for (const recipient of recipients.rows) {
+    publishAfterCommit(client, () =>
+      publishToUser(recipient.user_id, { type: 'funding', plan_id: String(plan.id), quest_id: String(plan.quest_id) }),
+    );
     await insertFundingNotification(client, {
       userId: recipient.user_id,
       isTest: Boolean(plan.is_test),
@@ -116,4 +129,5 @@ export async function notifyPlanStakeholders(
       message,
       href,
     });
+  }
 }

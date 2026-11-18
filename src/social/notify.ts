@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { runIsolatedProducer, type Queryable } from './activity.js';
 import { enqueuePush } from '../push/enqueue.js';
+import { publishAfterCommit, publishToUser } from '../realtime/bus.js';
 
 export type NotificationKind =
   | 'follow'
@@ -49,6 +50,9 @@ export async function notify(client: Queryable, input: NotifyInput): Promise<str
   if (!res.rows.length || res.rows[0].id !== notifId) {
     return null;
   }
+  publishAfterCommit(client, () =>
+    publishToUser(input.userId, { type: 'notification', id: notifId, kind: input.kind, title, href: input.href }),
+  );
 
   const push = input.push;
   if (push) {

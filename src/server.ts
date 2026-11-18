@@ -9,6 +9,7 @@ import { stopWeeklyRecapJob } from './social/weeklyRecapJob.js';
 import { stopChainBalanceWatch } from './chain/balanceWatch.js';
 import { stopBadgeMinter } from './chain/badgeMinter.js';
 import { stopWeeklyTrailTrendJob } from './trails/jobs/weeklyTrends.js';
+import { attachRealtime } from './realtime/server.js';
 
 const startedAt = Date.now();
 
@@ -20,6 +21,7 @@ const server = app.listen(env.PORT, env.HOST, () => {
   console.log(`🚀 JuanderQuest REST API backend listening on http://${env.HOST}:${env.PORT} (starting up)`);
   console.log(`📡 Environment: ${env.NODE_ENV}`);
 });
+const realtime = attachRealtime(server);
 
 bootstrap()
   .then(() => {
@@ -45,6 +47,7 @@ function shutdown(signal: NodeJS.Signals): void {
   stopWeeklyTrailTrendJob();
   stopChainBalanceWatch();
   stopBadgeMinter();
+  realtime.close();
   beginServiceShutdown();
   console.log(`[shutdown] ${signal} received — draining in-flight requests (10 s cap)`);
 

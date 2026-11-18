@@ -47,6 +47,7 @@ import { getHomeTown } from '../social/homeTown.js';
 import { log } from '../utils/logger.js';
 import { publishChecklist, publishChecklistError } from '../quests/publishChecklist.js';
 import { scheduleNearbyQuestAnnouncement } from '../social/nearbyQuest.js';
+import { publishBroadcast } from '../realtime/bus.js';
 
 const router = Router();
 const csv = (value: unknown) =>
@@ -1095,6 +1096,13 @@ router.post(
 
     // Update in-memory state
     db.upsertQuest(newQuest);
+    if (questStatus === 'published' && !newQuest.is_test)
+      publishBroadcast({
+        type: 'quest_published',
+        id: newQuest.id,
+        title: newQuest.title,
+        town: spot.municipality ?? null,
+      });
     if (!spot.quest_id) {
       spot.quest_id = newQuest.id;
     }

@@ -44,6 +44,7 @@ import { hasCompletedQuest } from '../services/quest-completion.js';
 import { hasFundingPlan, requireFundingHold, startFundedAttempt } from '../funding/holds.js';
 import { FundingError, publishFunding } from '../funding/transaction.js';
 import { fundingErrorResponse } from './fundingPlans.js';
+import { publishBroadcast } from '../realtime/bus.js';
 import { lockGovernanceSnapshot, commitGovernanceTransaction } from '../governance/transaction.js';
 import { publicFundingSummaries } from '../funding/readModel.js';
 import { handleQuestStepVerified } from '../stamps/hooks.js';
@@ -403,6 +404,8 @@ router.patch('/quests/:id/status', authenticateToken, async (req: AuthRequest, r
   quest.updated_at = new Date().toISOString();
   db.upsertQuest(quest);
   if (status === 'published' && previousStatus !== 'published') scheduleNearbyQuestAnnouncement(quest);
+  if (status === 'published' && previousStatus !== 'published' && !quest.is_test)
+    publishBroadcast({ type: 'quest_published', id: quest.id, title: quest.title, town: spot?.municipality ?? null });
   if (!isAuthor && (isAdmin || isAreaAdmin) && statusPool) {
     await writeAdminAudit({
       actorId: req.user!.id,
@@ -585,6 +588,7 @@ router.patch(
     if (radius_meters !== undefined) quest.radius_meters = radius_meters;
     if (reward_points !== undefined) quest.reward_points = reward_points;
     if (step_order_mode !== undefined) quest.step_order_mode = step_order_mode;
+    const becamePublished = status === 'published' && quest.status !== 'published';
     if (status !== undefined) {
       quest.status = status;
       quest.is_active = status === 'published';
@@ -625,6 +629,8 @@ router.patch(
 
     db.upsertQuest(quest);
     if (quest.status === 'published' && previousStatus !== 'published') scheduleNearbyQuestAnnouncement(quest);
+    if (becamePublished && !quest.is_test)
+      publishBroadcast({ type: 'quest_published', id: quest.id, title: quest.title, town: spot?.municipality ?? null });
 
     return res.status(200).json({
       success: true,

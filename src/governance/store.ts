@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import type { MemoryDb } from '../db/index.js';
 import { lockGovernanceSnapshot, commitGovernanceTransaction, authoritativeBalance } from './transaction.js';
+import { publishAfterCommit, publishToUser } from '../realtime/bus.js';
 
 export const MJDQ_PER_JDQ = 1000;
 
@@ -402,6 +403,9 @@ export class GovernanceStore {
             user.id,
             Math.floor(balance / MJDQ_PER_JDQ),
           ]);
+          publishAfterCommit(client, () =>
+            publishToUser(user.id, { type: 'points', balance: Math.floor(balance / MJDQ_PER_JDQ) }),
+          );
         }
       }
       const previousEntries = new Set(before.ledger.map((entry) => entry.id));

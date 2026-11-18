@@ -8,6 +8,7 @@ import type { PointAccountRef } from './ledger.js';
 import { notifyPlanStakeholders } from './notifications.js';
 import { runIsolatedProducer } from '../social/activity.js';
 import { announceNearbyQuest } from '../social/nearbyQuest.js';
+import { publishAfterCommit, publishBroadcast } from '../realtime/bus.js';
 import { evaluateConditions } from './sponsorships.js';
 
 export interface PlanTerms {
@@ -71,24 +72,28 @@ export async function setQuestFundingState(client: PoolClient, questId: string, 
       : ['closed', 'expired', 'cancelled'].includes(state)
         ? 'paused'
         : 'draft';
-  await client.query('UPDATE quests SET status=$2,is_active=$3,updated_at=NOW() WHERE id=$1', [
-    questId,
-    status,
-    state === 'active',
-  ]);
+  const updated = await client.query(
+    'UPDATE quests SET status=$2,is_active=$3,updated_at=NOW() WHERE id=$1 RETURNING id,title,is_test',
+    [questId, status, state === 'active'],
+  );
+  const quest = updated?.rows?.[0];
+  if (state === 'active' && quest && !quest.is_test)
+    publishAfterCommit(client, () =>
+      publishBroadcast({ type: 'quest_published', id: String(quest.id), title: String(quest.title), town: null }),
+    );
   // A funded quest goes live here; tell nearby travelers (first publish only, savepoint-isolated).
   if (status === 'published') {
     await runIsolatedProducer(client, '[nearby-quest] Funded quest announcement failed:', async () => {
-      const quest = (
+      const row = (
         await client.query('SELECT id,title,location_name,gps_lat,gps_lng,author_id,is_test FROM quests WHERE id=$1', [
           questId,
         ])
       ).rows[0];
-      if (quest)
+      if (row)
         await announceNearbyQuest(client, {
-          ...quest,
-          gps_lat: Number(quest.gps_lat),
-          gps_lng: Number(quest.gps_lng),
+          ...row,
+          gps_lat: Number(row.gps_lat),
+          gps_lng: Number(row.gps_lng),
         });
     });
   }
