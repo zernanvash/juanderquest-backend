@@ -56,8 +56,8 @@ realPgDescribe('Affiliate application resubmit and appeal after rejection (real 
     );
     for (const id of applicants) {
       await fixture.pool.query(
-        `INSERT INTO users(id,seed_id,display_name,email,role) VALUES ($1,$2,$1,$3,'user')`,
-        [id, `${id}-seed`, `${id}@test.local`],
+        `INSERT INTO users(id,seed_id,display_name,email,role) VALUES ($1,$2,$4,$3,'user')`,
+        [id, `${id}-seed`, `${id}@test.local`, id],
       );
     }
     await db.hydrateFromPg(fixture.pool);
