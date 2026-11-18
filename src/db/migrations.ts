@@ -100,6 +100,8 @@ export const MIGRATIONS = [
   // 092 runs after 096 (096 went live first); its notification-kind list
   // includes 096's 'spot_photo_approved', so it must be the last to set it.
   '092_spot_auto_filter.sql',
+  // Owner 2026-11-18: admin Give mJDQ + Amoy anchor (after 092, the last to run before it).
+  '097_admin_point_grants.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so

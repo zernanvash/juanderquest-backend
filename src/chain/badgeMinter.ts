@@ -49,6 +49,8 @@ export interface BadgeChain {
     nonce: number;
   }): Promise<string>;
   receipt(txHash: string): Promise<BadgeReceipt | null>;
+  /** Owner 2026-11-18: a 0-value transaction to the issuer itself carrying anchor data. */
+  sendAnchor?(args: { data: string; nonce: number }): Promise<string>;
 }
 
 export interface BadgeMinterOptions {
@@ -250,7 +252,8 @@ export async function sendNextBadge(
 ): Promise<void> {
   const now = options.now ?? new Date();
   const inFlight = await pool.query(
-    `SELECT 1 FROM chain_commands WHERE chain_id = $1 AND operation = 'badge_claim' AND status = 'submitted' LIMIT 1`,
+    `SELECT 1 FROM chain_commands WHERE chain_id = $1 AND operation IN ('badge_claim', 'points_anchor')
+        AND status = 'submitted' LIMIT 1`,
     [options.chainId],
   );
   if (inFlight.rowCount) {
@@ -335,8 +338,161 @@ export async function runBadgeMintTick(
   const result: BadgeTickResult = { enqueued: 0, included: 0, finalized: 0, retried: 0, failed: 0, sent: null };
   result.enqueued = await enqueueEligibleBadges(pool, options.chainId, options.now ?? new Date());
   await reconcileBadgeCommands(pool, chain, options, result);
+  await reconcileAnchorCommands(pool, chain, options, result);
   await sendNextBadge(pool, chain, options, result);
+  await sendNextAnchor(pool, chain, options, result);
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Owner 2026-11-18: admin mJDQ grants are anchored on-chain through the same outbox.
+// A `points_anchor` command is a 0-value transaction from the issuer to itself whose
+// data is "JDQG" + the grant fingerprint (`entitlement_id`). Same key, same lock, and
+// never more than one transaction in flight across badges and anchors.
+
+const ANCHOR_DATA_TAG = '0x4a445147';
+
+/** Tracks sent anchors to inclusion and finality; dropped or reverted ones are retried. */
+export async function reconcileAnchorCommands(
+  pool: Pool,
+  chain: BadgeChain,
+  options: BadgeMinterOptions,
+  result: BadgeTickResult,
+): Promise<void> {
+  const now = options.now ?? new Date();
+  const rows = await pool.query(
+    `SELECT c.id, c.status, c.attempt_count,
+            t.id AS attempt_id, t.tx_hash, t.nonce, t.block_hash, t.created_at AS sent_at
+       FROM chain_commands c
+       JOIN LATERAL (SELECT * FROM chain_transaction_attempts x WHERE x.command_id = c.id
+                      ORDER BY x.created_at DESC LIMIT 1) t ON TRUE
+      WHERE c.chain_id = $1 AND c.operation = 'points_anchor' AND c.status IN ('submitted', 'included')`,
+    [options.chainId],
+  );
+  if (rows.rows.length === 0) return;
+  const head = await chain.latestBlock();
+  for (const row of rows.rows) {
+    const receipt = await chain.receipt(row.tx_hash);
+    if (!receipt) {
+      if (row.status === 'included') {
+        await pool.query(`UPDATE chain_commands SET status = 'submitted', updated_at = now() WHERE id = $1`, [row.id]);
+        await pool.query(
+          `UPDATE chain_transaction_attempts SET status = 'submitted', block_number = NULL,
+          block_hash = NULL, updated_at = now() WHERE id = $1`,
+          [row.attempt_id],
+        );
+        continue;
+      }
+      if (now.getTime() - new Date(row.sent_at).getTime() < STUCK_AFTER_MS) continue;
+      if ((await chain.minedNonce()) > Number(row.nonce)) {
+        await pool.query(
+          `UPDATE chain_transaction_attempts SET status = 'replaced', updated_at = now() WHERE id = $1`,
+          [row.attempt_id],
+        );
+        const outcome = await requeueOrFail(
+          pool,
+          row.id,
+          Number(row.attempt_count),
+          options.maxAttempts,
+          'The anchor transaction was dropped by the network.',
+          now,
+        );
+        result[outcome] += 1;
+      }
+      continue;
+    }
+    if (!receipt.success) {
+      await pool.query(
+        `UPDATE chain_transaction_attempts SET status = 'reverted', block_number = $2, block_hash = $3,
+        updated_at = now() WHERE id = $1`,
+        [row.attempt_id, receipt.blockNumber, receipt.blockHash],
+      );
+      const outcome = await requeueOrFail(
+        pool,
+        row.id,
+        Number(row.attempt_count),
+        options.maxAttempts,
+        'The anchor transaction reverted.',
+        now,
+      );
+      result[outcome] += 1;
+      continue;
+    }
+    if (row.status === 'submitted' || row.block_hash !== receipt.blockHash) {
+      await pool.query(
+        `UPDATE chain_transaction_attempts SET status = 'included', block_number = $2, block_hash = $3,
+        updated_at = now() WHERE id = $1`,
+        [row.attempt_id, receipt.blockNumber, receipt.blockHash],
+      );
+      if (row.status === 'submitted') {
+        await pool.query(
+          `UPDATE chain_commands SET status = 'included', last_error = NULL, updated_at = now() WHERE id = $1`,
+          [row.id],
+        );
+        result.included += 1;
+      }
+    }
+    if (head - receipt.blockNumber >= options.confirmations) {
+      await pool.query(`UPDATE chain_commands SET status = 'finalized', updated_at = now() WHERE id = $1`, [row.id]);
+      result.finalized += 1;
+    }
+  }
+}
+
+/** Sends at most one queued anchor, and only when no badge or anchor is in flight. */
+export async function sendNextAnchor(
+  pool: Pool,
+  chain: BadgeChain,
+  options: BadgeMinterOptions,
+  result: BadgeTickResult,
+): Promise<void> {
+  if (!chain.sendAnchor || result.sent) return;
+  const now = options.now ?? new Date();
+  const inFlight = await pool.query(
+    `SELECT 1 FROM chain_commands WHERE chain_id = $1 AND operation IN ('badge_claim', 'points_anchor')
+        AND status = 'submitted' LIMIT 1`,
+    [options.chainId],
+  );
+  if (inFlight.rowCount) return;
+  const next = await pool.query(
+    `SELECT id, entitlement_id, recipient_address, attempt_count FROM chain_commands
+      WHERE chain_id = $1 AND operation = 'points_anchor' AND status = 'queued' AND next_attempt_at <= $2
+      ORDER BY created_at, id LIMIT 1`,
+    [options.chainId, now],
+  );
+  const cmd = next.rows[0];
+  if (!cmd) return;
+  if (String(cmd.recipient_address).toLowerCase() !== chain.issuer.toLowerCase()) {
+    await pool.query(`UPDATE chain_commands SET status = 'failed', last_error = $2, updated_at = now() WHERE id = $1`, [
+      cmd.id,
+      'The anchor was queued for another issuer wallet.',
+    ]);
+    result.failed += 1;
+    return;
+  }
+  if ((await chain.balanceWei()) < MIN_ISSUER_BALANCE_WEI) {
+    result.skipped = 'low_balance';
+    return;
+  }
+  const attempt = Number(cmd.attempt_count) + 1;
+  await pool.query(`UPDATE chain_commands SET attempt_count = $2, updated_at = now() WHERE id = $1`, [cmd.id, attempt]);
+  try {
+    const nonce = await chain.pendingNonce();
+    const txHash = await chain.sendAnchor({ data: ANCHOR_DATA_TAG + String(cmd.entitlement_id).slice(2), nonce });
+    await pool.query(
+      `INSERT INTO chain_transaction_attempts (id, command_id, chain_id, tx_hash, status, nonce)
+       VALUES ($1, $2, $3, $4, 'submitted', $5)`,
+      [randomUUID(), cmd.id, options.chainId, txHash.toLowerCase(), nonce],
+    );
+    await pool.query(
+      `UPDATE chain_commands SET status = 'submitted', last_error = NULL, updated_at = now() WHERE id = $1`,
+      [cmd.id],
+    );
+    result.sent = txHash;
+  } catch (err) {
+    const outcome = await requeueOrFail(pool, cmd.id, attempt, options.maxAttempts, `Send failed: ${shortError(err)}`, now);
+    result[outcome] += 1;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -444,6 +600,29 @@ export class EthersBadgeChain implements BadgeChain {
     });
     const hash = Transaction.from(signed).hash!;
     // Broadcasting the same signed bytes to a second RPC is harmless (same hash).
+    await this.read((p) => p.broadcastTransaction(signed));
+    return hash;
+  }
+
+  async sendAnchor(args: { data: string; nonce: number }): Promise<string> {
+    const [gas, block] = await Promise.all([
+      this.read((p) => p.estimateGas({ from: this.issuer, to: this.issuer, data: args.data })),
+      this.read((p) => p.getBlock('latest')),
+    ]);
+    const baseFee = block?.baseFeePerGas ?? 0n;
+    const maxFee = baseFee * 2n + PRIORITY_FEE > MIN_MAX_FEE ? baseFee * 2n + PRIORITY_FEE : MIN_MAX_FEE;
+    const signed = await this.wallet.signTransaction({
+      type: 2,
+      chainId: this.chainId,
+      to: this.issuer,
+      data: args.data,
+      nonce: args.nonce,
+      gasLimit: (gas * 12n) / 10n,
+      maxPriorityFeePerGas: PRIORITY_FEE,
+      maxFeePerGas: maxFee,
+      value: 0n,
+    });
+    const hash = Transaction.from(signed).hash!;
     await this.read((p) => p.broadcastTransaction(signed));
     return hash;
   }
