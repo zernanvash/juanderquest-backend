@@ -415,12 +415,16 @@ async function acceptTerms(
 export class SponsorshipService {
   constructor(private readonly pool: Pool) {}
 
-  async directory(questId: string, actorId: string, options: { q?: string; page?: number }) {
+  async directory(questId: string, actorId: string, options: { q?: string; page?: number; lat?: number; lng?: number }) {
     const client = await this.pool.connect();
     try {
       const quest = (
         await client.query(
-          'SELECT q.id,q.is_test,q.author_id,s.municipality FROM quests q LEFT JOIN spots s ON s.quest_id=q.id WHERE q.id=$1',
+          `SELECT q.id,q.is_test,q.author_id,q.gps_lat,q.gps_lng,
+            COALESCE((SELECT s.municipality FROM spots s WHERE s.quest_id=q.id ORDER BY s.created_at DESC LIMIT 1),
+              (SELECT s2.municipality FROM reviewed_quest_spot_bindings b JOIN spots s2 ON s2.id=b.spot_id
+                WHERE b.quest_id=q.id AND b.status='active' ORDER BY b.created_at DESC LIMIT 1)) AS municipality
+           FROM quests q WHERE q.id=$1`,
           [questId],
         )
       ).rows[0];
@@ -436,15 +440,33 @@ export class SponsorshipService {
         throw new FundingError('SCOPE_MISMATCH', 403, 'Account and quest scopes do not match.');
       const page = Math.max(1, Math.min(1000, options.page ?? 1));
       const query = (options.q ?? '').trim().slice(0, 100);
+      // Distance origin: the builder's current pin when given, else the saved quest location.
+      const validPin =
+        Number.isFinite(options.lat) &&
+        Number.isFinite(options.lng) &&
+        Math.abs(options.lat!) <= 90 &&
+        Math.abs(options.lng!) <= 180;
+      const originLat = validPin ? options.lat! : quest.gps_lat == null ? null : Number(quest.gps_lat);
+      const originLng = validPin ? options.lng! : quest.gps_lng == null ? null : Number(quest.gps_lng);
       const result = await client.query(
-        `SELECT m.id,m.name,m.municipality,m.category,m.logo_url,m.description,
+        `SELECT id,name,municipality,category,logo_url,description,vouchers,same_municipality,
+            CASE WHEN distance_m IS NULL THEN NULL ELSE ROUND(distance_m)::int END AS distance_m
+         FROM (SELECT m.id,m.name,m.municipality,m.category,m.logo_url,m.description,
           COALESCE((SELECT jsonb_agg(jsonb_build_object('id',v.id,'title',v.title,'description',v.description)
             ORDER BY v.title,v.id) FROM vouchers v WHERE v.merchant_id=m.id AND v.is_active=TRUE), '[]'::jsonb) AS vouchers,
-          (m.municipality IS NOT DISTINCT FROM $2) AS same_municipality
-         FROM merchants m WHERE m.status='active' AND m.is_published=TRUE AND m.is_test=$1
-           AND ($3='' OR m.name ILIKE '%'||$3||'%' OR COALESCE(m.category,'') ILIKE '%'||$3||'%')
-         ORDER BY (m.municipality IS NOT DISTINCT FROM $2) DESC,m.name,m.id LIMIT 20 OFFSET $4`,
-        [quest.is_test, quest.municipality ?? null, query, (page - 1) * 20],
+          (m.municipality IS NOT DISTINCT FROM $2) AS same_municipality,
+          CASE WHEN $5::double precision IS NULL OR $6::double precision IS NULL OR app.gps_lat IS NULL OR app.gps_lng IS NULL
+            THEN NULL
+            ELSE 12742000 * ASIN(LEAST(1, SQRT(
+              POWER(SIN(RADIANS(app.gps_lat - $5::double precision) / 2), 2) +
+              COS(RADIANS($5::double precision)) * COS(RADIANS(app.gps_lat)) *
+              POWER(SIN(RADIANS(app.gps_lng - $6::double precision) / 2), 2))))
+          END AS distance_m
+         FROM merchants m LEFT JOIN merchant_affiliate_applications app ON app.id=m.source_application_id
+         WHERE m.status='active' AND m.is_published=TRUE AND m.is_test=$1
+           AND ($3='' OR m.name ILIKE '%'||$3||'%' OR COALESCE(m.category,'') ILIKE '%'||$3||'%')) d
+         ORDER BY same_municipality DESC,distance_m ASC NULLS LAST,name,id LIMIT 20 OFFSET $4`,
+        [quest.is_test, quest.municipality ?? null, query, (page - 1) * 20, originLat, originLng],
       );
       return { items: result.rows, page, simulated: true };
     } finally {
