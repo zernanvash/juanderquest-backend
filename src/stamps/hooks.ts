@@ -93,3 +93,20 @@ export async function handleQotdAnswered(pool: Pool | null, input: QotdAnsweredH
     }),
   );
 }
+
+export interface SukiVisitHookInput {
+  userId: string;
+  visitId: string;
+  now?: Date;
+}
+
+/** Plan 107: a recorded Suki visit is an on-site check-in (shop members can never record their own). */
+export async function handleSukiVisit(pool: Pool | null, input: SukiVisitHookInput) {
+  if (!pool) return null;
+  return safeHook('[stamps] suki visit mission failed', () =>
+    recordMissionEvent(pool, input.userId, 'check_in', {
+      now: input.now,
+      sourceKey: `suki_visit:${input.visitId}`,
+    }),
+  );
+}

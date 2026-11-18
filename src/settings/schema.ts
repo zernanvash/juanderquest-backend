@@ -3,7 +3,7 @@ export type SettingValue = string | number | boolean;
 export interface SettingDefinition {
   key: string;
   label: string;
-  category: 'branding_support' | 'quiz_defaults' | 'quest_funding' | 'trail_economy' | 'stamps' | 'notifications';
+  category: 'branding_support' | 'quiz_defaults' | 'quest_funding' | 'trail_economy' | 'stamps' | 'notifications' | 'suki';
   type: 'email' | 'url' | 'text' | 'integer' | 'boolean' | 'string';
   defaultValue: SettingValue;
   min?: number;
@@ -405,6 +405,59 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     max: 10,
     restartRequired: false,
     description: 'Shields a traveler may hold at once. Shields never grant stamps.',
+  },
+  {
+    key: 'suki_enabled',
+    label: 'Enable Suki Cards',
+    category: 'suki',
+    type: 'boolean',
+    defaultValue: false,
+    restartRequired: false,
+    description: 'Merchant loyalty cards (Plan 107). Off hides every Suki route except reading your own cards.',
+  },
+  {
+    key: 'suki_visit_explorer_xp',
+    label: 'Explorer XP per Suki visit',
+    category: 'suki',
+    type: 'integer',
+    defaultValue: 5,
+    min: 0,
+    max: 50,
+    restartRequired: false,
+    description: 'Explorer XP for a recorded Suki visit (no mJDQ).',
+  },
+  {
+    key: 'suki_xp_visits_per_day',
+    label: 'Suki visits with XP per day',
+    category: 'suki',
+    type: 'integer',
+    defaultValue: 3,
+    min: 0,
+    max: 10,
+    restartRequired: false,
+    description: 'Only the first N Suki visits per Manila day, across all shops, earn XP.',
+  },
+  {
+    key: 'suki_reward_days',
+    label: 'Suki reward validity (days)',
+    category: 'suki',
+    type: 'integer',
+    defaultValue: 60,
+    min: 7,
+    max: 180,
+    restartRequired: false,
+    description: 'How long an unlocked Suki reward can be claimed at the shop.',
+  },
+  {
+    key: 'suki_max_accuracy_m',
+    label: 'Suki GPS accuracy limit (m)',
+    category: 'suki',
+    type: 'integer',
+    defaultValue: 100,
+    min: 20,
+    max: 200,
+    restartRequired: false,
+    description: 'Standee visits need a GPS fix at least this accurate.',
   },
 ];
 

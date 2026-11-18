@@ -243,6 +243,8 @@ export const AREA_SCOPED_ADMIN_ROUTES: Array<{ methods: string[]; path: RegExp }
   { methods: ['GET', 'PATCH'], path: /^\/affiliate\/applications\/[^/]+\/?$/ },
   { methods: ['GET'], path: /^\/vouchers\/?$/ },
   { methods: ['PATCH'], path: /^\/vouchers\/[^/]+\/availability\/?$/ },
+  { methods: ['GET'], path: /^\/suki\/(programs|towns)\/?$/ },
+  { methods: ['POST'], path: /^\/suki\/programs\/[^/]+\/(pause|resume)\/?$/ },
 ];
 
 export const isAreaScopedAdminRoute = (method: string, pathUnderAdmin: string) =>

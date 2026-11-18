@@ -106,6 +106,8 @@ export const MIGRATIONS = [
   '101_affiliate_reapply_appeal.sql',
   // Owner 2026-11-18: nearby-quest push; re-sets the notification kind list (092's list + nearby_quest).
   '102_nearby_quest_push.sql',
+  // Plan 107 Suki Card: re-sets the notification kind list (102's list + suki_reward), so it runs after 102.
+  '103_suki_cards.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so

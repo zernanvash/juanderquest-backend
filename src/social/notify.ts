@@ -12,7 +12,8 @@ export type NotificationKind =
   | 'weekly_champion'
   | 'spot_photo_approved'
   | 'spot_moderation'
-  | 'nearby_quest';
+  | 'nearby_quest'
+  | 'suki_reward';
 
 export interface NotifyInput {
   userId: string;
@@ -23,7 +24,7 @@ export interface NotifyInput {
   href: string;
   isTest: boolean;
   push?: {
-    category: 'overtaken' | 'social' | 'weekly_recap';
+    category: 'overtaken' | 'social' | 'weekly_recap' | 'account';
     collapseKey: string;
     actorName?: string;
   };
