@@ -162,8 +162,8 @@ realPg('Plan 108: sponsorship conditions and Sponsored by (disposable PostgreSQL
     if (fixture) await fixture.close();
   });
 
-  it('has 098_sponsorship_conditions.sql as the last migration in the ledger', async () => {
-    expect(MIGRATIONS[MIGRATIONS.length - 1]).toBe('098_sponsorship_conditions.sql');
+  it('has 098_sponsorship_conditions.sql in the ledger', async () => {
+    expect(MIGRATIONS).toContain('098_sponsorship_conditions.sql');
     const ledger = await fixture.pool.query(
       "SELECT filename FROM schema_migrations WHERE filename = '098_sponsorship_conditions.sql'",
     );
