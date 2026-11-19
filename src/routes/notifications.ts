@@ -60,7 +60,9 @@ notificationsRouter.get(
   },
 );
 
-const markSchema = z.object({ params: z.object({ id: z.string().uuid() }) });
+// v0.3.10: ids are TEXT. Plaza/social rows use `notif_<uuid>` (src/social/notify.ts),
+// so a UUID-only check rejected MARK READ on them with 400 and they stayed unread.
+const markSchema = z.object({ params: z.object({ id: z.string().trim().min(1).max(128) }) });
 notificationsRouter.patch(
   '/notifications/:id/read',
   authenticateToken,
