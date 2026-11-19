@@ -13,7 +13,8 @@ export type NotificationKind =
   | 'spot_photo_approved'
   | 'spot_moderation'
   | 'nearby_quest'
-  | 'suki_reward';
+  | 'suki_reward'
+  | 'quest_idle';
 
 export interface NotifyInput {
   userId: string;

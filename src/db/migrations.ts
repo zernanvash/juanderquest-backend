@@ -108,6 +108,9 @@ export const MIGRATIONS = [
   '102_nearby_quest_push.sql',
   // Plan 107 Suki Card: re-sets the notification kind list (102's list + suki_reward), so it runs after 102.
   '103_suki_cards.sql',
+  // v0.3.10 quests: idle window on accepted quests; re-sets the notification kind list (103's list + quest_idle).
+  // The shop track's 104 also sets that list: keep 105 last and merge 104's kind into it.
+  '105_quest_accept_idle_window.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so

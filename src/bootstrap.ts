@@ -9,6 +9,7 @@ import { initJuanChoiceScheduler } from './jobs/juanchoice-scheduler.js';
 import { initEconomyReservationWorker } from './jobs/economy-reservations.js';
 import { initEconomicOutboxWorker } from './jobs/economy-outbox.js';
 import { initFundingScheduler } from './funding/scheduler.js';
+import { initQuestIdleSweep } from './quests/idleWindow.js';
 import { startStandingsJob } from './social/standingsJob.js';
 import { initFcm } from './push/fcm.js';
 import { startPushDispatcher } from './push/dispatcher.js';
@@ -33,6 +34,7 @@ export async function bootstrap() {
     startWeeklyTrailTrendJob();
     startChainBalanceWatch();
     startBadgeMinter();
+    initQuestIdleSweep();
   } else {
     governanceStore.refreshBalances();
   }

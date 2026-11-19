@@ -52,6 +52,7 @@ import { settleReward } from '../funding/rewardSettlement.js';
 import { progressionService } from '../progression/service.js';
 import { governanceStore } from './proposals.js';
 import { log } from '../utils/logger.js';
+import { expireIdleAttempts, idleExpiresAt, idleWindowHours } from '../quests/idleWindow.js';
 
 const router = Router();
 
@@ -829,6 +830,8 @@ router.post('/quests/:id/attempts', authenticateToken, async (req: AuthRequest, 
   const fundingPool = getPool();
   if (fundingPool) {
     try {
+      // An idle acceptance expires first (its hold is released), so this start is a fresh window.
+      await expireIdleAttempts(fundingPool, { userId: req.user!.id, questId: id });
       const funded = await startFundedAttempt(fundingPool, id, req.user!.id);
       if (funded) {
         const attempt = mapAttempt(funded.attempt);
@@ -1138,6 +1141,7 @@ router.get('/quests/:id/progress', authenticateToken, async (req: AuthRequest, r
   const pool = getPool();
   if (pool) {
     try {
+      await expireIdleAttempts(pool, { userId, questId: id });
       const [completed, active] = await Promise.all([
         hasCompletedQuest(db, userId, id, pool),
         pool.query(
@@ -1148,6 +1152,13 @@ router.get('/quests/:id/progress', authenticateToken, async (req: AuthRequest, r
       let activeAttempt: any = null;
       if (active.rows[0] && ['in_progress', 'submitted'].includes(active.rows[0].status)) {
         activeAttempt = mapAttempt(active.rows[0]);
+        const authored = Array.isArray(quest.steps) && quest.steps.length > 0;
+        if (active.rows[0].status === 'in_progress' && authored && active.rows[0].last_progress_at) {
+          const hours = await idleWindowHours(pool);
+          activeAttempt.last_progress_at = new Date(active.rows[0].last_progress_at).toISOString();
+          activeAttempt.idle_window_hours = hours;
+          activeAttempt.idle_expires_at = idleExpiresAt(active.rows[0].last_progress_at, hours);
+        }
         try {
           const stepRows = await pool.query(
             'SELECT * FROM quest_step_evidence WHERE attempt_id = $1 ORDER BY step_order ASC',
@@ -1164,6 +1175,10 @@ router.get('/quests/:id/progress', authenticateToken, async (req: AuthRequest, r
           quest_id: id,
           has_completed: completed,
           active_attempt: activeAttempt ? sanitizeAttemptSnapshot(activeAttempt) : null,
+          last_expired_at:
+            !activeAttempt && active.rows[0]?.status === 'expired' && active.rows[0].expired_at
+              ? new Date(active.rows[0].expired_at).toISOString()
+              : null,
         },
       });
     } catch (error) {
@@ -1823,7 +1838,7 @@ router.post(
         const verifiedCount = parseInt(countRes.rows[0].count, 10);
         await pool.query(
           `UPDATE quest_attempts
-           SET verified_steps = $1, current_step = GREATEST(current_step, $2), updated_at = NOW()
+           SET verified_steps = $1, current_step = GREATEST(current_step, $2), last_progress_at = NOW(), updated_at = NOW()
            WHERE id = $3`,
           [verifiedCount, isSequential ? nextStepOrder : activeAttempt.current_step, activeAttempt.id],
         );
@@ -2866,7 +2881,7 @@ router.post(
         const verifiedCount = parseInt(countRes.rows[0].count, 10);
         await pool.query(
           `UPDATE quest_attempts
-           SET verified_steps = $1, current_step = GREATEST(current_step, $2), updated_at = NOW()
+           SET verified_steps = $1, current_step = GREATEST(current_step, $2), last_progress_at = NOW(), updated_at = NOW()
            WHERE id = $3`,
           [verifiedCount, isSequential ? nextStepOrder : activeAttempt.current_step, activeAttempt.id],
         );
