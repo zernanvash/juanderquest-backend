@@ -5,16 +5,25 @@ import { spotStore } from './store.js';
 
 export type CrowdGranularity = 'day' | 'week' | 'month';
 
+export type CrowdSortField =
+  'verified_visits' | 'on_site_now' | 'interactions' | 'pressure_score' | 'dwell_minutes' | 'name' | 'municipality';
+
 export interface CrowdQueryOptions {
   from?: string;
   to?: string;
   granularity?: CrowdGranularity;
+  province?: string;
   municipality?: string;
   category?: string;
   q?: string;
   spotId?: string;
   onsiteHours?: number;
   includeTest?: boolean;
+  page?: number;
+  limit?: number;
+  sort?: CrowdSortField;
+  dir?: 'asc' | 'desc';
+  includeAll?: boolean;
 }
 
 const BUSY_THRESHOLD: Record<CrowdCapacityBand, number> = {
@@ -88,20 +97,43 @@ async function loadScopedSpots(pool: Pool, scope: AdminScope, options: CrowdQuer
   if (!scope.platform && areaIds.length === 0) return [];
 
   const result = await pool.query(
-    `SELECT id, name, slug, category, municipality, crowd_capacity_band,
-            recommendation_suppressed, recommendation_suppressed_until, is_test, status
-       FROM spots
-      WHERE ($1::boolean = TRUE OR is_test = FALSE)
-        AND ($2::boolean = TRUE OR town_area_id = ANY($3::text[]) OR barangay_area_id = ANY($3::text[]))
-        AND ($4::text IS NULL OR LOWER(municipality) = LOWER($4))
-        AND ($5::text IS NULL OR category = $5)
-        AND ($6::text IS NULL OR id = $6 OR slug = $6)
-        AND ($7::text IS NULL OR name ILIKE '%' || $7 || '%' OR municipality ILIKE '%' || $7 || '%')
-      ORDER BY name, id`,
+    `SELECT s.id, s.name, s.slug, s.category, s.municipality, s.crowd_capacity_band,
+            s.recommendation_suppressed, s.recommendation_suppressed_until, s.is_test, s.status,
+            s.town_area_id, s.barangay_area_id,
+            COALESCE(prov.id, '__unassigned__') AS province_id,
+            COALESCE(prov.display_name, prov.name, 'Unassigned province') AS province_name,
+            COALESCE(eff_town.id, s.town_area_id) AS effective_town_area_id
+       FROM spots s
+       LEFT JOIN admin_areas town ON town.id = s.town_area_id
+       LEFT JOIN admin_areas brgy ON brgy.id = s.barangay_area_id
+       LEFT JOIN admin_areas town_via_brgy ON town_via_brgy.id = brgy.parent_id AND town_via_brgy.level = 'town'
+       LEFT JOIN admin_areas eff_town ON eff_town.id = COALESCE(town.id, town_via_brgy.id)
+       LEFT JOIN admin_areas prov ON prov.id = eff_town.parent_id AND prov.level = 'province'
+      WHERE ($1::boolean = TRUE OR s.is_test = FALSE)
+        AND ($2::boolean = TRUE OR s.town_area_id = ANY($3::text[]) OR s.barangay_area_id = ANY($3::text[]))
+        AND (
+          $4::text IS NULL
+          OR ($4 = '__unassigned__' AND prov.id IS NULL)
+          OR prov.id = $4
+          OR LOWER(COALESCE(prov.name, '')) = LOWER($4)
+          OR LOWER(COALESCE(prov.display_name, '')) = LOWER($4)
+        )
+        AND ($5::text IS NULL OR LOWER(s.municipality) = LOWER($5))
+        AND ($6::text IS NULL OR s.category = $6)
+        AND ($7::text IS NULL OR s.id = $7 OR s.slug = $7)
+        AND (
+          $8::text IS NULL
+          OR s.name ILIKE '%' || $8 || '%'
+          OR s.municipality ILIKE '%' || $8 || '%'
+          OR COALESCE(prov.name, '') ILIKE '%' || $8 || '%'
+          OR COALESCE(prov.display_name, '') ILIKE '%' || $8 || '%'
+        )
+      ORDER BY province_name, s.municipality, s.name, s.id`,
     [
       includeTest,
       scope.platform,
       areaIds,
+      options.province?.trim() || null,
       options.municipality?.trim() || null,
       options.category?.trim() || null,
       options.spotId?.trim() || null,
@@ -109,6 +141,97 @@ async function loadScopedSpots(pool: Pool, scope: AdminScope, options: CrowdQuer
     ],
   );
   return result.rows;
+}
+
+export async function getCrowdAreas(pool: Pool, scope: AdminScope, includeTestInput = false) {
+  const includeTest = scope.platform && Boolean(includeTestInput);
+  const spots = await loadScopedSpots(pool, scope, {}, includeTest);
+
+  const provinceMap = new Map<string, { id: string; name: string; municipalities: Set<string>; spotCount: number }>();
+  const muniMap = new Map<
+    string,
+    { name: string; town_area_id: string | null; province_id: string; province_name: string; spot_count: number }
+  >();
+  const categoriesSet = new Set<string>();
+
+  for (const s of spots) {
+    const provId = String(s.province_id || '__unassigned__');
+    const provName = String(s.province_name || 'Unassigned province');
+    const muniName = String(s.municipality || '').trim() || 'Unknown municipality';
+    const townAreaId = s.effective_town_area_id ? String(s.effective_town_area_id) : null;
+
+    if (s.category) categoriesSet.add(String(s.category));
+
+    const pEntry = provinceMap.get(provId) ?? {
+      id: provId,
+      name: provName,
+      municipalities: new Set<string>(),
+      spotCount: 0,
+    };
+    pEntry.municipalities.add(muniName.toLowerCase());
+    pEntry.spotCount += 1;
+    provinceMap.set(provId, pEntry);
+
+    const muniKey = `${provId}::${muniName.toLowerCase()}`;
+    const mEntry = muniMap.get(muniKey) ?? {
+      name: muniName,
+      town_area_id: townAreaId,
+      province_id: provId,
+      province_name: provName,
+      spot_count: 0,
+    };
+    mEntry.spot_count += 1;
+    muniMap.set(muniKey, mEntry);
+  }
+
+  const provinces = [...provinceMap.values()]
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      municipality_count: p.municipalities.size,
+      spot_count: p.spotCount,
+    }))
+    .sort((a, b) => {
+      if (a.id === '__unassigned__' && b.id !== '__unassigned__') return 1;
+      if (b.id === '__unassigned__' && a.id !== '__unassigned__') return -1;
+      return a.name.localeCompare(b.name);
+    });
+
+  const municipalities = [...muniMap.values()].sort(
+    (a, b) => a.province_name.localeCompare(b.province_name) || a.name.localeCompare(b.name),
+  );
+  const categories = [...categoriesSet].sort((a, b) => a.localeCompare(b));
+
+  const assignedAreas = scope.platform
+    ? []
+    : scope.grants.filter((g) => g.powers.has('analytics')).map((g) => ({ area_id: g.areaId, area_name: g.areaName }));
+
+  let scopeMode: 'platform' | 'province' | 'municipality' | 'multi_area' = 'platform';
+  let lockedProvince: string | null = null;
+  let lockedMunicipality: string | null = null;
+
+  if (!scope.platform) {
+    if (provinces.length <= 1 && municipalities.length <= 1) {
+      scopeMode = 'municipality';
+      lockedProvince = provinces[0]?.id ?? null;
+      lockedMunicipality = municipalities[0]?.name ?? null;
+    } else if (provinces.length === 1) {
+      scopeMode = 'province';
+      lockedProvince = provinces[0].id;
+    } else {
+      scopeMode = 'multi_area';
+    }
+  }
+
+  return {
+    scope_mode: scopeMode,
+    locked_province: lockedProvince,
+    locked_municipality: lockedMunicipality,
+    assigned_areas: assignedAreas,
+    provinces,
+    municipalities,
+    categories,
+  };
 }
 
 function bucketExpression(granularity: CrowdGranularity, col: string): string {
@@ -137,6 +260,7 @@ export async function getCrowdOverview(pool: Pool, scope: AdminScope, options: C
     return {
       window: win,
       filters_applied: {
+        province: options.province ?? null,
         municipality: options.municipality ?? null,
         category: options.category ?? null,
         q: options.q ?? null,
@@ -174,9 +298,11 @@ export async function getCrowdOverview(pool: Pool, scope: AdminScope, options: C
       average_dwell_minutes: 0,
       peak_capacity_alerts: [],
       timeseries: [],
+      area_breakdown: { level: 'municipality' as const, items: [] },
       category_breakdown: [],
       top_destinations: [],
-      filter_options: { municipalities: [], categories: [] },
+      destinations_pagination: { page: 1, limit: 25, total: 0, total_pages: 1 },
+      filter_options: { provinces: [], municipalities: [], categories: [] },
     };
   }
 
@@ -657,6 +783,26 @@ export async function getCrowdOverview(pool: Pool, scope: AdminScope, options: C
       proofs: maskSmallCount(b.proofs, isPlatform),
     }));
 
+  const distinctProvinces = new Set(spots.map((s: any) => String(s.province_id || '__unassigned__')));
+  const rollupLevel: 'province' | 'municipality' =
+    !options.province?.trim() && distinctProvinces.size > 1 ? 'province' : 'municipality';
+
+  const areaAgg = new Map<
+    string,
+    {
+      area_key: string;
+      area_name: string;
+      province_id: string;
+      province_name: string;
+      spots: number;
+      busy_spots: number;
+      verified_visits: number;
+      interactions: number;
+      visitors: Set<string>;
+      onsite: Set<string>;
+    }
+  >();
+
   const categoryAgg = new Map<
     string,
     { spots: number; verified_visits: number; interactions: number; onsite: Set<string> }
@@ -667,6 +813,31 @@ export async function getCrowdOverview(pool: Pool, scope: AdminScope, options: C
     const crowdNow = calculateCrowdMetrics(events24BySpot.get(s.id) ?? [], band, Date.now(), includeTest);
     const onsiteCount = onsiteBySpot.get(s.id)?.size ?? 0;
     const uniqueCount = uniqueVisitorsBySpot.get(s.id)?.size ?? 0;
+    const provId = String(s.province_id || '__unassigned__');
+    const provName = String(s.province_name || 'Unassigned province');
+    const dwellVal = dwellBySpot.get(s.id) ?? 0;
+
+    const areaKey = rollupLevel === 'province' ? provId : `${provId}::${String(s.municipality)}`;
+    const areaName = rollupLevel === 'province' ? provName : String(s.municipality);
+    const aEntry = areaAgg.get(areaKey) ?? {
+      area_key: areaKey,
+      area_name: areaName,
+      province_id: provId,
+      province_name: provName,
+      spots: 0,
+      busy_spots: 0,
+      verified_visits: 0,
+      interactions: 0,
+      visitors: new Set<string>(),
+      onsite: new Set<string>(),
+    };
+    aEntry.spots += 1;
+    if (crowdNow.crowd_status === 'estimated_busy') aEntry.busy_spots += 1;
+    aEntry.verified_visits += st.verified_visits;
+    aEntry.interactions += st.interactions;
+    for (const u of uniqueVisitorsBySpot.get(s.id) ?? []) aEntry.visitors.add(u);
+    for (const u of onsiteBySpot.get(s.id) ?? []) aEntry.onsite.add(u);
+    areaAgg.set(areaKey, aEntry);
 
     const catEntry = categoryAgg.get(s.category) ?? {
       spots: 0,
@@ -684,6 +855,8 @@ export async function getCrowdOverview(pool: Pool, scope: AdminScope, options: C
       spot_id: s.id,
       name: s.name,
       municipality: s.municipality,
+      province_id: provId,
+      province_name: provName,
       category: s.category,
       crowd_capacity_band: band,
       crowd_status: crowdNow.crowd_status,
@@ -702,13 +875,72 @@ export async function getCrowdOverview(pool: Pool, scope: AdminScope, options: C
       proofs_pending: maskSmallCount(st.proofs_pending, isPlatform),
       proofs_rejected: maskSmallCount(st.proofs_rejected, isPlatform),
       trail_checkins: maskSmallCount(st.trail_checkins, isPlatform),
-      dwell_minutes: dwellBySpot.get(s.id) ?? 0,
+      dwell_minutes: dwellVal,
       _sort_visits: st.verified_visits,
+      _sort_onsite: onsiteCount,
+      _sort_interactions: st.interactions,
+      _sort_pressure: crowdNow.pressure_score,
+      _sort_dwell: dwellVal,
     };
   });
 
-  topDestinations.sort((a: any, b: any) => b._sort_visits - a._sort_visits || a.name.localeCompare(b.name));
-  const cleanedDestinations = topDestinations.map(({ _sort_visits, ...rest }: any) => rest);
+  const sortField = options.sort ?? 'verified_visits';
+  const sortAsc = options.dir === 'asc';
+  topDestinations.sort((a: any, b: any) => {
+    let cmp = 0;
+    if (sortField === 'name') {
+      cmp = a.name.localeCompare(b.name);
+    } else if (sortField === 'municipality') {
+      cmp = a.municipality.localeCompare(b.municipality) || a.name.localeCompare(b.name);
+    } else if (sortField === 'on_site_now') {
+      cmp = a._sort_onsite - b._sort_onsite;
+    } else if (sortField === 'interactions') {
+      cmp = a._sort_interactions - b._sort_interactions;
+    } else if (sortField === 'pressure_score') {
+      cmp = a._sort_pressure - b._sort_pressure;
+    } else if (sortField === 'dwell_minutes') {
+      cmp = a._sort_dwell - b._sort_dwell;
+    } else {
+      cmp = a._sort_visits - b._sort_visits;
+    }
+    if (cmp !== 0) return sortAsc ? cmp : -cmp;
+    return b._sort_visits - a._sort_visits || a.name.localeCompare(b.name);
+  });
+
+  const stripInternalSort = ({
+    _sort_visits,
+    _sort_onsite,
+    _sort_interactions,
+    _sort_pressure,
+    _sort_dwell,
+    ...rest
+  }: any) => rest;
+  const allCleaned = topDestinations.map(stripInternalSort);
+  const totalDestinations = allCleaned.length;
+  const hasExplicitPaging = !options.includeAll && (options.page != null || options.limit != null);
+  const pageSize = hasExplicitPaging
+    ? Math.min(Math.max(Math.trunc(options.limit ?? 25), 1), 200)
+    : Math.max(1, Math.min(500, totalDestinations));
+  const totalPages = hasExplicitPaging ? Math.max(1, Math.ceil(totalDestinations / pageSize)) : 1;
+  const currentPage = hasExplicitPaging ? Math.min(Math.max(Math.trunc(options.page ?? 1), 1), totalPages) : 1;
+  const cleanedDestinations = hasExplicitPaging
+    ? allCleaned.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+    : allCleaned.slice(0, 500);
+
+  const areaBreakdownItems = [...areaAgg.values()]
+    .sort((a, b) => b.verified_visits - a.verified_visits || a.area_name.localeCompare(b.area_name))
+    .map((agg) => ({
+      area_key: agg.area_key,
+      area_name: agg.area_name,
+      province_id: agg.province_id,
+      province_name: agg.province_name,
+      spots: agg.spots,
+      busy_spots: agg.busy_spots,
+      verified_visits: maskSmallCount(agg.verified_visits, isPlatform),
+      unique_visitors: maskSmallCount(agg.visitors.size, isPlatform),
+      interactions: maskSmallCount(agg.interactions, isPlatform),
+      on_site_now: maskSmallCount(agg.onsite.size, isPlatform),
+    }));
 
   const categoryBreakdown = [...categoryAgg.entries()]
     .map(([category, agg]) => ({
@@ -719,6 +951,15 @@ export async function getCrowdOverview(pool: Pool, scope: AdminScope, options: C
       on_site_now: maskSmallCount(agg.onsite.size, isPlatform),
     }))
     .sort((a, b) => a.category.localeCompare(b.category));
+
+  const provinceOptsMap = new Map<string, string>();
+  for (const s of spots) {
+    const id = String(s.province_id || '__unassigned__');
+    if (!provinceOptsMap.has(id)) provinceOptsMap.set(id, String(s.province_name || 'Unassigned province'));
+  }
+  const provinceOptions = [...provinceOptsMap.entries()]
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const prevRow = prevRes.rows[0] ?? { prev_visits: 0, prev_unique: 0, prev_interactions: 0 };
   const prevVisits = Number(prevRow.prev_visits ?? 0);
@@ -734,6 +975,7 @@ export async function getCrowdOverview(pool: Pool, scope: AdminScope, options: C
   return {
     window: win,
     filters_applied: {
+      province: options.province ?? null,
       municipality: options.municipality ?? null,
       category: options.category ?? null,
       q: options.q ?? null,
@@ -787,9 +1029,17 @@ export async function getCrowdOverview(pool: Pool, scope: AdminScope, options: C
     average_dwell_minutes: dwellCount > 0 ? Math.round((dwellSum / dwellCount) * 10) / 10 : 0,
     peak_capacity_alerts: peakCapacityAlerts.slice(0, 50),
     timeseries,
+    area_breakdown: { level: rollupLevel, items: areaBreakdownItems },
     category_breakdown: categoryBreakdown,
     top_destinations: cleanedDestinations,
+    destinations_pagination: {
+      page: currentPage,
+      limit: pageSize,
+      total: totalDestinations,
+      total_pages: totalPages,
+    },
     filter_options: {
+      provinces: provinceOptions,
       municipalities: [...new Set(filterOptsRes.rows.map((r: any) => String(r.municipality)).filter(Boolean))].sort(),
       categories: [...new Set(filterOptsRes.rows.map((r: any) => String(r.category)).filter(Boolean))].sort(),
     },
