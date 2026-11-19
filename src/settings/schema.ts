@@ -166,6 +166,18 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     description: 'Snapshotted when a plan is submitted; hold cannot outlive the plan grace window.',
   },
   {
+    key: 'quest_accept_idle_hours',
+    label: 'Accepted quest idle limit (hours)',
+    category: 'quest_funding',
+    type: 'integer',
+    defaultValue: 72,
+    min: 6,
+    max: 336,
+    restartRequired: false,
+    description:
+      'An accepted quest expires when the traveler completes no task for this long; the clock resets on every task. Reserved rewards are released and the traveler may accept again.',
+  },
+  {
     key: 'funding_window_min_days',
     label: 'Minimum funding window (days)',
     category: 'quest_funding',

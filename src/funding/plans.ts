@@ -220,6 +220,49 @@ export async function finalizePlan(tx: FundingTx, plan: any, actorId: string, te
   return true;
 }
 
+/**
+ * Read-only overview for the author's funding management page (team review 2026-11-19).
+ * Points are BIGINT strings in rows; everything here is a plain number.
+ */
+export function fundingSummary(plan: any, contributions: any[], holdCounts: any, sponsorships: any[]) {
+  const sum = (rows: any[], field: string) => rows.reduce((total, row) => total + Number(row[field] ?? 0), 0);
+  const byKind = (kind: string) => contributions.filter((row) => row.funder_kind === kind);
+  const totals = (rows: any[]) => ({
+    committed: sum(rows, 'committed_points'),
+    remaining: sum(rows, 'remaining_points'),
+    held: sum(rows, 'held_points'),
+    paid: sum(rows, 'paid_reward_points') + sum(rows, 'paid_fee_points'),
+    refunded: sum(rows, 'refunded_points'),
+  });
+  const all = totals(contributions);
+  const perCompletion = Number(plan.reward_points) + Number(plan.fee_points);
+  const count = (key: string) => Number(holdCounts?.[key] ?? 0);
+  return {
+    target_points: Number(plan.target_points),
+    reward_points: Number(plan.reward_points),
+    fee_points: Number(plan.fee_points),
+    cost_per_completion: perCompletion,
+    planned_completions: Number(plan.planned_completions),
+    committed_points: all.committed,
+    remaining_points: all.remaining,
+    held_points: all.held,
+    paid_points: all.paid,
+    paid_reward_points: sum(contributions, 'paid_reward_points'),
+    refunded_points: all.refunded,
+    completions_left: perCompletion > 0 ? Math.floor(all.remaining / perCompletion) : 0,
+    author: totals(byKind('author')),
+    sponsors: totals(byKind('merchant')),
+    holds: {
+      active: count('held'),
+      pending_review: count('pending_review'),
+      paid: count('paid'),
+      released: count('released'),
+    },
+    open_sponsor_requests: sponsorships.filter((row) => ['requested', 'countered'].includes(String(row.status))).length,
+    accepted_sponsors: sponsorships.filter((row) => String(row.status) === 'accepted').length,
+  };
+}
+
 export class FundingPlansService {
   constructor(readonly pool: Pool) {}
 
@@ -471,9 +514,10 @@ export class FundingPlansService {
         [id],
       );
       const holds = await client.query(
-        `SELECT h.*, u.display_name AS raw_traveler_name
+        `SELECT h.*, u.display_name AS raw_traveler_name, a.status AS attempt_status
            FROM quest_funding_holds h
            LEFT JOIN users u ON u.id = h.user_id
+           LEFT JOIN quest_attempts a ON a.id = h.attempt_id
           WHERE h.plan_id=$1
           ORDER BY h.created_at DESC LIMIT 200`,
         [id],
@@ -486,6 +530,19 @@ export class FundingPlansService {
           traveler_label: platformAdmin ? raw_traveler_name || `Traveler #${suffix}` : `Traveler #${suffix}`,
         };
       });
+      const holdCounts = (
+        await client.query(
+          `SELECT
+             SUM(CASE WHEN h.status='held' THEN 1 ELSE 0 END)::int AS held,
+             SUM(CASE WHEN h.status='held' AND (a.status='submitted' OR EXISTS(
+               SELECT 1 FROM submissions s WHERE s.quest_id=$2 AND s.user_id=h.user_id AND s.status='pending'))
+               THEN 1 ELSE 0 END)::int AS pending_review,
+             SUM(CASE WHEN h.status='paid' THEN 1 ELSE 0 END)::int AS paid,
+             SUM(CASE WHEN h.status='released' THEN 1 ELSE 0 END)::int AS released
+           FROM quest_funding_holds h LEFT JOIN quest_attempts a ON a.id=h.attempt_id WHERE h.plan_id=$1`,
+          [id, plan.quest_id],
+        )
+      ).rows[0];
       const sponsorships = await client.query(
         `SELECT s.*, m.name AS merchant_name, m.sponsoring_suspended
            FROM quest_sponsorships s
@@ -510,6 +567,7 @@ export class FundingPlansService {
         })),
         holds: formattedHolds,
         sponsorships: evaluatedSponsorships,
+        summary: fundingSummary(plan, contributions.rows, holdCounts, evaluatedSponsorships),
         simulated: true,
       };
     } catch (error) {

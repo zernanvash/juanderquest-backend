@@ -539,7 +539,7 @@ router.patch(
             );
           }
           const updatedAttemptRes = await client.query(
-            "UPDATE quest_attempts SET status = 'in_progress', review_notes = $1, reviewed_by = $2, reviewed_at = NOW(), updated_at = NOW() WHERE id = $3 RETURNING *",
+            "UPDATE quest_attempts SET status = 'in_progress', last_progress_at = NOW(), review_notes = $1, reviewed_by = $2, reviewed_at = NOW(), updated_at = NOW() WHERE id = $3 RETURNING *",
             [rejection_reason, adminId, id],
           );
           await commitGovernanceTransaction(client);
@@ -563,7 +563,7 @@ router.patch(
               [id, rejection_reason],
             );
           const updatedAttemptRes = await client.query(
-            'UPDATE quest_attempts SET status = $4, review_notes = $1, reviewed_by = $2, reviewed_at = NOW(), updated_at = NOW() WHERE id = $3 RETURNING *',
+            'UPDATE quest_attempts SET status = $4, last_progress_at = NOW(), review_notes = $1, reviewed_by = $2, reviewed_at = NOW(), updated_at = NOW() WHERE id = $3 RETURNING *',
             [rejection_reason, adminId, id, retryable ? 'in_progress' : 'abandoned'],
           );
           await commitGovernanceTransaction(client);

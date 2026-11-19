@@ -919,7 +919,7 @@ export class SubmissionsService {
 
         if (action === 'reject') {
           await client.query(
-            `UPDATE quest_attempts SET status='in_progress',updated_at=NOW() WHERE id IN
+            `UPDATE quest_attempts SET status='in_progress',last_progress_at=NOW(),updated_at=NOW() WHERE id IN
              (SELECT h.attempt_id FROM quest_funding_holds h WHERE h.submission_id=$1 AND h.status='held')`,
             [id],
           );
