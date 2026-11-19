@@ -92,7 +92,9 @@ realPgDescribe('v0.3.10 shop (real PostgreSQL)', () => {
   });
 
   it('places migration 104 after 103 and adds merchant_products.specialty_at', async () => {
-    expect(MIGRATIONS.indexOf('104_merchant_specialty_pins.sql')).toBeGreaterThan(MIGRATIONS.indexOf('103_suki_cards.sql'));
+    expect(MIGRATIONS.indexOf('104_merchant_specialty_pins.sql')).toBeGreaterThan(
+      MIGRATIONS.indexOf('103_suki_cards.sql'),
+    );
     const col = await fixture.pool.query(
       `SELECT data_type FROM information_schema.columns WHERE table_name = 'merchant_products' AND column_name = 'specialty_at'`,
     );

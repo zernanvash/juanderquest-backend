@@ -300,7 +300,9 @@ realPg('accepted-quest idle window + funding overview (disposable PostgreSQL)', 
 
     // Progress refreshes the reservation (never shortens it, never past the round + 24 h).
     const againId = again.body.data.id;
-    await fixture.pool.query("UPDATE quest_funding_holds SET expires_at=NOW()+INTERVAL '1 hour' WHERE attempt_id=$1", [againId]);
+    await fixture.pool.query("UPDATE quest_funding_holds SET expires_at=NOW()+INTERVAL '1 hour' WHERE attempt_id=$1", [
+      againId,
+    ]);
     await refreshFundingHoldOnProgress(fixture.pool, againId);
     const refreshed = await fixture.pool.query(
       "SELECT EXTRACT(EPOCH FROM (expires_at-NOW()))/3600 AS h FROM quest_funding_holds WHERE attempt_id=$1 AND status='held'",

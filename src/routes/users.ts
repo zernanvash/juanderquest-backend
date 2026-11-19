@@ -298,12 +298,10 @@ usersRouter.post(
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found.' } });
     }
     if (target.id === req.user!.id) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: 'CANNOT_REPORT_SELF', message: 'You cannot report your own picture.' },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: 'CANNOT_REPORT_SELF', message: 'You cannot report your own picture.' },
+      });
     }
     if (!isCustomAvatar(target.avatar_url)) {
       return res
