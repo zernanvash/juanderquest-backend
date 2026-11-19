@@ -36,8 +36,8 @@ realPgDescribe('v0.3.10 shop (real PostgreSQL)', () => {
     for (const id of [ownerId, staffId, otherOwnerId, aliceId]) {
       await fixture.pool.query(
         `INSERT INTO users(id, seed_id, display_name, email, handle, role, is_public, is_test, created_at)
-         VALUES ($1,$2,$1,$3,$4,'user',TRUE,FALSE,$5) ON CONFLICT (id) DO NOTHING`,
-        [id, `${id}-seed`, `${id}@test.local`, id.replace(/-/g, ''), created],
+         VALUES ($1,$2,$6,$3,$4,'user',TRUE,FALSE,$5) ON CONFLICT (id) DO NOTHING`,
+        [id, `${id}-seed`, `${id}@test.local`, id.replace(/-/g, ''), created, id],
       );
       db.users.push({
         id,

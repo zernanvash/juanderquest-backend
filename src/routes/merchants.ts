@@ -428,7 +428,7 @@ merchantsRouter.put(
       const cached = db.findMerchantProductById(product.id);
       if (cached) cached.specialty_at = updated.specialty_at ? new Date(updated.specialty_at).toISOString() : null;
       return res.status(200).json({ success: true, data: publicProduct(updated) });
-    } catch (error) {
+    } catch {
       await client.query('ROLLBACK').catch(() => undefined);
       return fail(res, 503, 'MERCHANT_UNAVAILABLE', 'Could not update the specialty right now.');
     } finally {
