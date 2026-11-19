@@ -19,6 +19,9 @@ import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
 import { spotStore, Spot } from '../spots/store.js';
 import { buildModerationSummary, listSpotModerationEvents } from '../spots/moderation.js';
 import { log } from '../utils/logger.js';
+import multer from 'multer';
+import { detectValidatedMediaMime } from '../utils/media-mime.js';
+import { getSpotPhotoStorageProvider } from '../storage/spot-photos.js';
 
 export const usersRouter = Router();
 
@@ -189,6 +192,75 @@ usersRouter.patch(
     }
   },
 );
+
+// v0.3.10 (team review): profile picture. Same rules as spot photos: JPEG/PNG/WebP checked
+// by magic bytes, 8 MB cap, stored by the spot-photo storage provider. Applied immediately
+// (no review queue: that would need a column); reports go through the usual channels.
+const AVATAR_MAX_BYTES = 8 * 1024 * 1024;
+const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: AVATAR_MAX_BYTES } });
+const avatarLimiter = rateLimit({
+  policyId: 'users:avatar',
+  windowMs: 60 * 1000,
+  max: process.env.NODE_ENV === 'test' ? 1000 : 10,
+  keyStrategy: 'actor',
+});
+const defaultAvatar = (seed: string) => `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(seed)}`;
+
+// PUT /users/me/avatar (multipart field `photo`) - set your profile picture
+usersRouter.put('/users/me/avatar', authenticateToken, avatarLimiter, (req: AuthRequest, res: Response) => {
+  avatarUpload.single('photo')(req, res, async (err: any) => {
+    if (err) {
+      const tooLarge = err.code === 'LIMIT_FILE_SIZE';
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: tooLarge ? 'FILE_TOO_LARGE' : 'VALIDATION_ERROR',
+          message: tooLarge ? 'Photo file size exceeds maximum limit of 8 MB.' : err.message || 'Upload failed.',
+        },
+      });
+    }
+    const file = req.file;
+    if (!file?.buffer) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'No photo provided in request.' },
+      });
+    }
+    const detected = detectValidatedMediaMime(file.buffer);
+    if (!detected || detected.mediaType !== 'image') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_IMAGE_CONTENT', message: 'Profile picture must be a JPEG, PNG or WebP image.' },
+      });
+    }
+    try {
+      const saved = await getSpotPhotoStorageProvider().savePhoto(file.buffer, detected.mime, detected.ext, 'image');
+      const updated = await db.updateUserProfile(req.user!.id, { avatar_url: saved.url });
+      if (!updated) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found.' } });
+      }
+      res.set('Cache-Control', 'private, no-store');
+      return res.status(200).json({ success: true, data: { avatar_url: updated.avatar_url } });
+    } catch (e: any) {
+      log.error('avatar upload failed', { error: e?.message });
+      return res.status(500).json({
+        success: false,
+        error: { code: 'UPLOAD_FAILED', message: 'Could not save your profile picture.' },
+      });
+    }
+  });
+});
+
+// DELETE /users/me/avatar - back to the default avatar
+usersRouter.delete('/users/me/avatar', authenticateToken, avatarLimiter, async (req: AuthRequest, res: Response) => {
+  const user = (await db.findUserByIdDurable(req.user!.id)) || db.findUserById(req.user!.id);
+  if (!user) {
+    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found.' } });
+  }
+  const updated = await db.updateUserProfile(user.id, { avatar_url: defaultAvatar(user.seed_id || user.id) });
+  res.set('Cache-Control', 'private, no-store');
+  return res.status(200).json({ success: true, data: { avatar_url: updated?.avatar_url ?? '' } });
+});
 
 // Owner-only access never changes public visibility or exposes private followers.
 usersRouter.get(

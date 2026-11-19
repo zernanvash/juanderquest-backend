@@ -255,6 +255,7 @@ export class UsersRepository {
       handle?: string | null;
       bio?: string | null;
       status_text?: string | null;
+      avatar_url?: string;
     },
   ): Promise<UserRow | undefined> {
     if (!this.pool) return undefined;
@@ -292,6 +293,10 @@ export class UsersRepository {
       if (updates.status_text !== undefined) {
         setClauses.push(`status_text = $${pIdx++}`);
         values.push(updates.status_text);
+      }
+      if (updates.avatar_url !== undefined) {
+        setClauses.push(`avatar_url = $${pIdx++}`);
+        values.push(updates.avatar_url);
       }
 
       const query = `
