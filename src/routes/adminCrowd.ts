@@ -5,6 +5,7 @@ import { getPool } from '../db/pool.js';
 import { authenticateToken, type AuthRequest } from '../middleware/auth.js';
 import {
   dismissCrowdSuggestion,
+  getCrowdAreas,
   getCrowdHeatmap,
   getCrowdOverview,
   getCrowdSpotDetail,
@@ -18,12 +19,20 @@ const querySchema = z.object({
   from: z.string().trim().max(40).optional(),
   to: z.string().trim().max(40).optional(),
   granularity: z.enum(['day', 'week', 'month']).optional(),
+  province: z.string().trim().max(120).optional(),
   municipality: z.string().trim().max(120).optional(),
   category: z.string().trim().max(60).optional(),
   q: z.string().trim().max(120).optional(),
   spot_id: z.string().trim().max(200).optional(),
   onsite_hours: z.coerce.number().int().min(1).max(6).optional(),
   include_test: z.enum(['true', 'false']).optional(),
+  page: z.coerce.number().int().min(1).max(1000).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  sort: z
+    .enum(['verified_visits', 'on_site_now', 'interactions', 'pressure_score', 'dwell_minutes', 'name', 'municipality'])
+    .optional(),
+  dir: z.enum(['asc', 'desc']).optional(),
+  include_all: z.enum(['true', 'false']).optional(),
 });
 
 function parseQuery(req: AuthRequest) {
@@ -34,14 +43,48 @@ function parseQuery(req: AuthRequest) {
     from: d.from,
     to: d.to,
     granularity: d.granularity,
+    province: d.province,
     municipality: d.municipality,
     category: d.category,
     q: d.q,
     spotId: d.spot_id,
     onsiteHours: d.onsite_hours,
     includeTest: d.include_test === 'true',
+    page: d.page,
+    limit: d.limit,
+    sort: d.sort,
+    dir: d.dir,
+    includeAll: d.include_all === 'true',
   };
 }
+
+adminCrowdRouter.get(
+  '/admin/crowd/areas',
+  authenticateToken,
+  requireAreaAdmin('analytics'),
+  async (req: AuthRequest, res: Response) => {
+    const pool = getPool();
+    if (!pool) {
+      return res.status(503).json({
+        success: false,
+        error: { code: 'DATABASE_OUTAGE', message: 'Crowd analytics storage is unavailable.' },
+      });
+    }
+    try {
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.json({
+        success: true,
+        data: await getCrowdAreas(pool, req.adminScope!, req.query.include_test === 'true'),
+      });
+    } catch (error) {
+      log.error('[admin-crowd] areas failed:', { error });
+      return res.status(503).json({
+        success: false,
+        error: { code: 'CROWD_AREAS_UNAVAILABLE', message: 'Unable to load authorized crowd areas.' },
+      });
+    }
+  },
+);
 
 adminCrowdRouter.get(
   '/admin/crowd/overview',
