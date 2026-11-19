@@ -50,6 +50,21 @@ async function hasPendingReview(client: PoolClient, hold: any, questId: string) 
   return pending.rows.length > 0;
 }
 
+/**
+ * v0.3.10: progress on a funded attempt refreshes its reward reservation, so the
+ * hold lasts as long as the traveler keeps moving (matches the idle window, which
+ * also resets on progress). Never shortens a hold and never extends past the round.
+ */
+export async function refreshFundingHoldOnProgress(client: Pick<PoolClient, 'query'>, attemptId: string) {
+  await client.query(
+    `UPDATE quest_funding_holds h
+        SET expires_at = GREATEST(h.expires_at, LEAST(NOW() + (p.hold_ttl_hours * INTERVAL '1 hour'), p.ends_at + INTERVAL '24 hours'))
+       FROM quest_funding_plans p
+      WHERE p.id = h.plan_id AND h.attempt_id = $1 AND h.status = 'held'`,
+    [attemptId],
+  );
+}
+
 export async function releaseFundingHold(tx: FundingTx, hold: any, plan: any, actorId: string, reason: string) {
   if (hold.status !== 'held') return;
   const allocations = await tx.client.query(

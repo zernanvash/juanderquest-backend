@@ -7,6 +7,7 @@ import { env } from '../src/config/env.js';
 import { setPool } from '../src/db/pool.js';
 import { createTestDb, type TestDbInstance } from '../src/db/testHarness.js';
 import { FundingPlansService } from '../src/funding/plans.js';
+import { refreshFundingHoldOnProgress } from '../src/funding/holds.js';
 import { expireIdleAttempts, sendIdleReminders } from '../src/quests/idleWindow.js';
 
 // v0.3.10 team review: accepted quests expire after `quest_accept_idle_hours` without progress
@@ -296,5 +297,16 @@ realPg('accepted-quest idle window + funding overview (disposable PostgreSQL)', 
       [plan.id, traveler],
     );
     expect(Number(holds.rows[0].count)).toBe(1);
+
+    // Progress refreshes the reservation (never shortens it, never past the round + 24 h).
+    const againId = again.body.data.id;
+    await fixture.pool.query("UPDATE quest_funding_holds SET expires_at=NOW()+INTERVAL '1 hour' WHERE attempt_id=$1", [againId]);
+    await refreshFundingHoldOnProgress(fixture.pool, againId);
+    const refreshed = await fixture.pool.query(
+      "SELECT EXTRACT(EPOCH FROM (expires_at-NOW()))/3600 AS h FROM quest_funding_holds WHERE attempt_id=$1 AND status='held'",
+      [againId],
+    );
+    expect(Number(refreshed.rows[0].h)).toBeGreaterThan(40);
+    expect(Number(refreshed.rows[0].h)).toBeLessThanOrEqual(48.1);
   });
 });
