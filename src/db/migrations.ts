@@ -108,6 +108,8 @@ export const MIGRATIONS = [
   '102_nearby_quest_push.sql',
   // Plan 107 Suki Card: re-sets the notification kind list (102's list + suki_reward), so it runs after 102.
   '103_suki_cards.sql',
+  // v0.3.10: merchant specialty pins (merchant_products.specialty_at).
+  '104_merchant_specialty_pins.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so

@@ -468,9 +468,12 @@ export class SponsorshipService {
           END AS distance_m
          FROM merchants m LEFT JOIN merchant_affiliate_applications app ON app.id=m.source_application_id
          WHERE m.status='active' AND m.is_published=TRUE AND m.is_test=$1
-           AND ($3='' OR m.name ILIKE '%'||$3||'%' OR COALESCE(m.category,'') ILIKE '%'||$3||'%')) d
+           AND ($3='' OR m.name ILIKE '%'||$3||'%' OR COALESCE(m.category,'') ILIKE '%'||$3||'%')
+           -- v0.3.10: the creator's own shop is not one of the "nearby shops" to ask.
+           AND NOT EXISTS (SELECT 1 FROM merchant_memberships mm
+                            WHERE mm.merchant_id=m.id AND mm.user_id=$7 AND mm.status='active')) d
          ORDER BY same_municipality DESC,distance_m ASC NULLS LAST,name,id LIMIT 20 OFFSET $4`,
-        [quest.is_test, quest.municipality ?? null, query, (page - 1) * 20, originLat, originLng],
+        [quest.is_test, quest.municipality ?? null, query, (page - 1) * 20, originLat, originLng, actorId],
       );
       return { items: result.rows, page, simulated: true };
     } finally {

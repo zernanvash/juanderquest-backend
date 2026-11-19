@@ -262,6 +262,8 @@ export interface MerchantProductRow {
   is_published: boolean;
   is_archived: boolean;
   display_order: number;
+  /** v0.3.10 (migration 104): when the owner pinned it as a specialty; null when not pinned. */
+  specialty_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1190,6 +1192,7 @@ export class MemoryDb {
         is_published: Boolean(row.is_published),
         is_archived: Boolean(row.is_archived),
         display_order: Number(row.display_order) || 0,
+        specialty_at: row.specialty_at ? toIso(row.specialty_at) : null,
         created_at: toIso(row.created_at),
         updated_at: toIso(row.updated_at),
       }));
