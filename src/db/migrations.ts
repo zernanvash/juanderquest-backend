@@ -110,6 +110,8 @@ export const MIGRATIONS = [
   '103_suki_cards.sql',
   // Plan 109 admin oversight (agy); numbered 099 but registered after 103, which shipped first.
   '099_plan109_admin_oversight.sql',
+  // v0.3.10: merchant specialty pins (merchant_products.specialty_at).
+  '104_merchant_specialty_pins.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so

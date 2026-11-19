@@ -246,8 +246,11 @@ export class SukiService {
     const isTest = input.userId ? (await getStampEligibility(this.pool, input.userId)).isTest : false;
     const result = await this.pool.query(
       `${PROGRAM_SELECT}
-        WHERE p.status = 'active' AND m.status = 'active' AND m.is_published = TRUE AND p.is_test = $1`,
-      [isTest],
+        WHERE p.status = 'active' AND m.status = 'active' AND m.is_published = TRUE AND p.is_test = $1
+          -- v0.3.10: never list the viewer's own shop among the shops near them.
+          AND NOT EXISTS (SELECT 1 FROM merchant_memberships mm
+                           WHERE mm.merchant_id = m.id AND mm.user_id = $2 AND mm.status = 'active')`,
+      [isTest, input.userId ?? ''],
     );
     const limit = Math.min(Math.max(Number(input.limit) || 20, 1), 30);
     const hasPoint = Number.isFinite(input.lat) && Number.isFinite(input.lng);
@@ -845,12 +848,14 @@ export class SukiService {
 
   /** The single counter scanner: a Suki pass, a Suki reward code, or a Shop voucher / sponsor perk code. */
   async scan(staffId: string, rawCode: string, now = new Date()) {
+    const code = normaliseCounterCode(rawCode);
+    // v0.3.10: Shop vouchers and sponsor perks (`JDQ-…`) are confirmed at the counter even while Suki Cards
+    // are switched off; Suki passes and reward codes still need `suki_enabled`.
+    if (code.startsWith('JDQ-')) return this.scanVoucher(staffId, await this.requireMember(staffId), code, now);
     const settings = await this.requireEnabled();
     const member = await this.requireMember(staffId);
-    const code = normaliseCounterCode(rawCode);
     if (code.startsWith(SUKI_PASS_PREFIX)) return this.scanPass(staffId, member, code, settings, now);
     if (code.startsWith('SUKI-')) return this.scanReward(staffId, member, code, now);
-    if (code.startsWith('JDQ-')) return this.scanVoucher(staffId, member, code, now);
     throw new SukiError('CODE_UNKNOWN', 400, 'That is not a JuanderQuest code.');
   }
 
