@@ -119,7 +119,7 @@ export const MIGRATIONS = [
   // v0.3.10 profile track: avatar reports (reserved 107; orchestrator orders it with 104-106 at merge).
   '107_avatar_reports.sql',
   // Plan 114: public beta bug reports from /report-bug.
-  '110_bug_reports.sql',
+  '109_bug_reports.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
