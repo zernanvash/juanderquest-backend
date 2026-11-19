@@ -123,7 +123,7 @@ realPg('Plan 110a: merchant-to-user QA fixes & architecture bridges (real PG)', 
     );
     expect(colRes.rows.length).toBe(6);
     const idxRes = await fixture.pool.query(
-      `SELECT indexname FROM pg_indexes WHERE tablename='redemptions' AND indexname IN ('uq_redemptions_user_voucher','uq_redemptions_user_voucher_open')`,
+      `SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() AND tablename='redemptions' AND indexname IN ('uq_redemptions_user_voucher','uq_redemptions_user_voucher_open')`,
     );
     expect(idxRes.rows.map((r: any) => r.indexname)).toEqual(['uq_redemptions_user_voucher_open']);
   });

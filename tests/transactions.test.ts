@@ -391,6 +391,8 @@ describe('Phase 3: Atomic Submission, Review and Redemption Lifecycle', () => {
     it('Migration 010 duplicate preflight aborts when duplicates exist without deleting any records', async () => {
       // Drop unique index temporarily to simulate a pre-migration legacy state with duplicate entries
       await testDb.pool.query('DROP INDEX IF EXISTS uq_redemptions_user_voucher;');
+      // Migration 106 replaced it with a partial index; drop that too for the legacy simulation.
+      await testDb.pool.query('DROP INDEX IF EXISTS uq_redemptions_user_voucher_open;');
       await testDb.pool.query('DELETE FROM redemptions WHERE user_id = $1', ['usr_alice_tx']);
 
       try {
@@ -435,8 +437,9 @@ describe('Phase 3: Atomic Submission, Review and Redemption Lifecycle', () => {
       } finally {
         // Cleanup and re-establish constraint
         await testDb.pool.query('DELETE FROM redemptions WHERE user_id = $1', ['usr_alice_tx']);
+        // Restore the post-106 schema (partial index), not the legacy 010 index.
         await testDb.pool.query(
-          'CREATE UNIQUE INDEX IF NOT EXISTS uq_redemptions_user_voucher ON redemptions(user_id, voucher_id);',
+          `CREATE UNIQUE INDEX IF NOT EXISTS uq_redemptions_user_voucher_open ON redemptions(user_id, voucher_id) WHERE source = 'purchase' AND used_at IS NULL;`,
         );
       }
     });
