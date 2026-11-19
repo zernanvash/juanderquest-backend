@@ -824,6 +824,15 @@ router.get('/quests/:id/analytics', authenticateToken, async (req: AuthRequest, 
   });
 });
 
+// Lazy idle expiry is housekeeping (the periodic sweep also runs it): never fail a read or accept on it.
+async function expireIdleAttemptsQuietly(pool: Parameters<typeof expireIdleAttempts>[0], userId: string, questId: string) {
+  try {
+    await expireIdleAttempts(pool, { userId, questId });
+  } catch (error) {
+    log.warn('[quest-idle] lazy expiry skipped:', { error });
+  }
+}
+
 // POST /quests/:id/attempts - Start or resume progressive quest attempt
 router.post('/quests/:id/attempts', authenticateToken, async (req: AuthRequest, res: Response, next: NextFunction) => {
   const { id } = req.params;
@@ -831,7 +840,7 @@ router.post('/quests/:id/attempts', authenticateToken, async (req: AuthRequest, 
   if (fundingPool) {
     try {
       // An idle acceptance expires first (its hold is released), so this start is a fresh window.
-      await expireIdleAttempts(fundingPool, { userId: req.user!.id, questId: id });
+      await expireIdleAttemptsQuietly(fundingPool, req.user!.id, id);
       const funded = await startFundedAttempt(fundingPool, id, req.user!.id);
       if (funded) {
         const attempt = mapAttempt(funded.attempt);
@@ -1141,7 +1150,7 @@ router.get('/quests/:id/progress', authenticateToken, async (req: AuthRequest, r
   const pool = getPool();
   if (pool) {
     try {
-      await expireIdleAttempts(pool, { userId, questId: id });
+      await expireIdleAttemptsQuietly(pool, userId, id);
       const [completed, active] = await Promise.all([
         hasCompletedQuest(db, userId, id, pool),
         pool.query(
