@@ -141,10 +141,7 @@ realPgDescribe('v0.3.10 shop (real PostgreSQL)', () => {
 
   describe('specialty pins', () => {
     const pin = (who: string, id: string, pinned = true) =>
-      request(app)
-        .put(`/api/v1/merchant/products/${id}/specialty`)
-        .set('Authorization', auth(who))
-        .send({ pinned });
+      request(app).put(`/api/v1/merchant/products/${id}/specialty`).set('Authorization', auth(who)).send({ pinned });
 
     it('lets the owner pin up to 3 published products', async () => {
       for (const id of ['v310-p2', 'v310-p1', 'v310-p3']) {
