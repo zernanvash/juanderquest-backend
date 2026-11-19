@@ -9,10 +9,7 @@ import { env } from '../src/config/env.js';
 describe('Plan 114: public bug reports & admin triage', () => {
   let testDb: TestDbInstance;
   const adminId = 'bug-report-admin-1';
-  const adminToken = jwt.sign(
-    { id: adminId, seed_id: adminId, role: 'admin', typ: 'session' },
-    env.JWT_SECRET,
-  );
+  const adminToken = jwt.sign({ id: adminId, seed_id: adminId, role: 'admin', typ: 'session' }, env.JWT_SECRET);
 
   beforeAll(async () => {
     testDb = await createTestDb();
@@ -64,9 +61,7 @@ describe('Plan 114: public bug reports & admin triage', () => {
     expect(createRes.body.data.referenceCode).toMatch(/^BUG-[0-9A-F]{6}$/);
 
     // 4. Admin can list and update status (honeypot was not stored)
-    const listRes = await request(app)
-      .get('/api/v1/admin/bug-reports')
-      .set('Authorization', `Bearer ${adminToken}`);
+    const listRes = await request(app).get('/api/v1/admin/bug-reports').set('Authorization', `Bearer ${adminToken}`);
     expect(listRes.status).toBe(200);
     expect(listRes.body.data.items).toHaveLength(1);
     const saved = listRes.body.data.items[0];

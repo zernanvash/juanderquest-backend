@@ -146,54 +146,46 @@ bugReportsRouter.post(
   },
 );
 
-bugReportsRouter.get(
-  '/admin/bug-reports',
-  authenticateToken,
-  requireAdmin,
-  async (req: AuthRequest, res: Response) => {
-    const statusParam = typeof req.query.status === 'string' ? req.query.status : undefined;
-    const statusFilter =
-      statusParam && (STATUSES as readonly string[]).includes(statusParam) ? statusParam : undefined;
-    const rawLimit = Number(req.query.limit ?? 50);
-    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.trunc(rawLimit), 1), 100) : 50;
+bugReportsRouter.get('/admin/bug-reports', authenticateToken, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const statusParam = typeof req.query.status === 'string' ? req.query.status : undefined;
+  const statusFilter = statusParam && (STATUSES as readonly string[]).includes(statusParam) ? statusParam : undefined;
+  const rawLimit = Number(req.query.limit ?? 50);
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.trunc(rawLimit), 1), 100) : 50;
 
-    const pool = getPool();
-    if (!pool) {
-      const filtered = statusFilter
-        ? memoryBugReports.filter((r) => r.status === statusFilter)
-        : memoryBugReports;
-      return res.json({ success: true, data: { items: filtered.slice(0, limit) } });
-    }
+  const pool = getPool();
+  if (!pool) {
+    const filtered = statusFilter ? memoryBugReports.filter((r) => r.status === statusFilter) : memoryBugReports;
+    return res.json({ success: true, data: { items: filtered.slice(0, limit) } });
+  }
 
-    try {
-      const rows = statusFilter
-        ? await pool.query(
-            `SELECT id, reference_code, user_id, category, summary, description,
+  try {
+    const rows = statusFilter
+      ? await pool.query(
+          `SELECT id, reference_code, user_id, category, summary, description,
                     app_version, device_info, contact_email, page_url, status, created_at
              FROM bug_reports
              WHERE status = $1
              ORDER BY created_at DESC
              LIMIT $2`,
-            [statusFilter, limit],
-          )
-        : await pool.query(
-            `SELECT id, reference_code, user_id, category, summary, description,
+          [statusFilter, limit],
+        )
+      : await pool.query(
+          `SELECT id, reference_code, user_id, category, summary, description,
                     app_version, device_info, contact_email, page_url, status, created_at
              FROM bug_reports
              ORDER BY created_at DESC
              LIMIT $1`,
-            [limit],
-          );
-      return res.json({ success: true, data: { items: rows.rows } });
-    } catch (err) {
-      log.error('[bugReports] failed to list bug reports', { error: err });
-      return res.status(500).json({
-        success: false,
-        error: { code: 'BUG_REPORTS_UNAVAILABLE', message: 'Could not load bug reports.' },
-      });
-    }
-  },
-);
+          [limit],
+        );
+    return res.json({ success: true, data: { items: rows.rows } });
+  } catch (err) {
+    log.error('[bugReports] failed to list bug reports', { error: err });
+    return res.status(500).json({
+      success: false,
+      error: { code: 'BUG_REPORTS_UNAVAILABLE', message: 'Could not load bug reports.' },
+    });
+  }
+});
 
 bugReportsRouter.patch(
   '/admin/bug-reports/:id',
