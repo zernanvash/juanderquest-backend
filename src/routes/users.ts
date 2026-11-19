@@ -300,7 +300,10 @@ usersRouter.post(
     if (target.id === req.user!.id) {
       return res
         .status(400)
-        .json({ success: false, error: { code: 'CANNOT_REPORT_SELF', message: 'You cannot report your own picture.' } });
+        .json({
+          success: false,
+          error: { code: 'CANNOT_REPORT_SELF', message: 'You cannot report your own picture.' },
+        });
     }
     if (!isCustomAvatar(target.avatar_url)) {
       return res
