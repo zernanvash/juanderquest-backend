@@ -4,6 +4,7 @@ import { db, InvalidCursorError } from '../db/index.js';
 import { getPool } from '../db/pool.js';
 import {
   authenticateToken,
+  requireAdmin,
   AuthRequest,
   optionalAuthenticateToken,
   isAuthorizedQA,
@@ -19,6 +20,9 @@ import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
 import { spotStore, Spot } from '../spots/store.js';
 import { buildModerationSummary, listSpotModerationEvents } from '../spots/moderation.js';
 import { log } from '../utils/logger.js';
+import multer from 'multer';
+import { detectValidatedMediaMime } from '../utils/media-mime.js';
+import { getSpotPhotoStorageProvider } from '../storage/spot-photos.js';
 
 export const usersRouter = Router();
 
@@ -187,6 +191,190 @@ usersRouter.patch(
         error: { code: 'INTERNAL_ERROR', message: 'Failed to update profile.' },
       });
     }
+  },
+);
+
+// v0.3.10 (team review): profile picture. Same rules as spot photos: JPEG/PNG/WebP checked
+// by magic bytes, 8 MB cap, stored by the spot-photo storage provider. Applied immediately
+// (no review queue: that would need a column); reports go through the usual channels.
+const AVATAR_MAX_BYTES = 8 * 1024 * 1024;
+const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: AVATAR_MAX_BYTES } });
+const avatarLimiter = rateLimit({
+  policyId: 'users:avatar',
+  windowMs: 60 * 1000,
+  max: process.env.NODE_ENV === 'test' ? 1000 : 10,
+  keyStrategy: 'actor',
+});
+const defaultAvatar = (seed: string) => `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(seed)}`;
+
+// PUT /users/me/avatar (multipart field `photo`) - set your profile picture
+usersRouter.put('/users/me/avatar', authenticateToken, avatarLimiter, (req: AuthRequest, res: Response) => {
+  avatarUpload.single('photo')(req, res, async (err: any) => {
+    if (err) {
+      const tooLarge = err.code === 'LIMIT_FILE_SIZE';
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: tooLarge ? 'FILE_TOO_LARGE' : 'VALIDATION_ERROR',
+          message: tooLarge ? 'Photo file size exceeds maximum limit of 8 MB.' : err.message || 'Upload failed.',
+        },
+      });
+    }
+    const file = req.file;
+    if (!file?.buffer) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'No photo provided in request.' },
+      });
+    }
+    const detected = detectValidatedMediaMime(file.buffer);
+    if (!detected || detected.mediaType !== 'image') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_IMAGE_CONTENT', message: 'Profile picture must be a JPEG, PNG or WebP image.' },
+      });
+    }
+    try {
+      const saved = await getSpotPhotoStorageProvider().savePhoto(file.buffer, detected.mime, detected.ext, 'image');
+      const updated = await db.updateUserProfile(req.user!.id, { avatar_url: saved.url });
+      if (!updated) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found.' } });
+      }
+      res.set('Cache-Control', 'private, no-store');
+      return res.status(200).json({ success: true, data: { avatar_url: updated.avatar_url } });
+    } catch (e: any) {
+      log.error('avatar upload failed', { error: e?.message });
+      return res.status(500).json({
+        success: false,
+        error: { code: 'UPLOAD_FAILED', message: 'Could not save your profile picture.' },
+      });
+    }
+  });
+});
+
+/** Back to the default identicon (own DELETE and the admin Reset share this). */
+async function resetAvatar(userId: string) {
+  const user = (await db.findUserByIdDurable(userId)) || db.findUserById(userId);
+  if (!user) return undefined;
+  return db.updateUserProfile(user.id, { avatar_url: defaultAvatar(user.seed_id || user.id) });
+}
+
+/** A real picture someone chose (not empty, not the default DiceBear identicon). */
+const isCustomAvatar = (url: string | null | undefined) =>
+  Boolean(url && url.trim() && !/^https:\/\/api\.dicebear\.com\//.test(url.trim()));
+
+// DELETE /users/me/avatar - back to the default avatar
+usersRouter.delete('/users/me/avatar', authenticateToken, avatarLimiter, async (req: AuthRequest, res: Response) => {
+  const updated = await resetAvatar(req.user!.id);
+  if (!updated) {
+    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found.' } });
+  }
+  res.set('Cache-Control', 'private, no-store');
+  return res.status(200).json({ success: true, data: { avatar_url: updated.avatar_url ?? '' } });
+});
+
+// v0.3.10 (owner): uploads stay instant; viewers can report a picture and admins reset or dismiss.
+const avatarReportSchema = z.object({
+  body: z.object({ reason: z.enum(['inappropriate', 'impersonation', 'spam', 'other']) }),
+});
+
+// POST /users/:id/avatar/report - report another explorer's profile picture (id or handle)
+usersRouter.post(
+  '/users/:id/avatar/report',
+  authenticateToken,
+  avatarLimiter,
+  validateRequest(avatarReportSchema),
+  async (req: AuthRequest, res: Response) => {
+    const pool = getPool();
+    if (!pool) {
+      return res
+        .status(503)
+        .json({ success: false, error: { code: 'UNAVAILABLE', message: 'Reports are unavailable right now.' } });
+    }
+    const raw = String(req.params.id || '').trim();
+    const target =
+      (await db.findPublicUserById(raw, false)) || (await db.findPublicUserByHandle(raw.replace(/^@/, ''), false));
+    if (!target) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found.' } });
+    }
+    if (target.id === req.user!.id) {
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: { code: 'CANNOT_REPORT_SELF', message: 'You cannot report your own picture.' },
+        });
+    }
+    if (!isCustomAvatar(target.avatar_url)) {
+      return res
+        .status(400)
+        .json({ success: false, error: { code: 'NO_PICTURE', message: 'This explorer has no profile picture.' } });
+    }
+    const inserted = await pool.query(
+      `INSERT INTO avatar_reports (avatar_url, user_id, reporter_id, reason)
+       VALUES ($1, $2, $3, $4) ON CONFLICT (avatar_url, reporter_id) DO NOTHING`,
+      [target.avatar_url, target.id, req.user!.id, req.body.reason],
+    );
+    if (!inserted.rowCount) {
+      return res.status(409).json({
+        success: false,
+        error: { code: 'ALREADY_REPORTED', message: 'You already reported this picture.' },
+      });
+    }
+    return res.status(201).json({ success: true, data: { reported: true } });
+  },
+);
+
+// GET /admin/avatar-reports - open reports grouped by picture (admin)
+usersRouter.get('/admin/avatar-reports', authenticateToken, requireAdmin, async (_req: AuthRequest, res: Response) => {
+  const pool = getPool();
+  if (!pool) return res.json({ success: true, data: { items: [] } });
+  const { rows } = await pool.query(
+    `SELECT r.user_id, r.avatar_url, u.display_name, u.handle,
+            COUNT(*)::int AS report_count, array_agg(DISTINCT r.reason) AS reasons,
+            MIN(r.created_at) AS first_reported_at,
+            (u.avatar_url = r.avatar_url) AS is_current
+       FROM avatar_reports r JOIN users u ON u.id = r.user_id
+      WHERE r.status = 'pending'
+      GROUP BY r.user_id, r.avatar_url, u.display_name, u.handle, u.avatar_url
+      ORDER BY report_count DESC, first_reported_at ASC
+      LIMIT 200`,
+  );
+  res.set('Cache-Control', 'private, no-store');
+  return res.json({ success: true, data: { items: rows } });
+});
+
+const resolveAvatarReportSchema = z.object({ body: z.object({ action: z.enum(['reset', 'dismiss']) }) });
+
+// POST /admin/avatar-reports/:userId/resolve - reset the picture or dismiss its reports (admin)
+usersRouter.post(
+  '/admin/avatar-reports/:userId/resolve',
+  authenticateToken,
+  requireAdmin,
+  validateRequest(resolveAvatarReportSchema),
+  async (req: AuthRequest, res: Response) => {
+    const pool = getPool();
+    if (!pool) {
+      return res
+        .status(503)
+        .json({ success: false, error: { code: 'UNAVAILABLE', message: 'Reports are unavailable right now.' } });
+    }
+    const userId = String(req.params.userId);
+    const reset = req.body.action === 'reset';
+    let avatarUrl: string | undefined;
+    if (reset) {
+      const updated = await resetAvatar(userId);
+      if (!updated) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found.' } });
+      }
+      avatarUrl = updated.avatar_url;
+    }
+    const { rowCount } = await pool.query(
+      `UPDATE avatar_reports SET status = $2, resolved_by = $3, resolved_at = NOW()
+        WHERE user_id = $1 AND status = 'pending'`,
+      [userId, reset ? 'reset' : 'dismissed', req.user!.id],
+    );
+    return res.json({ success: true, data: { resolved: rowCount ?? 0, avatar_url: avatarUrl } });
   },
 );
 

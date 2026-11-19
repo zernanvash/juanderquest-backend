@@ -114,6 +114,8 @@ export const MIGRATIONS = [
   '104_merchant_specialty_pins.sql',
   // v0.3.10 quests: idle window on accepted quests; re-sets the notification kind list (103's list + quest_idle).
   '105_quest_accept_idle_window.sql',
+  // v0.3.10 profile track: avatar reports (reserved 107; orchestrator orders it with 104-106 at merge).
+  '107_avatar_reports.sql',
 ];
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so

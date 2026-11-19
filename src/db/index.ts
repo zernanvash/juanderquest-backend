@@ -1691,6 +1691,7 @@ export class MemoryDb {
       bio?: string | null;
       status_text?: string | null;
       display_name?: string;
+      avatar_url?: string;
     },
   ): Promise<UserRow | undefined> {
     if (this.pg) {
@@ -1730,6 +1731,7 @@ export class MemoryDb {
     if (updates.bio !== undefined) user.bio = updates.bio;
     if (updates.status_text !== undefined) user.status_text = updates.status_text;
     if (updates.display_name !== undefined) user.display_name = updates.display_name;
+    if (updates.avatar_url !== undefined) user.avatar_url = updates.avatar_url;
     user.updated_at = new Date().toISOString();
     return user;
   }
