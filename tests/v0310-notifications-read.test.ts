@@ -24,7 +24,14 @@ realPg('notification read state for every id shape (disposable PostgreSQL)', () 
       `${id}@example.test`,
       'user',
     ]);
-    db.users.push({ id, seed_id: id, display_name: id, email: `${id}@example.test`, role: 'user', is_test: false } as any);
+    db.users.push({
+      id,
+      seed_id: id,
+      display_name: id,
+      email: `${id}@example.test`,
+      role: 'user',
+      is_test: false,
+    } as any);
   }
 
   beforeAll(async () => {
