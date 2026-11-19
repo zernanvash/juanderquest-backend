@@ -226,4 +226,21 @@ describe('Plan 102 — Add photo to destination with admin approval', () => {
     expect(approveRes.status).toBe(409);
     expect(approveRes.body.error.code).toBe('MAX_IMAGES_EXCEEDED');
   });
+
+  it('GET /spots/:slug reads attached_assets from assetStore without querying spot_assets per request', async () => {
+    const seenSql: string[] = [];
+    const origQuery = testDb.pool.query.bind(testDb.pool);
+    const spy = jest.spyOn(testDb.pool, 'query').mockImplementation(((sql: any, ...rest: any[]) => {
+      seenSql.push(typeof sql === 'string' ? sql : String(sql?.text ?? ''));
+      return origQuery(sql, ...rest);
+    }) as any);
+    try {
+      const spotRes = await request(app).get(`/api/v1/spots/${spotSlug}`);
+      expect(spotRes.status).toBe(200);
+      expect(spotRes.body.data.attached_assets.length).toBeGreaterThanOrEqual(1);
+      expect(seenSql.some((q) => /FROM\s+spot_assets/i.test(q))).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });

@@ -251,60 +251,38 @@ router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, asyn
   const actorId =
     req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
   const pool = getPool();
-  const attached = Array.from(assetStore.assets.values()).filter(
-    (a) => a.spot_id === spot.id && a.status === 'attached',
-  );
+  const attached = Array.from(assetStore.assets.values())
+    .filter((a) => a.spot_id === spot.id && a.status === 'attached')
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
   let sponsors: Array<{ name: string; logo: string | null; quest_id: string }> = [];
   if (pool) {
     try {
-      const [assetsResult, sponsorsResult] = await Promise.all([
-        pool
-          .query(`SELECT * FROM spot_assets WHERE spot_id = $1 AND status = 'attached' ORDER BY created_at ASC`, [
-            spot.id,
-          ])
-          .catch(() => ({ rows: [] as any[] })),
-        pool
-          .query(
-            `SELECT DISTINCT ON (s.merchant_id)
-               m.name, m.logo_url AS logo, p.quest_id
-             FROM quest_sponsorships s
-             JOIN quest_funding_plans p ON p.id = s.plan_id
-             JOIN quests q ON q.id = p.quest_id
-             JOIN merchants m ON m.id = s.merchant_id
-             LEFT JOIN reviewed_quest_spot_bindings b
-               ON b.quest_id = q.id AND b.spot_id = $1 AND b.status = 'active'
-             WHERE s.status = 'accepted'
-               AND p.status IN ('active', 'closing')
-               AND q.is_active = TRUE
-               AND q.status = 'published'
-               AND s.is_test = $2 AND p.is_test = $2 AND q.is_test = $2
-               AND (
-                 b.spot_id = $1
-                 OR q.id = $3
-                 OR EXISTS (SELECT 1 FROM spots sp2 WHERE sp2.id = $1 AND sp2.quest_id = q.id)
-                 OR (abs(q.gps_lat - $4) <= 0.0015 AND abs(q.gps_lng - $5) <= 0.0015)
-               )
-             ORDER BY s.merchant_id, s.created_at, s.id
-             LIMIT 20`,
-            [spot.id, Boolean(spot.is_test), spot.quest_id || '', Number(spot.gps_lat), Number(spot.gps_lng)],
-          )
-          .catch(() => ({ rows: [] as any[] })),
-      ]);
-      const rows = assetsResult.rows;
-      if (rows.length > 0) {
-        const seen = new Set(attached.map((a) => a.id));
-        for (const r of rows) {
-          if (!seen.has(r.id)) {
-            const isVideo = r.mime_type?.startsWith('video/') || r.object_key?.includes('video');
-            attached.push({
-              ...r,
-              media_type: r.media_type || (isVideo ? 'video' : 'image'),
-              created_at: new Date(r.created_at).toISOString(),
-              updated_at: new Date(r.updated_at).toISOString(),
-            });
-          }
-        }
-      }
+      const sponsorsResult = await pool
+        .query(
+          `SELECT DISTINCT ON (s.merchant_id)
+             m.name, m.logo_url AS logo, p.quest_id
+           FROM quest_sponsorships s
+           JOIN quest_funding_plans p ON p.id = s.plan_id
+           JOIN quests q ON q.id = p.quest_id
+           JOIN merchants m ON m.id = s.merchant_id
+           LEFT JOIN reviewed_quest_spot_bindings b
+             ON b.quest_id = q.id AND b.spot_id = $1 AND b.status = 'active'
+           WHERE s.status = 'accepted'
+             AND p.status IN ('active', 'closing')
+             AND q.is_active = TRUE
+             AND q.status = 'published'
+             AND s.is_test = $2 AND p.is_test = $2 AND q.is_test = $2
+             AND (
+               b.spot_id = $1
+               OR q.id = $3
+               OR EXISTS (SELECT 1 FROM spots sp2 WHERE sp2.id = $1 AND sp2.quest_id = q.id)
+               OR (abs(q.gps_lat - $4) <= 0.0015 AND abs(q.gps_lng - $5) <= 0.0015)
+             )
+           ORDER BY s.merchant_id, s.created_at, s.id
+           LIMIT 20`,
+          [spot.id, Boolean(spot.is_test), spot.quest_id || '', Number(spot.gps_lat), Number(spot.gps_lng)],
+        )
+        .catch(() => ({ rows: [] as any[] }));
       sponsors = sponsorsResult.rows.map((r: any) => ({
         name: String(r.name),
         logo: r.logo ? String(r.logo) : null,
