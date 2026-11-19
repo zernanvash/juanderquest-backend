@@ -120,7 +120,17 @@ export const MIGRATIONS = [
   '107_avatar_reports.sql',
   // Plan 114: public beta bug reports from /report-bug.
   '109_bug_reports.sql',
+  // Plan 116 national launch: PostGIS geography, search, provenance (needs extensions; see scripts/prod-db).
+  '110_geo_search_provenance.sql',
+  // Plan 116: licensed, attributed catalog photos on spot_assets.
+  '111_spot_photo_licensing.sql',
+  // Plan 116: FK indexes that matter at national scale, BRIN on append tables, VALIDATE 084 checks.
+  '112_perf_hygiene.sql',
 ];
+
+// Plan 116+: PostgreSQL-only sections of a migration are fenced with these markers;
+// pg-mem applies the rest (plain columns and tables) and real PostgreSQL applies all.
+const PGMEM_SKIP_SECTION = /--\s*PGMEM_SKIP_BEGIN[\s\S]*?--\s*PGMEM_SKIP_END/g;
 
 // Stable arbitrary 32-bit key ("JDQ0") used to serialize concurrent boots so
 // two processes cannot apply the same migration twice.
@@ -541,6 +551,8 @@ export async function applyMigrations(pg: Pool) {
             );
             ALTER TABLE merchants ADD COLUMN IF NOT EXISTS town_area_id TEXT REFERENCES admin_areas(id);
           `);
+        } else if (pgMemMigrationAdapters.has(pg as object) && sql.includes('PGMEM_SKIP_BEGIN')) {
+          await client.query(sql.replace(PGMEM_SKIP_SECTION, ''));
         } else {
           await client.query(sql);
         }

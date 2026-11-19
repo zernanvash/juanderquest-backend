@@ -30,7 +30,9 @@ export async function createTestDb(options: { poolMax?: number } = {}): Promise<
     }
     const pool = new Pool({
       connectionString: url.toString(),
-      options: `-c search_path=${schema}`,
+      // Plan 116: PostGIS/pg_trgm/unaccent are installed once per database in the
+      // `extensions` schema (scripts/prod-db/bootstrap.sh), shared by every test schema.
+      options: `-c search_path=${schema},extensions`,
       max: poolMax,
       connectionTimeoutMillis: 3000,
     });
@@ -66,6 +68,15 @@ export async function createTestDb(options: { poolMax?: number } = {}): Promise<
     args: [DataType.jsonb],
     returns: DataType.text,
     implementation: (value: unknown) => (Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value),
+  });
+
+  // Migration 080+ default ids with gen_random_uuid() (built into PostgreSQL 13+).
+  memDb.public.registerFunction({
+    name: 'gen_random_uuid',
+    args: [],
+    returns: DataType.uuid,
+    implementation: () => randomUUID(),
+    impure: true,
   });
 
   memDb.public.registerFunction({

@@ -13,7 +13,8 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15-alpine
+        # Plan 116: production runs PostgreSQL 17 + PostGIS; CI uses the same pinned image.
+        image: postgis/postgis:17-3.5-alpine@sha256:894f570c0cf0664ed5576a8fd5d5bfb8fb1b19d592885b686c3a88c8bd90c41f
         env:
           POSTGRES_USER: test_user
           POSTGRES_PASSWORD: test_password
@@ -43,6 +44,10 @@ jobs:
       - name: Compile TypeScript
         run: npm run build
 
+      - name: Install database extensions (Plan 116 migration 110 needs PostGIS, pg_trgm, unaccent)
+        run: |
+          docker run --rm --network host -e PGPASSWORD=test_password postgis/postgis:17-3.5-alpine@sha256:894f570c0cf0664ed5576a8fd5d5bfb8fb1b19d592885b686c3a88c8bd90c41f \n            psql -v ON_ERROR_STOP=1 -h localhost -U test_user -d juanderquest_ci_test \n            -c 'CREATE EXTENSION IF NOT EXISTS postgis; CREATE EXTENSION IF NOT EXISTS pg_trgm; CREATE EXTENSION IF NOT EXISTS unaccent;'
+
       - name: Run unit & integration test suites
         env:
           NODE_ENV: test
@@ -52,14 +57,13 @@ jobs:
           ALLOW_IN_MEMORY_FALLBACK: 'false'
         run: npm test
 
-      - name: Install PostgreSQL client tools
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
-
       - name: Real PostgreSQL backup and restore drill
         env:
           DATABASE_URL: postgresql://test_user:test_password@localhost:5432/juanderquest_ci_test
         run: |
           set -euo pipefail
+          # PostgreSQL 17 client tools from the server image (apt's client is older than the server).
+          pgc() { docker run --rm --network host -e PGPASSWORD=test_password -v /tmp:/tmp postgis/postgis:17-3.5-alpine@sha256:894f570c0cf0664ed5576a8fd5d5bfb8fb1b19d592885b686c3a88c8bd90c41f "$@"; }
           # 1. Apply all migrations and seed representative record in primary CI database
           node -e "
             const { Pool } = require('pg');
@@ -77,20 +81,20 @@ jobs:
           "
           
           # 2. Dump schema and data to custom format archive
-          pg_dump -Fc -d "$DATABASE_URL" -f /tmp/juanderquest_ci.dump
+          pgc pg_dump -Fc -d "$DATABASE_URL" -f /tmp/juanderquest_ci.dump
           
           # 3. Create fresh isolated drill database using separate commands (avoids transaction block error)
-          PGPASSWORD=test_password psql -h localhost -U test_user -d postgres -c "DROP DATABASE IF EXISTS juanderquest_ci_drill;"
-          PGPASSWORD=test_password psql -h localhost -U test_user -d postgres -c "CREATE DATABASE juanderquest_ci_drill;"
+          pgc psql -h localhost -U test_user -d postgres -c "DROP DATABASE IF EXISTS juanderquest_ci_drill;"
+          pgc psql -h localhost -U test_user -d postgres -c "CREATE DATABASE juanderquest_ci_drill;"
           
           # 4. Restore archive into drill database
-          pg_restore --exit-on-error --single-transaction --clean --if-exists -d postgresql://test_user:test_password@localhost:5432/juanderquest_ci_drill /tmp/juanderquest_ci.dump
+          pgc pg_restore --exit-on-error --single-transaction --clean --if-exists -d postgresql://test_user:test_password@localhost:5432/juanderquest_ci_drill /tmp/juanderquest_ci.dump
           
           # 5. Verify restored migration count and representative data completeness
-          MIGRATION_COUNT=$(PGPASSWORD=test_password psql -h localhost -U test_user -d juanderquest_ci_drill -t -c "SELECT COUNT(*) FROM schema_migrations;")
+          MIGRATION_COUNT=$(pgc psql -h localhost -U test_user -d juanderquest_ci_drill -t -c "SELECT COUNT(*) FROM schema_migrations;")
           echo "Verified restored migration count: $MIGRATION_COUNT"
           test $(echo "$MIGRATION_COUNT" | tr -d '[:space:]') -ge 22
 
-          USER_COUNT=$(PGPASSWORD=test_password psql -h localhost -U test_user -d juanderquest_ci_drill -t -c "SELECT COUNT(*) FROM users WHERE id = 'ci-u1';")
+          USER_COUNT=$(pgc psql -h localhost -U test_user -d juanderquest_ci_drill -t -c "SELECT COUNT(*) FROM users WHERE id = 'ci-u1';")
           echo "Verified restored user count: $USER_COUNT"
           test $(echo "$USER_COUNT" | tr -d '[:space:]') -eq 1
