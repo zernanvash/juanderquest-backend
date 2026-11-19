@@ -825,7 +825,11 @@ router.get('/quests/:id/analytics', authenticateToken, async (req: AuthRequest, 
 });
 
 // Lazy idle expiry is housekeeping (the periodic sweep also runs it): never fail a read or accept on it.
-async function expireIdleAttemptsQuietly(pool: Parameters<typeof expireIdleAttempts>[0], userId: string, questId: string) {
+async function expireIdleAttemptsQuietly(
+  pool: Parameters<typeof expireIdleAttempts>[0],
+  userId: string,
+  questId: string,
+) {
   try {
     await expireIdleAttempts(pool, { userId, questId });
   } catch (error) {

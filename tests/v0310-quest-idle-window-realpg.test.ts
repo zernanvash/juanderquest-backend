@@ -137,7 +137,8 @@ realPg('accepted-quest idle window + funding overview (disposable PostgreSQL)', 
     const kind = await fixture.pool.query(
       "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname='user_notifications_kind_check'",
     );
-    for (const k of ['suki_reward', 'nearby_quest', 'quest_reward', 'quest_idle']) expect(kind.rows[0].def).toContain(k);
+    for (const k of ['suki_reward', 'nearby_quest', 'quest_reward', 'quest_idle'])
+      expect(kind.rows[0].def).toContain(k);
   });
 
   it('expires an idle acceptance, keeps its history, and lets the traveler accept again with a fresh window', async () => {
@@ -162,7 +163,7 @@ realPg('accepted-quest idle window + funding overview (disposable PostgreSQL)', 
       .send({ idempotency_key: randomUUID(), captured_lat: LAT, captured_lng: LNG, captured_accuracy: 5 });
     expect(step.status).toBe(200);
     const reset = await fixture.pool.query(
-      "SELECT EXTRACT(EPOCH FROM (NOW()-last_progress_at)) AS idle FROM quest_attempts WHERE id=$1",
+      'SELECT EXTRACT(EPOCH FROM (NOW()-last_progress_at)) AS idle FROM quest_attempts WHERE id=$1',
       [attemptId],
     );
     expect(Number(reset.rows[0].idle)).toBeLessThan(60);
@@ -224,9 +225,10 @@ realPg('accepted-quest idle window + funding overview (disposable PostgreSQL)', 
     await sendIdleReminders(fixture.pool);
     await sendIdleReminders(fixture.pool);
     expect(await count()).toBe(1);
-    const note = await fixture.pool.query("SELECT href,title FROM user_notifications WHERE user_id=$1 AND kind='quest_idle'", [
-      traveler,
-    ]);
+    const note = await fixture.pool.query(
+      "SELECT href,title FROM user_notifications WHERE user_id=$1 AND kind='quest_idle'",
+      [traveler],
+    );
     expect(note.rows[0].href).toBe(`/quests/${encodeURIComponent(questId)}`);
     // A new window (progress happened) may remind again.
     await backdate(attemptId, 61);
