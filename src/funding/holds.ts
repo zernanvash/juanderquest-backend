@@ -444,9 +444,10 @@ export async function settleFundingHold(
                 CASE WHEN $7::int IS NOT NULL THEN NOW() + ($7::int * INTERVAL '1 day') ELSE NULL END)`,
         [redemptionId, perk.rows[0].voucher_id, userId, code, `quest-perk:${hold.id}`, hold.id, validDays],
       );
-      await client.query('UPDATE quest_voucher_perks SET granted_qty=granted_qty+1 WHERE id=$1 AND granted_qty<total_qty', [
-        perk.rows[0].id,
-      ]);
+      await client.query(
+        'UPDATE quest_voucher_perks SET granted_qty=granted_qty+1 WHERE id=$1 AND granted_qty<total_qty',
+        [perk.rows[0].id],
+      );
       await client.query('RELEASE SAVEPOINT sponsor_perk_grant');
       voucherPerk = { redemption_id: redemptionId, code, title: perk.rows[0].title };
     } catch (perkErr) {

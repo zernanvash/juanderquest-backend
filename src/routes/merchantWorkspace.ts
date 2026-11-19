@@ -29,7 +29,12 @@ import { log } from '../utils/logger.js';
 /** Plan 110a — Merchant workspace bridges & public partner directory. */
 export const merchantWorkspaceRouter = Router();
 
-const writeLimiter = rateLimit({ policyId: 'merchant:workspace-write', windowMs: 60_000, max: 20, keyStrategy: 'actor' });
+const writeLimiter = rateLimit({
+  policyId: 'merchant:workspace-write',
+  windowMs: 60_000,
+  max: 20,
+  keyStrategy: 'actor',
+});
 
 const createVoucherSchema = z.object({
   body: z

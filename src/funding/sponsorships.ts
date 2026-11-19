@@ -663,8 +663,7 @@ export class SponsorshipService {
       )
         throw new FundingError('SPONSORSHIP_STATE', 409, 'This sponsorship request has expired or is no longer open.');
       await assertOwner(tx.client, actorId, sponsorship.merchant_id, Boolean(plan.is_test));
-      const counteredVoucherId =
-        terms.voucher_qty > 0 ? (terms.voucher_id ?? sponsorship.voucher_id ?? null) : null;
+      const counteredVoucherId = terms.voucher_qty > 0 ? (terms.voucher_id ?? sponsorship.voucher_id ?? null) : null;
       await assertVoucher(tx.client, sponsorship.merchant_id, counteredVoucherId, terms.voucher_qty);
       const result = await tx.client.query(
         `UPDATE quest_sponsorships SET status='countered',counter_points=$2,counter_voucher_qty=$3,counter_voucher_id=$9,counter_promo=$4,counter_message=$5,

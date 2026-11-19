@@ -401,9 +401,10 @@ export async function getMerchantAnalytics(pool: Pool, userId: string, rawDays?:
         WHERE s.merchant_id = $1 AND s.status = 'accepted' AND h.status = 'paid'`,
       [ctx.merchantId],
     ),
-    pool.query(`SELECT COUNT(*)::int AS active_catalog_count FROM vouchers WHERE merchant_id = $1 AND is_active = TRUE`, [
-      ctx.merchantId,
-    ]),
+    pool.query(
+      `SELECT COUNT(*)::int AS active_catalog_count FROM vouchers WHERE merchant_id = $1 AND is_active = TRUE`,
+      [ctx.merchantId],
+    ),
     pool.query(
       `SELECT
          COUNT(*) FILTER (WHERE r.source = 'purchase' AND r.created_at >= ${windowStartExpr})::int AS shop_redeemed_in_window,
