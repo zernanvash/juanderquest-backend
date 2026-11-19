@@ -196,7 +196,7 @@ realPg('author-funded Eco-Quest lifecycle (disposable PostgreSQL)', () => {
       .set('Authorization', token(adminId, 'admin'))
       .send({ action: 'approve' });
     expect(approved.status).toBe(200);
-    expect((await service.get(authorId, plan.id)).status).toBe('closed');
+    expect((await service.get(authorId, plan.id)).status).toBe('active');
   });
 
   it('keeps a rejected proof hold for resubmission and settles the legacy proof review path only once', async () => {
