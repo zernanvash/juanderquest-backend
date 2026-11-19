@@ -17,7 +17,9 @@ realPg('notification read state for every id shape (disposable PostgreSQL)', () 
   const token = (id: string) => `Bearer ${jwt.sign({ id, seed_id: id, role: 'user', typ: 'session' }, env.JWT_SECRET)}`;
 
   async function user(id: string) {
-    await fixture.pool.query('INSERT INTO users(id,seed_id,display_name,email,role) VALUES($1,$1,$1,$2,$3)', [
+    await fixture.pool.query('INSERT INTO users(id,seed_id,display_name,email,role) VALUES($1,$2,$3,$4,$5)', [
+      id,
+      id,
       id,
       `${id}@example.test`,
       'user',
