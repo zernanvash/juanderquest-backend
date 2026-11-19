@@ -41,7 +41,12 @@ import { RELIC_REACH_M, relicSpot } from '../quests/relicSpot.js';
 import { AR_GAMES, ArGame, passedSessionFor, startSession } from '../services/arGames.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { hasCompletedQuest } from '../services/quest-completion.js';
-import { hasFundingPlan, refreshFundingHoldOnProgress, requireFundingHold, startFundedAttempt } from '../funding/holds.js';
+import {
+  hasFundingPlan,
+  refreshFundingHoldOnProgress,
+  requireFundingHold,
+  startFundedAttempt,
+} from '../funding/holds.js';
 import { FundingError, publishFunding } from '../funding/transaction.js';
 import { fundingErrorResponse } from './fundingPlans.js';
 import { publishBroadcast } from '../realtime/bus.js';
