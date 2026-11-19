@@ -112,6 +112,11 @@ export async function notifyPlanStakeholders(
        FROM quest_funding_contributions c JOIN merchant_memberships mm ON mm.merchant_id=c.merchant_id
       WHERE c.plan_id=$1 AND c.is_test=$2 AND c.funder_kind='merchant'
         AND mm.role='owner' AND mm.status='active'
+     UNION
+     SELECT mm.user_id
+       FROM quest_sponsorships s JOIN merchant_memberships mm ON mm.merchant_id=s.merchant_id
+      WHERE s.plan_id=$1 AND s.is_test=$2 AND s.status='accepted'
+        AND mm.role='owner' AND mm.status='active'
      ORDER BY user_id`,
     [plan.id, plan.is_test],
   );

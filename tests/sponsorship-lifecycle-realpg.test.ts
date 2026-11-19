@@ -145,7 +145,7 @@ realPg('funded quest sponsorship lifecycle (disposable PostgreSQL)', () => {
       expect.objectContaining({
         kind: 'sponsorship',
         title: 'New Eco-Quest sponsorship request',
-        href: '/merchant/funding',
+        href: '/merchant?tab=sponsorships',
         read: false,
       }),
     ]);

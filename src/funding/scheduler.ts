@@ -2,7 +2,7 @@ import type { Pool } from 'pg';
 import { env } from '../config/env.js';
 import { getPool } from '../db/pool.js';
 import { lockGovernanceSnapshot, commitGovernanceTransaction } from '../governance/transaction.js';
-import { finalizePlan, lockPlan, refreshQuestMirror, setQuestFundingState } from './plans.js';
+import { finalizePlan, lockPlan, refreshQuestMirror, reopenBudgetPlanIfFunded, setQuestFundingState } from './plans.js';
 import { releaseFundingHold } from './holds.js';
 import { fundingTx, publishFunding } from './transaction.js';
 
@@ -55,7 +55,11 @@ export async function runFundingScheduler(pool: Pool) {
           [plan.id],
         );
         await setQuestFundingState(client, plan.quest_id, 'active');
-      } else if (plan.status === 'closing') await finalizePlan(tx, plan, plan.created_by);
+      } else if (plan.status === 'closing') {
+        if (!(await reopenBudgetPlanIfFunded(tx, plan))) {
+          await finalizePlan(tx, plan, plan.created_by);
+        }
+      }
     }
     await commitGovernanceTransaction(client);
     publishFunding(tx.groups);

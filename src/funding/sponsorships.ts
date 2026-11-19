@@ -93,7 +93,9 @@ export async function evaluateConditions(
               WHERE b.quest_id = q.id AND b.status = 'active' ORDER BY b.created_at DESC LIMIT 1) AS bound_municipality,
             m.name AS merchant_name, m.municipality AS merchant_municipality,
             aa.name AS town_area_name,
-            app.municipality AS app_municipality, app.gps_lat AS shop_lat, app.gps_lng AS shop_lng
+            app.municipality AS app_municipality,
+            COALESCE(m.gps_lat, app.gps_lat) AS shop_lat,
+            COALESCE(m.gps_lng, app.gps_lng) AS shop_lng
        FROM quest_funding_plans p
        JOIN quests q ON q.id = p.quest_id
        JOIN merchants m ON m.id = $2
@@ -398,7 +400,7 @@ async function acceptTerms(
       kind: 'sponsorship',
       title: 'Merchant accepted your sponsorship request',
       message: `The merchant sponsorship for this Eco-Quest is accepted with ${terms.points} demo points${terms.voucher_qty ? ' and a voucher perk' : ''}.`,
-      href: `/funding?quest_id=${encodeURIComponent(plan.quest_id)}`,
+      href: `/quests/${encodeURIComponent(plan.quest_id)}/funding`,
     });
   else
     await notifyMerchantOwners(
@@ -409,7 +411,7 @@ async function acceptTerms(
       'sponsorship',
       'Author accepted your sponsorship counter-offer',
       'The destination author accepted your revised Eco-Quest sponsorship terms.',
-      '/merchant/funding',
+      '/merchant?tab=sponsorships',
     );
   if (plan.status === 'pending_sponsors') await activateIfFunded(tx, plan);
   return { ...updated, conditions: evaluatedConditions };
@@ -548,7 +550,7 @@ export class SponsorshipService {
           'sponsorship',
           'New Eco-Quest sponsorship request',
           `A destination author invited your business to sponsor “${quest?.title ?? 'an Eco-Quest'}”.`,
-          '/merchant/funding',
+          '/merchant?tab=sponsorships',
         );
         return inserted.rows[0];
       },
@@ -591,12 +593,16 @@ export class SponsorshipService {
           [planId, sponsorship.merchant_id],
         )
       ).rows[0];
-      if (!contribution || Boolean(contribution.is_test) !== Boolean(plan.is_test))
+      if (contribution && Boolean(contribution.is_test) !== Boolean(plan.is_test))
         throw new FundingError(
           'SCOPE_MISMATCH',
           409,
           'Sponsor contribution is unavailable or belongs to another scope.',
         );
+      await tx.client.query(
+        `INSERT INTO points_accounts(id,kind,merchant_id,is_test) VALUES($1,'merchant',$2,$3) ON CONFLICT(id) DO NOTHING`,
+        [`merchant:${sponsorship.merchant_id}`, sponsorship.merchant_id, plan.is_test],
+      );
       const account = (
         await tx.client.query('SELECT balance_points,is_test FROM points_accounts WHERE id=$1 FOR UPDATE', [
           `merchant:${sponsorship.merchant_id}`,
@@ -604,7 +610,8 @@ export class SponsorshipService {
       ).rows[0];
       if (!account || Boolean(account.is_test) !== Boolean(plan.is_test))
         throw new FundingError('SCOPE_MISMATCH', 409, 'Merchant point scope does not match.');
-      if (plan.mode === 'window' && Number(account.balance_points) < Number(contribution.remaining_points) + points)
+      const existingRemaining = Number(contribution?.remaining_points ?? 0);
+      if (plan.mode === 'window' && Number(account.balance_points) < existingRemaining + points)
         throw new FundingError(
           'INSUFFICIENT_POINTS',
           409,
@@ -621,10 +628,19 @@ export class SponsorshipService {
           actorId,
           metadata: { merchant_id: sponsorship.merchant_id, top_up: true },
         });
-      await tx.client.query(
-        'UPDATE quest_funding_contributions SET committed_points=committed_points+$2,remaining_points=remaining_points+$2,updated_at=NOW() WHERE id=$1',
-        [contribution.id, points],
-      );
+      if (contribution) {
+        await tx.client.query(
+          'UPDATE quest_funding_contributions SET committed_points=committed_points+$2,remaining_points=remaining_points+$2,updated_at=NOW() WHERE id=$1',
+          [contribution.id, points],
+        );
+      } else {
+        await tx.client.query(
+          `INSERT INTO quest_funding_contributions(id,plan_id,funder_kind,merchant_id,sponsorship_id,is_test,committed_points,remaining_points)
+           VALUES($1,$2,'merchant',$3,$4,$5,$6,$6)`,
+          [randomUUID(), planId, sponsorship.merchant_id, sponsorship.id, plan.is_test, points],
+        );
+      }
+      await ensurePlanAccounts(tx.client, plan);
       return { plan_id: planId, merchant_id: sponsorship.merchant_id, added_points: points, simulated: true };
     });
   }
@@ -650,14 +666,10 @@ export class SponsorshipService {
       )
         throw new FundingError('SPONSORSHIP_STATE', 409, 'This sponsorship request has expired or is no longer open.');
       await assertOwner(tx.client, actorId, sponsorship.merchant_id, Boolean(plan.is_test));
-      await assertVoucher(
-        tx.client,
-        sponsorship.merchant_id,
-        terms.voucher_id ?? sponsorship.voucher_id,
-        terms.voucher_qty,
-      );
+      const counteredVoucherId = terms.voucher_qty > 0 ? (terms.voucher_id ?? sponsorship.voucher_id ?? null) : null;
+      await assertVoucher(tx.client, sponsorship.merchant_id, counteredVoucherId, terms.voucher_qty);
       const result = await tx.client.query(
-        `UPDATE quest_sponsorships SET status='countered',counter_points=$2,counter_voucher_qty=$3,counter_promo=$4,counter_message=$5,
+        `UPDATE quest_sponsorships SET status='countered',counter_points=$2,counter_voucher_qty=$3,counter_voucher_id=$9,counter_promo=$4,counter_message=$5,
              conditions=CASE WHEN $7 THEN $8::jsonb ELSE conditions END,
              terms_version=terms_version+1,responded_by=$6,responded_at=NOW(),updated_at=NOW() WHERE id=$1 RETURNING *`,
         [
@@ -669,6 +681,7 @@ export class SponsorshipService {
           actorId,
           hasConditions,
           JSON.stringify(validatedConditions ?? []),
+          counteredVoucherId,
         ],
       );
       const title =
@@ -681,7 +694,7 @@ export class SponsorshipService {
         kind: 'sponsorship',
         title: 'Merchant sent a sponsorship counter-offer',
         message: `The merchant proposed revised sponsorship terms for “${title}”. Review them before accepting.`,
-        href: `/funding?quest_id=${encodeURIComponent(plan.quest_id)}`,
+        href: `/quests/${encodeURIComponent(plan.quest_id)}/funding`,
       });
       const updatedRow = result.rows[0];
       return { ...updatedRow, conditions: await evaluateConditions(tx.client, updatedRow) };
@@ -785,7 +798,7 @@ export class SponsorshipService {
           throw new FundingError('SPONSORING_SUSPENDED', 409, 'Merchant sponsoring is currently suspended.');
         const terms = {
           points: Number(sponsorship.counter_points ?? sponsorship.points),
-          voucher_id: sponsorship.voucher_id,
+          voucher_id: sponsorship.counter_voucher_id ?? sponsorship.voucher_id,
           voucher_qty: Number(sponsorship.counter_voucher_qty ?? sponsorship.voucher_qty),
           promo: Boolean(sponsorship.counter_promo ?? sponsorship.promo),
           message: sponsorship.counter_message ?? sponsorship.message,
@@ -833,7 +846,7 @@ export class SponsorshipService {
           'sponsorship',
           'Sponsorship request withdrawn',
           'The destination author withdrew their Eco-Quest sponsorship request.',
-          '/merchant/funding',
+          '/merchant?tab=sponsorships',
         );
       } else {
         const title =
@@ -846,7 +859,7 @@ export class SponsorshipService {
           kind: 'sponsorship',
           title: 'Merchant declined the sponsorship request',
           message: `The merchant declined the request for “${title}”.`,
-          href: `/funding?quest_id=${encodeURIComponent(plan.quest_id)}`,
+          href: `/quests/${encodeURIComponent(plan.quest_id)}/funding`,
         });
       }
       return updated;
@@ -860,9 +873,10 @@ export class SponsorshipService {
       if (status && !allowed.includes(status))
         throw new FundingError('INVALID_STATUS', 400, 'Unsupported sponsorship status.');
       const result = await client.query(
-        `SELECT s.*,p.quest_id,p.status AS plan_status,q.title AS quest_title,sp.name AS spot_name
+        `SELECT s.*,p.quest_id,p.status AS plan_status,q.title AS quest_title,
+                (SELECT sp.name FROM spots sp WHERE sp.quest_id=q.id ORDER BY sp.created_at DESC LIMIT 1) AS spot_name
            FROM quest_sponsorships s JOIN quest_funding_plans p ON p.id=s.plan_id JOIN quests q ON q.id=p.quest_id
-           LEFT JOIN spots sp ON sp.quest_id=q.id JOIN merchant_memberships mm ON mm.merchant_id=s.merchant_id
+           JOIN merchant_memberships mm ON mm.merchant_id=s.merchant_id
           JOIN merchants m ON m.id=s.merchant_id JOIN users u ON u.id=mm.user_id
           WHERE mm.user_id=$1 AND mm.status='active' AND mm.role IN ('owner','staff') AND m.status='active'
             AND m.is_test=s.is_test AND u.is_test=s.is_test AND ($2::text IS NULL OR s.status=$2)

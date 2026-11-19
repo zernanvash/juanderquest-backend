@@ -80,9 +80,11 @@ export class VouchersService {
           };
         }
 
-        // 4. One redemption per voucher per user rule under the user lock
+        // 4. One open Shop redemption per voucher per user rule under the user lock
         const { rows: userVoucherRows } = await client.query(
-          'SELECT 1 FROM redemptions WHERE user_id = $1 AND voucher_id = $2 LIMIT 1',
+          `SELECT 1 FROM redemptions
+            WHERE user_id = $1 AND voucher_id = $2 AND source = 'purchase' AND used_at IS NULL
+            LIMIT 1`,
           [userId, voucherId],
         );
         if (userVoucherRows.length > 0) {
@@ -94,10 +96,15 @@ export class VouchersService {
           };
         }
 
-        // 5. Voucher existence check
+        // 5. Voucher existence, merchant status/scope, self-redemption, and stock checks
         const { rows: voucherRows } = await client.query(
-          `SELECT v.*,m.id AS owner_merchant_id,m.is_test AS merchant_is_test FROM vouchers v
-            JOIN merchants m ON m.id=v.merchant_id WHERE v.id = $1 AND v.is_active = TRUE`,
+          `SELECT v.*, m.id AS owner_merchant_id, m.is_test AS merchant_is_test,
+                  m.status AS merchant_status, m.is_published AS merchant_is_published,
+                  m.source_application_id
+             FROM vouchers v
+             JOIN merchants m ON m.id = v.merchant_id
+            WHERE v.id = $1 AND v.is_active = TRUE
+            FOR UPDATE OF v`,
           [voucherId],
         );
         if (!voucherRows.length) {
@@ -110,6 +117,50 @@ export class VouchersService {
         }
         const voucher = voucherRows[0];
 
+        if (
+          voucher.merchant_status != null &&
+          (voucher.merchant_status !== 'active' ||
+            (voucher.source_application_id != null && voucher.merchant_is_published !== true))
+        ) {
+          await client.query('ROLLBACK');
+          return {
+            success: false,
+            statusCode: 404,
+            error: { code: 'NOT_FOUND', message: 'Voucher not found or inactive.' },
+          };
+        }
+
+        if (
+          user.is_test != null &&
+          voucher.merchant_is_test != null &&
+          Boolean(user.is_test) !== Boolean(voucher.merchant_is_test)
+        ) {
+          await client.query('ROLLBACK');
+          return {
+            success: false,
+            statusCode: 409,
+            error: { code: 'SCOPE_MISMATCH', message: 'Voucher and traveler environments do not match.' },
+          };
+        }
+
+        if (voucher.owner_merchant_id != null) {
+          const { rows: selfMemberRows } = await client.query(
+            `SELECT 1 FROM merchant_memberships WHERE merchant_id = $1 AND user_id = $2 AND status = 'active' LIMIT 1`,
+            [voucher.owner_merchant_id, userId],
+          );
+          if (selfMemberRows.length > 0) {
+            await client.query('ROLLBACK');
+            return {
+              success: false,
+              statusCode: 403,
+              error: {
+                code: 'SELF_REDEMPTION_FORBIDDEN',
+                message: 'Shop members cannot redeem their own vouchers.',
+              },
+            };
+          }
+        }
+
         if (voucher.availability === 'preview') {
           await client.query('ROLLBACK');
           return {
@@ -117,6 +168,21 @@ export class VouchersService {
             statusCode: 409,
             error: { code: 'NOT_REDEEMABLE', message: 'This partner offer is coming soon.' },
           };
+        }
+
+        if (voucher.stock_limit != null) {
+          const { rows: stockRows } = await client.query(
+            'SELECT COUNT(*)::int AS cnt FROM redemptions WHERE voucher_id = $1',
+            [voucherId],
+          );
+          if (Number(stockRows[0]?.cnt ?? 0) >= Number(voucher.stock_limit)) {
+            await client.query('ROLLBACK');
+            return {
+              success: false,
+              statusCode: 409,
+              error: { code: 'VOUCHER_OUT_OF_STOCK', message: 'This voucher is out of stock.' },
+            };
+          }
         }
 
         if (user.demo_points < voucher.cost_points) {
@@ -131,14 +197,17 @@ export class VouchersService {
         // 6. Cryptographically strong unique code generation and insertion
         const code = `JDQ-${randomBytes(3).toString('hex').toUpperCase()}-${randomBytes(3).toString('hex').toUpperCase()}`;
         const redemptionId = `rdm_${Date.now()}_${randomUUID().slice(0, 6)}`;
+        const validDays = voucher.valid_days == null ? null : Number(voucher.valid_days);
 
         let createdRows: any[];
         try {
           const insertResult = await client.query(
-            `INSERT INTO redemptions (id, voucher_id, user_id, code, cost_points, idempotency_key, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, NOW())
+            `INSERT INTO redemptions (id, voucher_id, user_id, code, cost_points, idempotency_key, expires_at, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6,
+                     CASE WHEN $7::int IS NOT NULL THEN NOW() + ($7::int * INTERVAL '1 day') ELSE NULL END,
+                     NOW())
              RETURNING *`,
-            [redemptionId, voucherId, userId, code, voucher.cost_points, idempotencyKey],
+            [redemptionId, voucherId, userId, code, voucher.cost_points, idempotencyKey, validDays],
           );
           createdRows = insertResult.rows;
         } catch (insertErr: any) {
@@ -362,7 +431,7 @@ export class VouchersService {
     };
   }
 
-  private mapRedemptionRow(row: any): RedemptionRow {
+  private mapRedemptionRow(row: any): RedemptionRow & { expires_at?: string | null } {
     return {
       id: row.id,
       voucher_id: row.voucher_id,
@@ -371,6 +440,7 @@ export class VouchersService {
       cost_points: row.cost_points,
       idempotency_key: row.idempotency_key,
       created_at: new Date(row.created_at).toISOString(),
+      ...(row.expires_at ? { expires_at: new Date(row.expires_at).toISOString() } : {}),
     };
   }
 }
