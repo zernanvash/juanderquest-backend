@@ -184,9 +184,9 @@ describe('Plan 67 progressive auth and wallet onboarding', () => {
       .send({ idempotency_key: 'shop-k-123456' });
     expect(shopBuy.status).toBe(403);
     expect(shopBuy.body.error.code).toBe('WALLET_REQUIRED');
+    // Owner 2026-11-19: voucher redemption no longer needs a wallet.
     const redeem = await request(app).post('/api/v1/vouchers/v1/redeem').set(auth).send({});
-    expect(redeem.status).toBe(403);
-    expect(redeem.body.error.code).toBe('WALLET_REQUIRED');
+    expect(redeem.body.error?.code).not.toBe('WALLET_REQUIRED');
 
     const wallet = Wallet.createRandom();
     const challenge = await request(app).post('/api/v1/auth/wallet/challenge').send({ address: wallet.address });

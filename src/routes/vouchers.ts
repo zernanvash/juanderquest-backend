@@ -9,7 +9,6 @@ import {
   checkQAAuthorization,
   isAuthorizedQA,
   optionalAuthenticateToken,
-  requireBoundWallet,
   AuthRequest,
 } from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
@@ -171,7 +170,7 @@ router.post(
   '/vouchers/:id/redeem',
   marketplaceRedemptionGate,
   authenticateToken,
-  requireBoundWallet,
+  // Owner 2026-11-19: vouchers need no wallet; any signed-in account can redeem with mJDQ.
   validateRequest(redeemSchema),
   async (req: AuthRequest, res: Response) => {
     return await handleRedemption(req.params.id, req, res);
@@ -182,7 +181,7 @@ router.post(
   '/vouchers/redeem',
   marketplaceRedemptionGate,
   authenticateToken,
-  requireBoundWallet,
+  // Owner 2026-11-19: vouchers need no wallet; any signed-in account can redeem with mJDQ.
   validateRequest(redeemSchema),
   async (req: AuthRequest, res: Response) => {
     const voucherId = req.body.voucher_id || req.body.id;
