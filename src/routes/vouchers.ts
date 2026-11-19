@@ -4,7 +4,14 @@ import { z } from 'zod';
 import { env } from '../config/env.js';
 import { db } from '../db/index.js';
 import { governanceStore } from './proposals.js';
-import { authenticateToken, requireBoundWallet, AuthRequest } from '../middleware/auth.js';
+import {
+  authenticateToken,
+  checkQAAuthorization,
+  isAuthorizedQA,
+  optionalAuthenticateToken,
+  requireBoundWallet,
+  AuthRequest,
+} from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
 import { vouchersService } from '../services/vouchers.js';
 import { getPool } from '../db/pool.js';
@@ -109,20 +116,31 @@ async function handleRedemption(voucherId: string, req: AuthRequest, res: Respon
   }
 }
 
-router.get('/vouchers', async (_req, res: Response) => {
+router.get('/vouchers', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res: Response) => {
+  const viewerIsTest = isAuthorizedQA(req);
+  if (viewerIsTest) res.set('X-Robots-Tag', 'noindex, nofollow');
   const pool = getPool();
   if (pool) {
     try {
       // Plan 65: a reigning msme_partner_spotlight pins vouchers from that town to the top.
-      const towns = (await getActiveJuanChoicePerks(pool, false).catch(() => []))
+      const towns = (await getActiveJuanChoicePerks(pool, viewerIsTest).catch(() => []))
         .filter((perk) => perk.key === 'msme_partner_spotlight')
         .map((perk) => perk.municipality);
       const r = await pool.query(
         `SELECT v.*,m.name AS merchant_name,v.partner_label AS "partnerLabel",v.icon_key AS "iconKey",(v.availability='live' AND $1::boolean) AS redeemable,
-          EXISTS (SELECT 1 FROM unnest($2::text[]) town WHERE m.location ILIKE '%' || town || '%') AS featured
-        FROM vouchers v JOIN merchants m ON m.id=v.merchant_id WHERE v.is_active=TRUE AND (v.availability='preview' OR $1::boolean)
+          EXISTS (SELECT 1 FROM unnest($2::text[]) town WHERE m.location ILIKE '%' || town || '%') AS featured,
+          (SELECT COUNT(*)::int FROM redemptions r WHERE r.voucher_id = v.id) AS redeemed_count,
+          CASE
+            WHEN v.stock_limit IS NULL THEN NULL
+            ELSE GREATEST(0, v.stock_limit - (SELECT COUNT(*)::int FROM redemptions r WHERE r.voucher_id = v.id))
+          END AS remaining_stock
+        FROM vouchers v JOIN merchants m ON m.id=v.merchant_id
+        WHERE v.is_active=TRUE
+          AND m.status='active'
+          AND m.is_test=$3
+          AND (v.availability='preview' OR ($1::boolean AND (m.is_published=TRUE OR m.source_application_id IS NULL)))
         ORDER BY featured DESC,v.sort_order,v.id`,
-        [env.MARKETPLACE_ENABLED, towns],
+        [env.MARKETPLACE_ENABLED, towns, viewerIsTest],
       );
       return res.json({ success: true, data: r.rows });
     } catch {

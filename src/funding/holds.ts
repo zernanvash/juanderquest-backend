@@ -12,6 +12,7 @@ import {
   funderAccount,
   lockPlan,
   refreshQuestMirror,
+  reopenBudgetPlanIfFunded,
   setQuestFundingState,
 } from './plans.js';
 import { notifyPlanStakeholders, insertFundingNotification } from './notifications.js';
@@ -424,7 +425,7 @@ export async function settleFundingHold(
   });
   let voucherPerk: { redemption_id: string; code: string; title: string } | undefined;
   const perk = await client.query(
-    `SELECT perk.id,perk.sponsorship_id,perk.voucher_id,v.title
+    `SELECT perk.id,perk.sponsorship_id,perk.voucher_id,v.title,v.valid_days
        FROM quest_voucher_perks perk JOIN quest_sponsorships sponsor ON sponsor.id=perk.sponsorship_id
        JOIN vouchers v ON v.id=perk.voucher_id AND v.merchant_id=sponsor.merchant_id
       WHERE perk.plan_id=$1 AND perk.granted_qty<perk.total_qty AND sponsor.status='accepted' AND sponsor.is_test=$2 AND v.is_active=TRUE
@@ -434,16 +435,24 @@ export async function settleFundingHold(
   if (perk.rows[0]) {
     const code = `JDQ-${randomBytes(8).toString('hex').toUpperCase()}`;
     const redemptionId = randomUUID();
-    await client.query(
-      `INSERT INTO redemptions(id,voucher_id,user_id,code,cost_points,idempotency_key,source,hold_id)
-       VALUES($1,$2,$3,$4,0,$5,'quest_sponsor_perk',$6)`,
-      [redemptionId, perk.rows[0].voucher_id, userId, code, `quest-perk:${hold.id}`, hold.id],
-    );
-    await client.query(
-      'UPDATE quest_voucher_perks SET granted_qty=granted_qty+1 WHERE id=$1 AND granted_qty<total_qty',
-      [perk.rows[0].id],
-    );
-    voucherPerk = { redemption_id: redemptionId, code, title: perk.rows[0].title };
+    const validDays = perk.rows[0].valid_days == null ? null : Number(perk.rows[0].valid_days);
+    await client.query('SAVEPOINT sponsor_perk_grant');
+    try {
+      await client.query(
+        `INSERT INTO redemptions(id,voucher_id,user_id,code,cost_points,idempotency_key,source,hold_id,expires_at)
+         VALUES($1,$2,$3,$4,0,$5,'quest_sponsor_perk',$6,
+                CASE WHEN $7::int IS NOT NULL THEN NOW() + ($7::int * INTERVAL '1 day') ELSE NULL END)`,
+        [redemptionId, perk.rows[0].voucher_id, userId, code, `quest-perk:${hold.id}`, hold.id, validDays],
+      );
+      await client.query('UPDATE quest_voucher_perks SET granted_qty=granted_qty+1 WHERE id=$1 AND granted_qty<total_qty', [
+        perk.rows[0].id,
+      ]);
+      await client.query('RELEASE SAVEPOINT sponsor_perk_grant');
+      voucherPerk = { redemption_id: redemptionId, code, title: perk.rows[0].title };
+    } catch (perkErr) {
+      await client.query('ROLLBACK TO SAVEPOINT sponsor_perk_grant');
+      console.warn('[funding:settle] Sponsor voucher perk skipped:', perkErr);
+    }
   }
   if (plan.status === 'closing') await finalizePlan(tx, plan, actorId);
   return {
@@ -476,6 +485,7 @@ export async function abandonFundedAttempt(
     if (await hasPendingReview(tx.client, hold, questId))
       throw new FundingError('SUBMISSION_PENDING', 409, 'Wait for the pending review before abandoning this attempt.');
     await releaseFundingHold(tx, hold, plan, userId, 'traveler_abandoned');
+    await reopenBudgetPlanIfFunded(tx, plan);
     if (plan.status === 'closing') await finalizePlan(tx, plan, userId);
     return {
       attempt_id: attemptId,

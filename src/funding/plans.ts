@@ -168,6 +168,32 @@ export async function activateIfFunded(tx: FundingTx, plan: any) {
   return result.rows[0];
 }
 
+/** Reopen a budget round that hit budget_exhausted if holds later return points before ends_at. */
+export async function reopenBudgetPlanIfFunded(tx: FundingTx, plan: any): Promise<boolean> {
+  if (
+    plan.mode !== 'budget' ||
+    plan.status !== 'closing' ||
+    plan.close_reason !== 'budget_exhausted' ||
+    new Date(plan.ends_at).getTime() <= Date.now()
+  ) {
+    return false;
+  }
+  const res = await tx.client.query(
+    'SELECT COALESCE(SUM(remaining_points),0)::bigint AS total FROM quest_funding_contributions WHERE plan_id=$1 AND is_test=$2',
+    [plan.id, plan.is_test],
+  );
+  const cost = Number(plan.reward_points) + Number(plan.fee_points);
+  if (Number(res.rows[0]?.total ?? 0) < cost) return false;
+  await tx.client.query(
+    "UPDATE quest_funding_plans SET status='active',close_reason=NULL,closing_at=NULL,version=version+1,updated_at=NOW() WHERE id=$1",
+    [plan.id],
+  );
+  plan.status = 'active';
+  plan.close_reason = null;
+  await setQuestFundingState(tx.client, plan.quest_id, 'active');
+  return true;
+}
+
 /** Finalize only once every existing hold has resolved. */
 export async function finalizePlan(tx: FundingTx, plan: any, actorId: string, terminal = 'closed') {
   const live = await tx.client.query("SELECT 1 FROM quest_funding_holds WHERE plan_id=$1 AND status='held' LIMIT 1", [
