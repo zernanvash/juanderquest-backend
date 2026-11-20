@@ -1,5 +1,5 @@
 import { getPool } from '../db/pool.js';
-import { ensureAreaCache, getCachedAreas, matchSpotToAreas } from '../maps/areas-service.js';
+import { ensureAreaCache, getCachedAreas, resolveSpotAreas } from '../maps/areas-service.js';
 import { distanceMeters } from '../maps/geometry.js';
 import { PANGASINAN_MUNICIPALITIES } from '../routes/affiliates.js';
 
@@ -181,7 +181,7 @@ export async function recordHomeTownSighting(userId: string, input: SightingInpu
   if (pool) {
     await ensureAreaCache(pool);
   }
-  const match = matchSpotToAreas(input.lat, input.lng);
+  const match = await resolveSpotAreas(pool, input.lat, input.lng);
   if (!match.townAreaId) {
     return { accepted: false, ignored_reason: 'outside_pangasinan', state: stateBefore };
   }

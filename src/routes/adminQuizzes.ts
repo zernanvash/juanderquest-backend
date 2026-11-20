@@ -4,7 +4,7 @@ import { httpUrl } from '../utils/http-url.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { assertInScope, auditOnSuccess, requireAreaAdmin, spotAreaIds, spotInScope } from '../admin/scope.js';
 import { getPool } from '../db/pool.js';
-import { ensureAreaCache, matchSpotToAreas } from '../maps/areas-service.js';
+import { resolveSpotAreas } from '../maps/areas-service.js';
 import { recognizeSpotLocation } from '../spots/recognize.js';
 import { spotStore } from '../spots/store.js';
 import { CulturalQuizRepository } from '../quizzes/repository.js';
@@ -74,8 +74,12 @@ const isPinInScope = async (
   pin: { lat: number; lng: number; municipality?: unknown },
 ): Promise<boolean> => {
   if (scope.platform) return true;
-  await ensureAreaCache(getPool());
-  const match = matchSpotToAreas(pin.lat, pin.lng, typeof pin.municipality === 'string' ? pin.municipality : undefined);
+  const match = await resolveSpotAreas(
+    getPool(),
+    pin.lat,
+    pin.lng,
+    typeof pin.municipality === 'string' ? pin.municipality : undefined,
+  );
   return (
     assertInScope(scope, 'quests_quizzes', match.townAreaId) ||
     assertInScope(scope, 'quests_quizzes', match.barangayAreaId)

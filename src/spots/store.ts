@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { env } from '../config/env.js';
 import { isDevelopmentSeedEnabled } from '../db/policy.js';
 import { db } from '../db/index.js';
-import { ensureAreaCache, matchSpotToAreas } from '../maps/areas-service.js';
+import { resolveSpotAreas } from '../maps/areas-service.js';
 import { getPool } from '../db/pool.js';
 
 export type SpotCategory =
@@ -13,7 +13,7 @@ export type SpotSource = 'lgu' | 'editorial' | 'open_data' | 'community';
 export type { CrowdCapacityBand, CrowdStatus, CrowdConfidence, ActivityType, CrowdMetrics } from './crowd.js';
 import type { CrowdCapacityBand, ActivityType } from './crowd.js';
 import { calculateCrowdMetrics } from './crowd.js';
-import { rankExploreSpots, type ExploreListQuery } from './recommender.js';
+import { rankExploreSpots, rankExploreSpotsPage, type ExploreListQuery } from './recommender.js';
 interface ActivityEvent {
   id: string;
   user_id: string;
@@ -58,6 +58,11 @@ export interface Spot {
   recommendation_suppressed_until?: string | null;
   town_area_id?: string | null;
   barangay_area_id?: string | null;
+  // Plan 116 (migration 110)
+  province_area_id?: string | null;
+  region_area_id?: string | null;
+  launch_tier?: 'featured' | 'standard' | 'review' | null;
+  external_refs?: Record<string, string>;
   is_test?: boolean;
 }
 
@@ -361,8 +366,11 @@ export class SpotStore {
     this.pg = pool;
     const { rows } = await pool.query('SELECT * FROM spots ORDER BY created_at');
     if (rows.length)
-      this.spots = rows.map((r: any) => ({
+      // Plan 116: geog/search_tsv are generated database columns (map + search indexes);
+      // they never belong in API objects or memory.
+      this.spots = rows.map(({ geog: _geog, search_tsv: _searchTsv, ...r }: any) => ({
         ...r,
+        external_refs: r.external_refs || {},
         tags: r.tags || [],
         amenities: r.amenities || [],
         good_for: r.good_for || [],
@@ -411,7 +419,7 @@ export class SpotStore {
     if (!pool) return;
     try {
       await pool.query(
-        `INSERT INTO spots (id,slug,name,description,category,subcategory,tags,municipality,address,gps_lat,gps_lng,price_level,hours,amenities,good_for,best_time,image_url,source_type,source_name,source_url,trust_level,status,quest_id,created_by,is_test,created_at,updated_at,town_area_id,barangay_area_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,category=EXCLUDED.category,subcategory=EXCLUDED.subcategory,tags=EXCLUDED.tags,municipality=EXCLUDED.municipality,address=EXCLUDED.address,gps_lat=EXCLUDED.gps_lat,gps_lng=EXCLUDED.gps_lng,price_level=EXCLUDED.price_level,hours=EXCLUDED.hours,amenities=EXCLUDED.amenities,good_for=EXCLUDED.good_for,best_time=EXCLUDED.best_time,image_url=EXCLUDED.image_url,status=EXCLUDED.status,is_test=EXCLUDED.is_test,updated_at=EXCLUDED.updated_at,town_area_id=COALESCE(EXCLUDED.town_area_id, spots.town_area_id),barangay_area_id=COALESCE(EXCLUDED.barangay_area_id, spots.barangay_area_id)`,
+        `INSERT INTO spots (id,slug,name,description,category,subcategory,tags,municipality,address,gps_lat,gps_lng,price_level,hours,amenities,good_for,best_time,image_url,source_type,source_name,source_url,trust_level,status,quest_id,created_by,is_test,created_at,updated_at,town_area_id,barangay_area_id,province_area_id,region_area_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,category=EXCLUDED.category,subcategory=EXCLUDED.subcategory,tags=EXCLUDED.tags,municipality=EXCLUDED.municipality,address=EXCLUDED.address,gps_lat=EXCLUDED.gps_lat,gps_lng=EXCLUDED.gps_lng,price_level=EXCLUDED.price_level,hours=EXCLUDED.hours,amenities=EXCLUDED.amenities,good_for=EXCLUDED.good_for,best_time=EXCLUDED.best_time,image_url=EXCLUDED.image_url,status=EXCLUDED.status,is_test=EXCLUDED.is_test,updated_at=EXCLUDED.updated_at,town_area_id=COALESCE(EXCLUDED.town_area_id, spots.town_area_id),barangay_area_id=COALESCE(EXCLUDED.barangay_area_id, spots.barangay_area_id),province_area_id=COALESCE(EXCLUDED.province_area_id, spots.province_area_id),region_area_id=COALESCE(EXCLUDED.region_area_id, spots.region_area_id)`,
         [
           s.id,
           s.slug,
@@ -442,6 +450,8 @@ export class SpotStore {
           s.updated_at,
           s.town_area_id || null,
           s.barangay_area_id || null,
+          s.province_area_id || null,
+          s.region_area_id || null,
         ],
       );
     } catch {
@@ -732,6 +742,11 @@ export class SpotStore {
     return rankExploreSpots(this, q);
   }
 
+  /** Plan 116: one page plus the total match count (for meta.total / next_cursor). */
+  listPage(q: ExploreListQuery) {
+    return rankExploreSpotsPage(this, q);
+  }
+
   async create(
     input: Omit<
       Spot,
@@ -750,8 +765,7 @@ export class SpotStore {
     while (this.spots.some((s) => s.slug === slug)) {
       slug = `${baseSlug}-${randomUUID().slice(0, 8)}`;
     }
-    await ensureAreaCache(getPool());
-    const areaMatch = matchSpotToAreas(input.gps_lat, input.gps_lng, input.municipality);
+    const areaMatch = await resolveSpotAreas(getPool(), input.gps_lat, input.gps_lng, input.municipality);
     const spot: Spot = {
       ...input,
       id: randomUUID(),
@@ -767,6 +781,8 @@ export class SpotStore {
       updated_at: timestamp,
       town_area_id: areaMatch.townAreaId,
       barangay_area_id: areaMatch.barangayAreaId,
+      province_area_id: areaMatch.provinceAreaId,
+      region_area_id: areaMatch.regionAreaId,
     };
     await this.persistSpot(spot);
     this.spots.push(spot);
@@ -796,6 +812,8 @@ export class SpotStore {
         | 'status'
         | 'town_area_id'
         | 'barangay_area_id'
+        | 'province_area_id'
+        | 'region_area_id'
       >
     >,
   ): Promise<Spot | undefined> {

@@ -3,7 +3,7 @@
 // Nominatim reverse lookup adds the POI name, road and OSM tags; a deterministic mapper turns
 // those into suggestions that use the API's own vocabularies (see the POST /spots schema).
 import type { Pool } from 'pg';
-import { ensureAreaCache, getCachedAreas, matchSpotToAreas } from '../maps/areas-service.js';
+import { ensureAreaCache, getCachedAreas, resolveSpotAreas } from '../maps/areas-service.js';
 import { distanceKm, spotStore } from './store.js';
 
 export type SpotCategory =
@@ -522,7 +522,7 @@ export async function recognizeSpotLocation(
 ): Promise<SpotRecognition> {
   // A. PSGC areas (offline, fast).
   await ensureAreaCache(pool);
-  const match = matchSpotToAreas(lat, lng);
+  const match = await resolveSpotAreas(pool, lat, lng);
   const areas = getCachedAreas() ?? [];
   const town = areas.find((area) => area.id === match.townAreaId) ?? null;
   const barangayArea = areas.find((area) => area.id === match.barangayAreaId) ?? null;

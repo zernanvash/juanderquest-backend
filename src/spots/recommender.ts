@@ -22,6 +22,22 @@ export interface ExploreListQuery {
   limit?: number;
   offset?: number;
   now?: number;
+  // Plan 116 national scale: map viewport [west, south, east, north], admin area (town, barangay,
+  // province or region id) and launch tier filters.
+  bbox?: [number, number, number, number];
+  areaId?: string;
+  tier?: 'featured' | 'standard' | 'review';
+}
+
+// Plan 116: bounds that keep one Explore request cheap with a national catalogue.
+// Small catalogues (tests, Pangasinan) never reach them, so ranking is unchanged there.
+export const RANK_CANDIDATE_CAP = 2000; // spots scored per request
+export const DIVERSITY_WINDOW = 300; // MMR diversity is O(n^2); apply it to the head only
+export const CACHED_HEAD = 600; // ranked items kept per cache entry
+
+export interface RankedPage {
+  items: RankedSpotItem[];
+  total: number;
 }
 
 export interface UserTasteProfile {
@@ -537,7 +553,8 @@ export function applyExploreDiversity(
 interface CachedExploreEntry {
   expiresAt: number;
   stateFingerprint: string;
-  items: RankedSpotItem[];
+  items: RankedSpotItem[]; // head of the ranking (≤ CACHED_HEAD)
+  total: number; // all matches, for paging
 }
 
 const exploreCache = new Map<string, CachedExploreEntry>();
@@ -633,6 +650,37 @@ function computeSpotMeritMap(store: SpotStore, nowMs: number): Map<string, SpotM
 }
 
 export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedSpotItem[] {
+  return rankExploreSpotsPage(store, q).items;
+}
+
+function matchesExploreFilters(s: Spot, q: ExploreListQuery): boolean {
+  if (q.search && !`${s.name} ${s.description} ${s.tags.join(' ')}`.toLowerCase().includes(q.search.toLowerCase()))
+    return false;
+  if (q.categories?.length && !q.categories.includes(s.category)) return false;
+  if (q.tags?.length && !q.tags.some((t) => s.tags.includes(t))) return false;
+  if (q.municipality && s.municipality.toLowerCase() !== q.municipality.toLowerCase()) return false;
+  if (q.hasQuest && !s.quest_id) return false;
+  if (q.tier && s.launch_tier !== q.tier) return false;
+  if (q.areaId && ![s.town_area_id, s.barangay_area_id, s.province_area_id, s.region_area_id].includes(q.areaId))
+    return false;
+  if (q.bbox) {
+    const [west, south, east, north] = q.bbox;
+    if (s.gps_lat < south || s.gps_lat > north || s.gps_lng < west || s.gps_lng > east) return false;
+  }
+  if (q.radius && q.lat !== undefined && q.lng !== undefined && distanceKm(q.lat, q.lng, s.gps_lat, s.gps_lng) > q.radius)
+    return false;
+  return true;
+}
+
+// Deterministic, cheap prior used only to pick which spots to score when a request would
+// otherwise score more than RANK_CANDIDATE_CAP (national catalogue, no location given).
+function candidatePrior(s: Spot, trends: Map<string, number>): number {
+  const trust = { lgu_verified: 0.45, editorial: 0.38, community: 0.3, open_data: 0.22 }[s.trust_level] ?? 0.1;
+  const tier = s.launch_tier === 'featured' ? 0.3 : 0;
+  return trust + tier + (s.quest_id ? 0.2 : 0) + Math.min(0.3, (trends.get(s.id) ?? 0) / 15);
+}
+
+export function rankExploreSpotsPage(store: SpotStore, q: ExploreListQuery): RankedPage {
   const nowMs = q.now ?? Date.now();
   const manilaDay = manilaDayKey(nowMs);
   const sortMode = q.sort || 'recommended';
@@ -669,22 +717,32 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
     sort: sortMode,
     hasQuest: Boolean(q.hasQuest),
     allowTest: Boolean(q.allowTest),
+    bbox: q.bbox ? q.bbox.map((v) => Number(v.toFixed(3))) : null,
+    areaId: q.areaId || null,
+    tier: q.tier || null,
     hourBucket: q.intent ? 'intent' : Math.floor(manilaHour(new Date(nowMs)) / 4),
   });
 
   const cacheKey = `${actorKey}|${manilaDay}|${filterKey}`;
   const stateFingerprint = computeStateFingerprint(store, profileUserId || q.userId, resolvedHomeTown);
   const cached = exploreCache.get(cacheKey);
-  if (cached && cached.expiresAt > nowMs && cached.stateFingerprint === stateFingerprint) {
+  const requestedOffset = Math.max(0, q.offset ?? 0);
+  const requestedEnd = q.limit !== undefined ? requestedOffset + q.limit : Math.max(CACHED_HEAD, requestedOffset);
+  if (
+    cached &&
+    cached.expiresAt > nowMs &&
+    cached.stateFingerprint === stateFingerprint &&
+    // Only the head of each ranking is cached; deeper pages are recomputed.
+    (requestedEnd <= cached.items.length || cached.items.length === cached.total)
+  ) {
     // Other travelers' likes do not change the fingerprint, so like counts are always fresh.
     const freshLikes = store.likeCounts();
-    const cloned = cached.items.map((item) => ({
+    const cloned = cached.items.slice(requestedOffset, requestedEnd).map((item) => ({
       ...item,
       recommendation_reasons: [...item.recommendation_reasons],
       like_count: store.likeCount(item.id, q.userId || actorKey, freshLikes),
     }));
-    const offset = Math.max(0, q.offset ?? 0);
-    return q.limit !== undefined ? cloned.slice(offset, offset + q.limit) : cloned.slice(offset);
+    return { items: cloned, total: cached.total };
   }
 
   // Evict expired cache entries
@@ -705,9 +763,34 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
   const tier3Town = resolvedHomeTown || taste.topAffinityTowns[0] || null;
   const tier3Centroid = tier3Town ? centroids.get(tier3Town.toLowerCase()) : undefined;
 
-  const eligibleSpots = store.spots.filter(
-    (s) => s.status === 'published' && !store.isSuppressed(s, nowMs) && (q.allowTest || !s.is_test),
+  // Plan 116: cheap filters run before scoring (same result, far less work).
+  let eligibleSpots = store.spots.filter(
+    (s) =>
+      s.status === 'published' &&
+      !store.isSuppressed(s, nowMs) &&
+      (q.allowTest || !s.is_test) &&
+      matchesExploreFilters(s, q),
   );
+  const total = eligibleSpots.length;
+  if (eligibleSpots.length > RANK_CANDIDATE_CAP) {
+    const anchor =
+      q.lat !== undefined && q.lng !== undefined
+        ? { lat: q.lat, lng: q.lng }
+        : taste.lastActiveSpot
+          ? { lat: taste.lastActiveSpot.gps_lat, lng: taste.lastActiveSpot.gps_lng }
+          : tier3Centroid;
+    eligibleSpots = anchor
+      ? eligibleSpots
+          .map((s) => ({ s, d: distanceKm(anchor.lat, anchor.lng, s.gps_lat, s.gps_lng) }))
+          .sort((a, b) => a.d - b.d || a.s.id.localeCompare(b.s.id))
+          .slice(0, RANK_CANDIDATE_CAP)
+          .map((x) => x.s)
+      : eligibleSpots
+          .map((s) => ({ s, p: candidatePrior(s, trends) }))
+          .sort((a, b) => b.p - a.p || a.s.id.localeCompare(b.s.id))
+          .slice(0, RANK_CANDIDATE_CAP)
+          .map((x) => x.s);
+  }
 
   const scored = eligibleSpots
     .map((s): RankedSpotItem => {
@@ -903,17 +986,7 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
         like_count: store.likeCount(s.id, q.userId || actorKey, likeCounts),
         trend_score: trendScore,
       };
-    })
-    .filter(
-      (s) =>
-        (!q.search ||
-          `${s.name} ${s.description} ${s.tags.join(' ')}`.toLowerCase().includes(q.search.toLowerCase())) &&
-        (!q.categories?.length || q.categories.includes(s.category)) &&
-        (!q.tags?.length || q.tags.some((t) => s.tags.includes(t))) &&
-        (!q.municipality || s.municipality.toLowerCase() === q.municipality.toLowerCase()) &&
-        (!q.hasQuest || Boolean(s.quest_id)) &&
-        (s.distance_km === undefined || !q.radius || s.distance_km <= q.radius),
-    );
+    });
 
   // Initial sort
   scored.sort((a, b) => {
@@ -936,7 +1009,12 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
     sortMode === 'recommended' && !q.search && (!q.categories || q.categories.length !== 1) && !q.municipality;
 
   const enableSerendipitySlot = shouldDiversify && !q.intent;
-  const ranked = shouldDiversify ? applyExploreDiversity(scored, taste, enableSerendipitySlot) : scored;
+  const ranked = shouldDiversify
+    ? [
+        ...applyExploreDiversity(scored.slice(0, DIVERSITY_WINDOW), taste, enableSerendipitySlot),
+        ...scored.slice(DIVERSITY_WINDOW),
+      ]
+    : scored;
 
   if (exploreCache.size >= 250) {
     const oldestKey = exploreCache.keys().next().value;
@@ -945,11 +1023,11 @@ export function rankExploreSpots(store: SpotStore, q: ExploreListQuery): RankedS
   exploreCache.set(cacheKey, {
     expiresAt: nowMs + EXPLORE_CACHE_TTL_MS,
     stateFingerprint,
-    items: ranked,
+    items: ranked.slice(0, CACHED_HEAD),
+    total,
   });
 
-  const offset = Math.max(0, q.offset ?? 0);
-  return q.limit !== undefined ? ranked.slice(offset, offset + q.limit) : ranked.slice(offset);
+  return { items: ranked.slice(requestedOffset, requestedEnd), total };
 }
 
 export const scoreAndRankSpots = rankExploreSpots;

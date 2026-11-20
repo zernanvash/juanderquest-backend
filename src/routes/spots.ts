@@ -28,7 +28,8 @@ import {
   recordSpotModerationEvent,
   submitSpotAppeal,
 } from '../spots/moderation.js';
-import { ensureAreaCache, matchSpotToAreas } from '../maps/areas-service.js';
+import { resolveSpotAreas } from '../maps/areas-service.js';
+import { mapView, searchSpots } from '../spots/national.js';
 import { assetStore } from '../spots/asset-store.js';
 import { MAX_SPOT_GALLERY_PHOTOS, spotPhotoSubmissionStore } from '../spots/photo-submission-store.js';
 import { getSpotPhotoStorageProvider } from '../storage/spot-photos.js';
@@ -107,27 +108,82 @@ router.get('/spot-taxonomy', (_req, res) =>
   }),
 );
 
+const adminSpotListSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  cursor: z.string().optional(),
+  status: z.string().max(40).optional(),
+  tier: z.enum(['featured', 'standard', 'review']).optional(),
+  area_id: z.string().max(200).optional(),
+  q: z.string().trim().max(80).optional(),
+  wave: z.string().max(80).optional(),
+  confidence_min: z.coerce.number().min(0).max(1).optional(),
+  confidence_max: z.coerce.number().min(0).max(1).optional(),
+  sort: z.enum(['newest', 'name']).optional(),
+});
+
+// Plan 116: default /spots page size when the client sends no limit (older APKs).
+const DEFAULT_SPOT_PAGE = 50;
+
+function encodeSpotCursor(offset: number): string {
+  return Buffer.from(JSON.stringify({ o: offset }), 'utf8').toString('base64url');
+}
+
+function decodeSpotCursor(raw: unknown): number | undefined {
+  if (typeof raw !== 'string' || !raw || raw.length > 64) return undefined;
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    return Number.isInteger(parsed?.o) && parsed.o >= 0 && parsed.o <= 100_000 ? parsed.o : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** `west,south,east,north` in degrees; undefined when absent, null when malformed. */
+function parseBbox(raw: unknown): [number, number, number, number] | undefined | null {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== 'string') return null;
+  const parts = raw.split(',').map(Number);
+  if (parts.length !== 4 || parts.some((v) => !Number.isFinite(v))) return null;
+  const [west, south, east, north] = parts;
+  if (west < -180 || east > 180 || south < -90 || north > 90 || west >= east || south >= north) return null;
+  return [west, south, east, north];
+}
+
 router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res) => {
   const allowTest = isAuthorizedQA(req);
   if (allowTest) res.set('X-Robots-Tag', 'noindex, nofollow');
   const lat = numeric(req.query.lat),
     lng = numeric(req.query.lng),
     radius = numeric(req.query.radius_km);
-  const limit = numeric(req.query.limit),
-    offset = numeric(req.query.offset);
+  const limit = numeric(req.query.limit);
+  // Plan 116: `cursor` (opaque, from meta.next_cursor) or the older numeric `offset`.
+  const cursorOffset = decodeSpotCursor(req.query.cursor);
+  const offset = cursorOffset ?? numeric(req.query.offset);
+  const bbox = parseBbox(req.query.bbox);
+  const tier = req.query.tier as string | undefined;
   if (
     (lat !== undefined) !== (lng !== undefined) ||
-    [lat, lng, radius, limit, offset].some((v) => v !== undefined && !Number.isFinite(v))
+    [lat, lng, radius, limit, offset].some((v) => v !== undefined && !Number.isFinite(v)) ||
+    (req.query.cursor !== undefined && cursorOffset === undefined) ||
+    bbox === null ||
+    (tier !== undefined && !['featured', 'standard', 'review'].includes(tier))
   ) {
     return res.status(400).json({
       success: false,
-      error: { code: 'VALIDATION_ERROR', message: 'Valid lat/lng and radius values are required.' },
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Valid lat/lng, radius, bbox (west,south,east,north), tier and cursor values are required.',
+      },
     });
   }
+  // Plan 116: never return the whole national catalogue. Old clients that send no limit get
+  // the first page plus meta.total; new clients page with meta.next_cursor.
+  const pageSize = limit !== undefined ? Math.max(1, Math.min(100, Math.floor(limit))) : DEFAULT_SPOT_PAGE;
+  const pageOffset = offset !== undefined ? Math.max(0, Math.floor(offset)) : 0;
   const actorId =
     req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
   const homeTown = req.user?.id ? await getHomeTown(req.user.id) : null;
-  const data = spotStore.list({
+  const page = spotStore.listPage({
     search: req.query.q as string | undefined,
     categories: csv(req.query.categories),
     tags: csv(req.query.tags),
@@ -142,10 +198,67 @@ router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, async (req
     actorId,
     homeTown,
     allowTest,
-    limit: limit !== undefined ? Math.max(1, Math.min(100, Math.floor(limit))) : undefined,
-    offset: offset !== undefined ? Math.max(0, Math.floor(offset)) : undefined,
+    bbox: bbox ?? undefined,
+    areaId: typeof req.query.area_id === 'string' && req.query.area_id ? req.query.area_id : undefined,
+    tier: tier as 'featured' | 'standard' | 'review' | undefined,
+    limit: pageSize,
+    offset: pageOffset,
   });
-  return res.json({ success: true, data, meta: { count: data.length, sort: req.query.sort || 'recommended' } });
+  const data = page.items;
+  const nextOffset = pageOffset + data.length;
+  return res.json({
+    success: true,
+    data,
+    meta: {
+      count: data.length,
+      total: page.total,
+      next_cursor: nextOffset < page.total && data.length > 0 ? encodeSpotCursor(nextOffset) : null,
+      sort: req.query.sort || 'recommended',
+    },
+  });
+});
+
+// Plan 116: lightweight map markers for a viewport; grid clusters when a low zoom would
+// otherwise return too many points. Registered before /spots/:slug.
+const mapQuerySchema = z.object({
+  bbox: z.string(),
+  zoom: z.coerce.number().min(0).max(22),
+  categories: z.string().optional(),
+  tier: z.enum(['featured', 'standard', 'review']).optional(),
+});
+router.get('/spots/map', (req, res) => {
+  const parsed = mapQuerySchema.safeParse(req.query);
+  const bbox = parsed.success ? parseBbox(parsed.data.bbox) : null;
+  if (!parsed.success || !bbox)
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'bbox=west,south,east,north and zoom (0-22) are required.' },
+    });
+  res.set('Cache-Control', 'public, max-age=60');
+  const view = mapView(spotStore.spots, {
+    bbox,
+    zoom: Math.floor(parsed.data.zoom),
+    categories: csv(parsed.data.categories),
+    tier: parsed.data.tier,
+  });
+  return res.json({ success: true, data: { markers: view.markers, clusters: view.clusters }, meta: { total: view.total } });
+});
+
+// Plan 116: typeahead destination search (accent-insensitive; trigram typo tolerance on PostgreSQL).
+const searchQuerySchema = z.object({
+  q: z.string().trim().min(2).max(80),
+  limit: z.coerce.number().int().min(1).max(20).optional(),
+});
+router.get('/spots/search', async (req, res) => {
+  const parsed = searchQuerySchema.safeParse(req.query);
+  if (!parsed.success)
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'q must be 2-80 characters.' },
+    });
+  res.set('Cache-Control', 'public, max-age=60');
+  const data = await searchSpots(getPool(), spotStore.spots, parsed.data.q, parsed.data.limit ?? 10);
+  return res.json({ success: true, data, meta: { count: data.length } });
 });
 
 router.get('/spots/highlights', optionalAuthenticateToken, (req: AuthRequest, res) => {
@@ -439,18 +552,77 @@ router.get(
   '/admin/spots',
   authenticateToken,
   requireAreaAdmin(['destinations', 'quests_quizzes']),
-  (req: AuthRequest, res) => {
+  async (req: AuthRequest, res) => {
     const scope = req.adminScope!;
     const spots = spotStore.spots.filter(
       (s) => spotInAdminScope(scope, s) || spotInScope(scope, 'quests_quizzes', s.id),
     );
     const now = Date.now();
+    const paged = req.query.limit !== undefined || req.query.cursor !== undefined;
+    if (!paged) {
+      // Legacy shape (whole list) for the current dashboard; Plan 116 handout 116b moves it to paging.
+      return res.json({
+        success: true,
+        data: spots.map((s) => {
+          spotStore.isSuppressed(s, now);
+          return { ...s, ...spotStore.crowd(s, now) };
+        }),
+      });
+    }
+    const filters = adminSpotListSchema.safeParse(req.query);
+    const offset = req.query.cursor !== undefined ? decodeSpotCursor(req.query.cursor) : 0;
+    if (!filters.success || offset === undefined)
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid admin destination filters.' },
+      });
+    const f = filters.data;
+    let provenanceIds: Set<string> | null = null;
+    if (f.wave || f.confidence_min !== undefined || f.confidence_max !== undefined) {
+      const pool = getPool();
+      if (!pool)
+        return res.status(400).json({
+          success: false,
+          error: { code: 'UNSUPPORTED_FILTER', message: 'Import filters need the database.' },
+        });
+      const { rows } = await pool.query(
+        `SELECT spot_id FROM spot_provenance
+          WHERE ($1::text IS NULL OR import_wave = $1)
+            AND ($2::real IS NULL OR import_confidence >= $2)
+            AND ($3::real IS NULL OR import_confidence <= $3)`,
+        [f.wave ?? null, f.confidence_min ?? null, f.confidence_max ?? null],
+      );
+      provenanceIds = new Set(rows.map((r: { spot_id: string }) => r.spot_id));
+    }
+    const needle = f.q ? f.q.toLowerCase() : null;
+    const matched = spots
+      .filter(
+        (s) =>
+          (!f.status || s.status === f.status) &&
+          (!f.tier || s.launch_tier === f.tier) &&
+          (!f.area_id ||
+            [s.town_area_id, s.barangay_area_id, s.province_area_id, s.region_area_id].includes(f.area_id)) &&
+          (!needle || `${s.name} ${s.municipality}`.toLowerCase().includes(needle)) &&
+          (!provenanceIds || provenanceIds.has(s.id)),
+      )
+      .sort((a, b) =>
+        f.sort === 'name'
+          ? a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
+          : Date.parse(b.created_at) - Date.parse(a.created_at) || a.id.localeCompare(b.id),
+      );
+    const page = matched.slice(offset, offset + f.limit);
+    const next = offset + page.length;
     return res.json({
       success: true,
-      data: spots.map((s) => {
+      data: page.map((s) => {
         spotStore.isSuppressed(s, now);
         return { ...s, ...spotStore.crowd(s, now) };
       }),
+      meta: {
+        count: page.length,
+        total: matched.length,
+        next_cursor: next < matched.length && page.length > 0 ? encodeSpotCursor(next) : null,
+      },
     });
   },
 );
@@ -836,8 +1008,7 @@ router.patch(
       });
     }
 
-    await ensureAreaCache(getPool());
-    const areaMatch = matchSpotToAreas(nextLat, nextLng, nextMunicipality);
+    const areaMatch = await resolveSpotAreas(getPool(), nextLat, nextLng, nextMunicipality);
     const wasPublished = existing.status === 'published';
 
     const updated = await spotStore.updateSpot(existing.id, {
@@ -845,6 +1016,8 @@ router.patch(
       status: evaluation.status,
       town_area_id: areaMatch.townAreaId,
       barangay_area_id: areaMatch.barangayAreaId,
+      province_area_id: areaMatch.provinceAreaId,
+      region_area_id: areaMatch.regionAreaId,
     });
 
     await recordSpotModerationEvent({
