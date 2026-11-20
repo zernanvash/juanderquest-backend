@@ -38,7 +38,12 @@ hit 'Areas, Ilocos Norte view, zoom 11'     '/areas?bbox=120.4000,18.0000,120.90
 hit 'Area shape (Laoag)'                    '/areas/ilocos-norte--laoag/shape'         '"geometry"'
 hit 'Area shape (Pangasinan, carried)'      '/areas/pangasinan/shape'                  '"geometry"'
 hit 'Area spots (Vigan)'                    '/areas/ilocos-sur--vigan/spots'           ''
-hit 'Map markers (new endpoint)'            '/spots/map?bbox=119.5,15.3,121.2,18.8&zoom=8' '"markers"'
+hit 'Trails list'                           '/trails'                                  '"stop_count"'
+hit 'Trail detail (curated)'                '/trails/coastal_wonders_trail'            '"(stops|preview)"'
+hit 'Route Vigan to Laoag (turn by turn)'   '/routes?start_lat=17.5747&start_lng=120.3869&end_lat=18.1977&end_lng=120.5936' '"navigation_mode":"turn_by_turn"'
+hit 'Route La Union to Vigan'               '/routes?start_lat=16.6159&start_lng=120.3199&end_lat=17.5747&end_lng=120.3869' '"navigation_mode":"turn_by_turn"'
+hit 'Route in Pangasinan'                   '/routes?start_lat=16.0433&start_lng=120.3333&end_lat=16.1660&end_lng=119.9790' '"navigation_mode":"turn_by_turn"'
+hit 'Map markers (new endpoint)'           '/spots/map?bbox=119.5,15.3,121.2,18.8&zoom=8' '"markers"'
 P=$(curl -s "$B/spots/$PHOTO_SPOT" | grep -o '/api/v1/uploads/spot-photos/catalog/[^"]*w640.webp' | head -1)
 hit 'Catalog photo file (w640)'             "${P#/api/v1}"                             ''
 exit $fail

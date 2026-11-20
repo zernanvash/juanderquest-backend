@@ -1068,16 +1068,23 @@
       "reason": "Derived data: regenerated from the new catalog / by jobs after cutover"
     },
     "trail_stops": {
-      "mode": "regenerate",
-      "reason": "Derived data: regenerated from the new catalog / by jobs after cutover"
+      "mode": "carry-filtered",
+      "group": "content",
+      "reason": "Stops of the carried curated trails; a stop whose spot is not carried is dropped (FK closure)",
+      "columns": ["trail_id", "position", "spot_id", "checkin_radius_m", "dwell_min", "leg_minutes", "leg_km", "arrive_offset_min", "narration"],
+      "filter": "s.trail_id IN (SELECT t.id FROM trails t WHERE t.source = 'curated' AND t.status = 'published' AND NOT t.is_test)"
     },
     "trail_unlocks": {
       "mode": "empty",
       "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
     },
     "trails": {
-      "mode": "regenerate",
-      "reason": "Derived data: regenerated from the new catalog / by jobs after cutover"
+      "mode": "carry-filtered",
+      "group": "content",
+      "reason": "Curated published trails (owner-made; the only trails users saw: 4 in Pangasinan). Engine trails were all pending_review and are regenerated from the new catalog.",
+      "columns": ["id", "slug", "title", "tagline", "tier", "theme", "municipalities", "unlock_rule", "costing", "total_minutes", "total_km", "story", "status", "source", "owner_user_id", "generation_id", "available_from", "available_until", "version", "reviewed_by", "published_at", "is_test", "created_at"],
+      "filter": "s.source = 'curated' AND s.status = 'published' AND NOT s.is_test",
+      "onParentMissing": { "owner_user_id": "null", "generation_id": "null", "reviewed_by": "null" }
     },
     "travel_time_matrix": {
       "mode": "regenerate",

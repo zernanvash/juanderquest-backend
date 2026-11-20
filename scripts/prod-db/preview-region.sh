@@ -32,6 +32,9 @@ APP_URL=$(printf %s "$JDQ_APP_URL" | sed "s#/juanderquest_prod#/$DB#")
 JDQ_ENV=dev PORT=4130 HOST=127.0.0.1 DATABASE_URL="$APP_URL" CORS_ORIGIN=http://127.0.0.1:3130 \
   DB_MIGRATION_MODE=verify SEED_DEVELOPMENT_DATA=false ALLOW_IN_MEMORY_FALLBACK=false ALLOW_DEMO_LOGIN=false \
   LOCAL_UPLOAD_DIR="$HOME/jdq-seed/national-116/photos/media" \
+  VALHALLA_URL="${VALHALLA_URL:-http://127.0.0.1:8003}" \
+  VALHALLA_COVERAGE_BBOX="${VALHALLA_COVERAGE_BBOX:-119.70,15.55,121.05,18.70}" \
+  VALHALLA_COVERAGE_LABEL="${VALHALLA_COVERAGE_LABEL:-Ilocos Region}" \
   PREVIEW_FOREGROUND="${PREVIEW_FOREGROUND:-}" \
   bash -c 'if [ -n "$PREVIEW_FOREGROUND" ]; then exec node node_modules/tsx/dist/cli.mjs src/server.ts; else exec nohup node node_modules/tsx/dist/cli.mjs src/server.ts; fi' \
   > "$REH/preview-api.log" 2>&1 &
