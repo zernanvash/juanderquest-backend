@@ -1,0 +1,1291 @@
+{
+  "version": 1,
+  "plan": "Plan 116 §9 carry-over (fail-closed manifest)",
+  "groups": ["accounts", "content", "merchants", "community"],
+  "confirmGroups": {
+    "community_spots": {
+      "table": "spots",
+      "description": "Community-submitted spots; many are test entries. Only listed ids are carried.",
+      "eligible": "s.source_type = 'community' AND NOT s.is_test",
+      "list": {
+        "id": "s.id",
+        "slug": "s.slug",
+        "name": "s.name",
+        "status": "s.status",
+        "created": "s.created_at::date",
+        "creator_handle": "(SELECT coalesce(u.handle, '(no handle)') FROM public.users u WHERE u.id = s.created_by)",
+        "creator_domain": "(SELECT lower(split_part(u.email, '@', 2)) FROM public.users u WHERE u.id = s.created_by)",
+        "creator_role": "(SELECT u.role::text FROM public.users u WHERE u.id = s.created_by)",
+        "has_quest": "s.quest_id IS NOT NULL"
+      }
+    },
+    "quests": {
+      "table": "quests",
+      "description": "Quests: eligible = published, non-test, authored by an admin, an active merchant member, or the system (no author).",
+      "eligible": "NOT s.is_test AND s.status = 'published' AND (s.author_id IS NULL OR EXISTS (SELECT 1 FROM public.users u WHERE u.id = s.author_id AND u.role = 'admin') OR EXISTS (SELECT 1 FROM public.merchant_memberships mm WHERE mm.user_id = s.author_id AND mm.status = 'active'))",
+      "list": {
+        "id": "s.id",
+        "title": "s.title",
+        "status": "s.status::text",
+        "is_test": "s.is_test",
+        "is_active": "s.is_active",
+        "category": "s.category::text",
+        "author_handle": "(SELECT coalesce(u.handle, '(no handle)') FROM public.users u WHERE u.id = s.author_id)",
+        "author_role": "(SELECT u.role::text FROM public.users u WHERE u.id = s.author_id)",
+        "location_name": "s.location_name",
+        "created": "s.created_at::date"
+      }
+    },
+    "merchants": {
+      "table": "merchants",
+      "description": "Merchants: eligible = non-test. Memberships/products/application follow by FK closure.",
+      "eligible": "NOT s.is_test",
+      "list": {
+        "id": "s.id",
+        "name": "s.name",
+        "status": "s.status",
+        "is_published": "s.is_published",
+        "municipality": "s.municipality",
+        "created": "s.created_at::date",
+        "members": "(SELECT count(*) FROM public.merchant_memberships mm WHERE mm.merchant_id = s.id)"
+      }
+    },
+    "curated_collections": {
+      "table": "curated_collections",
+      "description": "Curated collections (collection spots follow by FK closure).",
+      "eligible": "TRUE",
+      "list": {
+        "id": "s.id",
+        "title": "s.title",
+        "category": "s.category",
+        "is_active": "s.is_active",
+        "spots": "(SELECT count(*) FROM public.curated_collection_spots c WHERE c.collection_id = s.id)"
+      }
+    },
+    "festivals": {
+      "table": "juanchoice_festivals",
+      "description": "JuanChoice festivals (non-test).",
+      "eligible": "NOT s.is_test",
+      "list": {
+        "id": "s.id::text",
+        "name": "s.name",
+        "municipality": "s.municipality",
+        "starts_on": "s.starts_on",
+        "ends_on": "s.ends_on"
+      }
+    }
+  },
+  "ownerLists": {
+    "users": {
+      "table": "users",
+      "description": "Every source user: handle + email domain only (never full emails or names); selected = carried by D2.",
+      "orderBy": "2, 1",
+      "list": {
+        "handle": "coalesce(s.handle, '(no handle) ' || left(s.id, 8))",
+        "email_domain": "lower(split_part(s.email, '@', 2))",
+        "role": "s.role::text",
+        "is_test": "s.is_test",
+        "has_email_login": "EXISTS (SELECT 1 FROM public.auth_identities a WHERE a.user_id = s.id AND a.provider = 'email') OR EXISTS (SELECT 1 FROM public.password_credentials p WHERE p.user_id = s.id)",
+        "created": "s.created_at::date"
+      }
+    }
+  },
+  "tables": {
+    "account_emails": {
+      "mode": "carry",
+      "group": "accounts",
+      "reason": "Account emails of carried users (FK closure on user_id)",
+      "columns": [
+        "id",
+        "user_id",
+        "email",
+        "normalized_email",
+        "is_verified",
+        "verified_at",
+        "is_primary",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    "achievement_awards": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "achievement_definitions": {
+      "mode": "carry",
+      "group": "content",
+      "reason": "Achievement catalog (migration-seeded rows take the live values)",
+      "columns": [
+        "id",
+        "track",
+        "title",
+        "description",
+        "badge_icon",
+        "category",
+        "threshold",
+        "criteria_version",
+        "is_active",
+        "created_at"
+      ],
+      "existing": "update"
+    },
+    "admin_area_assignments": {
+      "mode": "carry",
+      "group": "community",
+      "reason": "Area-admin grants of carried users granted by carried admins (FK closure; 0 rows today)",
+      "columns": ["id", "user_id", "area_id", "powers", "granted_by", "granted_at", "revoked_at"]
+    },
+    "admin_areas": {
+      "mode": "carry",
+      "group": "content",
+      "reason": "All admin areas (Pangasinan ids unchanged); rows the national areas import already loaded are kept as they are (target wins)",
+      "columns": [
+        "id",
+        "psgc_code",
+        "level",
+        "name",
+        "display_name",
+        "parent_id",
+        "osm_relation_id",
+        "has_boundary",
+        "label_lat",
+        "label_lng",
+        "bbox",
+        "min_zoom",
+        "shape_file",
+        "data_version",
+        "updated_at",
+        "boundary"
+      ],
+      "existing": "keep"
+    },
+    "admin_audit_log": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "admin_point_grants": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "ai_cache": {
+      "mode": "regenerate",
+      "reason": "Derived data: regenerated from the new catalog / by jobs after cutover"
+    },
+    "ar_game_sessions": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "auth_challenges": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "auth_identities": {
+      "mode": "carry-filtered",
+      "group": "accounts",
+      "reason": "Login identities of carried users (FK closure on user_id); wallet identities are chain links and are not carried",
+      "columns": ["id", "user_id", "provider", "provider_subject", "created_at", "updated_at"],
+      "filter": "s.provider <> 'wallet'"
+    },
+    "auth_mail_outbox": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "avatar_reports": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "bug_reports": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "chain_block_headers": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "chain_checkpoints": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "chain_commands": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "chain_contracts": {
+      "mode": "ignore",
+      "reason": "Seeded by migrations (Amoy testnet contract registry); nothing copied"
+    },
+    "chain_events": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "chain_transaction_attempts": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "chain_wallet_audit": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "chain_wallets": {
+      "mode": "ignore",
+      "reason": "Seeded by migrations (system wallets); nothing copied"
+    },
+    "community_goal_unlocks": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "community_goals": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "cosmetic_audit": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "cosmetic_items": {
+      "mode": "ignore",
+      "reason": "Cosmetic catalog seeded by migrations (same 33 rows); nothing copied"
+    },
+    "crowd_suggestion_dismissals": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "cultural_quiz_attempt_answers": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "cultural_quiz_attempts": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "cultural_quiz_completions": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "cultural_quiz_options": {
+      "mode": "carry",
+      "group": "content",
+      "reason": "Options of carried quiz questions",
+      "columns": ["id", "question_id", "ordinal", "option_text", "is_correct", "created_at"]
+    },
+    "cultural_quiz_questions": {
+      "mode": "carry",
+      "group": "content",
+      "reason": "Questions of carried quiz versions",
+      "columns": [
+        "id",
+        "version_id",
+        "ordinal",
+        "question_text",
+        "explanation",
+        "source_url",
+        "created_at",
+        "question_type",
+        "media_url",
+        "hint",
+        "round",
+        "answer_payload"
+      ]
+    },
+    "cultural_quiz_versions": {
+      "mode": "carry",
+      "group": "content",
+      "reason": "Versions of carried quizzes",
+      "columns": [
+        "id",
+        "quiz_id",
+        "version",
+        "title",
+        "description",
+        "language",
+        "radius_meters",
+        "xp_reward",
+        "time_limit_minutes",
+        "cooldown_hours",
+        "created_by",
+        "published_at",
+        "created_at",
+        "host_lines",
+        "theme"
+      ],
+      "onParentMissing": {
+        "created_by": "null"
+      }
+    },
+    "cultural_quizzes": {
+      "mode": "carry-filtered",
+      "group": "content",
+      "reason": "Cultural quizzes of carried spots (non-test)",
+      "columns": [
+        "id",
+        "destination_id",
+        "reward_scope_id",
+        "status",
+        "current_version",
+        "created_by",
+        "is_test",
+        "created_at",
+        "updated_at"
+      ],
+      "filter": "NOT s.is_test",
+      "onParentMissing": {
+        "created_by": "null"
+      }
+    },
+    "curated_collection_spots": {
+      "mode": "carry",
+      "group": "content",
+      "reason": "Spots of carried collections (FK closure)",
+      "columns": ["collection_id", "spot_id", "order_index"]
+    },
+    "curated_collections": {
+      "mode": "carry-filtered",
+      "group": "content",
+      "reason": "Only collections the owner confirms (migration-seeded rows take the live values)",
+      "columns": ["id", "title", "description", "category", "badge_id", "is_active", "created_at"],
+      "filter": "s.id = ANY({{confirm:curated_collections}})",
+      "existing": "update"
+    },
+    "daily_claims": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "daily_missions": {
+      "mode": "carry",
+      "group": "content",
+      "reason": "Daily mission catalog (migration-seeded rows take the live values)",
+      "columns": ["id", "kind", "title", "stamps", "on_site", "active", "created_at", "updated_at"],
+      "existing": "update"
+    },
+    "discovery_preferences": {
+      "mode": "carry",
+      "group": "accounts",
+      "reason": "Discovery preferences of carried users (FK closure on user_id)",
+      "columns": [
+        "user_id",
+        "categories",
+        "tags",
+        "occasions",
+        "price_levels",
+        "radius_km",
+        "onboarding_state",
+        "updated_at"
+      ]
+    },
+    "economic_accounts": {
+      "mode": "ignore",
+      "reason": "System economic accounts seeded by migrations; balances start fresh"
+    },
+    "economic_activity_scopes": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "economic_assets": {
+      "mode": "ignore",
+      "reason": "Asset registry seeded by migrations"
+    },
+    "economic_commands": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "economic_corrections": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "economic_cosmetics": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "economic_entitlements": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "economic_outbox": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "economic_outbox_receipts": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "economic_quest_scope_bindings": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "economic_reward_policies": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "economic_transactions": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "economic_transfers": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "engagement_challenges": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "governance_audit": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "governance_ledger": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "governance_snapshot": {
+      "mode": "regenerate",
+      "reason": "Derived data: regenerated from the new catalog / by jobs after cutover"
+    },
+    "home_town_sightings": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_ballot_events": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_ballots": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_campaign_audit": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_campaigns": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_candidates": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_festivals": {
+      "mode": "carry-filtered",
+      "group": "content",
+      "reason": "Only festivals the owner confirms (non-test)",
+      "columns": [
+        "id",
+        "name",
+        "municipality",
+        "starts_on",
+        "ends_on",
+        "boost_multiplier",
+        "is_test",
+        "created_by",
+        "created_at",
+        "boosts_voting"
+      ],
+      "filter": "NOT s.is_test AND s.id::text = ANY({{confirm:festivals}})"
+    },
+    "juanchoice_merchant_offers": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_participations": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_perk_control_audit": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_perk_settings": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_perk_suspensions": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_promotion_assessments": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_promotion_budgets": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_receipts": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_region_locks": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_results": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_schedule_audit": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_schedule_periods": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_schedules": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "juanchoice_spot_election_state": {
+      "mode": "regenerate",
+      "reason": "Derived data: regenerated from the new catalog / by jobs after cutover"
+    },
+    "juanchoice_supporter_quest_claims": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "lgu_operator_scopes": {
+      "mode": "ignore",
+      "reason": "Legacy table dropped by later migrations (source only); nothing copied"
+    },
+    "merchant_affiliate_applications": {
+      "mode": "carry-filtered",
+      "group": "merchants",
+      "reason": "Only the source application of an owner-confirmed merchant; applicant must be carried",
+      "columns": [
+        "id",
+        "user_id",
+        "business_name",
+        "category",
+        "municipality",
+        "contact_name",
+        "contact_email",
+        "contact_phone",
+        "sponsorship_goals",
+        "proposal_details",
+        "status",
+        "reviewer_id",
+        "reviewer_notes",
+        "reviewed_at",
+        "created_at",
+        "updated_at",
+        "version",
+        "business_address",
+        "business_province",
+        "gps_lat",
+        "gps_lng",
+        "preferred_contact_method",
+        "applicant_feedback",
+        "declaration_version",
+        "resubmission_count",
+        "previous_rejection_reason",
+        "resubmitted_at",
+        "appeal_message",
+        "appealed_at"
+      ],
+      "filter": "s.id IN (SELECT m.source_application_id FROM public.merchants m WHERE m.id = ANY({{confirm:merchants}}) AND m.source_application_id IS NOT NULL)",
+      "onParentMissing": {
+        "reviewer_id": "null"
+      }
+    },
+    "merchant_affiliate_drafts": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "merchant_application_audits": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "merchant_memberships": {
+      "mode": "carry",
+      "group": "merchants",
+      "reason": "Memberships of carried users in carried merchants (FK closure)",
+      "columns": ["id", "merchant_id", "user_id", "role", "status", "created_at", "updated_at"]
+    },
+    "merchant_point_credits": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "merchant_products": {
+      "mode": "carry",
+      "group": "merchants",
+      "reason": "Products of carried merchants (FK closure)",
+      "columns": [
+        "id",
+        "merchant_id",
+        "name",
+        "description",
+        "price",
+        "currency",
+        "image_url",
+        "is_published",
+        "is_archived",
+        "display_order",
+        "created_at",
+        "updated_at",
+        "specialty_at"
+      ]
+    },
+    "merchants": {
+      "mode": "carry-filtered",
+      "group": "merchants",
+      "reason": "Only merchants the owner confirms (non-test); migration-seeded sample merchants take the live values if confirmed",
+      "columns": [
+        "id",
+        "name",
+        "location",
+        "description",
+        "created_at",
+        "status",
+        "is_published",
+        "category",
+        "municipality",
+        "contact_email",
+        "contact_phone",
+        "logo_url",
+        "banner_url",
+        "source_application_id",
+        "is_test",
+        "town_area_id",
+        "gps_lat",
+        "gps_lng",
+        "spot_id",
+        "sponsoring_suspended",
+        "sponsoring_suspended_reason",
+        "sponsoring_suspended_at"
+      ],
+      "filter": "NOT s.is_test AND s.id = ANY({{confirm:merchants}})",
+      "existing": "update",
+      "onParentMissing": {
+        "source_application_id": "null",
+        "spot_id": "null",
+        "town_area_id": "null"
+      }
+    },
+    "municipalities": {
+      "mode": "ignore",
+      "reason": "Legacy municipality list seeded by migrations (admin_areas replaces it)"
+    },
+    "nearby_quest_announcements": {
+      "mode": "regenerate",
+      "reason": "Derived data: regenerated from the new catalog / by jobs after cutover"
+    },
+    "nearby_quest_push_days": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "outbox_events": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "password_credentials": {
+      "mode": "carry",
+      "group": "accounts",
+      "reason": "Password hashes of carried users (FK closure on user_id)",
+      "columns": ["id", "user_id", "password_hash", "algorithm", "salt", "created_at", "updated_at"]
+    },
+    "plaza_job_runs": {
+      "mode": "regenerate",
+      "reason": "Derived data: regenerated from the new catalog / by jobs after cutover"
+    },
+    "plaza_weekly_scores": {
+      "mode": "regenerate",
+      "reason": "Derived data: regenerated from the new catalog / by jobs after cutover"
+    },
+    "points_accounts": {
+      "mode": "ignore",
+      "reason": "System points accounts seeded by migrations; merchant/plan accounts start fresh"
+    },
+    "progression_events": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "progression_totals": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "push_deliveries": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "qotd_answers": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "qotd_options": {
+      "mode": "carry",
+      "group": "content",
+      "reason": "Question-of-the-day options (migration-seeded rows take the live values)",
+      "columns": ["id", "question_id", "ordinal", "option_text", "is_correct"],
+      "existing": "update"
+    },
+    "qotd_questions": {
+      "mode": "carry",
+      "group": "content",
+      "reason": "Question-of-the-day bank (migration-seeded rows take the live values)",
+      "columns": [
+        "id",
+        "question_text",
+        "explanation",
+        "source_url",
+        "active",
+        "created_by",
+        "created_at",
+        "updated_at"
+      ],
+      "existing": "update",
+      "onParentMissing": {
+        "created_by": "null"
+      }
+    },
+    "quest_attempts": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "quest_funding_commands": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "quest_funding_contributions": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "quest_funding_hold_allocations": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "quest_funding_holds": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "quest_funding_plans": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "quest_sponsorships": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "quest_step_evidence": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "quest_voucher_perks": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "question_of_the_day": {
+      "mode": "carry-filtered",
+      "group": "content",
+      "reason": "QOTD schedule: future Manila dates only (past days are history)",
+      "columns": ["manila_date", "question_id", "created_at"],
+      "filter": "s.manila_date > (now() AT TIME ZONE 'Asia/Manila')::date"
+    },
+    "quests": {
+      "mode": "carry-filtered",
+      "group": "content",
+      "reason": "Only quests the owner confirms (eligible: published, non-test, admin/merchant/system-authored)",
+      "columns": [
+        "id",
+        "title",
+        "description",
+        "category",
+        "location_name",
+        "gps_lat",
+        "gps_lng",
+        "radius_meters",
+        "reward_points",
+        "marker_code",
+        "marker_image_url",
+        "is_active",
+        "created_at",
+        "updated_at",
+        "is_test",
+        "author_id",
+        "status",
+        "version",
+        "steps",
+        "funding_required",
+        "step_order_mode",
+        "is_featured"
+      ],
+      "filter": "NOT s.is_test AND s.id = ANY({{confirm:quests}})"
+    },
+    "redemptions": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "reviewed_quest_spot_bindings": {
+      "mode": "carry-filtered",
+      "group": "content",
+      "reason": "Bindings of carried quests to carried spots (non-test)",
+      "columns": [
+        "id",
+        "quest_id",
+        "spot_id",
+        "binding_version",
+        "status",
+        "reviewed_by",
+        "notes",
+        "is_test",
+        "created_at",
+        "updated_at"
+      ],
+      "filter": "NOT s.is_test",
+      "onParentMissing": {
+        "reviewed_by": "null"
+      }
+    },
+    "reward_appeals": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "reward_awards": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "reward_pools": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "reward_reservations": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "schema_migrations": {
+      "mode": "ignore",
+      "reason": "Migration ledger: rebuilt by replaying migrations on the new DB, never copied"
+    },
+    "seed_runs": {
+      "mode": "ignore",
+      "reason": "New in 110 (target only): written by the national importers"
+    },
+    "shop_teasers": {
+      "mode": "ignore",
+      "reason": "Shop teasers seeded by migrations"
+    },
+    "social_activities": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "social_cheers": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "social_comment_reports": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "social_comments": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "spot_activity_events": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "spot_assets": {
+      "mode": "carry-filtered",
+      "group": "content",
+      "reason": "Assets attached to carried spots (url/object_key kept; files are moved by the photos phase); uploader must be carried (user_id may only be NULL for catalog sources)",
+      "columns": [
+        "id",
+        "user_id",
+        "storage_provider",
+        "object_key",
+        "url",
+        "mime_type",
+        "width",
+        "height",
+        "size_bytes",
+        "status",
+        "spot_id",
+        "created_at",
+        "updated_at"
+      ],
+      "filter": "s.spot_id IS NOT NULL AND s.status <> 'deleted'"
+    },
+    "spot_interactions": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "spot_moderation_events": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "spot_photo_submissions": {
+      "mode": "carry-filtered",
+      "group": "community",
+      "reason": "Approved photo submissions of carried users on carried spots/assets",
+      "columns": [
+        "id",
+        "spot_id",
+        "user_id",
+        "asset_id",
+        "caption",
+        "status",
+        "reviewed_by",
+        "reviewed_at",
+        "reject_reason",
+        "created_at",
+        "updated_at"
+      ],
+      "filter": "s.status = 'approved'",
+      "onParentMissing": {
+        "reviewed_by": "null"
+      }
+    },
+    "spot_provenance": {
+      "mode": "ignore",
+      "reason": "New in 110 (target only): written by the national destinations importer"
+    },
+    "spot_reports": {
+      "mode": "carry-filtered",
+      "group": "community",
+      "reason": "Open (pending) reports from carried users",
+      "columns": [
+        "id",
+        "spot_id",
+        "user_id",
+        "reporter_name",
+        "reason",
+        "details",
+        "status",
+        "resolved_by",
+        "resolved_at",
+        "resolution_note",
+        "created_at",
+        "updated_at",
+        "weight"
+      ],
+      "filter": "s.status = 'pending' AND s.user_id IS NOT NULL",
+      "onParentMissing": {
+        "resolved_by": "null"
+      }
+    },
+    "spots": {
+      "mode": "carry-filtered",
+      "group": "content",
+      "reason": "All non-community spots (ids/slugs unchanged); community spots only when the owner confirms them (many are test entries); migration-seeded rows take the live values",
+      "columns": [
+        "id",
+        "slug",
+        "name",
+        "description",
+        "category",
+        "subcategory",
+        "tags",
+        "municipality",
+        "address",
+        "gps_lat",
+        "gps_lng",
+        "price_level",
+        "hours",
+        "amenities",
+        "image_url",
+        "source_type",
+        "source_name",
+        "source_url",
+        "trust_level",
+        "status",
+        "quest_id",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "crowd_capacity_band",
+        "reviewed_by",
+        "reviewed_at",
+        "recommendation_suppressed",
+        "is_test",
+        "good_for",
+        "best_time",
+        "town_area_id",
+        "barangay_area_id",
+        "recommendation_suppressed_until"
+      ],
+      "filter": "NOT s.is_test AND (s.source_type <> 'community' OR s.id = ANY({{confirm:community_spots}}))",
+      "existing": "update",
+      "onParentMissing": {
+        "created_by": "null",
+        "reviewed_by": "null",
+        "quest_id": "null"
+      }
+    },
+    "stamp_balances": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "stamp_ledger": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "streak_shield_events": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "submissions": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "suki_cards": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "suki_programs": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "suki_rewards": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "suki_visits": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "system_settings_audit": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "system_settings_document": {
+      "mode": "carry",
+      "group": "content",
+      "reason": "System settings (single row; live values win over the migration default)",
+      "columns": ["id", "values", "revision", "updated_by", "updated_at"],
+      "existing": "update",
+      "onParentMissing": {
+        "updated_by": "null"
+      }
+    },
+    "trail_checkins": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "trail_completions": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "trail_generations": {
+      "mode": "regenerate",
+      "reason": "Derived data: regenerated from the new catalog / by jobs after cutover"
+    },
+    "trail_stops": {
+      "mode": "regenerate",
+      "reason": "Derived data: regenerated from the new catalog / by jobs after cutover"
+    },
+    "trail_unlocks": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "trails": {
+      "mode": "regenerate",
+      "reason": "Derived data: regenerated from the new catalog / by jobs after cutover"
+    },
+    "travel_time_matrix": {
+      "mode": "regenerate",
+      "reason": "Derived data: regenerated from the new catalog / by jobs after cutover"
+    },
+    "trend_digests": {
+      "mode": "regenerate",
+      "reason": "Derived data: regenerated from the new catalog / by jobs after cutover"
+    },
+    "user_cosmetic_loadout": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "user_cosmetics": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "user_daily_missions": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "user_devices": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "user_engagement_preferences": {
+      "mode": "carry",
+      "group": "accounts",
+      "reason": "Engagement preferences of carried users (FK closure on user_id)",
+      "columns": ["user_id", "share_achievements", "updated_at"]
+    },
+    "user_follows": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "user_notification_preferences": {
+      "mode": "carry",
+      "group": "accounts",
+      "reason": "Notification preferences of carried users (FK closure on user_id)",
+      "columns": [
+        "user_id",
+        "push_overtaken",
+        "push_friend_activity",
+        "push_social",
+        "push_weekly_recap",
+        "quiet_hours",
+        "updated_at",
+        "push_nearby_quest"
+      ]
+    },
+    "user_notifications": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "user_role_audit": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "user_streaks": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "users": {
+      "mode": "carry-filtered",
+      "group": "accounts",
+      "reason": "D2: admins + real accounts (not guest.invalid/simulation.invalid/*.local/example.test, not is_test, not QA); account/profile/home town/preferences only — points, reputation, wallet link and badges reset",
+      "columns": [
+        "id",
+        "seed_id",
+        "display_name",
+        "email",
+        "avatar_url",
+        "role",
+        "demo_points",
+        "created_at",
+        "updated_at",
+        "is_public",
+        "handle",
+        "bio",
+        "status_text",
+        "is_test",
+        "scout_reputation",
+        "wallet_address",
+        "age_eligibility_declared",
+        "age_declared_at",
+        "terms_accepted_version",
+        "terms_accepted_at",
+        "share_activity",
+        "admin_scope",
+        "session_epoch",
+        "tutorials_seen",
+        "home_municipality",
+        "featured_badges",
+        "favorite_spot_id",
+        "progress_public",
+        "home_town_source",
+        "home_town_gps"
+      ],
+      "filter": "NOT s.is_test AND s.role <> 'qa' AND (s.role = 'admin' OR (lower(split_part(s.email, '@', 2)) NOT IN ('guest.invalid', 'simulation.invalid', 'example.test') AND lower(split_part(s.email, '@', 2)) <> 'local' AND lower(split_part(s.email, '@', 2)) NOT LIKE '%.local' AND split_part(s.email, '@', 2) <> ''))",
+      "transform": {
+        "demo_points": "0",
+        "scout_reputation": "0",
+        "wallet_address": "NULL",
+        "featured_badges": "'{}'::text[]"
+      },
+      "onParentMissing": {
+        "favorite_spot_id": "null"
+      },
+      "deferred": ["favorite_spot_id"]
+    },
+    "verified_visits": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    },
+    "vouchers": {
+      "mode": "ignore",
+      "reason": "Voucher catalog is part of the points economy (fresh start); the migration-seeded sample vouchers stay"
+    },
+    "web_analytics_events": {
+      "mode": "empty",
+      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+    }
+  },
+  "reverse": {
+    "description": "Plan 116 §11 step 8: within 24 h of cutover, copy accounts created/changed on the new DB back into the old DB (users/auth tables only). Sanitised columns (points, reputation, wallet, badges, favourite spot) are never written back.",
+    "tables": {
+      "users": {
+        "columns": [
+          "id",
+          "seed_id",
+          "display_name",
+          "email",
+          "avatar_url",
+          "role",
+          "created_at",
+          "updated_at",
+          "is_public",
+          "handle",
+          "bio",
+          "status_text",
+          "is_test",
+          "age_eligibility_declared",
+          "age_declared_at",
+          "terms_accepted_version",
+          "terms_accepted_at",
+          "share_activity",
+          "admin_scope",
+          "session_epoch",
+          "tutorials_seen",
+          "home_municipality",
+          "progress_public",
+          "home_town_source",
+          "home_town_gps"
+        ],
+        "filter": "(s.created_at >= {{since}} OR s.updated_at >= {{since}})"
+      },
+      "auth_identities": {
+        "columns": ["id", "user_id", "provider", "provider_subject", "created_at", "updated_at"],
+        "filter": "s.provider <> 'wallet' AND (s.created_at >= {{since}} OR s.updated_at >= {{since}})"
+      },
+      "password_credentials": {
+        "columns": ["id", "user_id", "password_hash", "algorithm", "salt", "created_at", "updated_at"],
+        "filter": "(s.created_at >= {{since}} OR s.updated_at >= {{since}})"
+      },
+      "account_emails": {
+        "columns": [
+          "id",
+          "user_id",
+          "email",
+          "normalized_email",
+          "is_verified",
+          "verified_at",
+          "is_primary",
+          "created_at",
+          "updated_at"
+        ],
+        "filter": "(s.created_at >= {{since}} OR s.updated_at >= {{since}})"
+      },
+      "discovery_preferences": {
+        "columns": [
+          "user_id",
+          "categories",
+          "tags",
+          "occasions",
+          "price_levels",
+          "radius_km",
+          "onboarding_state",
+          "updated_at"
+        ],
+        "filter": "s.updated_at >= {{since}}"
+      },
+      "user_engagement_preferences": {
+        "columns": ["user_id", "share_achievements", "updated_at"],
+        "filter": "s.updated_at >= {{since}}"
+      },
+      "user_notification_preferences": {
+        "columns": [
+          "user_id",
+          "push_overtaken",
+          "push_friend_activity",
+          "push_social",
+          "push_weekly_recap",
+          "quiet_hours",
+          "updated_at",
+          "push_nearby_quest"
+        ],
+        "filter": "s.updated_at >= {{since}}"
+      }
+    }
+  }
+}
