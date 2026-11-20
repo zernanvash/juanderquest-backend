@@ -168,6 +168,9 @@ describe('Plan 116 catalog photos in spot payloads', () => {
     expect(photos[0].is_primary).toBe(true);
     expect(photos[1].url).toBe('/u/p2-640');
     expect(photos[0].attribution).toBe('Photo: A. Photographer / Wikimedia Commons, CC BY-SA 4.0');
+    // The fields the mobile app renders as photo credit (SpotPhoto.sourceName / sourceUrl).
+    expect(photos[0].source_name).toBe(photos[0].attribution);
+    expect(photos[0].source_url).toBe('https://commons.wikimedia.org/wiki/File:X.jpg');
   });
 });
 
@@ -175,7 +178,9 @@ describe('Plan 116 GET /spots contract', () => {
   it('caps unpaged responses and exposes total + an opaque cursor', async () => {
     const res = await request(app).get('/api/v1/spots');
     expect(res.status).toBe(200);
-    expect(res.body.data.length).toBeLessThanOrEqual(50);
+    // Apps that don't page get up to 300 (covers a launch region; still bounded).
+    expect(res.body.data.length).toBeLessThanOrEqual(300);
+    expect(res.body.data.length).toBe(Math.min(300, res.body.meta.total));
     expect(typeof res.body.meta.total).toBe('number');
     expect(res.body.meta.count).toBe(res.body.data.length);
     const small = await request(app).get('/api/v1/spots?limit=2');

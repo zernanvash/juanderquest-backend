@@ -121,8 +121,14 @@ const adminSpotListSchema = z.object({
   sort: z.enum(['newest', 'name']).optional(),
 });
 
-// Plan 116: default /spots page size when the client sends no limit (older APKs).
-const DEFAULT_SPOT_PAGE = 50;
+// Plan 116: page size when the client sends neither limit nor cursor. Every shipped app (v0.3.x
+// and v0.4.0) calls GET /spots without paging and builds Explore AND the map from that one list,
+// so this must cover a launch region (Region I: 146 public spots) or installed apps lose spots.
+// Bounded (≤ CACHED_HEAD); handout 116b moves the app to /spots/map + cursor paging before more
+// regions launch, after which this can drop back to 50.
+const DEFAULT_SPOT_PAGE = 300;
+// Explicit limit= stays capped at 100 per page.
+const MAX_SPOT_PAGE = 100;
 
 function encodeSpotCursor(offset: number): string {
   return Buffer.from(JSON.stringify({ o: offset }), 'utf8').toString('base64url');
@@ -178,7 +184,12 @@ router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, async (req
   }
   // Plan 116: never return the whole national catalogue. Old clients that send no limit get
   // the first page plus meta.total; new clients page with meta.next_cursor.
-  const pageSize = limit !== undefined ? Math.max(1, Math.min(100, Math.floor(limit))) : DEFAULT_SPOT_PAGE;
+  const pageSize =
+    limit !== undefined
+      ? Math.max(1, Math.min(MAX_SPOT_PAGE, Math.floor(limit)))
+      : cursorOffset !== undefined
+        ? MAX_SPOT_PAGE
+        : DEFAULT_SPOT_PAGE;
   const pageOffset = offset !== undefined ? Math.max(0, Math.floor(offset)) : 0;
   const actorId =
     req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;

@@ -48,6 +48,12 @@ export interface SpotCatalogPhoto {
   attribution_url: string | null;
   source: string;
   attribution: string;
+  // Same credit under the names the mobile app already renders (SpotPhoto.sourceName/sourceUrl),
+  // so CC BY / BY-SA credit shows without an app update.
+  source_name: string;
+  source_url: string | null;
+  mime_type: string;
+  media_type: 'image';
 }
 
 export class SpotAssetStore {
@@ -78,7 +84,9 @@ export class SpotAssetStore {
           (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
           a.id.localeCompare(b.id),
       )
-      .map((a) => ({
+      .map((a) => {
+        const attribution = `Photo: ${a.author} / ${a.source === 'commons' ? 'Wikimedia Commons' : a.source}, ${a.license}`;
+        return {
         id: a.id,
         url: a.variants?.w640 || a.url,
         variants: a.variants || {},
@@ -92,8 +100,13 @@ export class SpotAssetStore {
         license_url: a.license_url ?? null,
         attribution_url: a.attribution_url ?? null,
         source: a.source!,
-        attribution: `Photo: ${a.author} / ${a.source === 'commons' ? 'Wikimedia Commons' : a.source}, ${a.license}`,
-      }));
+        attribution,
+        source_name: attribution,
+        source_url: a.attribution_url ?? a.license_url ?? null,
+        mime_type: 'image/webp',
+        media_type: 'image' as const,
+        };
+      });
   }
 
   async createPendingAsset(
