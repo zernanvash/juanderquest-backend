@@ -531,8 +531,11 @@
       "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
     },
     "juanchoice_schedules": {
-      "mode": "empty",
-      "reason": "Fresh start (D2): progression, points, ledgers, chain (Amoy testnet), social, devices, analytics, audit history stay in the old-DB backup"
+      "mode": "carry-filtered",
+      "group": "content",
+      "reason": "Owner 2026-11-21 (option a): keep the weekly election schedule (config only). The scheduler rebuilds periods/campaigns/candidates from it; ballots and results start at zero.",
+      "columns": ["id", "schedule_key", "region_key", "display_region", "timezone", "cadence", "enabled", "effective_period", "preparation_lead_days", "minimum_candidates", "target_candidates", "maximum_candidates", "themes", "policy_version", "is_test", "created_at", "updated_at", "winner_cooldown_weeks", "minister_cooldown_weeks", "special_round_interval_weeks"],
+      "filter": "NOT s.is_test"
     },
     "juanchoice_spot_election_state": {
       "mode": "regenerate",
