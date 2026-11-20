@@ -419,6 +419,8 @@ router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, asyn
       like_count: spotStore.likeCount(spot.id, actorId),
       trend_score: spotStore.trend(spot.id),
       attached_assets: attached,
+      // Plan 116 §6.3: licensed catalog photos with credit; image_url stays the primary w640.
+      photos: assetStore.catalogPhotos(spot.id),
       sponsors,
       ...moderation,
     },

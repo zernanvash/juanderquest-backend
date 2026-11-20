@@ -147,6 +147,8 @@ const toHit = (s: Spot): SearchHit => ({
   thumb: s.image_url || null,
 });
 
+export const SEARCH_WORD_SIMILARITY = 0.45;
+
 const escapeLike = (v: string) => v.replace(/[\\%_]/g, (m) => `\\${m}`);
 
 /**
@@ -163,16 +165,21 @@ export async function searchSpots(
     return searchSpotsInMemory(spots, query, limit);
   }
   try {
+    // Word similarity matches a typed word against the best-matching part of a long name
+    // ("vigna" → "Vigan Cathedral" 0.50, "paoya" → "Paoay Church" 0.50); plain similarity
+    // compares whole strings and misses those. 0.45 measured on Region I (Plan 116 §6.6).
     const { rows } = await pool.query(
-      `SELECT id FROM spots
-        WHERE status = 'published' AND NOT is_test
-          AND (f_unaccent(lower(name)) LIKE '%' || $2 || '%' ESCAPE '\\'
-               OR f_unaccent(lower(name)) % f_unaccent(lower($1)))
-        ORDER BY (f_unaccent(lower(name)) LIKE $2 || '%' ESCAPE '\\') DESC,
-                 similarity(f_unaccent(lower(name)), f_unaccent(lower($1))) DESC,
+      `SELECT id FROM (
+         SELECT id, name, launch_tier, f_unaccent(lower(name)) AS n FROM spots
+          WHERE status = 'published' AND NOT is_test) s
+        WHERE n LIKE '%' || $2 || '%' ESCAPE '\\'
+           OR word_similarity(f_unaccent(lower($1)), n) >= $4
+        ORDER BY (n LIKE $2 || '%' ESCAPE '\\') DESC,
+                 (n LIKE '%' || $2 || '%' ESCAPE '\\') DESC,
+                 word_similarity(f_unaccent(lower($1)), n) DESC,
                  (launch_tier = 'featured') DESC NULLS LAST, name
         LIMIT $3`,
-      [query, escapeLike(fold(query)), limit],
+      [query, escapeLike(fold(query)), limit, SEARCH_WORD_SIMILARITY],
     );
     const byId = new Map(spots.map((s) => [s.id, s]));
     return rows.map((r) => byId.get(r.id)).filter((s): s is Spot => Boolean(s)).map(toHit);

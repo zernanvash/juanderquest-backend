@@ -4,6 +4,7 @@ import { app } from '../src/app';
 import { SpotStore, type Spot } from '../src/spots/store.js';
 import { rankExploreSpotsPage, RANK_CANDIDATE_CAP, CACHED_HEAD } from '../src/spots/recommender.js';
 import { mapView, searchSpotsInMemory, MAP_MARKER_LIMIT } from '../src/spots/national.js';
+import { SpotAssetStore } from '../src/spots/asset-store.js';
 
 const base = new Date('2026-11-01T00:00:00Z').toISOString();
 
@@ -134,6 +135,39 @@ describe('Plan 116 typeahead (in-memory path)', () => {
     ];
     const hits = searchSpotsInMemory(spots, 'las pinas', 10);
     expect(hits.map((h) => h.id)).toEqual(['syn-1', 'syn-2']);
+  });
+});
+
+describe('Plan 116 catalog photos in spot payloads', () => {
+  it('lists only licensed, credited catalog photos, primary first', () => {
+    const store = new SpotAssetStore();
+    const base = {
+      user_id: null as unknown as string,
+      storage_provider: 'local' as const,
+      object_key: 'k',
+      mime_type: 'image/webp',
+      media_type: 'image' as const,
+      width: 1280,
+      height: 960,
+      size_bytes: 1,
+      spot_id: 'syn-1',
+      created_at: '2026-11-20T00:00:00.000Z',
+      updated_at: '2026-11-20T00:00:00.000Z',
+      source: 'commons',
+      license: 'CC BY-SA 4.0',
+      author: 'A. Photographer',
+      attribution_url: 'https://commons.wikimedia.org/wiki/File:X.jpg',
+    };
+    store.assets.set('p2', { ...base, id: 'p2', url: '/u/p2', status: 'approved', sort_order: 1, variants: { w640: '/u/p2-640' } });
+    store.assets.set('p1', { ...base, id: 'p1', url: '/u/p1', status: 'approved', is_primary: true, sort_order: 0 });
+    store.assets.set('gone', { ...base, id: 'gone', url: '/u/g', status: 'deleted' });
+    store.assets.set('upload', { ...base, id: 'upload', url: '/u/up', status: 'attached', source: null });
+    store.assets.set('nocredit', { ...base, id: 'nocredit', url: '/u/n', status: 'approved', author: null });
+    const photos = store.catalogPhotos('syn-1');
+    expect(photos.map((p) => p.id)).toEqual(['p1', 'p2']);
+    expect(photos[0].is_primary).toBe(true);
+    expect(photos[1].url).toBe('/u/p2-640');
+    expect(photos[0].attribution).toBe('Photo: A. Photographer / Wikimedia Commons, CC BY-SA 4.0');
   });
 });
 

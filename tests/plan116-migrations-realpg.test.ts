@@ -1,6 +1,8 @@
 // Plan 116 migrations 110-112 on real PostgreSQL 17 + PostGIS (the production engine).
 // Runs only with JDQ_REAL_PG_URL (scripts/prod-db/run-realpg.sh).
 import { createTestDb, type TestDbInstance } from '../src/db/testHarness.js';
+import { searchSpots } from '../src/spots/national.js';
+import { resolveSpotAreas } from '../src/maps/areas-service.js';
 
 const realPg = process.env.JDQ_REAL_PG_URL ? describe : describe.skip;
 
@@ -47,6 +49,26 @@ realPg('Plan 116 migrations (real PostgreSQL + PostGIS)', () => {
       `SELECT id FROM spots WHERE f_unaccent(lower(name)) % f_unaccent(lower('hundred islnds')) ORDER BY id`,
     );
     expect(trgm.rows.map((r) => r.id)).toContain('hundred-islands');
+  });
+
+  it('typeahead tolerates typos and accents on the SQL path (searchSpots)', async () => {
+    const { rows } = await db.pool.query(`SELECT id, slug, name, municipality, category, status FROM spots`);
+    const spots = rows.map((r) => ({ ...r, is_test: false, image_url: '', launch_tier: null })) as never[];
+    const ids = async (q: string) => (await searchSpots(db.pool, spots, q, 10)).map((h) => h.id);
+    expect(await ids('hundred')).toEqual(['hundred-islands']); // prefix
+    expect(await ids('hundered')).toEqual(['hundred-islands']); // typo
+    expect(await ids('las pinas')).toEqual(['las-pinas-church']); // no accent
+    expect(await ids('islands')).toEqual(['hundred-islands']); // word inside the name
+    expect(await ids('volcano')).toEqual([]); // nothing unrelated
+  });
+
+  it('resolves town, province and region for a point (resolveSpotAreas)', async () => {
+    const m = await resolveSpotAreas(db.pool, 16.198, 119.993);
+    expect(m).toMatchObject({ townAreaId: 'alaminos', provinceAreaId: 'pangasinan', regionAreaId: 'region-ilocos' });
+    const coastal = await resolveSpotAreas(db.pool, 16.198, 119.885); // ~1.6 km west of the edge (119.9): 2 km fallback
+    expect(coastal.townAreaId).toBe('alaminos');
+    const far = await resolveSpotAreas(db.pool, 14.5995, 120.9842);
+    expect(far).toEqual({ townAreaId: null, barangayAreaId: null, provinceAreaId: null, regionAreaId: null });
   });
 
   it('matches a point to its town polygon with the spatial index', async () => {

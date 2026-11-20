@@ -15,10 +15,39 @@ export interface SpotAssetRecord {
   width: number;
   height: number;
   size_bytes: number;
-  status: 'pending' | 'attached' | 'deleted';
+  // 'approved' = licensed catalog photo (Plan 116, migration 111); never counts as a user upload.
+  status: 'pending' | 'attached' | 'deleted' | 'approved';
   spot_id?: string | null;
   created_at: string;
   updated_at: string;
+  source?: string | null;
+  license?: string | null;
+  license_url?: string | null;
+  author?: string | null;
+  attribution_url?: string | null;
+  blurhash?: string | null;
+  dominant_color?: string | null;
+  variants?: Record<string, string> | null;
+  is_primary?: boolean;
+  sort_order?: number | null;
+}
+
+/** Plan 116 §6.3 spot payload photo (licensed catalog photo with its required credit). */
+export interface SpotCatalogPhoto {
+  id: string;
+  url: string;
+  variants: Record<string, string>;
+  width: number;
+  height: number;
+  blurhash: string | null;
+  dominant_color: string | null;
+  is_primary: boolean;
+  author: string;
+  license: string;
+  license_url: string | null;
+  attribution_url: string | null;
+  source: string;
+  attribution: string;
 }
 
 export class SpotAssetStore {
@@ -37,6 +66,34 @@ export class SpotAssetStore {
         updated_at: new Date(r.updated_at).toISOString(),
       });
     }
+  }
+
+  /** Licensed catalog photos for a spot: primary first, then sort_order. */
+  catalogPhotos(spotId: string): SpotCatalogPhoto[] {
+    return Array.from(this.assets.values())
+      .filter((a) => a.spot_id === spotId && a.status === 'approved' && a.source && a.license && a.author)
+      .sort(
+        (a, b) =>
+          Number(Boolean(b.is_primary)) - Number(Boolean(a.is_primary)) ||
+          (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+          a.id.localeCompare(b.id),
+      )
+      .map((a) => ({
+        id: a.id,
+        url: a.variants?.w640 || a.url,
+        variants: a.variants || {},
+        width: a.width,
+        height: a.height,
+        blurhash: a.blurhash ?? null,
+        dominant_color: a.dominant_color ?? null,
+        is_primary: Boolean(a.is_primary),
+        author: a.author!,
+        license: a.license!,
+        license_url: a.license_url ?? null,
+        attribution_url: a.attribution_url ?? null,
+        source: a.source!,
+        attribution: `Photo: ${a.author} / ${a.source === 'commons' ? 'Wikimedia Commons' : a.source}, ${a.license}`,
+      }));
   }
 
   async createPendingAsset(
