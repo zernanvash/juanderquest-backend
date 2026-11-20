@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Plan 116 §10: load one region into the REHEARSAL production database (juanderquest_prod on
 # jdq-prod-rehearsal-pg :55461), in cutover order. Run in WSL from the backend repo:
-#   scripts/prod-db/rehearse-region.sh 0100000000 [steps...]   (steps: areas carry dest photos finalize; default all)
+#   scripts/prod-db/rehearse-region.sh 0100000000 [steps...]   (steps: areas carry accounts dest photos finalize; default all)
 # Refuses any target other than the rehearsal cluster. URLs and passwords are never printed.
 set -euo pipefail
 export MSYS_NO_PATHCONV=1
 REGION="${1:?region PSGC, e.g. 0100000000}"; shift
-STEPS="${*:-areas carry dest photos finalize}"
+STEPS="${*:-areas carry accounts dest photos finalize}"
 SECRETS=~/.jdq-secrets
 # shellcheck disable=SC1091
 source "$SECRETS/jdq-prod-rehearsal-pg.env"
@@ -61,6 +61,11 @@ for step in $STEPS; do
       DATABASE_URL="$JDQ_OWNER_URL" npx tsx scripts/seed/photos/process.ts --region "$REGION" --limit 100000 \
         --storage local --processor pillow --apply > "$OUT/photos-process.log" 2>&1
       tail -6 "$OUT/photos-process.log"
+      ;;
+    accounts)
+      log 'accounts: remove seeded fixtures, zero everyone, force sign-in again'
+      docker cp scripts/prod-db/launch-accounts.sql "$PG_CONTAINER":/tmp/launch-accounts.sql
+      psql_owner -A -f /tmp/launch-accounts.sql 2>&1 | tee "$OUT/accounts.log"
       ;;
     finalize)
       log 'finalize: area parents + featured photo rule'
