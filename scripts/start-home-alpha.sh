@@ -56,6 +56,20 @@ export NODE_ENV=production
 export PORT=4000
 export HOST=127.0.0.1
 export DATABASE_URL="postgres://jdq_alpha:${db_password}@127.0.0.1:55433/juanderquest_alpha"
+# Plan 116 cutover: when this private file exists the backend runs on the production database v2
+# (jdq-prod-postgres, runtime role jdq_app, DDL-free: migrations are only verified). The file holds
+# one line DATABASE_URL=...; it is read, never executed. Rollback = remove the file + pm2 restart.
+db_env="${JDQ_DATABASE_ENV_FILE:-$HOME/.jdq-secrets/jdq-backend-database.env}"
+if [ -f "$db_env" ]; then
+  v2_url=$(sed -n 's/^DATABASE_URL=//p' "$db_env" | head -n 1 | tr -d '\r')
+  if [ -z "$v2_url" ]; then
+    echo "[start] $db_env has no DATABASE_URL line; refusing to start." >&2
+    exit 1
+  fi
+  export DATABASE_URL="$v2_url"
+  export DB_MIGRATION_MODE=verify
+  echo '[start] database: production v2 (jdq_app, migrations verified only)' >&2
+fi
 export JWT_SECRET="$JDQ_ALPHA_JWT_SECRET"
 export CORS_ORIGIN='https://juanderquest.app,https://www.juanderquest.app,https://admin.juanderquest.app'
 export ALLOW_IN_MEMORY_FALLBACK=false
