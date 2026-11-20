@@ -22,7 +22,10 @@ REVOKE ALL ON DATABASE $NAME FROM PUBLIC;
 GRANT CONNECT, TEMPORARY ON DATABASE $NAME TO jdq_owner, jdq_app, jdq_readonly;
 SQL
 psql_su -d "$NAME" <<SQL
-CREATE SCHEMA extensions;
+-- Owned by jdq_owner: a -Fc dump sets the owner right after CREATE SCHEMA, so a plain
+-- pg_restore can build the f_unaccent/trigram indexes (PG17 builds them as the table owner)
+-- before the GRANTs at the end of the restore.
+CREATE SCHEMA extensions AUTHORIZATION jdq_owner;
 GRANT USAGE ON SCHEMA extensions TO PUBLIC;
 CREATE EXTENSION postgis SCHEMA extensions;
 CREATE EXTENSION pg_trgm SCHEMA extensions;

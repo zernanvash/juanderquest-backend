@@ -113,7 +113,10 @@ SQL
 psql_su -d "$DB" <<SQL
 -- Extensions live in their own schema so per-test schemas (search_path=<test>,extensions)
 -- and production share one install. Migrations only check that they exist.
-CREATE SCHEMA extensions;
+-- Owned by jdq_owner: a -Fc dump sets the owner right after CREATE SCHEMA, so a plain
+-- pg_restore can build the f_unaccent/trigram indexes (PG17 builds them as the table owner)
+-- before the GRANTs at the end of the restore.
+CREATE SCHEMA extensions AUTHORIZATION jdq_owner;
 GRANT USAGE ON SCHEMA extensions TO PUBLIC;
 CREATE EXTENSION postgis SCHEMA extensions;
 CREATE EXTENSION pg_trgm SCHEMA extensions;
