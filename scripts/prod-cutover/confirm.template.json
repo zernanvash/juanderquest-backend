@@ -1,0 +1,8 @@
+{
+  "_comment": "Plan 116 §9 owner confirmation for carry.ts --confirm-file. Copy outside git, list the approved ids from the confirm-<group>.csv files the dry-run writes (only rows with eligible=t are accepted; anything else refuses the run). A group left out is skipped and reported.",
+  "community_spots": [],
+  "quests": [],
+  "merchants": [],
+  "curated_collections": [],
+  "festivals": []
+}
