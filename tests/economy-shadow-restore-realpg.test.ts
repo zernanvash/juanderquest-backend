@@ -14,7 +14,7 @@ realDockerPg('economy shadow backup/restore on isolated real PostgreSQL', () => 
   if (!/^jdq-reliability-pg-[a-z0-9-]+$/.test(container)) {
     throw new Error('UNSAFE_REAL_PG_DOCKER_CONTAINER');
   }
-  const databaseUser = 'jdq_test';
+  const databaseUser = process.env.JDQ_REAL_PG_URL ? new URL(process.env.JDQ_REAL_PG_URL).username : 'jdq_test';
   let source: TestDbInstance;
 
   beforeAll(async () => {
@@ -94,6 +94,18 @@ realDockerPg('economy shadow backup/restore on isolated real PostgreSQL', () => 
     if (exists.rowCount) throw new Error('SHADOW_RESTORE_TARGET_EXISTS');
     runDocker('pg_dump', '-U', databaseUser, '-d', 'jdq_reliability_test', '-n', sourceSchema, '-Fc', '-f', archive);
     runDocker('createdb', '-U', databaseUser, targetName);
+    // PG17 clusters keep PostGIS/pg_trgm/unaccent in a shared "extensions" schema that a
+    // single-schema dump does not carry; recreate it in the target before restoring.
+    const ext = await source.pool.query(`SELECT 1 FROM pg_namespace WHERE nspname = 'extensions'`);
+    if (ext.rowCount) {
+      runDocker(
+        'psql', '-U', databaseUser, '-d', targetName, '-v', 'ON_ERROR_STOP=1', '-q',
+        '-c', 'CREATE SCHEMA extensions',
+        '-c', 'CREATE EXTENSION postgis SCHEMA extensions',
+        '-c', 'CREATE EXTENSION pg_trgm SCHEMA extensions',
+        '-c', 'CREATE EXTENSION unaccent SCHEMA extensions',
+      );
+    }
     let verified = false;
     try {
       runDocker(
@@ -111,7 +123,7 @@ realDockerPg('economy shadow backup/restore on isolated real PostgreSQL', () => 
       targetUrl.pathname = `/${targetName}`;
       const restored = new Pool({
         connectionString: targetUrl.toString(),
-        options: `-c search_path=${sourceSchema}`,
+        options: `-c search_path=${sourceSchema},extensions`,
         max: 2,
       });
       try {

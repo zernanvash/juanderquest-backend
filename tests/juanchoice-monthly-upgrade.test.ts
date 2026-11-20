@@ -20,7 +20,7 @@ realIt(
       await admin.query(`CREATE SCHEMA ${schema}`);
       pool = new Pool({
         connectionString: url.toString(),
-        options: `-c search_path=${schema}`,
+        options: `-c search_path=${schema},extensions`, // PostGIS lives in "extensions" on PG17 clusters
         max: 2,
         connectionTimeoutMillis: 3000,
       });

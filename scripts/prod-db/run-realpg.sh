@@ -10,7 +10,7 @@ secrets="$HOME/.jdq-secrets/jdq-reliability-pg-116.env"
 # shellcheck disable=SC1090
 . "$secrets"
 [ "${PG_DB:-}" = jdq_reliability_test ] || { echo 'Secrets are not for the test cluster.' >&2; exit 1; }
-export JDQ_REAL_PG_URL DATABASE_URL="$JDQ_REAL_PG_URL" NODE_ENV=test
+export JDQ_REAL_PG_URL DATABASE_URL="$JDQ_REAL_PG_URL" NODE_ENV=test JDQ_REAL_PG_DOCKER_CONTAINER="$PG_CONTAINER"
 unset POSTGRES_SUPERUSER_PASSWORD JDQ_OWNER_URL JDQ_APP_URL JDQ_READONLY_URL
 # WSL cannot read the Windows gitdir in a Windows worktree's .git file.
 if [[ -f "$repo_dir/.git" ]]; then
