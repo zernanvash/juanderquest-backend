@@ -46,7 +46,9 @@ jobs:
 
       - name: Install database extensions (Plan 116 migration 110 needs PostGIS, pg_trgm, unaccent)
         run: |
-          docker run --rm --network host -e PGPASSWORD=test_password postgis/postgis:17-3.5-alpine@sha256:894f570c0cf0664ed5576a8fd5d5bfb8fb1b19d592885b686c3a88c8bd90c41f \n            psql -v ON_ERROR_STOP=1 -h localhost -U test_user -d juanderquest_ci_test \n            -c 'CREATE EXTENSION IF NOT EXISTS postgis; CREATE EXTENSION IF NOT EXISTS pg_trgm; CREATE EXTENSION IF NOT EXISTS unaccent;'
+          docker run --rm --network host -e PGPASSWORD=test_password postgis/postgis:17-3.5-alpine@sha256:894f570c0cf0664ed5576a8fd5d5bfb8fb1b19d592885b686c3a88c8bd90c41f \
+            psql -v ON_ERROR_STOP=1 -h localhost -U test_user -d juanderquest_ci_test \
+            -c 'CREATE EXTENSION IF NOT EXISTS postgis; CREATE EXTENSION IF NOT EXISTS pg_trgm; CREATE EXTENSION IF NOT EXISTS unaccent;'
 
       - name: Run unit & integration test suites
         env:
