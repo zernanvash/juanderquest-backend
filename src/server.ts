@@ -9,6 +9,7 @@ import { stopWeeklyRecapJob } from './social/weeklyRecapJob.js';
 import { stopChainBalanceWatch } from './chain/balanceWatch.js';
 import { stopBadgeMinter } from './chain/badgeMinter.js';
 import { stopWeeklyTrailTrendJob } from './trails/jobs/weeklyTrends.js';
+import { stopRetentionJob } from './jobs/retention.js';
 import { attachRealtime } from './realtime/server.js';
 
 const startedAt = Date.now();
@@ -47,6 +48,7 @@ function shutdown(signal: NodeJS.Signals): void {
   stopWeeklyTrailTrendJob();
   stopChainBalanceWatch();
   stopBadgeMinter();
+  stopRetentionJob();
   realtime.close();
   beginServiceShutdown();
   console.log(`[shutdown] ${signal} received — draining in-flight requests (10 s cap)`);

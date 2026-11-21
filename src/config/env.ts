@@ -96,6 +96,9 @@ const rawEnv = cleanEnv(process.env, {
   // Plan 65 quadratic vote boosts (in-app points only); separate from the quarantined budget economy.
   JUANCHOICE_BOOSTS_ENABLED: bool({ default: false }),
   JUANCHOICE_FINALIZER_WORKER_ENABLED: bool({ default: false }),
+  // Plan 116 §6.5 daily retention job (src/jobs/retention.ts).
+  RETENTION_JOB_ENABLED: bool({ default: false }),
+  RETENTION_DRY_RUN: bool({ default: false }),
   JUANCHOICE_FINALIZER_INTERVAL_MS: num({ default: 30000 }),
   JUANCHOICE_SCHEDULER_ENABLED: bool({ default: false }),
   JUANCHOICE_SCHEDULER_INTERVAL_MS: num({ default: 60000 }),
