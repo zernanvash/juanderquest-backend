@@ -62,10 +62,13 @@ describeRealPg('Trail Engine national bounded generation (isolated real PostgreS
       await transactionClient.query('ROLLBACK');
       transactionClient.release();
     }
+    // Requests are chunked by source rows (<= 2,500 pairs each); add the rows up across requests.
     let observedMatrixNodes = 0;
+    let largestRequestPairs = 0;
     const matrixFetch: MatrixFetch = async (_input, init) => {
       const body = JSON.parse(String(init?.body)) as { sources: unknown[]; targets: unknown[] };
-      observedMatrixNodes = body.sources.length;
+      observedMatrixNodes += body.sources.length;
+      largestRequestPairs = Math.max(largestRequestPairs, body.sources.length * body.targets.length);
       return new Response(
         JSON.stringify({
           sources_to_targets: body.sources.map((_source, from) =>
@@ -143,6 +146,7 @@ describeRealPg('Trail Engine national bounded generation (isolated real PostgreS
     expect(input.matrix_pairs).toBeLessThanOrEqual(60 * 60);
     expect(observedMatrixNodes).toBeLessThanOrEqual(60);
     expect(input.matrix_pairs).toBe(observedMatrixNodes * observedMatrixNodes);
+    expect(largestRequestPairs).toBeLessThanOrEqual(2500);
     expect(generated.solution.feasible).toBe(true);
     expect(generated.solution.stops.length).toBeGreaterThanOrEqual(3);
     // Owner 2026-10-28: generation is admin/weekly only (personal trails off), so 5 s on the shared laptop.

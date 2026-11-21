@@ -346,6 +346,56 @@ describe('Plan 44 trail engine phase 0–2', () => {
     ).rejects.toThrow('limited to 60');
   });
 
+  test('matrix stays under the Valhalla pair limit, fetches only missing rows, never caches failed requests', async () => {
+    const echo = jest.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { sources: unknown[]; targets: unknown[] };
+      return {
+        ok: true,
+        json: async () => ({
+          sources_to_targets: body.sources.map(() => body.targets.map(() => ({ time: 60, distance: 1 }))), // Valhalla distance is in km
+        }),
+      } as Response;
+    });
+    const sixty = Array.from({ length: 60 }, (_, i) => ({ id: `s${i}`, lat: 16 + i / 1000, lng: 120 }));
+    const query = jest.fn().mockResolvedValue({ rows: [] });
+    const full = await refreshTravelTimeMatrix({ query } as any, 'auto', { points: sixty, fetchImpl: echo });
+    expect(full.requested).toBe(3600);
+    expect(echo).toHaveBeenCalledTimes(2); // 41 + 19 source rows x 60 targets
+    for (const [, init] of echo.mock.calls) {
+      const body = JSON.parse(String(init?.body));
+      expect(body.sources.length * body.targets.length).toBeLessThanOrEqual(2500);
+    }
+
+    // Only row "b" lacks cached legs: one request with that single source.
+    const rowsA = ['a', 'b'].map((to) => ({ from_spot: 'a', to_spot: to, seconds: 60, meters: 1000, approximate: false }));
+    echo.mockClear();
+    const ensured = await ensureTravelTimeMatrix(
+      { query: jest.fn().mockResolvedValueOnce({ rows: rowsA }).mockResolvedValue({ rows: [] }) } as any,
+      'auto',
+      [
+        { id: 'a', lat: 16, lng: 120 },
+        { id: 'b', lat: 16.1, lng: 120.1 },
+      ],
+      { fetchImpl: echo },
+    );
+    expect(echo).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(echo.mock.calls[0][1]?.body)).sources).toHaveLength(1);
+    expect(ensured.lookup('b', 'a')).toEqual({ minutes: 1, km: 1, approximate: false });
+
+    // A failed request still yields estimates for this trail, but only the zero self-legs are stored.
+    const failQuery = jest.fn().mockResolvedValue({ rows: [] });
+    const failed = await refreshTravelTimeMatrix({ query: failQuery } as any, 'auto', {
+      points: [
+        { id: 'a', lat: 16, lng: 120 },
+        { id: 'b', lat: 16.1, lng: 120.1 },
+      ],
+      fetchImpl: jest.fn().mockResolvedValue({ ok: false, status: 503 } as Response),
+    });
+    expect(failed.approximate).toBe(2);
+    expect(failQuery.mock.calls[0][1][1]).toEqual(['a', 'b']);
+    expect(failQuery.mock.calls[0][1][2]).toEqual(['a', 'b']);
+  });
+
   test('generation reports NO_FEASIBLE_TRAIL before opening a persistence transaction', async () => {
     const client = {
       query: jest.fn().mockImplementation(async (sql: string) => {

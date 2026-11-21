@@ -4,6 +4,8 @@ import type { TrailCosting, TrailLeg, TrailLegLookup } from './types.js';
 
 export const MAX_TRAIL_MATRIX_NODES = 60;
 export const TRAIL_MATRIX_TTL_DAYS = 90;
+/** Valhalla's default service_limits.*.max_matrix_location_pairs; larger requests are rejected outright. */
+export const MAX_MATRIX_PAIRS_PER_REQUEST = 2500;
 
 export interface MatrixPoint {
   id: string;
@@ -22,7 +24,8 @@ export interface MatrixRefreshResult {
 export interface MatrixEnsureResult extends MatrixRefreshResult {
   lookup: TrailLegLookup;
 }
-type MatrixEntry = { from: string; to: string; leg: TrailLeg };
+/** `transient`: an estimate because the request failed (timeout, 4xx/5xx); never cached. */
+type MatrixEntry = { from: string; to: string; leg: TrailLeg; transient?: boolean };
 
 function asPoint(r: { id: unknown; gps_lat: unknown; gps_lng: unknown }): MatrixPoint {
   return { id: String(r.id), lat: Number(r.gps_lat), lng: Number(r.gps_lng) };
@@ -61,8 +64,13 @@ export async function refreshTravelTimeMatrix(
 ): Promise<MatrixRefreshResult> {
   const points = uniquePoints(options.points ?? (await loadCuratedTrailMatrixPoints(pool)));
   assertBounded(points);
-  const entries = await fetchEntries(points, costing, options);
-  await persistEntries(pool, costing, entries, options.graphLabel ?? env.VALHALLA_COVERAGE_LABEL);
+  const entries = await fetchEntries(points, points, costing, options);
+  await persistEntries(
+    pool,
+    costing,
+    entries.filter((item) => !item.transient),
+    options.graphLabel ?? env.VALHALLA_COVERAGE_LABEL,
+  );
   return summarize(costing, entries, options.graphLabel ?? env.VALHALLA_COVERAGE_LABEL, points.length);
 }
 
@@ -103,10 +111,22 @@ export async function ensureTravelTimeMatrix(
         missing.push({ from: from.id, to: to.id, leg: { minutes: 0, km: 0, approximate: false } });
     }
   if (missing.length) {
-    const fetched = await fetchEntries(points, costing, options);
+    // Only the rows that lack a cached leg are requested (every target, so the row is complete).
+    const missingFrom = new Set(missing.map((item) => item.from));
+    const fetched = await fetchEntries(
+      points.filter((point) => missingFrom.has(point.id)),
+      points,
+      costing,
+      options,
+    );
     const missingKeys = new Set(missing.map((item) => pairKey(item.from, item.to)));
     const missingEntries = fetched.filter((item) => missingKeys.has(pairKey(item.from, item.to)));
-    await persistEntries(pool, costing, missingEntries, options.graphLabel ?? env.VALHALLA_COVERAGE_LABEL);
+    await persistEntries(
+      pool,
+      costing,
+      missingEntries.filter((item) => !item.transient),
+      options.graphLabel ?? env.VALHALLA_COVERAGE_LABEL,
+    );
     for (const item of missingEntries) legs.set(pairKey(item.from, item.to), item.leg);
   }
 
@@ -162,14 +182,15 @@ function lookupFromRows(rows: Array<Record<string, unknown>>): TrailLegLookup {
   return (from, to) => map.get(pairKey(from, to));
 }
 
-async function fetchEntries(
-  points: MatrixPoint[],
+/** One sources×targets request; undefined when the request itself fails. */
+async function fetchCells(
+  sources: MatrixPoint[],
+  targets: MatrixPoint[],
   costing: TrailCosting,
   options: { fetchImpl?: MatrixFetch; baseUrl?: string; timeoutMs?: number },
-): Promise<MatrixEntry[]> {
+): Promise<unknown[][] | undefined> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const baseUrl = (options.baseUrl ?? env.VALHALLA_URL).replace(/\/$/, '');
-  let cells: unknown[][] | undefined;
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 10_000);
@@ -180,26 +201,51 @@ async function fetchEntries(
         headers: { 'content-type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
-          sources: points.map((point) => ({ lat: point.lat, lon: point.lng })),
-          targets: points.map((point) => ({ lat: point.lat, lon: point.lng })),
+          sources: sources.map((point) => ({ lat: point.lat, lon: point.lng })),
+          targets: targets.map((point) => ({ lat: point.lat, lon: point.lng })),
           costing: valhallaCosting(costing),
         }),
       });
       if (!response.ok) throw new Error(`Valhalla matrix returned ${response.status}`);
       const body = (await response.json()) as { sources_to_targets?: unknown[][] };
-      cells = body.sources_to_targets;
+      return body.sources_to_targets;
     } finally {
       clearTimeout(timeout);
     }
   } catch {
-    cells = undefined;
+    return undefined;
   }
+}
 
+/** Requests are split into source chunks so none exceeds MAX_MATRIX_PAIRS_PER_REQUEST. */
+async function fetchEntries(
+  sources: MatrixPoint[],
+  targets: MatrixPoint[],
+  costing: TrailCosting,
+  options: { fetchImpl?: MatrixFetch; baseUrl?: string; timeoutMs?: number },
+): Promise<MatrixEntry[]> {
   const entries: MatrixEntry[] = [];
-  for (let i = 0; i < points.length; i++)
-    for (let j = 0; j < points.length; j++) {
-      const source = points[i],
-        target = points[j];
+  if (!sources.length || !targets.length) return entries;
+  const rowsPerRequest = Math.max(1, Math.floor(MAX_MATRIX_PAIRS_PER_REQUEST / targets.length));
+  for (let start = 0; start < sources.length; start += rowsPerRequest) {
+    const chunk = sources.slice(start, start + rowsPerRequest);
+    const cells = await fetchCells(chunk, targets, costing, options);
+    entries.push(...toEntries(chunk, targets, cells, costing));
+  }
+  return entries;
+}
+
+function toEntries(
+  sources: MatrixPoint[],
+  targets: MatrixPoint[],
+  cells: unknown[][] | undefined,
+  costing: TrailCosting,
+): MatrixEntry[] {
+  const entries: MatrixEntry[] = [];
+  for (let i = 0; i < sources.length; i++)
+    for (let j = 0; j < targets.length; j++) {
+      const source = sources[i],
+        target = targets[j];
       const cell = cells?.[i]?.[j] as { time?: number; distance?: number; error?: unknown } | undefined;
       const usable =
         source.id === target.id ||
@@ -214,7 +260,7 @@ async function fetchEntries(
           : usable
             ? { minutes: cell!.time! / 60, km: cell!.distance!, approximate: false }
             : fallbackLeg(source, target, costing);
-      entries.push({ from: source.id, to: target.id, leg });
+      entries.push({ from: source.id, to: target.id, leg, transient: !cells && source.id !== target.id });
     }
   return entries;
 }
