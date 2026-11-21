@@ -367,7 +367,13 @@ describe('Plan 44 trail engine phase 0–2', () => {
     }
 
     // Only row "b" lacks cached legs: one request with that single source.
-    const rowsA = ['a', 'b'].map((to) => ({ from_spot: 'a', to_spot: to, seconds: 60, meters: 1000, approximate: false }));
+    const rowsA = ['a', 'b'].map((to) => ({
+      from_spot: 'a',
+      to_spot: to,
+      seconds: 60,
+      meters: 1000,
+      approximate: false,
+    }));
     echo.mockClear();
     const ensured = await ensureTravelTimeMatrix(
       { query: jest.fn().mockResolvedValueOnce({ rows: rowsA }).mockResolvedValue({ rows: [] }) } as any,
