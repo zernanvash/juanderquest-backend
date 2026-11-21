@@ -252,7 +252,11 @@ router.get('/spots/map', (req, res) => {
     categories: csv(parsed.data.categories),
     tier: parsed.data.tier,
   });
-  return res.json({ success: true, data: { markers: view.markers, clusters: view.clusters }, meta: { total: view.total } });
+  return res.json({
+    success: true,
+    data: { markers: view.markers, clusters: view.clusters },
+    meta: { total: view.total },
+  });
 });
 
 // Plan 116: typeahead destination search (accent-insensitive; trigram typo tolerance on PostgreSQL).
@@ -1110,13 +1114,16 @@ router.post(
       });
     }
 
-    // Author ownership enforcement
-    if (!spot.created_by || spot.created_by !== req.user!.id) {
+    // Owner 2026-11-21: any signed-in traveler may add a quest to a published destination (each quest
+    // gets its own binding; spots.quest_id stays the first one). The poster may also add quests while
+    // their destination is still in review.
+    const isDestinationAuthor = Boolean(spot.created_by && spot.created_by === req.user!.id);
+    if (!isDestinationAuthor && spot.status !== 'published') {
       return res.status(403).json({
         success: false,
         error: {
-          code: 'FORBIDDEN_NOT_DESTINATION_AUTHOR',
-          message: 'Only the original scout who posted this destination can create quests for it.',
+          code: 'DESTINATION_NOT_PUBLISHED',
+          message: 'Quests can be added once this destination is published.',
         },
       });
     }
@@ -1182,6 +1189,7 @@ router.post(
     const newQuest: QuestRow = {
       id: questId,
       author_id: req.user!.id,
+      spot_id: spot.id,
       status: questStatus,
       version: 1,
       steps: normalizedTasks,
@@ -1298,6 +1306,18 @@ router.post(
   },
 );
 
+/** In-memory mode: the destination's first quest, quests created on it, and (legacy) quests by its poster. */
+function memoryQuestsForSpot(
+  spot: { id: string; quest_id?: string | null; created_by?: string | null },
+  allowTest: boolean,
+) {
+  return db.quests.filter(
+    (q) =>
+      (q.id === spot.quest_id || q.spot_id === spot.id || (!q.spot_id && q.author_id === spot.created_by)) &&
+      (allowTest || !q.is_test),
+  );
+}
+
 router.get('/spots/:id/quests', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res) => {
   const allowTest = isAuthorizedQA(req);
   if (allowTest) res.set('X-Robots-Tag', 'noindex, nofollow');
@@ -1349,26 +1369,27 @@ router.get('/spots/:id/quests', optionalAuthenticateToken, checkQAAuthorization,
       }));
     } catch (e: any) {
       log.warn('[spots:getQuests] PG query fallback:', { error: e.message });
-      quests = db.quests.filter(
-        (q) => (q.id === spot.quest_id || q.author_id === spot.created_by) && (allowTest || !q.is_test),
-      );
+      quests = memoryQuestsForSpot(spot, allowTest);
     }
   } else {
-    quests = db.quests.filter(
-      (q) => (q.id === spot.quest_id || q.author_id === spot.created_by) && (allowTest || !q.is_test),
-    );
+    quests = memoryQuestsForSpot(spot, allowTest);
   }
 
+  // Several travelers can write quests for one destination, so draft visibility, marker codes and stats
+  // follow the quest's own author (legacy author-less quests fall back to the destination poster).
+  const ownsQuest = (q: QuestRow) => Boolean(req.user?.id && (q.author_id ? q.author_id === req.user.id : isAuthor));
+
   // Filter out drafts or archived for general travelers
-  if (!isAuthor && !isAdminOrQA) {
-    quests = quests.filter((q) => q.status === 'published' || (!q.status && q.is_active));
+  if (!isAdminOrQA) {
+    quests = quests.filter((q) => ownsQuest(q) || q.status === 'published' || (!q.status && q.is_active));
   }
 
   // Sanitize: strip marker_code unless authorized
   const sanitized = quests.map((quest) => {
-    const canInspectMarker = allowTest || isAuthor || isAdminOrQA;
+    const canManage = isAdminOrQA || ownsQuest(quest);
+    const canInspectMarker = allowTest || canManage;
     const base = sanitizeQuestForViewer(quest, canInspectMarker);
-    if (isAuthor || isAdminOrQA) {
+    if (canManage) {
       return {
         ...base,
         stats: db.getQuestAttemptStats(quest.id),

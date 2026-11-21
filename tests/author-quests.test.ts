@@ -68,21 +68,27 @@ describe('Destination-Author Quests System', () => {
     expect(res.body.success).toBe(false);
   });
 
-  it('rejects a non-author user with 403 FORBIDDEN_NOT_DESTINATION_AUTHOR', async () => {
-    const res = await request(app)
-      .post(`/api/v1/spots/${testSpotId}/quests`)
-      .set('Authorization', `Bearer ${otherUserToken}`)
-      .send({
-        title: 'Hijacked Quest by Non-Author',
-        description: 'Trying to add a quest to someone else destination without authorization.',
-        category: 'eco',
-        radius_meters: 200,
-        reward_points: 75,
-      });
+  it('rejects a non-author while the destination is not published (DESTINATION_NOT_PUBLISHED)', async () => {
+    const spot = spotStore.spots.find((s) => s.id === testSpotId)!;
+    spot.status = 'pending_review';
+    try {
+      const res = await request(app)
+        .post(`/api/v1/spots/${testSpotId}/quests`)
+        .set('Authorization', `Bearer ${otherUserToken}`)
+        .send({
+          title: 'Early Quest by Another Traveler',
+          description: 'Trying to add a quest before the destination is published.',
+          category: 'eco',
+          radius_meters: 200,
+          reward_points: 75,
+        });
 
-    expect(res.status).toBe(403);
-    expect(res.body.success).toBe(false);
-    expect(res.body.error.code).toBe('FORBIDDEN_NOT_DESTINATION_AUTHOR');
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('DESTINATION_NOT_PUBLISHED');
+    } finally {
+      spot.status = 'published';
+    }
   });
 
   it('allows the original destination scout author to create an official quest', async () => {
@@ -108,6 +114,28 @@ describe('Destination-Author Quests System', () => {
     // Verify spot now has quest_id attached
     const updatedSpot = spotStore.spots.find((s) => s.id === testSpotId);
     expect(updatedSpot?.quest_id).toBe(res.body.data.id);
+  });
+
+  it('lets another traveler add their own quest to a published destination without replacing the first', async () => {
+    const firstQuestId = spotStore.spots.find((s) => s.id === testSpotId)?.quest_id;
+    const res = await request(app)
+      .post(`/api/v1/spots/${testSpotId}/quests`)
+      .set('Authorization', `Bearer ${otherUserToken}`)
+      .send({
+        title: 'Tide Pool Photo Walk',
+        description: 'A second quest on the same destination, written by a different traveler.',
+        category: 'eco',
+        radius_meters: 200,
+        reward_points: 75,
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.author_id).toBe(otherUserId);
+    expect(spotStore.spots.find((s) => s.id === testSpotId)?.quest_id).toBe(firstQuestId);
+
+    const list = await request(app).get(`/api/v1/spots/${testSpotId}/quests`);
+    const titles = list.body.data.map((q: any) => q.title);
+    expect(titles).toEqual(expect.arrayContaining(['Sunset Beacon Exploration Trail', 'Tide Pool Photo Walk']));
   });
 
   it('lists active quests for the spot via GET /spots/:id/quests without leaking marker code', async () => {

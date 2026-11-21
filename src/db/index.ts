@@ -271,6 +271,8 @@ export interface MerchantProductRow {
 export interface QuestRow {
   id: string;
   author_id?: string | null;
+  /** In-memory only: the destination an author quest was created on (PG uses reviewed_quest_spot_bindings). */
+  spot_id?: string | null;
   status?: QuestStatus;
   version?: number;
   step_order_mode?: 'sequential' | 'any';

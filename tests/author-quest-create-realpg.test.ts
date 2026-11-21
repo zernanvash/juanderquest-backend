@@ -90,4 +90,56 @@ realPg('author quest creation persists to PostgreSQL', () => {
     expect(row.rows[0]?.author_id).toBe(authorId);
     expect(row.rows[0]?.steps).toHaveLength(1);
   });
+
+  it('lets another traveler add a quest to the published destination; drafts stay private to their author', async () => {
+    const otherId = `traveler-${randomUUID()}`;
+    await fixture.pool.query(
+      'INSERT INTO users(id,seed_id,display_name,email,role,demo_points) VALUES($1,$2,$3,$4,$5,$6)',
+      [otherId, otherId, 'Traveler', `${otherId}@example.test`, 'user', 0],
+    );
+    const otherToken = jwt.sign({ id: otherId, seed_id: otherId, role: 'user', typ: 'session' }, env.JWT_SECRET);
+    const authorToken = jwt.sign({ id: authorId, seed_id: authorId, role: 'user', typ: 'session' }, env.JWT_SECRET);
+    const body = (title: string, status: 'draft' | 'published') => ({
+      title,
+      description: 'A second traveler writes a quest for this destination.',
+      category: 'eco',
+      status,
+      steps: [
+        { step_order: 1, title: 'Arrive', description: 'Check in.', checkpoint_type: 'location', required: true },
+      ],
+    });
+
+    const pub = await request(app)
+      .post(`/api/v1/spots/${spotId}/quests`)
+      .set('Authorization', `Bearer ${otherToken}`)
+      .send(body('Rock pool walk', 'published'));
+    expect(pub.status).toBe(201);
+    const draft = await request(app)
+      .post(`/api/v1/spots/${spotId}/quests`)
+      .set('Authorization', `Bearer ${otherToken}`)
+      .send(body('Unfinished idea', 'draft'));
+    expect(draft.status).toBe(201);
+
+    const binding = await fixture.pool.query(
+      `SELECT spot_id FROM reviewed_quest_spot_bindings WHERE quest_id = $1 AND status = 'active'`,
+      [pub.body.data.id],
+    );
+    expect(binding.rows[0]?.spot_id).toBe(spotId);
+
+    // The destination poster sees the other traveler's published quest, but not their draft or QR code.
+    const asPoster = await request(app)
+      .get(`/api/v1/spots/${spotId}/quests`)
+      .set('Authorization', `Bearer ${authorToken}`);
+    const posterView = asPoster.body.data.find((q: any) => q.id === pub.body.data.id);
+    expect(posterView).toBeDefined();
+    expect(posterView.marker_code).toBeUndefined();
+    expect(asPoster.body.data.some((q: any) => q.id === draft.body.data.id)).toBe(false);
+
+    // Their own author sees both, including the draft.
+    const asAuthor = await request(app)
+      .get(`/api/v1/spots/${spotId}/quests`)
+      .set('Authorization', `Bearer ${otherToken}`);
+    const ids = asAuthor.body.data.map((q: any) => q.id);
+    expect(ids).toEqual(expect.arrayContaining([pub.body.data.id, draft.body.data.id]));
+  });
 });
