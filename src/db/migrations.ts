@@ -126,6 +126,8 @@ export const MIGRATIONS = [
   '111_spot_photo_licensing.sql',
   // Plan 116: FK indexes that matter at national scale, BRIN on append tables, VALIDATE 084 checks.
   '112_perf_hygiene.sql',
+  // Plan 118: pending destination relocation requests for pin moves > 200 m.
+  '113_spot_relocation_requests.sql',
 ];
 
 // Plan 116+: PostgreSQL-only sections of a migration are fenced with these markers;

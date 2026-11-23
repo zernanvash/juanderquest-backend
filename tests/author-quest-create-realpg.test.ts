@@ -56,7 +56,7 @@ realPg('author quest creation persists to PostgreSQL', () => {
       is_test: false,
       created_by: authorId,
     } as any);
-  });
+  }, 60000);
 
   afterAll(async () => {
     env.QUEST_FUNDING_ENABLED = originalFunding;
@@ -91,7 +91,7 @@ realPg('author quest creation persists to PostgreSQL', () => {
     expect(row.rows[0]?.steps).toHaveLength(1);
   });
 
-  it('lets another traveler add a quest to the published destination; drafts stay private to their author', async () => {
+  it('rejects new quests from another traveler (Plan 118) while keeping existing quests live and drafts private', async () => {
     const otherId = `traveler-${randomUUID()}`;
     await fixture.pool.query(
       'INSERT INTO users(id,seed_id,display_name,email,role,demo_points) VALUES($1,$2,$3,$4,$5,$6)',
@@ -109,37 +109,47 @@ realPg('author quest creation persists to PostgreSQL', () => {
       ],
     });
 
-    const pub = await request(app)
+    // Plan 118: another traveler cannot create new quests on a poster-owned destination.
+    const rejected = await request(app)
       .post(`/api/v1/spots/${spotId}/quests`)
       .set('Authorization', `Bearer ${otherToken}`)
       .send(body('Rock pool walk', 'published'));
-    expect(pub.status).toBe(201);
-    const draft = await request(app)
-      .post(`/api/v1/spots/${spotId}/quests`)
-      .set('Authorization', `Bearer ${otherToken}`)
-      .send(body('Unfinished idea', 'draft'));
-    expect(draft.status).toBe(201);
+    expect(rejected.status).toBe(403);
+    expect(rejected.body.error?.code).toBe('DESTINATION_OWNER_ONLY');
 
-    const binding = await fixture.pool.query(
-      `SELECT spot_id FROM reviewed_quest_spot_bindings WHERE quest_id = $1 AND status = 'active'`,
-      [pub.body.data.id],
+    // Pre-existing quests by another traveler remain live and their drafts stay private.
+    const existingPubId = `q-ext-pub-${randomUUID().slice(0, 8)}`;
+    const existingDraftId = `q-ext-draft-${randomUUID().slice(0, 8)}`;
+    const stepJson = JSON.stringify([
+      { step_order: 1, title: 'Arrive', description: 'Check in.', checkpoint_type: 'location', required: true },
+    ]);
+    await fixture.pool.query(
+      `INSERT INTO quests(id, author_id, title, description, category, location_name, gps_lat, gps_lng, radius_meters,
+         reward_points, is_active, status, steps, marker_code)
+       VALUES
+         ($1, $3, 'Existing Rock Pool Walk', 'Pre-existing quest.', 'eco', 'Author Spot', 16.3, 119.79, 200, 75, true, 'published', $4::jsonb, 'JDQ-PUB1'),
+         ($2, $3, 'Existing Unfinished Idea', 'Pre-existing draft.', 'eco', 'Author Spot', 16.3, 119.79, 200, 75, true, 'draft', $4::jsonb, 'JDQ-DRF1')`,
+      [existingPubId, existingDraftId, otherId, stepJson],
     );
-    expect(binding.rows[0]?.spot_id).toBe(spotId);
+    await fixture.pool.query(
+      `INSERT INTO reviewed_quest_spot_bindings(id, quest_id, spot_id, status)
+       VALUES ($1, $2, $5, 'active'), ($3, $4, $5, 'active')`,
+      [randomUUID(), existingPubId, randomUUID(), existingDraftId, spotId],
+    );
+    await db.hydrateFromPg(fixture.pool);
 
-    // The destination poster sees the other traveler's published quest, but not their draft or QR code.
     const asPoster = await request(app)
       .get(`/api/v1/spots/${spotId}/quests`)
       .set('Authorization', `Bearer ${authorToken}`);
-    const posterView = asPoster.body.data.find((q: any) => q.id === pub.body.data.id);
+    const posterView = asPoster.body.data.find((q: any) => q.id === existingPubId);
     expect(posterView).toBeDefined();
     expect(posterView.marker_code).toBeUndefined();
-    expect(asPoster.body.data.some((q: any) => q.id === draft.body.data.id)).toBe(false);
+    expect(asPoster.body.data.some((q: any) => q.id === existingDraftId)).toBe(false);
 
-    // Their own author sees both, including the draft.
     const asAuthor = await request(app)
       .get(`/api/v1/spots/${spotId}/quests`)
       .set('Authorization', `Bearer ${otherToken}`);
     const ids = asAuthor.body.data.map((q: any) => q.id);
-    expect(ids).toEqual(expect.arrayContaining([pub.body.data.id, draft.body.data.id]));
+    expect(ids).toEqual(expect.arrayContaining([existingPubId, existingDraftId]));
   });
 });
