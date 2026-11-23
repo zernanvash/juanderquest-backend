@@ -24,8 +24,18 @@ export interface AuthRequest extends Request {
 interface CachedSessionScope {
   session_epoch: number;
   role: 'user' | 'admin' | 'area_admin' | 'qa';
+  suspended_at: string | null;
   expiresAt: number;
 }
+
+export const sendSuspendedResponse = (res: Response) =>
+  res.status(403).json({
+    success: false,
+    error: {
+      code: 'ACCOUNT_SUSPENDED',
+      message: 'This account is suspended. Contact support@juanderquest.app.',
+    },
+  });
 
 const sessionScopeCache = new Map<string, CachedSessionScope>();
 const SESSION_CACHE_TTL_MS = 30_000;
@@ -52,10 +62,14 @@ export const getAlphaSessionScopeBatcher = (pool: Pool): AlphaSessionScopeBatche
 
 export const getSessionScope = async (
   userId: string,
-): Promise<{ session_epoch: number; role: 'user' | 'admin' | 'area_admin' | 'qa' } | null> => {
+): Promise<{
+  session_epoch: number;
+  role: 'user' | 'admin' | 'area_admin' | 'qa';
+  suspended_at: string | null;
+} | null> => {
   const cached = sessionScopeCache.get(userId);
   if (cached && Date.now() < cached.expiresAt) {
-    return { session_epoch: cached.session_epoch, role: cached.role };
+    return { session_epoch: cached.session_epoch, role: cached.role, suspended_at: cached.suspended_at };
   }
 
   const pool = db.usersRepo.getPool();
@@ -63,14 +77,22 @@ export const getSessionScope = async (
     const batcher = getAlphaSessionScopeBatcher(pool);
     const scope = await batcher.lookup(userId);
     if (!scope) return null;
-    const result = { session_epoch: scope.session_epoch ?? 0, role: scope.role ?? 'user' };
+    const result = {
+      session_epoch: scope.session_epoch ?? 0,
+      role: scope.role ?? 'user',
+      suspended_at: scope.suspended_at ?? null,
+    };
     sessionScopeCache.set(userId, { ...result, expiresAt: Date.now() + SESSION_CACHE_TTL_MS });
     return result;
   }
 
   const user = db.findUserById(userId);
   if (!user) return null;
-  const result = { session_epoch: user.session_epoch ?? 0, role: user.role };
+  const result = {
+    session_epoch: user.session_epoch ?? 0,
+    role: user.role,
+    suspended_at: user.suspended_at ?? null,
+  };
   sessionScopeCache.set(userId, { ...result, expiresAt: Date.now() + SESSION_CACHE_TTL_MS });
   return result;
 };
@@ -84,6 +106,10 @@ export const optionalAuthenticateToken = async (req: AuthRequest, res: Response,
   try {
     const scope = await getSessionScope(user.id);
     if (!scope) return next();
+    if (scope.suspended_at) {
+      clearSessionCookie(res);
+      return next();
+    }
     const tokenSep = user.sep ?? 0;
     if (tokenSep !== scope.session_epoch) {
       return next();
@@ -132,6 +158,10 @@ export const authenticateToken = async (req: AuthRequest, res: Response, next: N
       return res
         .status(401)
         .json({ success: false, error: { code: 'UNAUTHORIZED', message: 'User account no longer exists.' } });
+    }
+    if (scope.suspended_at) {
+      clearSessionCookie(res);
+      return sendSuspendedResponse(res);
     }
     const tokenSep = user.sep ?? 0;
     if (tokenSep !== scope.session_epoch) {

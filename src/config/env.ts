@@ -99,6 +99,8 @@ const rawEnv = cleanEnv(process.env, {
   // Plan 116 §6.5 daily retention job (src/jobs/retention.ts).
   RETENTION_JOB_ENABLED: bool({ default: false }),
   RETENTION_DRY_RUN: bool({ default: false }),
+  // Plan 117 WP-3 suspicious activity scanner (src/jobs/risk-scan.ts).
+  RISK_SCAN_ENABLED: bool({ default: false }),
   JUANCHOICE_FINALIZER_INTERVAL_MS: num({ default: 30000 }),
   JUANCHOICE_SCHEDULER_ENABLED: bool({ default: false }),
   JUANCHOICE_SCHEDULER_INTERVAL_MS: num({ default: 60000 }),

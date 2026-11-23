@@ -129,7 +129,20 @@ export class SettingsService {
       }
 
       const beforeValues = canonicalSettings(current?.values ?? {});
-      const afterValues = { ...beforeValues, ...normalized };
+      const existingRiskThresholds =
+        current?.values &&
+        typeof current.values === 'object' &&
+        'risk_thresholds' in (current.values as Record<string, unknown>)
+          ? (current.values as Record<string, unknown>).risk_thresholds
+          : undefined;
+      const afterValues: Record<string, SettingValue> = {
+        ...beforeValues,
+        ...normalized,
+      };
+      const persistedValues: Record<string, unknown> =
+        existingRiskThresholds !== undefined
+          ? { ...afterValues, risk_thresholds: existingRiskThresholds }
+          : afterValues;
       const changedKeys = changeEntries.map(([key]) => key);
       const nextRevision = currentRevision + 1;
 
@@ -137,7 +150,7 @@ export class SettingsService {
         `UPDATE system_settings_document
          SET values = $1::jsonb, revision = $2, updated_by = $3, updated_at = NOW()
          WHERE id = 1`,
-        [JSON.stringify(afterValues), nextRevision, params.actorId],
+        [JSON.stringify(persistedValues), nextRevision, params.actorId],
       );
 
       await client.query(

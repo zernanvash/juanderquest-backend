@@ -35,6 +35,9 @@ export interface UserRow {
   admin_scope?: 'platform' | 'area' | 'developer' | null;
   is_test?: boolean;
   session_epoch?: number;
+  suspended_at?: string | null;
+  suspended_reason?: string | null;
+  suspended_by?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1060,6 +1063,10 @@ export class MemoryDb {
       bio: row.bio ?? null,
       status_text: row.status_text ?? null,
       is_test: Boolean(row.is_test),
+      session_epoch: row.session_epoch !== undefined && row.session_epoch !== null ? Number(row.session_epoch) : 0,
+      suspended_at: row.suspended_at ? toIso(row.suspended_at) : null,
+      suspended_reason: row.suspended_reason ?? null,
+      suspended_by: row.suspended_by ?? null,
       created_at: toIso(row.created_at),
       updated_at: toIso(row.updated_at),
     }));

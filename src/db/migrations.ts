@@ -126,6 +126,8 @@ export const MIGRATIONS = [
   '111_spot_photo_licensing.sql',
   // Plan 116: FK indexes that matter at national scale, BRIN on append tables, VALIDATE 084 checks.
   '112_perf_hygiene.sql',
+  // Plan 117: user suspension columns, search/sort indexes, risk_flags table, and risk thresholds.
+  '113_user_suspension_and_risk_flags.sql',
 ];
 
 // Plan 116+: PostgreSQL-only sections of a migration are fenced with these markers;
