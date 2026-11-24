@@ -128,6 +128,8 @@ export const MIGRATIONS = [
   '112_perf_hygiene.sql',
   // Plan 118: pending destination relocation requests for pin moves > 200 m.
   '113_spot_relocation_requests.sql',
+  // Plan 117: user suspension columns, search/sort indexes, risk_flags table, and risk thresholds (reserved 114; 113 is Plan 118).
+  '114_user_suspension_and_risk_flags.sql',
 ];
 
 // Plan 116+: PostgreSQL-only sections of a migration are fenced with these markers;

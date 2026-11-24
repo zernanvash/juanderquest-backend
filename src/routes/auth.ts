@@ -8,6 +8,7 @@ import {
   optionalAuthenticateToken,
   AuthRequest,
   invalidateSessionScopeCache,
+  sendSuspendedResponse,
 } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { randomUUID } from 'crypto';
@@ -48,6 +49,13 @@ const localWalletIdentifierSchema = z.coerce.string().trim().min(1, 'A local wal
 const issueToken = (user: (typeof db.users)[number], rememberMe = false) => signSessionToken(user, rememberMe);
 
 type UserRecord = (typeof db.users)[number];
+
+const rejectIfSuspended = (res: Response, user: UserRecord | undefined): boolean => {
+  if (!user?.suspended_at) return false;
+  clearSessionCookie(res);
+  sendSuspendedResponse(res);
+  return true;
+};
 
 const findWalletUser = async (address: string): Promise<UserRecord | undefined> => {
   const seedId = `wallet:${address.toLowerCase()}`;
@@ -101,6 +109,7 @@ const walletSignIn = async (
   extra: Record<string, unknown> = {},
 ) => {
   const user = await findWalletUser(address);
+  if (rejectIfSuspended(res, user)) return;
   if (user && (await db.identityService.hasCompletedCredentials(user.id, user.email))) {
     const token = issueToken(user, rememberMe);
     setSessionCookie(res, token, rememberMe);
@@ -309,6 +318,7 @@ router.post(
       if (!user) {
         return res.status(404).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'User not found.' } });
       }
+      if (rejectIfSuspended(res, user)) return;
 
       const remember = remember_me === true;
       const token = issueToken(user, remember);
@@ -381,6 +391,7 @@ router.post(
       }
 
       accountLoginThrottle.recordSuccess(normalizedEmail);
+      if (rejectIfSuspended(res, user)) return;
 
       const remember = remember_me === true;
       const token = issueToken(user, remember);
@@ -602,6 +613,7 @@ router.post(
           return res
             .status(401)
             .json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'Account no longer exists.' } });
+        if (rejectIfSuspended(res, user)) return;
         if (!byGoogle) {
           // Plan 72 Phase 2: If the account's email is not verified, delete that user's password_credentials row
           // before linking Google and marking the email verified. Whoever created the password never proved they own the email.
@@ -702,6 +714,7 @@ router.post(
             success: false,
             error: { code: 'SESSION_EXISTS', message: 'Sign out before starting a guest account.' },
           });
+        if (rejectIfSuspended(res, user)) return;
       } else {
         const identity = randomUUID();
         user = await db.findOrCreateUserDurable({
@@ -925,6 +938,7 @@ router.post(
           ? await db.usersRepo.findById(emailOwner.user_id)
           : db.findUserById(emailOwner.user_id);
         if (!user) return walletCompletionError(res, 404, 'USER_NOT_FOUND', 'Account not found.');
+        if (rejectIfSuspended(res, user)) return;
         if (user.wallet_address && user.wallet_address.toLowerCase() !== address.toLowerCase()) {
           return walletCompletionError(
             res,
@@ -1206,6 +1220,8 @@ router.post(
       });
     }
 
+    if (rejectIfSuspended(res, user)) return;
+
     const token = signSessionToken(user);
     setSessionCookie(res, token, false);
 
@@ -1281,6 +1297,7 @@ router.post(
         },
       });
     }
+    if (rejectIfSuspended(res, user)) return;
 
     if (!user) {
       try {

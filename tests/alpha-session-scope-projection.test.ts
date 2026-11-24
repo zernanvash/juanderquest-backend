@@ -34,6 +34,7 @@ describe('UsersRepository - findAlphaSessionScopesByIds (Iteration 20a)', () => 
       is_test: false,
       session_epoch: 0,
       role: 'admin',
+      suspended_at: null,
     });
     expect((projected as any).email).toBeUndefined();
     expect((projected as any).demo_points).toBeUndefined();
@@ -56,7 +57,7 @@ describe('UsersRepository - findAlphaSessionScopesByIds (Iteration 20a)', () => 
     expect(mockQuery).toHaveBeenCalledTimes(1);
     const [sql, params] = mockQuery.mock.calls[0];
     expect(sql).toBe(
-      'SELECT id, seed_id, is_test, COALESCE(session_epoch, 0)::int AS session_epoch, role FROM users WHERE id = ANY($1::text[])',
+      'SELECT id, seed_id, is_test, COALESCE(session_epoch, 0)::int AS session_epoch, role, suspended_at FROM users WHERE id = ANY($1::text[])',
     );
     expect(params).toEqual([['user-1', 'user-2']]);
   });

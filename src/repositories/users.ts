@@ -26,6 +26,7 @@ export interface AlphaSessionScope {
   is_test: boolean;
   session_epoch: number;
   role: 'user' | 'admin' | 'area_admin' | 'qa';
+  suspended_at?: string | null;
 }
 
 export class UsersRepository {
@@ -69,8 +70,9 @@ export class UsersRepository {
       is_test: boolean;
       session_epoch: number;
       role: 'user' | 'admin' | 'area_admin' | 'qa';
+      suspended_at: Date | string | null;
     }>(
-      'SELECT id, seed_id, is_test, COALESCE(session_epoch, 0)::int AS session_epoch, role FROM users WHERE id = ANY($1::text[])',
+      'SELECT id, seed_id, is_test, COALESCE(session_epoch, 0)::int AS session_epoch, role, suspended_at FROM users WHERE id = ANY($1::text[])',
       [uniqueIds],
     );
 
@@ -82,6 +84,7 @@ export class UsersRepository {
         is_test: Boolean(row.is_test),
         session_epoch: row.session_epoch ?? 0,
         role: row.role ?? 'user',
+        suspended_at: row.suspended_at ? new Date(row.suspended_at).toISOString() : null,
       });
     }
 
@@ -844,6 +847,9 @@ export class UsersRepository {
       admin_scope: row.admin_scope ?? null,
       is_test: Boolean(row.is_test),
       session_epoch: row.session_epoch !== undefined && row.session_epoch !== null ? Number(row.session_epoch) : 0,
+      suspended_at: row.suspended_at ? new Date(row.suspended_at).toISOString() : null,
+      suspended_reason: row.suspended_reason ?? null,
+      suspended_by: row.suspended_by ?? null,
       created_at: new Date(row.created_at).toISOString(),
       updated_at: new Date(row.updated_at).toISOString(),
     };
