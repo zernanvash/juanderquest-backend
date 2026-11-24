@@ -88,12 +88,14 @@ realPg('Plan 119: Plaza People Search & Unified Follow Suggestions (real Postgre
       [viewerId, mutualBridgeId, followsYouId, mutualTargetId],
     );
 
-    // Recent activity for activeExplorerId
+    // Recent activity for activeExplorerId and testCandidateId (for QA cold-start isolation check)
     await fixture.pool.query(
       `INSERT INTO social_activities (
          id, event_key, actor_id, verb, subject_type, subject_id, subject_title, subject_href, is_test
-       ) VALUES ($1, $2, $3, 'quest_completed', 'quest', 'q1', 'Quest One', '/quests/q1', FALSE)`,
-      [`act_${suffix}`, `evt_${suffix}`, activeExplorerId],
+       ) VALUES
+         ($1, $2, $3, 'quest_completed', 'quest', 'q1', 'Quest One', '/quests/q1', FALSE),
+         ($4, $5, $6, 'quest_completed', 'quest', 'q2', 'Quest Two', '/quests/q2', TRUE)`,
+      [`act_${suffix}`, `evt_${suffix}`, activeExplorerId, `act_qa_${suffix}`, `evt_qa_${suffix}`, testCandidateId],
     );
 
     // Shared verified visit (spot) between viewerId and sharedSpotId
@@ -152,12 +154,13 @@ realPg('Plan 119: Plaza People Search & Unified Follow Suggestions (real Postgre
     expect(ids).not.toContain(suspendedUserId);
     expect(ids).not.toContain(testCandidateId);
 
-    // Relevant signals should outrank quiet/unrelated user
-    expect(ids.indexOf(followsYouId)).toBeLessThan(ids.indexOf(inactiveOtherId));
-    expect(ids.indexOf(hometownId)).toBeLessThan(ids.indexOf(inactiveOtherId));
-    expect(ids.indexOf(mutualTargetId)).toBeLessThan(ids.indexOf(inactiveOtherId));
-    expect(ids.indexOf(sharedSpotId)).toBeLessThan(ids.indexOf(inactiveOtherId));
-    expect(ids.indexOf(activeExplorerId)).toBeLessThan(ids.indexOf(inactiveOtherId));
+    // Relevant signals should be suggested; unrelated inactive user is excluded from signal pool
+    expect(ids).toContain(followsYouId);
+    expect(ids).toContain(hometownId);
+    expect(ids).toContain(mutualTargetId);
+    expect(ids).toContain(sharedSpotId);
+    expect(ids).toContain(activeExplorerId);
+    expect(ids).not.toContain(inactiveOtherId);
 
     for (const item of items) {
       expect(item.is_following).toBe(false);
@@ -212,7 +215,9 @@ realPg('Plan 119: Plaza People Search & Unified Follow Suggestions (real Postgre
     expect(handleRes.status).toBe(200);
     expect(handleRes.body.data.items[0].id).toBe(typoTargetId);
     expect(handleRes.body.data.items[0].is_following).toBe(false);
-    expect(handleRes.body.data.items[0].score).toBeUndefined();
+    expect(handleRes.body.data.items[0].score).toBe(1);
+    expect('bio' in handleRes.body.data.items[0]).toBe(true);
+    expect('status_text' in handleRes.body.data.items[0]).toBe(true);
     expect(handleRes.body.data.items[0].email).toBeUndefined();
 
     // Followed user shows is_following: true
@@ -272,5 +277,45 @@ realPg('Plan 119: Plaza People Search & Unified Follow Suggestions (real Postgre
     const mb = followingRes.body.data.items.find((i: any) => i.id === mutualBridgeId);
     expect(mb).toBeDefined();
     expect(mb.is_following).toBe(true);
+  });
+
+  it('includes an older follows-you user on the first page even with 250 newer inactive users', async () => {
+    const scaleViewerId = `p119-scale-v-${suffix}`;
+    const olderFollowerId = `p119-scale-old-${suffix}`;
+    await fixture.pool.query(
+      `INSERT INTO users (
+         id, seed_id, display_name, email, handle, role, is_public, is_test, created_at, session_epoch
+       ) VALUES
+         ($1::text, $1::text, 'Scale Viewer', $1::text || '@example.test', 'scale_viewer', 'user', TRUE, FALSE, NOW(), 0),
+         ($2::text, $2::text, 'Older Follower', $2::text || '@example.test', 'older_follower', 'user', TRUE, FALSE, NOW() - INTERVAL '30 days', 0)`,
+      [scaleViewerId, olderFollowerId],
+    );
+    await fixture.pool.query(
+      `INSERT INTO users (
+         id, seed_id, display_name, email, handle, role, is_public, is_test, created_at, session_epoch
+       )
+       SELECT
+         $1::text || '-' || g::text,
+         $1::text || '-' || g::text,
+         'Newer Inactive ' || g::text,
+         $1::text || '-' || g::text || '@example.test',
+         'newer_inactive_' || g::text,
+         'user',
+         TRUE,
+         FALSE,
+         NOW(),
+         0
+       FROM generate_series(1, 250) AS g`,
+      [`p119-scale-new-${suffix}`],
+    );
+    await fixture.pool.query(`INSERT INTO user_follows (follower_id, following_id) VALUES ($1, $2)`, [
+      olderFollowerId,
+      scaleViewerId,
+    ]);
+
+    const res = await request(app).get('/api/v1/users/suggestions').set(as(scaleViewerId));
+    expect(res.status).toBe(200);
+    const ids = res.body.data.items.map((i: any) => i.id);
+    expect(ids).toContain(olderFollowerId);
   });
 });

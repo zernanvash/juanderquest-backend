@@ -6,6 +6,9 @@ export interface PeopleSearchItem {
   display_name: string;
   handle: string | null;
   avatar_url: string | null;
+  bio: string | null;
+  status_text: string | null;
+  score: number;
   is_following: boolean;
 }
 
@@ -16,6 +19,16 @@ function escapeLike(value: string): string {
 function stripDiacritics(value: string): string {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
+
+const TIER_SCORE: Record<number, number> = {
+  1: 1.0,
+  2: 0.95,
+  3: 0.9,
+  4: 0.85,
+  5: 0.75,
+  6: 0.7,
+  7: 0.5,
+};
 
 export async function searchPeopleDiscovery(opts: {
   query: string;
@@ -52,9 +65,10 @@ export async function searchPeopleDiscovery(opts: {
       let tier = 0;
       if (handleLower && handleLower === qLower) tier = 1;
       else if (handleLower && handleLower.startsWith(qLower)) tier = 2;
-      else if (nameLower.startsWith(qFolded)) tier = 3;
-      else if (handleLower && handleLower.includes(qLower)) tier = 4;
-      else if (nameLower.includes(qFolded)) tier = 5;
+      else if (nameLower === qFolded) tier = 3;
+      else if (nameLower.startsWith(qFolded)) tier = 4;
+      else if (handleLower && handleLower.includes(qLower)) tier = 5;
+      else if (nameLower.includes(qFolded)) tier = 6;
 
       if (tier > 0) {
         ranked.push({
@@ -64,6 +78,9 @@ export async function searchPeopleDiscovery(opts: {
             display_name: user.display_name,
             handle: user.handle || null,
             avatar_url: user.avatar_url || null,
+            bio: user.bio || null,
+            status_text: user.status_text || null,
+            score: TIER_SCORE[tier] ?? 0.5,
             is_following: followingSet.has(user.id),
           },
         });
@@ -83,13 +100,16 @@ export async function searchPeopleDiscovery(opts: {
       u.display_name,
       u.handle,
       u.avatar_url,
+      u.bio,
+      u.status_text,
       CASE
         WHEN u.handle IS NOT NULL AND lower(u.handle) = $1 THEN 1
         WHEN u.handle IS NOT NULL AND lower(u.handle) LIKE $2 || '%' ESCAPE '\\' THEN 2
-        WHEN f_unaccent(lower(u.display_name)) LIKE $3 || '%' ESCAPE '\\' THEN 3
-        WHEN u.handle IS NOT NULL AND lower(u.handle) LIKE '%' || $2 || '%' ESCAPE '\\' THEN 4
-        WHEN f_unaccent(lower(u.display_name)) LIKE '%' || $3 || '%' ESCAPE '\\' THEN 5
-        ELSE 6
+        WHEN f_unaccent(lower(u.display_name)) = f_unaccent($1) THEN 3
+        WHEN f_unaccent(lower(u.display_name)) LIKE $3 || '%' ESCAPE '\\' THEN 4
+        WHEN u.handle IS NOT NULL AND lower(u.handle) LIKE '%' || $2 || '%' ESCAPE '\\' THEN 5
+        WHEN f_unaccent(lower(u.display_name)) LIKE '%' || $3 || '%' ESCAPE '\\' THEN 6
+        ELSE 7
       END AS match_tier,
       GREATEST(
         COALESCE(extensions.similarity(lower(u.handle), $1), 0),
@@ -103,10 +123,10 @@ export async function searchPeopleDiscovery(opts: {
       AND (
         (u.handle IS NOT NULL AND (
           lower(u.handle) LIKE '%' || $2 || '%' ESCAPE '\\'
-          OR extensions.similarity(lower(u.handle), $1) > 0.25
+          OR lower(u.handle) OPERATOR(extensions.%) $1
         ))
         OR f_unaccent(lower(u.display_name)) LIKE '%' || $3 || '%' ESCAPE '\\'
-        OR extensions.similarity(f_unaccent(lower(u.display_name)), f_unaccent($1)) > 0.30
+        OR f_unaccent(lower(u.display_name)) OPERATOR(extensions.%) f_unaccent($1)
       )
     ORDER BY match_tier ASC, sim_score DESC, u.display_name ASC, u.id ASC
     LIMIT $6
@@ -117,6 +137,9 @@ export async function searchPeopleDiscovery(opts: {
     display_name: string;
     handle: string | null;
     avatar_url: string | null;
+    bio: string | null;
+    status_text: string | null;
+    match_tier: number;
   }>(sql, [qLower, qLike, qFoldedLike, opts.viewerId, opts.allowTest, limit]);
 
   let followingSet = new Set<string>();
@@ -136,6 +159,9 @@ export async function searchPeopleDiscovery(opts: {
     display_name: r.display_name,
     handle: r.handle || null,
     avatar_url: r.avatar_url || null,
+    bio: r.bio || null,
+    status_text: r.status_text || null,
+    score: TIER_SCORE[Number(r.match_tier)] ?? 0.5,
     is_following: followingSet.has(r.id),
   }));
 }

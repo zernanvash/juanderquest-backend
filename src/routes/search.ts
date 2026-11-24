@@ -216,8 +216,8 @@ searchRouter.get(
           if (a.type === 'people') return -1;
           if (b.type === 'people') return 1;
         }
-        const topA = a.candidates[0] && 'score' in a.candidates[0] ? a.candidates[0].score || 0 : 0;
-        const topB = b.candidates[0] && 'score' in b.candidates[0] ? b.candidates[0].score || 0 : 0;
+        const topA = a.candidates[0]?.score || 0;
+        const topB = b.candidates[0]?.score || 0;
         if (topB !== topA) return topB - topA;
         const order = { places: 0, people: 1, quests: 2 };
         return order[a.type] - order[b.type];
@@ -242,9 +242,8 @@ searchRouter.get(
           const currentCount = allocatedCounts[g.type];
           if (currentCount < MAX_PER_GROUP && currentCount < g.candidates.length) {
             const nextCandidate = g.candidates[currentCount];
-            const nextScore = nextCandidate && 'score' in nextCandidate ? nextCandidate.score : 0.8;
-            if (nextCandidate && nextScore > bestScore) {
-              bestScore = nextScore;
+            if (nextCandidate && nextCandidate.score > bestScore) {
+              bestScore = nextCandidate.score;
               bestGroup = g.type;
             }
           }

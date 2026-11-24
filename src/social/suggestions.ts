@@ -48,7 +48,6 @@ export async function getFollowSuggestions(
           !followingSet.has(u.id) &&
           !dismissedSet.has(u.id),
       )
-      .slice(0, 200)
       .map((u) => {
         const followsBack = db.follows.some((f) => f.follower_id === u.id && f.following_id === viewerId) ? 45 : 0;
         const mutualCount = db.follows.filter((f) => followingSet.has(f.follower_id) && f.following_id === u.id).length;
@@ -91,9 +90,60 @@ export async function getFollowSuggestions(
   const viewerHometown = viewer.home_municipality?.trim() || null;
 
   const sql = `
-    WITH candidate_pool AS (
+    WITH candidate_ids AS (
+      (
+        SELECT fb.follower_id AS id
+        FROM user_follows fb
+        WHERE fb.following_id = $1
+        LIMIT 100
+      )
+      UNION
+      (
+        SELECT f2.following_id AS id
+        FROM user_follows f1
+        JOIN user_follows f2 ON f2.follower_id = f1.following_id
+        WHERE f1.follower_id = $1
+        LIMIT 100
+      )
+      UNION
+      (
+        SELECT u.id
+        FROM users u
+        WHERE $3::text IS NOT NULL
+          AND u.is_public = TRUE
+          AND u.suspended_at IS NULL
+          AND COALESCE(u.is_test, FALSE) = $2
+          AND lower(u.home_municipality) = lower($3::text)
+        LIMIT 100
+      )
+      UNION
+      (
+        SELECT DISTINCT vv2.user_id AS id
+        FROM verified_visits vv1
+        JOIN verified_visits vv2 ON vv2.spot_id = vv1.spot_id
+        WHERE vv1.user_id = $1
+          AND vv2.user_id <> $1
+          AND vv1.revoked_at IS NULL
+          AND vv2.revoked_at IS NULL
+          AND vv1.occurred_at >= NOW() - INTERVAL '90 days'
+          AND vv2.occurred_at >= NOW() - INTERVAL '90 days'
+        LIMIT 100
+      )
+      UNION
+      (
+        SELECT sa.actor_id AS id
+        FROM social_activities sa
+        WHERE sa.hidden_at IS NULL
+          AND sa.created_at >= NOW() - INTERVAL '14 days'
+        GROUP BY sa.actor_id
+        ORDER BY MAX(sa.created_at) DESC
+        LIMIT 100
+      )
+    ),
+    candidate_pool AS (
       SELECT u.id, u.display_name, u.handle, u.avatar_url, u.home_municipality
-      FROM users u
+      FROM candidate_ids ci
+      JOIN users u ON u.id = ci.id
       WHERE u.id <> $1
         AND u.is_public = TRUE
         AND u.suspended_at IS NULL
@@ -108,8 +158,6 @@ export async function getFollowSuggestions(
           SELECT 1 FROM user_suggestion_dismissals d
           WHERE d.user_id = $1 AND d.dismissed_user_id = u.id
         )
-      ORDER BY u.created_at DESC, u.id ASC
-      LIMIT 200
     ),
     scored AS (
       SELECT
