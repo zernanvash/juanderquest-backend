@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
@@ -166,11 +167,30 @@ export const getLatestAppVersion = (): AppVersionData => {
   return fallback;
 };
 
-// GET /api/v1/app/version -> Get latest app version info + dynamic min build & announcement
+export interface AppPromoPanel {
+  campaign_id: string;
+  title: string;
+  body: string;
+  cta_label: string;
+  url: string;
+  until: string | null;
+}
+
+const isHttpsUrl = (raw: string): boolean => {
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === 'https:' && parsed.host.length > 0;
+  } catch {
+    return false;
+  }
+};
+
+// GET /api/v1/app/version -> Get latest app version info + dynamic min build, announcement & promo panel
 appVersionRouter.get('/app/version', async (_req: Request, res: Response) => {
   const versionData = getLatestAppVersion();
   let minSupportedBuild = versionData.minSupportedBuildNumber ?? versionData.minSupportedVersionCode ?? 1;
   let announcement: { text: string; severity: 'info' | 'warning'; until: string | null } | null = null;
+  let promoPanel: AppPromoPanel | null = null;
   try {
     const settings = await appSettingsService.getSettings();
     const configuredMin = Number(settings.values.app_min_supported_build ?? 1);
@@ -185,6 +205,29 @@ appVersionRouter.get('/app/version', async (_req: Request, res: Response) => {
     if (text && !isExpired) {
       announcement = { text, severity, until: untilRaw || null };
     }
+
+    const promoEnabled = settings.values.app_promo_enabled === true;
+    const promoTitle = String(settings.values.app_promo_title ?? '').trim();
+    const promoBody = String(settings.values.app_promo_body ?? '').trim();
+    const promoCtaLabel = String(settings.values.app_promo_cta_label ?? '').trim() || 'Open Form';
+    const promoUrl = String(settings.values.app_promo_url ?? '').trim();
+    const promoUntilRaw = String(settings.values.app_promo_until ?? '').trim();
+    const promoUntilMs = promoUntilRaw ? Date.parse(promoUntilRaw) : NaN;
+    const isPromoExpired = Boolean(promoUntilRaw) && (!Number.isFinite(promoUntilMs) || promoUntilMs <= Date.now());
+    if (promoEnabled && promoTitle && isHttpsUrl(promoUrl) && !isPromoExpired) {
+      const configuredCampaignId = String(settings.values.app_promo_campaign_id ?? '').trim();
+      const campaignId =
+        configuredCampaignId ||
+        `promo-${createHash('sha256').update(`${promoTitle}|${promoUrl}`).digest('hex').slice(0, 12)}`;
+      promoPanel = {
+        campaign_id: campaignId,
+        title: promoTitle,
+        body: promoBody,
+        cta_label: promoCtaLabel,
+        url: promoUrl,
+        until: promoUntilRaw || null,
+      };
+    }
   } catch {
     // Settings table or pool unavailable (e.g. unit test without PG) - preserve fallback behavior.
   }
@@ -196,6 +239,7 @@ appVersionRouter.get('/app/version', async (_req: Request, res: Response) => {
       ...versionData,
       min_supported_build: minSupportedBuild,
       announcement,
+      promo_panel: promoPanel,
     },
   });
 });

@@ -230,6 +230,13 @@ adminSettingsRouter.get(
     const announcementText = String(settingsSnapshot.values.app_announcement_text ?? '').trim();
     const announcementSeverity = settingsSnapshot.values.app_announcement_severity === 'warning' ? 'warning' : 'info';
     const announcementUntil = String(settingsSnapshot.values.app_announcement_until ?? '').trim();
+    const promoEnabled = settingsSnapshot.values.app_promo_enabled === true;
+    const promoCampaignId = String(settingsSnapshot.values.app_promo_campaign_id ?? '').trim();
+    const promoTitle = String(settingsSnapshot.values.app_promo_title ?? '').trim();
+    const promoBody = String(settingsSnapshot.values.app_promo_body ?? '').trim();
+    const promoCtaLabel = String(settingsSnapshot.values.app_promo_cta_label ?? 'Open Form').trim() || 'Open Form';
+    const promoUrl = String(settingsSnapshot.values.app_promo_url ?? '').trim();
+    const promoUntil = String(settingsSnapshot.values.app_promo_until ?? '').trim();
 
     return res.status(200).json({
       success: true,
@@ -288,6 +295,13 @@ adminSettingsRouter.get(
           app_announcement_text: announcementText,
           app_announcement_severity: announcementSeverity,
           app_announcement_until: announcementUntil,
+          app_promo_enabled: promoEnabled,
+          app_promo_campaign_id: promoCampaignId,
+          app_promo_title: promoTitle,
+          app_promo_body: promoBody,
+          app_promo_cta_label: promoCtaLabel,
+          app_promo_url: promoUrl,
+          app_promo_until: promoUntil,
         },
       },
     });
