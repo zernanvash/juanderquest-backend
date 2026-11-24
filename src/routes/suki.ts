@@ -5,13 +5,14 @@ import { authenticateToken, optionalAuthenticateToken, AuthRequest } from '../mi
 import { rateLimit } from '../middleware/rateLimit.js';
 import { validateRequest } from '../middleware/validate.js';
 import { assertInScope, requireAreaAdmin, writeAdminAudit } from '../admin/scope.js';
-import { SukiError, SukiService, SUKI_REWARD_KINDS } from '../suki/service.js';
+import { SukiError, SukiService, SUKI_ICON_KEYS, SUKI_REWARD_KINDS, SUKI_SKIN_KEYS } from '../suki/service.js';
 import { log } from '../utils/logger.js';
 
-/** Plan 107 — Suki Card merchant loyalty cards. */
+/** Plan 107 / Plan 111 — Suki Card merchant loyalty cards, tiers & Suki Points. */
 export const sukiRouter = Router();
 
 const visitLimiter = rateLimit({ policyId: 'suki:visit', windowMs: 60_000, max: 6, keyStrategy: 'actor' });
+const redeemLimiter = rateLimit({ policyId: 'suki:points-redeem', windowMs: 60_000, max: 6, keyStrategy: 'actor' });
 const passLimiter = rateLimit({ policyId: 'suki:pass', windowMs: 60_000, max: 10, keyStrategy: 'actor' });
 const pollLimiter = rateLimit({ policyId: 'suki:pass-status', windowMs: 60_000, max: 30, keyStrategy: 'actor' });
 const scanLimiter = rateLimit({ policyId: 'suki:scan', windowMs: 60_000, max: 30, keyStrategy: 'actor' });
@@ -70,14 +71,31 @@ const visitSchema = z.object({
     .strict(),
 });
 const passSchema = z.object({ body: z.object({ program_id: z.string().min(3).max(80) }).strict() });
+const tierInputSchema = z
+  .object({
+    visit_number: z.number().int().min(1).max(20),
+    reward_kind: z.enum(SUKI_REWARD_KINDS),
+    reward_value: z.number().int().nullable().optional(),
+    reward_text: z.string().trim().min(3).max(120),
+    icon_key: z.enum(SUKI_ICON_KEYS).optional(),
+  })
+  .strict();
+
 const programSchema = z.object({
   body: z
     .object({
       title: z.string().trim().min(3).max(60),
-      reward_kind: z.enum(SUKI_REWARD_KINDS),
+      reward_kind: z.enum(SUKI_REWARD_KINDS).optional(),
       reward_value: z.number().int().nullable().optional(),
-      reward_text: z.string().trim().min(3).max(120),
+      reward_text: z.string().trim().min(3).max(120).optional(),
       visits_required: z.number().int().min(3).max(20).optional(),
+      tiers: z.array(tierInputSchema).min(1).max(4).optional(),
+      points_enabled: z.boolean().optional(),
+      points_per_visit: z.number().int().min(0).max(100).optional(),
+      pesos_per_point: finite.min(1).max(1000).nullable().optional(),
+      max_points_per_visit: z.number().int().min(1).max(2000).optional(),
+      points_expire_days: z.number().int().min(30).max(730).nullable().optional(),
+      skin_key: z.enum(SUKI_SKIN_KEYS).optional(),
       mode: z.enum(['standee', 'staff_scan']).optional(),
       radius_m: z.number().int().min(30).max(200).optional(),
     })
@@ -88,7 +106,43 @@ const locationSchema = z.object({
     .object({ lat: finite.min(-90).max(90), lng: finite.min(-180).max(180), accuracy_m: finite.min(0).max(10_000) })
     .strict(),
 });
-const scanSchema = z.object({ body: z.object({ code: z.string().trim().min(4).max(2000) }).strict() });
+const scanSchema = z.object({
+  body: z
+    .object({
+      code: z.string().trim().min(4).max(2000),
+      amount_spent: finite.min(0).max(100_000).nullable().optional(),
+    })
+    .strict(),
+});
+const pointsRedeemSchema = z.object({
+  body: z
+    .object({
+      item_id: z.string().trim().min(3).max(80),
+      idempotency_key: z.string().trim().min(8).max(100),
+    })
+    .strict(),
+});
+const pointsMenuCreateSchema = z.object({
+  body: z
+    .object({
+      title: z.string().trim().min(3).max(80),
+      points_cost: z.number().int().min(10).max(100_000),
+      icon_key: z.enum(SUKI_ICON_KEYS).optional(),
+      sort_order: z.number().int().min(0).max(999).optional(),
+    })
+    .strict(),
+});
+const pointsMenuPatchSchema = z.object({
+  body: z
+    .object({
+      title: z.string().trim().min(3).max(80).optional(),
+      points_cost: z.number().int().min(10).max(100_000).optional(),
+      icon_key: z.enum(SUKI_ICON_KEYS).optional(),
+      is_active: z.boolean().optional(),
+      sort_order: z.number().int().min(0).max(999).optional(),
+    })
+    .strict(),
+});
 const pauseSchema = z.object({ body: z.object({ reason: z.string().trim().min(3).max(300) }).strict() });
 
 const optionalNumber = (raw: unknown) => {
@@ -140,6 +194,26 @@ sukiRouter.post(
   visitLimiter,
   validateRequest(visitSchema),
   handle((req, svc) => svc.recordStandeeVisit(req.user!.id, req.body), 201),
+);
+
+sukiRouter.post(
+  '/suki/points/redeem',
+  authenticateToken,
+  redeemLimiter,
+  validateRequest(pointsRedeemSchema),
+  handle((req, svc) => svc.redeemPoints(req.user!.id, req.body), 201),
+);
+
+sukiRouter.get(
+  '/suki/cards/:cardId/points',
+  authenticateToken,
+  handle(async (req, svc) => {
+    await svc.requireEnabled();
+    return svc.listCardPoints(req.user!.id, String(req.params.cardId), {
+      cursor: typeof req.query.cursor === 'string' ? req.query.cursor : undefined,
+      limit: optionalNumber(req.query.limit),
+    });
+  }),
 );
 
 sukiRouter.post(
@@ -225,7 +299,39 @@ sukiRouter.post(
   authenticateToken,
   scanLimiter,
   validateRequest(scanSchema),
-  handle((req, svc) => svc.scan(req.user!.id, req.body.code)),
+  handle((req, svc) => svc.scan(req.user!.id, req.body.code, new Date(), req.body.amount_spent ?? null)),
+);
+
+sukiRouter.get(
+  '/merchant/suki/points-menu',
+  authenticateToken,
+  handle(async (req, svc) => {
+    await svc.requireEnabled();
+    return svc.merchantPointsMenu(req.user!.id);
+  }),
+);
+
+sukiRouter.post(
+  '/merchant/suki/points-menu',
+  authenticateToken,
+  writeLimiter,
+  validateRequest(pointsMenuCreateSchema),
+  handle((req, svc) => svc.createPointsMenuItem(req.user!.id, req.body), 201),
+);
+
+sukiRouter.patch(
+  '/merchant/suki/points-menu/:itemId',
+  authenticateToken,
+  writeLimiter,
+  validateRequest(pointsMenuPatchSchema),
+  handle((req, svc) => svc.updatePointsMenuItem(req.user!.id, String(req.params.itemId), req.body)),
+);
+
+sukiRouter.delete(
+  '/merchant/suki/points-menu/:itemId',
+  authenticateToken,
+  writeLimiter,
+  handle((req, svc) => svc.deletePointsMenuItem(req.user!.id, String(req.params.itemId))),
 );
 
 sukiRouter.get(

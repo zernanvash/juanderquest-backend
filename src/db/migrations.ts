@@ -118,6 +118,8 @@ export const MIGRATIONS = [
   '106_merchant_user_qa_and_bridges.sql',
   // v0.3.10 profile track: avatar reports (reserved 107; orchestrator orders it with 104-106 at merge).
   '107_avatar_reports.sql',
+  // Plan 111: Suki Card v2 multi-tier reward ladder, Suki Points, and card skins (reserved 108).
+  '108_suki_v2_tiers_points.sql',
   // Plan 114: public beta bug reports from /report-bug.
   '109_bug_reports.sql',
   // Plan 116 national launch: PostGIS geography, search, provenance (needs extensions; see scripts/prod-db).
