@@ -68,9 +68,9 @@ describe('Destination-Author Quests System', () => {
     expect(res.body.success).toBe(false);
   });
 
-  it('rejects a non-author while the destination is not published (DESTINATION_NOT_PUBLISHED)', async () => {
+  it('rejects a non-author while the destination is not published (DESTINATION_OWNER_ONLY)', async () => {
     const spot = spotStore.spots.find((s) => s.id === testSpotId)!;
-    spot.status = 'pending_review';
+    spot.status = 'needs_review';
     try {
       const res = await request(app)
         .post(`/api/v1/spots/${testSpotId}/quests`)
@@ -85,7 +85,7 @@ describe('Destination-Author Quests System', () => {
 
       expect(res.status).toBe(403);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.code).toBe('DESTINATION_NOT_PUBLISHED');
+      expect(res.body.error.code).toBe('DESTINATION_OWNER_ONLY');
     } finally {
       spot.status = 'published';
     }
@@ -116,7 +116,7 @@ describe('Destination-Author Quests System', () => {
     expect(updatedSpot?.quest_id).toBe(res.body.data.id);
   });
 
-  it('lets another traveler add their own quest to a published destination without replacing the first', async () => {
+  it('rejects another traveler adding a quest to a poster-owned destination (Plan 118)', async () => {
     const firstQuestId = spotStore.spots.find((s) => s.id === testSpotId)?.quest_id;
     const res = await request(app)
       .post(`/api/v1/spots/${testSpotId}/quests`)
@@ -129,13 +129,9 @@ describe('Destination-Author Quests System', () => {
         reward_points: 75,
       });
 
-    expect(res.status).toBe(201);
-    expect(res.body.data.author_id).toBe(otherUserId);
+    expect(res.status).toBe(403);
+    expect(res.body.error?.code).toBe('DESTINATION_OWNER_ONLY');
     expect(spotStore.spots.find((s) => s.id === testSpotId)?.quest_id).toBe(firstQuestId);
-
-    const list = await request(app).get(`/api/v1/spots/${testSpotId}/quests`);
-    const titles = list.body.data.map((q: any) => q.title);
-    expect(titles).toEqual(expect.arrayContaining(['Sunset Beacon Exploration Trail', 'Tide Pool Photo Walk']));
   });
 
   it('lists active quests for the spot via GET /spots/:id/quests without leaking marker code', async () => {

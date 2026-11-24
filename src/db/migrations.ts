@@ -118,6 +118,8 @@ export const MIGRATIONS = [
   '106_merchant_user_qa_and_bridges.sql',
   // v0.3.10 profile track: avatar reports (reserved 107; orchestrator orders it with 104-106 at merge).
   '107_avatar_reports.sql',
+  // Plan 111: Suki Card v2 multi-tier reward ladder, Suki Points, and card skins (reserved 108).
+  '108_suki_v2_tiers_points.sql',
   // Plan 114: public beta bug reports from /report-bug.
   '109_bug_reports.sql',
   // Plan 116 national launch: PostGIS geography, search, provenance (needs extensions; see scripts/prod-db).
@@ -126,6 +128,8 @@ export const MIGRATIONS = [
   '111_spot_photo_licensing.sql',
   // Plan 116: FK indexes that matter at national scale, BRIN on append tables, VALIDATE 084 checks.
   '112_perf_hygiene.sql',
+  // Plan 118: pending destination relocation requests for pin moves > 200 m.
+  '113_spot_relocation_requests.sql',
   // Plan 117: user suspension columns, search/sort indexes, risk_flags table, and risk thresholds (reserved 114; 113 is Plan 118).
   '114_user_suspension_and_risk_flags.sql',
   // Plan 119: persisted follow-suggestion dismissals and lookup indexes for people discovery.

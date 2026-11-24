@@ -42,7 +42,8 @@ import { recordActivity } from '../social/activity.js';
 import { notify } from '../social/notify.js';
 import { normalizeTasks } from '../quests/taskNormalize.js';
 import { questTaskInputSchema, validateTasksWithinDistance } from '../quests/taskValidation.js';
-import { assertInScope, requireAreaAdmin, spotInScope, writeAdminAudit } from '../admin/scope.js';
+import { assertInScope, loadAdminScope, requireAreaAdmin, spotInScope, writeAdminAudit } from '../admin/scope.js';
+import { resolveSpotAuthors, spotRelocationStore, type RelocationStatus } from '../spots/relocations.js';
 import { handleSpotInteraction } from '../stamps/hooks.js';
 import { getHomeTown } from '../social/homeTown.js';
 import { log } from '../utils/logger.js';
@@ -215,7 +216,11 @@ router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, async (req
     limit: pageSize,
     offset: pageOffset,
   });
-  const data = page.items;
+  const authors = await resolveSpotAuthors(page.items.map((s) => s.created_by));
+  const data = page.items.map((s) => ({
+    ...s,
+    author: s.created_by ? (authors.get(s.created_by) ?? null) : null,
+  }));
   const nextOffset = pageOffset + data.length;
   return res.json({
     success: true,
@@ -424,10 +429,13 @@ router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, asyn
     (spot.status === 'held' || spot.status === 'hidden_pending_review')
       ? buildModerationSummary(spot, await listSpotModerationEvents([spot.id]))
       : {};
+  const authorMap = spot.created_by ? await resolveSpotAuthors([spot.created_by]) : null;
+  const author = spot.created_by ? (authorMap?.get(spot.created_by) ?? null) : null;
   return res.json({
     success: true,
     data: {
       ...spot,
+      author,
       ...spotStore.crowd(spot),
       saved: spotStore.isSaved(actorId, spot.id),
       liked: spotStore.isLiked(actorId, spot.id),
@@ -643,6 +651,162 @@ router.get(
     });
   },
 );
+// Plan 118: Pending destination relocation requests (> 200 m moves). Registered before /admin/spots/:id.
+router.get(
+  '/admin/spots/relocations',
+  authenticateToken,
+  requireAreaAdmin('destinations'),
+  async (req: AuthRequest, res) => {
+    const rawStatus = typeof req.query.status === 'string' ? req.query.status : 'pending';
+    const status: RelocationStatus | 'all' =
+      rawStatus === 'pending' ||
+      rawStatus === 'approved' ||
+      rawStatus === 'rejected' ||
+      rawStatus === 'cancelled' ||
+      rawStatus === 'all'
+        ? rawStatus
+        : 'pending';
+    const allowedSpotIds = new Set(
+      spotStore.spots.filter((spot) => spotInAdminScope(req.adminScope!, spot)).map((spot) => spot.id),
+    );
+    const items = await spotRelocationStore.list({ status, allowedSpotIds });
+    return res.json({ success: true, data: items, meta: { count: items.length } });
+  },
+);
+
+router.post(
+  '/admin/spots/relocations/:id/approve',
+  authenticateToken,
+  requireAreaAdmin('destinations'),
+  async (req: AuthRequest, res) => {
+    const notFound = () =>
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Relocation request not found.' } });
+    const existing = await spotRelocationStore.findById(req.params.id);
+    const spot = existing ? spotStore.spots.find((s) => s.id === existing.spot_id) : undefined;
+    if (!existing || !spot || !spotInAdminScope(req.adminScope!, spot)) return notFound();
+    if (existing.status !== 'pending') {
+      return res.status(409).json({
+        success: false,
+        error: { code: 'ALREADY_REVIEWED', message: `Relocation request is already ${existing.status}.` },
+      });
+    }
+
+    const beforeCoords = { gps_lat: spot.gps_lat, gps_lng: spot.gps_lng };
+    const areaMatch = await resolveSpotAreas(getPool(), existing.to_lat, existing.to_lng, spot.municipality);
+    await spotStore.updateSpot(spot.id, {
+      gps_lat: existing.to_lat,
+      gps_lng: existing.to_lng,
+      town_area_id: areaMatch.townAreaId,
+      barangay_area_id: areaMatch.barangayAreaId,
+      province_area_id: areaMatch.provinceAreaId,
+      region_area_id: areaMatch.regionAreaId,
+    });
+
+    const updated = await spotRelocationStore.markApproved(existing.id, req.user!.id);
+    if (!updated) return notFound();
+
+    await writeAdminAudit({
+      actorId: req.user!.id,
+      actorRole: req.user!.role,
+      areaId: spot.town_area_id ?? null,
+      action: 'spot_relocation.approved',
+      subjectType: 'spot_relocation_request',
+      subjectId: existing.id,
+      before: { status: existing.status, ...beforeCoords },
+      after: {
+        status: updated.status,
+        gps_lat: existing.to_lat,
+        gps_lng: existing.to_lng,
+        distance_m: existing.distance_m,
+      },
+    });
+
+    const pool = getPool();
+    if (pool) {
+      try {
+        await notify(pool, {
+          userId: existing.requested_by,
+          kind: 'spot_moderation',
+          eventKey: `spot_relocation_approved:${existing.id}`,
+          title: 'Destination move approved',
+          message: `Your pin relocation for ${spot.name} (${existing.distance_m} m) was approved.`,
+          href: `/spots/${spot.slug || spot.id}`,
+          isTest: Boolean(spot.is_test),
+        });
+      } catch (err) {
+        log.warn('[spots:approveRelocation] Notification skipped:', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    return res.json({ success: true, data: updated });
+  },
+);
+
+const rejectRelocationSchema = z.object({
+  body: z
+    .object({
+      note: z.string().trim().min(3).max(500),
+    })
+    .strict(),
+});
+
+router.post(
+  '/admin/spots/relocations/:id/reject',
+  authenticateToken,
+  requireAreaAdmin('destinations'),
+  validateRequest(rejectRelocationSchema),
+  async (req: AuthRequest, res) => {
+    const notFound = () =>
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Relocation request not found.' } });
+    const existing = await spotRelocationStore.findById(req.params.id);
+    const spot = existing ? spotStore.spots.find((s) => s.id === existing.spot_id) : undefined;
+    if (!existing || !spot || !spotInAdminScope(req.adminScope!, spot)) return notFound();
+    if (existing.status !== 'pending') {
+      return res.status(409).json({
+        success: false,
+        error: { code: 'ALREADY_REVIEWED', message: `Relocation request is already ${existing.status}.` },
+      });
+    }
+
+    const updated = await spotRelocationStore.markRejected(existing.id, req.user!.id, req.body.note);
+    if (!updated) return notFound();
+
+    await writeAdminAudit({
+      actorId: req.user!.id,
+      actorRole: req.user!.role,
+      areaId: spot.town_area_id ?? null,
+      action: 'spot_relocation.rejected',
+      subjectType: 'spot_relocation_request',
+      subjectId: existing.id,
+      before: { status: existing.status },
+      after: { status: updated.status, review_note: updated.review_note },
+    });
+
+    const pool = getPool();
+    if (pool) {
+      try {
+        await notify(pool, {
+          userId: existing.requested_by,
+          kind: 'spot_moderation',
+          eventKey: `spot_relocation_rejected:${existing.id}`,
+          title: 'Destination move not approved',
+          message: `Your pin relocation for ${spot.name} was rejected: ${req.body.note}`,
+          href: `/spots/${spot.slug || spot.id}`,
+          isTest: Boolean(spot.is_test),
+        });
+      } catch (err) {
+        log.warn('[spots:rejectRelocation] Notification skipped:', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    return res.json({ success: true, data: updated });
+  },
+);
+
 router.get('/admin/spots/:id', authenticateToken, requireAreaAdmin('destinations'), (req: AuthRequest, res) => {
   const spot = spotStore.spots.find((s) => s.id === req.params.id || s.slug === req.params.id);
   if (!spot || !spotInAdminScope(req.adminScope!, spot))
@@ -968,8 +1132,14 @@ router.post('/spots', authenticateToken, validateRequest(contributionSchema), as
   });
 });
 
+const RELOCATION_INSTANT_MAX_M = 200;
+
 const updateContributionSchema = z.object({
-  body: contributionSchema.shape.body.partial(),
+  body: contributionSchema.shape.body
+    .extend({
+      accuracy_m: z.number().min(0).max(50000).nullable().optional(),
+    })
+    .partial(),
 });
 
 router.patch(
@@ -999,9 +1169,24 @@ router.patch(
     const nextName = req.body.name ?? existing.name;
     const nextDescription = req.body.description ?? existing.description;
     const nextTags = req.body.tags ?? existing.tags;
-    const nextLat = req.body.gps_lat ?? existing.gps_lat;
-    const nextLng = req.body.gps_lng ?? existing.gps_lng;
+    const requestedLat = req.body.gps_lat ?? existing.gps_lat;
+    const requestedLng = req.body.gps_lng ?? existing.gps_lng;
     const nextMunicipality = req.body.municipality ?? existing.municipality;
+
+    const coordsChanged =
+      (req.body.gps_lat !== undefined || req.body.gps_lng !== undefined) &&
+      (requestedLat !== existing.gps_lat || requestedLng !== existing.gps_lng);
+    const moveDistanceM = coordsChanged
+      ? Math.round(distanceKm(existing.gps_lat, existing.gps_lng, requestedLat, requestedLng) * 1000)
+      : 0;
+    const recentInstantM =
+      coordsChanged && moveDistanceM > 0
+        ? await spotRelocationStore.recentInstantDistanceM(existing.id, req.user!.id, 30)
+        : 0;
+    const needsRelocationReview = coordsChanged && recentInstantM + moveDistanceM > RELOCATION_INSTANT_MAX_M;
+
+    const effectiveLat = needsRelocationReview ? existing.gps_lat : requestedLat;
+    const effectiveLng = needsRelocationReview ? existing.gps_lng : requestedLng;
 
     const evaluation = await evaluateSpotSubmission({
       mode: 'edit',
@@ -1010,8 +1195,8 @@ router.patch(
       name: nextName,
       description: nextDescription,
       tags: nextTags,
-      gps_lat: nextLat,
-      gps_lng: nextLng,
+      gps_lat: effectiveLat,
+      gps_lng: effectiveLng,
     });
 
     if (evaluation.action === 'reject') {
@@ -1025,17 +1210,56 @@ router.patch(
       });
     }
 
-    const areaMatch = await resolveSpotAreas(getPool(), nextLat, nextLng, nextMunicipality);
+    const areaMatch = await resolveSpotAreas(getPool(), effectiveLat, effectiveLng, nextMunicipality);
     const wasPublished = existing.status === 'published';
 
+    const { accuracy_m: accuracyM, gps_lat: _ignoredLat, gps_lng: _ignoredLng, ...nonCoordFields } = req.body;
+    const spotPatch = needsRelocationReview
+      ? nonCoordFields
+      : {
+          ...nonCoordFields,
+          ...(req.body.gps_lat !== undefined ? { gps_lat: req.body.gps_lat } : {}),
+          ...(req.body.gps_lng !== undefined ? { gps_lng: req.body.gps_lng } : {}),
+        };
+
     const updated = await spotStore.updateSpot(existing.id, {
-      ...req.body,
+      ...spotPatch,
       status: evaluation.status,
       town_area_id: areaMatch.townAreaId,
       barangay_area_id: areaMatch.barangayAreaId,
       province_area_id: areaMatch.provinceAreaId,
       region_area_id: areaMatch.regionAreaId,
     });
+
+    let pendingRelocation: { id: string; status: 'pending'; distance_m: number } | null = null;
+    if (needsRelocationReview) {
+      const createdRelocation = await spotRelocationStore.createOrReplacePending({
+        spotId: existing.id,
+        requestedBy: req.user!.id,
+        fromLat: existing.gps_lat,
+        fromLng: existing.gps_lng,
+        toLat: requestedLat,
+        toLng: requestedLng,
+        distanceM: moveDistanceM,
+        accuracyM: accuracyM ?? null,
+      });
+      pendingRelocation = {
+        id: createdRelocation.id,
+        status: 'pending',
+        distance_m: createdRelocation.distance_m,
+      };
+    } else if (coordsChanged && moveDistanceM > 0) {
+      await spotRelocationStore.recordInstantApproved({
+        spotId: existing.id,
+        requestedBy: req.user!.id,
+        fromLat: existing.gps_lat,
+        fromLng: existing.gps_lng,
+        toLat: requestedLat,
+        toLng: requestedLng,
+        distanceM: moveDistanceM,
+        accuracyM: accuracyM ?? null,
+      });
+    }
 
     await recordSpotModerationEvent({
       spotId: existing.id,
@@ -1068,10 +1292,12 @@ router.patch(
       }
     }
 
-    return res.json({
+    return res.status(pendingRelocation ? 202 : 200).json({
       success: true,
+      ...(pendingRelocation ? { relocation: pendingRelocation } : {}),
       data: {
         ...(updated ?? existing),
+        ...(pendingRelocation ? { relocation: pendingRelocation } : {}),
         moderation_reasons: evaluation.reasonCodes,
         moderation_messages: evaluation.messages,
         ...(evaluation.duplicateSpot ? { duplicate_spot: evaluation.duplicateSpot } : {}),
@@ -1114,16 +1340,25 @@ router.post(
       });
     }
 
-    // Owner 2026-11-21: any signed-in traveler may add a quest to a published destination (each quest
-    // gets its own binding; spots.quest_id stays the first one). The poster may also add quests while
-    // their destination is still in review.
+    // Plan 118 (owner 2026-11-23): only the destination's poster can add quests (including while
+    // their destination is still in review). Destinations with no poster take quests from platform
+    // admins or in-scope area admins only. Existing quests by other travelers stay live.
     const isDestinationAuthor = Boolean(spot.created_by && spot.created_by === req.user!.id);
-    if (!isDestinationAuthor && spot.status !== 'published') {
+    let isAuthorizedAdminForPosterlessSpot = false;
+    if (!isDestinationAuthor && !spot.created_by) {
+      try {
+        const scope = await loadAdminScope(req.user!.id);
+        isAuthorizedAdminForPosterlessSpot = spotInAdminScope(scope, spot);
+      } catch {
+        isAuthorizedAdminForPosterlessSpot = false;
+      }
+    }
+    if (!isDestinationAuthor && !isAuthorizedAdminForPosterlessSpot) {
       return res.status(403).json({
         success: false,
         error: {
-          code: 'DESTINATION_NOT_PUBLISHED',
-          message: 'Quests can be added once this destination is published.',
+          code: 'DESTINATION_OWNER_ONLY',
+          message: 'Only the person who posted this destination can add quests to it.',
         },
       });
     }

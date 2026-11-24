@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
 
@@ -102,4 +102,12 @@ export function normaliseCounterCode(raw: unknown): string {
 export function customerLabel(userId: string, merchantId: string): string {
   const tag = createHmac('sha256', standeeKey()).update(`label:${merchantId}:${userId}`).digest('hex').slice(0, 3);
   return `Suki #${tag.toUpperCase()}`;
+}
+
+/** Deterministic Suki Card serial (e.g. "SUKI 0042-A3F7") rendered on the card face. */
+export function formatCardNo(cardId: string): string {
+  const hex = createHash('sha256').update(`jdq-suki-card:${cardId}`).digest('hex');
+  const digits = String(parseInt(hex.slice(0, 6), 16) % 10000).padStart(4, '0');
+  const tail = hex.slice(6, 10).toUpperCase();
+  return `SUKI ${digits}-${tail}`;
 }
