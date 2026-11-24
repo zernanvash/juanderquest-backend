@@ -520,6 +520,75 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     restartRequired: false,
     description: 'Optional ISO-8601 expiry timestamp after which /app/version stops returning the banner.',
   },
+  {
+    key: 'app_promo_enabled',
+    label: 'Enable Mobile Home promo form panel',
+    category: 'mobile_app',
+    type: 'boolean',
+    defaultValue: false,
+    restartRequired: false,
+    description: 'Displays the highlighted feedback or promotion form panel on the mobile Home dashboard.',
+  },
+  {
+    key: 'app_promo_campaign_id',
+    label: 'Mobile Home promo campaign ID',
+    category: 'mobile_app',
+    type: 'text',
+    defaultValue: '',
+    maxLength: 64,
+    restartRequired: false,
+    description: 'Dismissal version token; changing it re-shows the panel to travelers who dismissed an earlier wave.',
+  },
+  {
+    key: 'app_promo_title',
+    label: 'Mobile Home promo headline',
+    category: 'mobile_app',
+    type: 'text',
+    defaultValue: '',
+    maxLength: 80,
+    restartRequired: false,
+    description: 'Short plain-text headline shown in the Mobile Home promo panel (max 80 characters).',
+  },
+  {
+    key: 'app_promo_body',
+    label: 'Mobile Home promo description',
+    category: 'mobile_app',
+    type: 'text',
+    defaultValue: '',
+    maxLength: 200,
+    restartRequired: false,
+    description: 'Short plain-text description shown below the headline (max 200 characters).',
+  },
+  {
+    key: 'app_promo_cta_label',
+    label: 'Mobile Home promo button label',
+    category: 'mobile_app',
+    type: 'text',
+    defaultValue: 'Open Form',
+    maxLength: 28,
+    restartRequired: false,
+    description: 'Action button label inside the Mobile Home promo panel (max 28 characters).',
+  },
+  {
+    key: 'app_promo_url',
+    label: 'Mobile Home promo form URL',
+    category: 'mobile_app',
+    type: 'url',
+    defaultValue: '',
+    maxLength: 500,
+    restartRequired: false,
+    description: 'HTTPS URL opened when the traveler taps the Mobile Home promo CTA button.',
+  },
+  {
+    key: 'app_promo_until',
+    label: 'Mobile Home promo expiry (ISO timestamp)',
+    category: 'mobile_app',
+    type: 'text',
+    defaultValue: '',
+    maxLength: 40,
+    restartRequired: false,
+    description: 'Optional ISO-8601 expiry timestamp after which /app/version stops returning promo_panel.',
+  },
 ];
 
 export const SETTINGS_BY_KEY: ReadonlyMap<string, SettingDefinition> = new Map(
@@ -550,7 +619,11 @@ export function validateSettingValue(definition: SettingDefinition, raw: unknown
         return { ok: false, message: `${definition.label} is too long.` };
       try {
         const parsed = new URL(value);
-        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+        if (definition.key === 'app_promo_url') {
+          if (parsed.protocol !== 'https:') {
+            return { ok: false, message: `${definition.label} must use https.` };
+          }
+        } else if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
           return { ok: false, message: `${definition.label} must use http or https.` };
         }
       } catch {
@@ -564,7 +637,17 @@ export function validateSettingValue(definition: SettingDefinition, raw: unknown
       if (value.length > (definition.maxLength ?? 280))
         return { ok: false, message: `${definition.label} is too long.` };
       if (/[<>]/.test(value)) return { ok: false, message: `${definition.label} must be plain text without HTML.` };
-      if (definition.key === 'app_announcement_until' && value && !Number.isFinite(Date.parse(value))) {
+      if (definition.key === 'app_promo_campaign_id' && value && !/^[A-Za-z0-9._-]+$/.test(value)) {
+        return {
+          ok: false,
+          message: `${definition.label} may only contain letters, numbers, dots, underscores, and hyphens.`,
+        };
+      }
+      if (
+        (definition.key === 'app_announcement_until' || definition.key === 'app_promo_until') &&
+        value &&
+        !Number.isFinite(Date.parse(value))
+      ) {
         return { ok: false, message: `${definition.label} must be a valid ISO date/time.` };
       }
       return { ok: true, value };
