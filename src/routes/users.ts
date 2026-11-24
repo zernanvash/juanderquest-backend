@@ -14,6 +14,7 @@ import {
 import { validateRequest } from '../middleware/validate.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { notify } from '../social/notify.js';
+import { getFollowSuggestions, dismissFollowSuggestion } from '../social/suggestions.js';
 import { manilaHour } from '../social/time.js';
 import { safeCosmeticsFor } from '../shop/render.js';
 import { forwardAsyncRouteErrors } from '../middleware/asyncRoutes.js';
@@ -51,6 +52,12 @@ const followLimiter = rateLimit({
   max: 30,
   keyStrategy: 'actor',
   coarseIpMax: 150,
+});
+const suggestionsLimiter = rateLimit({
+  policyId: 'users:suggestions',
+  windowMs: 60 * 1000,
+  max: 30,
+  keyStrategy: 'actor',
 });
 
 // ==========================================
@@ -376,6 +383,77 @@ usersRouter.post(
   },
 );
 
+// GET /users/suggestions — Unified blended follow suggestions (Plan 119)
+usersRouter.get(
+  '/users/suggestions',
+  authenticateToken,
+  suggestionsLimiter,
+  async (req: AuthRequest, res: Response) => {
+    res.set('Cache-Control', 'private, no-store');
+    const limit = req.query.limit === undefined ? 20 : Number(req.query.limit);
+    const offset = req.query.offset === undefined ? 0 : Number(req.query.offset);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 30) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Limit must be an integer from 1 to 30.' },
+      });
+    }
+    if (!Number.isInteger(offset) || offset < 0 || offset > 100) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Offset must be an integer from 0 to 100.' },
+      });
+    }
+    try {
+      const result = await getFollowSuggestions(req.user!.id, { limit, offset });
+      return res.json({ success: true, data: result });
+    } catch {
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Unable to load follow suggestions.' },
+      });
+    }
+  },
+);
+
+// POST /users/suggestions/:id/dismiss — Idempotent suggestion dismissal (Plan 119)
+usersRouter.post(
+  '/users/suggestions/:id/dismiss',
+  authenticateToken,
+  suggestionsLimiter,
+  async (req: AuthRequest, res: Response) => {
+    res.set('Cache-Control', 'private, no-store');
+    const targetId = String(req.params.id ?? '').trim();
+    if (!targetId) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Target user id is required.' },
+      });
+    }
+    try {
+      const outcome = await dismissFollowSuggestion(req.user!.id, targetId);
+      if (outcome === 'self') {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'Cannot dismiss yourself.' },
+        });
+      }
+      if (outcome === 'not_found') {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'User not found.' },
+        });
+      }
+      return res.status(204).send();
+    } catch {
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Unable to dismiss suggestion.' },
+      });
+    }
+  },
+);
+
 // Owner-only access never changes public visibility or exposes private followers.
 usersRouter.get(
   '/users/me/followers',
@@ -399,7 +477,30 @@ usersRouter.get(
       );
       if (!result)
         return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Account unavailable.' } });
-      return res.json({ success: true, data: result });
+      const ids = result.items.map((item) => item.id);
+      let followingSet = new Set<string>();
+      if (ids.length > 0) {
+        const pool = getPool();
+        if (pool) {
+          const followRes = await pool.query<{ following_id: string }>(
+            'SELECT following_id FROM user_follows WHERE follower_id = $1 AND following_id = ANY($2::text[])',
+            [req.user!.id, ids],
+          );
+          followingSet = new Set(followRes.rows.map((r) => r.following_id));
+        } else {
+          followingSet = new Set(db.follows.filter((f) => f.follower_id === req.user!.id).map((f) => f.following_id));
+        }
+      }
+      return res.json({
+        success: true,
+        data: {
+          ...result,
+          items: result.items.map((item) => ({
+            ...item,
+            is_following: followingSet.has(item.id),
+          })),
+        },
+      });
     } catch (err) {
       const invalid = err instanceof InvalidCursorError;
       return res.status(invalid ? 400 : 500).json({
@@ -426,7 +527,13 @@ usersRouter.get('/users/me/following', authenticateToken, async (req: AuthReques
     const result = await db.listMyFollowing(userId, limit, cursor);
     return res.status(200).json({
       success: true,
-      data: result,
+      data: {
+        ...result,
+        items: result.items.map((item) => ({
+          ...item,
+          is_following: true,
+        })),
+      },
     });
   } catch (err: any) {
     if (err instanceof InvalidCursorError || err?.name === 'InvalidCursorError') {

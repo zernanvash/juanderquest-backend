@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import { db } from '../db/index.js';
+import { searchPeopleDiscovery, type PeopleSearchItem } from '../social/peopleSearch.js';
 import { spotStore } from '../spots/store.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { optionalAuthenticateToken, checkQAAuthorization, isAuthorizedQA, AuthRequest } from '../middleware/auth.js';
@@ -18,15 +19,7 @@ export interface PlaceResultItem {
   score: number;
 }
 
-export interface PersonResultItem {
-  id: string;
-  display_name: string;
-  handle: string | null;
-  avatar_url: string;
-  bio: string | null;
-  status_text: string | null;
-  score: number;
-}
+export type PersonResultItem = PeopleSearchItem;
 
 export interface QuestResultItem {
   id: string;
@@ -87,51 +80,6 @@ function searchPlaces(query: string, allowTest: boolean = false): PlaceResultIte
   }
 
   return results.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
-}
-
-async function searchPeople(
-  query: string,
-  isHandleIntent: boolean,
-  allowTest: boolean = false,
-): Promise<PersonResultItem[]> {
-  if (db.usersRepo.getPool()) {
-    return await db.usersRepo.searchPeople(query, isHandleIntent, allowTest);
-  }
-
-  const qLower = query.toLowerCase();
-  const results: PersonResultItem[] = [];
-
-  for (const user of db.users) {
-    if (!user.is_public) continue; // Privacy rule: only explicitly public travelers
-    if (!allowTest && user.is_test) continue;
-    let score = 0;
-    const nameLower = user.display_name.toLowerCase();
-    const handleLower = (user.handle || '').toLowerCase();
-    const bioLower = (user.bio || '').toLowerCase();
-    const statusLower = (user.status_text || '').toLowerCase();
-
-    if (handleLower && handleLower === qLower) score = isHandleIntent ? 1.0 : 0.95;
-    else if (nameLower === qLower) score = isHandleIntent ? 0.9 : 1.0;
-    else if (handleLower && handleLower.startsWith(qLower)) score = isHandleIntent ? 0.95 : 0.85;
-    else if (nameLower.startsWith(qLower)) score = isHandleIntent ? 0.85 : 0.9;
-    else if (handleLower && handleLower.includes(qLower)) score = 0.75;
-    else if (nameLower.includes(qLower)) score = 0.7;
-    else if (statusLower.includes(qLower) || bioLower.includes(qLower)) score = 0.45;
-
-    if (score > 0) {
-      results.push({
-        id: user.id,
-        display_name: user.display_name,
-        handle: user.handle || null,
-        avatar_url: user.avatar_url,
-        bio: user.bio || null,
-        status_text: user.status_text || null,
-        score: Number(score.toFixed(2)),
-      });
-    }
-  }
-
-  return results.sort((a, b) => b.score - a.score || a.display_name.localeCompare(b.display_name));
 }
 
 function searchQuests(query: string, allowTest: boolean = false): QuestResultItem[] {
@@ -212,7 +160,14 @@ searchRouter.get(
     const cleanTerm = normalized.replace(/^@/, '').trim();
 
     const places = type === 'all' || type === 'places' ? searchPlaces(cleanTerm, allowTest) : [];
-    const people = type === 'all' || type === 'people' ? await searchPeople(cleanTerm, isHandleIntent, allowTest) : [];
+    const people =
+      type === 'all' || type === 'people'
+        ? await searchPeopleDiscovery({
+            query: cleanTerm,
+            viewerId: req.user?.id ?? null,
+            allowTest,
+          })
+        : [];
     const quests = type === 'all' || type === 'quests' ? searchQuests(cleanTerm, allowTest) : [];
 
     // Preview Mode: Compact budget of 8 items maximum, capped at 4 items per group
@@ -261,8 +216,8 @@ searchRouter.get(
           if (a.type === 'people') return -1;
           if (b.type === 'people') return 1;
         }
-        const topA = a.candidates[0]?.score || 0;
-        const topB = b.candidates[0]?.score || 0;
+        const topA = a.candidates[0] && 'score' in a.candidates[0] ? a.candidates[0].score || 0 : 0;
+        const topB = b.candidates[0] && 'score' in b.candidates[0] ? b.candidates[0].score || 0 : 0;
         if (topB !== topA) return topB - topA;
         const order = { places: 0, people: 1, quests: 2 };
         return order[a.type] - order[b.type];
@@ -287,8 +242,9 @@ searchRouter.get(
           const currentCount = allocatedCounts[g.type];
           if (currentCount < MAX_PER_GROUP && currentCount < g.candidates.length) {
             const nextCandidate = g.candidates[currentCount];
-            if (nextCandidate && nextCandidate.score > bestScore) {
-              bestScore = nextCandidate.score;
+            const nextScore = nextCandidate && 'score' in nextCandidate ? nextCandidate.score : 0.8;
+            if (nextCandidate && nextScore > bestScore) {
+              bestScore = nextScore;
               bestGroup = g.type;
             }
           }
