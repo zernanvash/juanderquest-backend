@@ -1179,7 +1179,11 @@ router.patch(
     const moveDistanceM = coordsChanged
       ? Math.round(distanceKm(existing.gps_lat, existing.gps_lng, requestedLat, requestedLng) * 1000)
       : 0;
-    const needsRelocationReview = coordsChanged && moveDistanceM > RELOCATION_INSTANT_MAX_M;
+    const recentInstantM =
+      coordsChanged && moveDistanceM > 0
+        ? await spotRelocationStore.recentInstantDistanceM(existing.id, req.user!.id, 30)
+        : 0;
+    const needsRelocationReview = coordsChanged && recentInstantM + moveDistanceM > RELOCATION_INSTANT_MAX_M;
 
     const effectiveLat = needsRelocationReview ? existing.gps_lat : requestedLat;
     const effectiveLng = needsRelocationReview ? existing.gps_lng : requestedLng;
@@ -1244,6 +1248,17 @@ router.patch(
         status: 'pending',
         distance_m: createdRelocation.distance_m,
       };
+    } else if (coordsChanged && moveDistanceM > 0) {
+      await spotRelocationStore.recordInstantApproved({
+        spotId: existing.id,
+        requestedBy: req.user!.id,
+        fromLat: existing.gps_lat,
+        fromLng: existing.gps_lng,
+        toLat: requestedLat,
+        toLng: requestedLng,
+        distanceM: moveDistanceM,
+        accuracyM: accuracyM ?? null,
+      });
     }
 
     await recordSpotModerationEvent({

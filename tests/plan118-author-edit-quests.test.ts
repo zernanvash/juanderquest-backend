@@ -334,4 +334,62 @@ realPg('Plan 118 — Destination author, poster-only quests, and relocation requ
     expect(rejectNotif.rows[0].kind).toBe('spot_moderation');
     expect(rejectNotif.rows[0].href).toBe(`/spots/${authoredSlug}`);
   });
+
+  it('prevents walking a pin with repeated <=200 m moves within 30 days, and resets after 30 days', async () => {
+    await fixture.pool.query('DELETE FROM spot_relocation_requests WHERE spot_id = $1', [authoredSpotId]);
+
+    const before = await request(app).get(`/api/v1/spots/${authoredSlug}`);
+    const baseLat = Number(before.body.data.gps_lat);
+    const baseLng = Number(before.body.data.gps_lng);
+
+    // First 150 m move (~0.00135 deg lat) saves instantly (200) and logs an auto-approved row.
+    const move1Lat = Number((baseLat + 0.00135).toFixed(6));
+    const move1 = await request(app)
+      .patch(`/api/v1/spots/${authoredSpotId}`)
+      .set('Authorization', `Bearer ${authorToken}`)
+      .send({ gps_lat: move1Lat, gps_lng: baseLng });
+    expect(move1.status).toBe(200);
+    expect(move1.body.relocation).toBeUndefined();
+    expect(move1.body.data.gps_lat).toBeCloseTo(move1Lat, 5);
+
+    const autoRows = await fixture.pool.query(
+      `SELECT id, status, reviewed_by, review_note, distance_m
+       FROM spot_relocation_requests
+       WHERE spot_id = $1 AND status = 'approved'`,
+      [authoredSpotId],
+    );
+    expect(autoRows.rows).toHaveLength(1);
+    expect(autoRows.rows[0].reviewed_by).toBeNull();
+    expect(autoRows.rows[0].review_note).toBe('auto: within 200 m');
+    expect(autoRows.rows[0].distance_m).toBeGreaterThan(100);
+    expect(autoRows.rows[0].distance_m).toBeLessThanOrEqual(200);
+
+    // Second 150 m move immediately after pushes 30-day cumulative > 200 m -> pending (202), coords unchanged.
+    const move2Lat = Number((move1Lat + 0.00135).toFixed(6));
+    const move2 = await request(app)
+      .patch(`/api/v1/spots/${authoredSpotId}`)
+      .set('Authorization', `Bearer ${authorToken}`)
+      .send({ gps_lat: move2Lat, gps_lng: baseLng });
+    expect(move2.status).toBe(202);
+    expect(move2.body.relocation?.status).toBe('pending');
+    expect(move2.body.data.gps_lat).toBeCloseTo(move1Lat, 5);
+
+    // Backdate the first instant move by 31 days and cancel the pending request: next 150 m move saves instantly (200).
+    await fixture.pool.query(
+      `UPDATE spot_relocation_requests SET created_at = NOW() - INTERVAL '31 days' WHERE id = $1`,
+      [autoRows.rows[0].id],
+    );
+    await fixture.pool.query(
+      `UPDATE spot_relocation_requests SET status = 'cancelled' WHERE spot_id = $1 AND status = 'pending'`,
+      [authoredSpotId],
+    );
+
+    const move3 = await request(app)
+      .patch(`/api/v1/spots/${authoredSpotId}`)
+      .set('Authorization', `Bearer ${authorToken}`)
+      .send({ gps_lat: move2Lat, gps_lng: baseLng });
+    expect(move3.status).toBe(200);
+    expect(move3.body.relocation).toBeUndefined();
+    expect(move3.body.data.gps_lat).toBeCloseTo(move2Lat, 5);
+  });
 });

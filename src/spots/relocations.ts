@@ -12,6 +12,8 @@ export interface SpotAuthorSummary {
 
 export type RelocationStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
+export const AUTO_RELOCATION_REVIEW_NOTE = 'auto: within 200 m';
+
 export interface SpotRelocationRequest {
   id: string;
   spot_id: string;
@@ -179,6 +181,92 @@ class SpotRelocationStore {
       reviewed_at: null,
       review_note: null,
       created_at: new Date().toISOString(),
+    };
+    this.memory.unshift(record);
+    return record;
+  }
+
+  async recentInstantDistanceM(spotId: string, requestedBy: string, windowDays = 30): Promise<number> {
+    const pool = getPool();
+    if (pool) {
+      const res = await pool.query(
+        `SELECT COALESCE(SUM(distance_m), 0)::int AS total
+         FROM spot_relocation_requests
+         WHERE spot_id = $1
+           AND requested_by = $2
+           AND status = 'approved'
+           AND reviewed_by IS NULL
+           AND review_note = $3
+           AND created_at > NOW() - ($4::int * INTERVAL '1 day')`,
+        [spotId, requestedBy, AUTO_RELOCATION_REVIEW_NOTE, windowDays],
+      );
+      return Number(res.rows[0]?.total ?? 0);
+    }
+    const cutoffMs = Date.now() - windowDays * 86_400_000;
+    return this.memory
+      .filter(
+        (r) =>
+          r.spot_id === spotId &&
+          r.requested_by === requestedBy &&
+          r.status === 'approved' &&
+          r.reviewed_by === null &&
+          r.review_note === AUTO_RELOCATION_REVIEW_NOTE &&
+          Date.parse(r.created_at) > cutoffMs,
+      )
+      .reduce((sum, r) => sum + r.distance_m, 0);
+  }
+
+  async recordInstantApproved(input: {
+    spotId: string;
+    requestedBy: string;
+    fromLat: number;
+    fromLng: number;
+    toLat: number;
+    toLng: number;
+    distanceM: number;
+    accuracyM?: number | null;
+  }): Promise<SpotRelocationRequest> {
+    const id = `reloc_${randomUUID()}`;
+    const accuracyM = input.accuracyM ?? null;
+    const pool = getPool();
+    if (pool) {
+      const inserted = await pool.query(
+        `INSERT INTO spot_relocation_requests (
+           id, spot_id, requested_by, from_lat, from_lng, to_lat, to_lng, distance_m, accuracy_m,
+           status, reviewed_by, reviewed_at, review_note
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'approved', NULL, NOW(), $10)
+         RETURNING *`,
+        [
+          id,
+          input.spotId,
+          input.requestedBy,
+          input.fromLat,
+          input.fromLng,
+          input.toLat,
+          input.toLng,
+          input.distanceM,
+          accuracyM,
+          AUTO_RELOCATION_REVIEW_NOTE,
+        ],
+      );
+      return mapRelocationRow(inserted.rows[0]);
+    }
+    const nowIso = new Date().toISOString();
+    const record: SpotRelocationRequest = {
+      id,
+      spot_id: input.spotId,
+      requested_by: input.requestedBy,
+      from_lat: input.fromLat,
+      from_lng: input.fromLng,
+      to_lat: input.toLat,
+      to_lng: input.toLng,
+      distance_m: input.distanceM,
+      accuracy_m: accuracyM,
+      status: 'approved',
+      reviewed_by: null,
+      reviewed_at: nowIso,
+      review_note: AUTO_RELOCATION_REVIEW_NOTE,
+      created_at: nowIso,
     };
     this.memory.unshift(record);
     return record;
