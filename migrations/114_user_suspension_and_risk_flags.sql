@@ -42,7 +42,20 @@ CREATE INDEX IF NOT EXISTS idx_risk_flags_user_created ON risk_flags (user_id, c
 CREATE INDEX IF NOT EXISTS idx_risk_flags_rule_created ON risk_flags (rule, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_submissions_user_status_created ON submissions (user_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_stamp_ledger_positive_created ON stamp_ledger (created_at DESC) WHERE delta > 0;
-CREATE INDEX IF NOT EXISTS idx_quest_step_evidence_failed ON quest_step_evidence (user_id, updated_at DESC) WHERE failed_tries > 0;
+-- PGMEM_SKIP_BEGIN
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'quest_step_evidence'
+      AND column_name = 'failed_tries'
+  ) THEN
+    CREATE INDEX IF NOT EXISTS idx_quest_step_evidence_failed ON quest_step_evidence (user_id, updated_at DESC) WHERE failed_tries > 0;
+  END IF;
+END $$;
+-- PGMEM_SKIP_END
 
 -- PGMEM_SKIP_BEGIN
 -- Seed default risk thresholds into system_settings_document.values.risk_thresholds if absent.

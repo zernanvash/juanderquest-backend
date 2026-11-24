@@ -164,7 +164,9 @@ export class GovernanceStore {
   }
 
   private seedProposals() {
-    const organizer = this.db.users.find((user) => user.role === 'user');
+    const organizer = [...this.db.users]
+      .filter((user) => user.role === 'user')
+      .sort((a, b) => a.id.localeCompare(b.id))[0];
     if (!organizer) return;
     const seeds = [
       [
