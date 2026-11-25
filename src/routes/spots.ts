@@ -30,6 +30,11 @@ import {
 } from '../spots/moderation.js';
 import { resolveSpotAreas } from '../maps/areas-service.js';
 import { mapView, searchSpots } from '../spots/national.js';
+import {
+  emptySpotMarkerClassification,
+  loadActiveLocalPartnerSpotIds,
+  loadSpotMarkerMeta,
+} from '../spots/markerKind.js';
 import { assetStore } from '../spots/asset-store.js';
 import { MAX_SPOT_GALLERY_PHOTOS, spotPhotoSubmissionStore } from '../spots/photo-submission-store.js';
 import { getSpotPhotoStorageProvider } from '../storage/spot-photos.js';
@@ -194,8 +199,21 @@ router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, async (req
   const pageOffset = offset !== undefined ? Math.max(0, Math.floor(offset)) : 0;
   const actorId =
     req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
+  const localPartnerOnly = req.query.local_partner === 'true';
+  if (localPartnerOnly && !env.MARKETPLACE_ENABLED) {
+    return res.json({
+      success: true,
+      data: [],
+      meta: {
+        count: 0,
+        total: 0,
+        next_cursor: null,
+        sort: req.query.sort || 'recommended',
+      },
+    });
+  }
   const homeTown = req.user?.id ? await getHomeTown(req.user.id) : null;
-  const page = spotStore.listPage({
+  const listOpts = {
     search: req.query.q as string | undefined,
     categories: csv(req.query.categories),
     tags: csv(req.query.tags),
@@ -213,14 +231,34 @@ router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, async (req
     bbox: bbox ?? undefined,
     areaId: typeof req.query.area_id === 'string' && req.query.area_id ? req.query.area_id : undefined,
     tier: tier as 'featured' | 'standard' | 'review' | undefined,
-    limit: pageSize,
-    offset: pageOffset,
+  };
+  let page: { items: typeof spotStore.spots; total: number };
+  if (localPartnerOnly) {
+    const partnerIds = await loadActiveLocalPartnerSpotIds(getPool(), { allowTest });
+    const filtered = spotStore.list(listOpts).filter((s) => partnerIds.has(s.id));
+    page = { items: filtered.slice(pageOffset, pageOffset + pageSize), total: filtered.length };
+  } else {
+    page = spotStore.listPage({
+      ...listOpts,
+      limit: pageSize,
+      offset: pageOffset,
+    });
+  }
+  const [authors, markerMeta] = await Promise.all([
+    resolveSpotAuthors(page.items.map((s) => s.created_by)),
+    loadSpotMarkerMeta(getPool(), page.items, { allowTest }),
+  ]);
+  const data = page.items.map((s) => {
+    const meta = markerMeta.get(s.id) ?? emptySpotMarkerClassification();
+    return {
+      ...s,
+      author: s.created_by ? (authors.get(s.created_by) ?? null) : null,
+      marker_kind: meta.marker_kind,
+      local_partner: meta.local_partner,
+      active_quest_count: meta.active_quest_count,
+      active_quest_ids: meta.active_quest_ids,
+    };
   });
-  const authors = await resolveSpotAuthors(page.items.map((s) => s.created_by));
-  const data = page.items.map((s) => ({
-    ...s,
-    author: s.created_by ? (authors.get(s.created_by) ?? null) : null,
-  }));
   const nextOffset = pageOffset + data.length;
   return res.json({
     success: true,
@@ -242,7 +280,7 @@ const mapQuerySchema = z.object({
   categories: z.string().optional(),
   tier: z.enum(['featured', 'standard', 'review']).optional(),
 });
-router.get('/spots/map', (req, res) => {
+router.get('/spots/map', async (req, res) => {
   const parsed = mapQuerySchema.safeParse(req.query);
   const bbox = parsed.success ? parseBbox(parsed.data.bbox) : null;
   if (!parsed.success || !bbox)
@@ -257,6 +295,22 @@ router.get('/spots/map', (req, res) => {
     categories: csv(parsed.data.categories),
     tier: parsed.data.tier,
   });
+  if (view.markers.length > 0) {
+    const markerMeta = await loadSpotMarkerMeta(
+      getPool(),
+      view.markers.map((m) => ({ id: m.id, is_test: false })),
+    );
+    for (const m of view.markers) {
+      const meta = markerMeta.get(m.id);
+      if (!meta) continue;
+      m.marker_kind = meta.marker_kind;
+      m.is_local_partner = meta.is_local_partner;
+      m.merchant_id = meta.merchant_id;
+      m.merchant_name = meta.merchant_name;
+      m.active_quest_count = meta.active_quest_count;
+      m.active_quest_ids = meta.active_quest_ids;
+    }
+  }
   return res.json({
     success: true,
     data: { markers: view.markers, clusters: view.clusters },
@@ -429,13 +483,21 @@ router.get('/spots/:slug', optionalAuthenticateToken, checkQAAuthorization, asyn
     (spot.status === 'held' || spot.status === 'hidden_pending_review')
       ? buildModerationSummary(spot, await listSpotModerationEvents([spot.id]))
       : {};
-  const authorMap = spot.created_by ? await resolveSpotAuthors([spot.created_by]) : null;
+  const [authorMap, markerMetaMap] = await Promise.all([
+    spot.created_by ? resolveSpotAuthors([spot.created_by]) : Promise.resolve(null),
+    loadSpotMarkerMeta(pool, [spot], { allowTest }),
+  ]);
   const author = spot.created_by ? (authorMap?.get(spot.created_by) ?? null) : null;
+  const markerMeta = markerMetaMap.get(spot.id) ?? emptySpotMarkerClassification();
   return res.json({
     success: true,
     data: {
       ...spot,
       author,
+      marker_kind: markerMeta.marker_kind,
+      local_partner: markerMeta.local_partner,
+      active_quest_count: markerMeta.active_quest_count,
+      active_quest_ids: markerMeta.active_quest_ids,
       ...spotStore.crowd(spot),
       saved: spotStore.isSaved(actorId, spot.id),
       liked: spotStore.isLiked(actorId, spot.id),

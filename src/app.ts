@@ -48,6 +48,7 @@ import { chainBadgesRouter } from './routes/chainBadges.js';
 import { shopRouter } from './routes/shop.js';
 import { adminShopRouter } from './routes/adminShop.js';
 import adminAreaAdminsRouter from './routes/adminAreaAdmins.js';
+import { adminMerchantClaimsRouter } from './routes/adminMerchantClaims.js';
 import { adminUsersRouter } from './routes/adminUsers.js';
 import { stampsRouter } from './routes/stamps.js';
 import { arGamesRouter } from './routes/arGames.js';
@@ -126,6 +127,7 @@ app.use('/api/v1', spotsRouter);
 app.use('/api/v1', analyticsRouter);
 app.use('/api/v1', adminCrowdRouter);
 app.use('/api/v1', adminAreaAdminsRouter);
+app.use('/api/v1', adminMerchantClaimsRouter);
 // Plan 117 admin user management, economy monitor, and risk queue must precede economyReadsRouter's /admin/economy profile gate.
 app.use('/api/v1', adminUsersRouter);
 // Internal economy profile gate must run before the broad /admin middleware.
