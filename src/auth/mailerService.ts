@@ -4,7 +4,8 @@ import { randomUUID } from 'crypto';
 export interface AuthMailJob {
   id: string;
   recipientEmail: string;
-  templateType: 'signup_otp' | 'password_reset_otp' | 'password_changed_alert';
+  templateType:
+    'signup_otp' | 'password_reset_otp' | 'password_changed_alert' | 'email_change_otp' | 'email_changed_alert';
   code?: string;
 }
 
@@ -75,6 +76,22 @@ export function renderAuthEmail(job: Pick<AuthMailJob, 'templateType' | 'code'>)
         text: 'The password on your JuanDerQuest account was just changed. If this was not you, reset your password now.',
         html: wrap(
           '<p>The password on your JuanDerQuest account was just changed. If this was not you, reset your password now.</p>',
+        ),
+      };
+    case 'email_change_otp':
+      return {
+        subject: `${code} is your JuanDerQuest email change code`,
+        text: `Your email change verification code is ${code}. It expires in 10 minutes.\n\nIf you did not request this email change, you can ignore this email.`,
+        html: wrap(
+          `<p>Enter this code to confirm changing your JuanDerQuest account email:</p>${codeBlock}<p>It expires in 10 minutes.</p>`,
+        ),
+      };
+    case 'email_changed_alert':
+      return {
+        subject: 'Your JuanDerQuest account email was changed',
+        text: 'The email address on your JuanDerQuest account was migrated using your bound wallet. If this was not you, contact support@juanderquest.app immediately.',
+        html: wrap(
+          '<p>The email address on your JuanDerQuest account was migrated using your bound wallet. If this was not you, contact <strong>support@juanderquest.app</strong> immediately.</p>',
         ),
       };
   }

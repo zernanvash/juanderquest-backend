@@ -134,6 +134,8 @@ export const MIGRATIONS = [
   '114_user_suspension_and_risk_flags.sql',
   // Plan 119: persisted follow-suggestion dismissals and lookup indexes for people discovery.
   '115_people_suggestion_dismissals.sql',
+  // Plan 120: durable audit trail and cooldown source for wallet-gated email migrations.
+  '116_email_change_audit.sql',
 ];
 
 // Plan 116+: PostgreSQL-only sections of a migration are fenced with these markers;

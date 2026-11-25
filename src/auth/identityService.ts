@@ -27,6 +27,16 @@ export class UnifiedIdentityService {
   private inMemoryIdentities: AuthIdentityRow[] = [];
   private inMemoryEmails: AccountEmailRow[] = [];
   private inMemoryPasswords = new Map<string, { hash: string; salt: string; algorithm: string }>();
+  private inMemoryEmailChangeAudit: Array<{
+    id: string;
+    user_id: string;
+    old_email: string;
+    new_email: string;
+    wallet_address: string;
+    google_unlinked: boolean;
+    ip_address: string | null;
+    created_at: string;
+  }> = [];
 
   constructor(private pool: Pool | null) {}
 
@@ -307,6 +317,242 @@ export class UnifiedIdentityService {
       return (res.rowCount ?? 0) > 0;
     }
     return this.inMemoryPasswords.has(userId);
+  }
+
+  async hasGoogleIdentity(userId: string): Promise<boolean> {
+    if (this.pool) {
+      const res = await this.pool.query(`SELECT 1 FROM auth_identities WHERE user_id = $1 AND provider = 'google'`, [
+        userId,
+      ]);
+      return (res.rowCount ?? 0) > 0;
+    }
+    return this.inMemoryIdentities.some((i) => i.user_id === userId && i.provider === 'google');
+  }
+
+  async hasVerifiedPrimaryEmail(userId: string, fallbackEmail?: string | null): Promise<boolean> {
+    if (this.pool) {
+      const res = await this.pool.query<{ is_primary: boolean; is_verified: boolean }>(
+        `SELECT is_primary, is_verified FROM account_emails WHERE user_id = $1`,
+        [userId],
+      );
+      if (res.rows.length > 0) {
+        return res.rows.some((r) => r.is_primary && r.is_verified);
+      }
+      return Boolean(fallbackEmail && !this.isPlaceholderEmail(fallbackEmail));
+    }
+    const rows = this.inMemoryEmails.filter((e) => e.user_id === userId);
+    if (rows.length > 0) {
+      return rows.some((e) => e.is_primary && e.is_verified);
+    }
+    return Boolean(fallbackEmail && !this.isPlaceholderEmail(fallbackEmail));
+  }
+
+  async isEmailClaimedByAnotherUser(userId: string, rawEmail: string): Promise<boolean> {
+    const normalized = this.normalizeEmail(rawEmail);
+    if (this.pool) {
+      const uRes = await this.pool.query(`SELECT 1 FROM users WHERE LOWER(email) = $1 AND id <> $2 LIMIT 1`, [
+        normalized,
+        userId,
+      ]);
+      if ((uRes.rowCount ?? 0) > 0) return true;
+
+      const eRes = await this.pool.query(
+        `SELECT 1 FROM account_emails WHERE normalized_email = $1 AND user_id <> $2 LIMIT 1`,
+        [normalized, userId],
+      );
+      if ((eRes.rowCount ?? 0) > 0) return true;
+
+      const iRes = await this.pool.query(
+        `SELECT 1 FROM auth_identities WHERE provider = 'email' AND provider_subject = $1 AND user_id <> $2 LIMIT 1`,
+        [normalized, userId],
+      );
+      return (iRes.rowCount ?? 0) > 0;
+    }
+
+    if (this.inMemoryEmails.some((e) => e.normalized_email === normalized && e.user_id !== userId)) return true;
+    if (
+      this.inMemoryIdentities.some(
+        (i) => i.provider === 'email' && i.provider_subject === normalized && i.user_id !== userId,
+      )
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  async getLastEmailChangeAt(userId: string): Promise<Date | null> {
+    if (this.pool) {
+      const res = await this.pool.query<{ created_at: Date | string }>(
+        `SELECT created_at FROM auth_email_change_audit WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        [userId],
+      );
+      if (res.rowCount === 0) return null;
+      return new Date(res.rows[0].created_at);
+    }
+    const rows = this.inMemoryEmailChangeAudit
+      .filter((r) => r.user_id === userId)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return rows.length ? new Date(rows[0].created_at) : null;
+  }
+
+  async migrateEmailTransaction(params: {
+    userId: string;
+    newEmail: string;
+    walletAddress: string;
+    ipAddress?: string | null;
+  }): Promise<{ oldEmail: string; newEmail: string; googleUnlinked: boolean }> {
+    const normalizedNewEmail = this.normalizeEmail(params.newEmail);
+    const cleanNewEmail = params.newEmail.trim();
+
+    if (this.pool) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        const userRes = await client.query<{
+          id: string;
+          email: string | null;
+          wallet_address: string | null;
+          session_epoch: number;
+        }>(`SELECT id, email, wallet_address, session_epoch FROM users WHERE id = $1 FOR UPDATE`, [params.userId]);
+
+        if (userRes.rowCount === 0) {
+          const err = new Error('USER_NOT_FOUND');
+          (err as any).code = 'USER_NOT_FOUND';
+          throw err;
+        }
+
+        const userRow = userRes.rows[0];
+        if (
+          !userRow.wallet_address ||
+          userRow.wallet_address.trim().toLowerCase() !== params.walletAddress.trim().toLowerCase()
+        ) {
+          const err = new Error('WALLET_REQUIRED_FOR_EMAIL_CHANGE');
+          (err as any).code = 'WALLET_REQUIRED_FOR_EMAIL_CHANGE';
+          throw err;
+        }
+
+        const conflictUser = await client.query(`SELECT 1 FROM users WHERE LOWER(email) = $1 AND id <> $2 LIMIT 1`, [
+          normalizedNewEmail,
+          params.userId,
+        ]);
+        const conflictEmail = await client.query(
+          `SELECT 1 FROM account_emails WHERE normalized_email = $1 AND user_id <> $2 LIMIT 1`,
+          [normalizedNewEmail, params.userId],
+        );
+        const conflictIdentity = await client.query(
+          `SELECT 1 FROM auth_identities WHERE provider = 'email' AND provider_subject = $1 AND user_id <> $2 LIMIT 1`,
+          [normalizedNewEmail, params.userId],
+        );
+        if (
+          (conflictUser.rowCount ?? 0) > 0 ||
+          (conflictEmail.rowCount ?? 0) > 0 ||
+          (conflictIdentity.rowCount ?? 0) > 0
+        ) {
+          const err = new Error('EMAIL_ALREADY_IN_USE');
+          (err as any).code = 'EMAIL_ALREADY_IN_USE';
+          throw err;
+        }
+
+        const oldEmail = (userRow.email ?? '').trim();
+
+        await client.query(`UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2`, [
+          normalizedNewEmail,
+          params.userId,
+        ]);
+
+        await client.query(`DELETE FROM account_emails WHERE user_id = $1`, [params.userId]);
+        await client.query(
+          `INSERT INTO account_emails (
+             id, user_id, email, normalized_email, is_verified, verified_at, is_primary, created_at, updated_at
+           ) VALUES ($1, $2, $3, $4, TRUE, NOW(), TRUE, NOW(), NOW())`,
+          [randomUUID(), params.userId, cleanNewEmail, normalizedNewEmail],
+        );
+
+        await client.query(`DELETE FROM auth_identities WHERE user_id = $1 AND provider = 'email'`, [params.userId]);
+        await client.query(
+          `INSERT INTO auth_identities (id, user_id, provider, provider_subject, created_at, updated_at)
+           VALUES ($1, $2, 'email', $3, NOW(), NOW())`,
+          [randomUUID(), params.userId, normalizedNewEmail],
+        );
+
+        const googleDel = await client.query(`DELETE FROM auth_identities WHERE user_id = $1 AND provider = 'google'`, [
+          params.userId,
+        ]);
+        const googleUnlinked = (googleDel.rowCount ?? 0) > 0;
+
+        await client.query(
+          `INSERT INTO auth_email_change_audit (
+             id, user_id, old_email, new_email, wallet_address, google_unlinked, ip_address, created_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+          [
+            randomUUID(),
+            params.userId,
+            oldEmail,
+            normalizedNewEmail,
+            userRow.wallet_address,
+            googleUnlinked,
+            params.ipAddress ?? null,
+          ],
+        );
+
+        await client.query('COMMIT');
+        return { oldEmail, newEmail: normalizedNewEmail, googleUnlinked };
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+
+    // In-memory fallback
+    if (await this.isEmailClaimedByAnotherUser(params.userId, normalizedNewEmail)) {
+      const err = new Error('EMAIL_ALREADY_IN_USE');
+      (err as any).code = 'EMAIL_ALREADY_IN_USE';
+      throw err;
+    }
+
+    const prevPrimary = this.inMemoryEmails.find((e) => e.user_id === params.userId && e.is_primary);
+    const oldEmail = prevPrimary?.email ?? '';
+    this.inMemoryEmails = this.inMemoryEmails.filter((e) => e.user_id !== params.userId);
+    const now = new Date().toISOString();
+    this.inMemoryEmails.push({
+      id: randomUUID(),
+      user_id: params.userId,
+      email: cleanNewEmail,
+      normalized_email: normalizedNewEmail,
+      is_verified: true,
+      verified_at: now,
+      is_primary: true,
+      created_at: now,
+      updated_at: now,
+    });
+
+    const hadGoogle = this.inMemoryIdentities.some((i) => i.user_id === params.userId && i.provider === 'google');
+    this.inMemoryIdentities = this.inMemoryIdentities.filter(
+      (i) => !(i.user_id === params.userId && (i.provider === 'email' || i.provider === 'google')),
+    );
+    this.inMemoryIdentities.push({
+      id: randomUUID(),
+      user_id: params.userId,
+      provider: 'email',
+      provider_subject: normalizedNewEmail,
+      created_at: now,
+      updated_at: now,
+    });
+    this.inMemoryEmailChangeAudit.push({
+      id: randomUUID(),
+      user_id: params.userId,
+      old_email: oldEmail,
+      new_email: normalizedNewEmail,
+      wallet_address: params.walletAddress,
+      google_unlinked: hadGoogle,
+      ip_address: params.ipAddress ?? null,
+      created_at: now,
+    });
+
+    return { oldEmail, newEmail: normalizedNewEmail, googleUnlinked: hadGoogle };
   }
 
   /**

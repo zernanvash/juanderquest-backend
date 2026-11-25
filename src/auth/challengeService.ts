@@ -242,4 +242,149 @@ export class AuthChallengeService {
       };
     }
   }
+
+  /**
+   * Looks up an active, unconsumed challenge by id and bound user without consuming it.
+   */
+  async findActiveChallengeById(
+    challengeId: string,
+    purpose: string,
+    boundUserId: string,
+  ): Promise<{ id: string; targetIdentifier: string; metadata: any; expiresAt: string } | null> {
+    if (this.pool) {
+      const res = await this.pool.query(
+        `SELECT id, target_identifier, metadata, expires_at
+         FROM auth_challenges
+         WHERE id = $1
+           AND purpose = $2
+           AND bound_user_id = $3
+           AND consumed_at IS NULL
+           AND expires_at > NOW()
+           AND attempt_count < max_attempts`,
+        [challengeId, purpose, boundUserId],
+      );
+      if (res.rowCount === 0) return null;
+      const row = res.rows[0];
+      return {
+        id: row.id,
+        targetIdentifier: row.target_identifier,
+        metadata: row.metadata,
+        expiresAt: row.expires_at,
+      };
+    }
+
+    const c = this.inMemoryChallenges.get(challengeId);
+    if (
+      !c ||
+      c.purpose !== purpose ||
+      c.boundUserId !== boundUserId ||
+      c.consumedAt ||
+      c.expiresAt <= Date.now() ||
+      c.attemptCount >= c.maxAttempts
+    ) {
+      return null;
+    }
+    return {
+      id: c.id,
+      targetIdentifier: c.target,
+      metadata: c.metadata,
+      expiresAt: new Date(c.expiresAt).toISOString(),
+    };
+  }
+
+  /**
+   * Durably verifies and atomically consumes a challenge by id and bound user.
+   */
+  async consumeChallengeById(params: {
+    challengeId: string;
+    purpose: string;
+    code: string;
+    boundUserId: string;
+  }): Promise<{ valid: boolean; error?: string; metadata?: any; targetIdentifier?: string }> {
+    if (this.pool) {
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        const res = await client.query(
+          `SELECT * FROM auth_challenges
+           WHERE id = $1 AND purpose = $2 AND bound_user_id = $3 AND consumed_at IS NULL
+           FOR UPDATE`,
+          [params.challengeId, params.purpose, params.boundUserId],
+        );
+
+        if (res.rowCount === 0) {
+          await client.query('ROLLBACK');
+          return { valid: false, error: 'CHALLENGE_NOT_FOUND' };
+        }
+
+        const row = res.rows[0];
+        if (new Date(row.expires_at).getTime() <= Date.now()) {
+          await client.query(`UPDATE auth_challenges SET consumed_at = NOW() WHERE id = $1`, [row.id]);
+          await client.query('COMMIT');
+          return { valid: false, error: 'CHALLENGE_EXPIRED' };
+        }
+
+        if (row.attempt_count >= row.max_attempts) {
+          await client.query(`UPDATE auth_challenges SET consumed_at = NOW() WHERE id = $1`, [row.id]);
+          await client.query('COMMIT');
+          return { valid: false, error: 'MAX_ATTEMPTS_EXCEEDED' };
+        }
+
+        const isMatch = verifyChallengeCode(params.code, row.code_hash, env.JWT_SECRET);
+        if (!isMatch) {
+          await client.query(`UPDATE auth_challenges SET attempt_count = attempt_count + 1 WHERE id = $1`, [row.id]);
+          await client.query('COMMIT');
+          return { valid: false, error: 'INVALID_CODE' };
+        }
+
+        await client.query(
+          `UPDATE auth_challenges SET consumed_at = NOW(), attempt_count = attempt_count + 1 WHERE id = $1`,
+          [row.id],
+        );
+        await client.query('COMMIT');
+
+        return {
+          valid: true,
+          metadata: row.metadata,
+          targetIdentifier: row.target_identifier,
+        };
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+
+    const candidate = this.inMemoryChallenges.get(params.challengeId);
+    if (
+      !candidate ||
+      candidate.purpose !== params.purpose ||
+      candidate.boundUserId !== params.boundUserId ||
+      candidate.consumedAt
+    ) {
+      return { valid: false, error: 'CHALLENGE_NOT_FOUND' };
+    }
+    if (candidate.expiresAt <= Date.now()) {
+      candidate.consumedAt = Date.now();
+      return { valid: false, error: 'CHALLENGE_EXPIRED' };
+    }
+    if (candidate.attemptCount >= candidate.maxAttempts) {
+      candidate.consumedAt = Date.now();
+      return { valid: false, error: 'MAX_ATTEMPTS_EXCEEDED' };
+    }
+
+    const isMatch = verifyChallengeCode(params.code, candidate.codeHash, env.JWT_SECRET);
+    candidate.attemptCount++;
+    if (!isMatch) {
+      return { valid: false, error: 'INVALID_CODE' };
+    }
+    candidate.consumedAt = Date.now();
+    return {
+      valid: true,
+      metadata: candidate.metadata,
+      targetIdentifier: candidate.target,
+    };
+  }
 }
