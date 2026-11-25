@@ -90,11 +90,16 @@ export async function getFollowSuggestions(
   const viewerHometown = viewer.home_municipality?.trim() || null;
 
   const sql = `
+    -- Each signal drops self, already-followed and dismissed users before its LIMIT, so heavy
+    -- followers/actives can't fill a branch with people the viewer already follows.
     WITH candidate_ids AS (
       (
         SELECT fb.follower_id AS id
         FROM user_follows fb
         WHERE fb.following_id = $1
+          AND fb.follower_id <> $1
+          AND NOT EXISTS (SELECT 1 FROM user_follows xf WHERE xf.follower_id = $1 AND xf.following_id = fb.follower_id)
+          AND NOT EXISTS (SELECT 1 FROM user_suggestion_dismissals xd WHERE xd.user_id = $1 AND xd.dismissed_user_id = fb.follower_id)
         LIMIT 100
       )
       UNION
@@ -103,6 +108,9 @@ export async function getFollowSuggestions(
         FROM user_follows f1
         JOIN user_follows f2 ON f2.follower_id = f1.following_id
         WHERE f1.follower_id = $1
+          AND f2.following_id <> $1
+          AND NOT EXISTS (SELECT 1 FROM user_follows xf WHERE xf.follower_id = $1 AND xf.following_id = f2.following_id)
+          AND NOT EXISTS (SELECT 1 FROM user_suggestion_dismissals xd WHERE xd.user_id = $1 AND xd.dismissed_user_id = f2.following_id)
         LIMIT 100
       )
       UNION
@@ -114,6 +122,9 @@ export async function getFollowSuggestions(
           AND u.suspended_at IS NULL
           AND COALESCE(u.is_test, FALSE) = $2
           AND lower(u.home_municipality) = lower($3::text)
+          AND u.id <> $1
+          AND NOT EXISTS (SELECT 1 FROM user_follows xf WHERE xf.follower_id = $1 AND xf.following_id = u.id)
+          AND NOT EXISTS (SELECT 1 FROM user_suggestion_dismissals xd WHERE xd.user_id = $1 AND xd.dismissed_user_id = u.id)
         LIMIT 100
       )
       UNION
@@ -127,6 +138,9 @@ export async function getFollowSuggestions(
           AND vv2.revoked_at IS NULL
           AND vv1.occurred_at >= NOW() - INTERVAL '90 days'
           AND vv2.occurred_at >= NOW() - INTERVAL '90 days'
+          AND vv2.user_id <> $1
+          AND NOT EXISTS (SELECT 1 FROM user_follows xf WHERE xf.follower_id = $1 AND xf.following_id = vv2.user_id)
+          AND NOT EXISTS (SELECT 1 FROM user_suggestion_dismissals xd WHERE xd.user_id = $1 AND xd.dismissed_user_id = vv2.user_id)
         LIMIT 100
       )
       UNION
@@ -135,6 +149,9 @@ export async function getFollowSuggestions(
         FROM social_activities sa
         WHERE sa.hidden_at IS NULL
           AND sa.created_at >= NOW() - INTERVAL '14 days'
+          AND sa.actor_id <> $1
+          AND NOT EXISTS (SELECT 1 FROM user_follows xf WHERE xf.follower_id = $1 AND xf.following_id = sa.actor_id)
+          AND NOT EXISTS (SELECT 1 FROM user_suggestion_dismissals xd WHERE xd.user_id = $1 AND xd.dismissed_user_id = sa.actor_id)
         GROUP BY sa.actor_id
         ORDER BY MAX(sa.created_at) DESC
         LIMIT 100

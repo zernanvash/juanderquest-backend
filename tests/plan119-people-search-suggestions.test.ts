@@ -318,4 +318,44 @@ realPg('Plan 119: Plaza People Search & Unified Follow Suggestions (real Postgre
     const ids = res.body.data.items.map((i: any) => i.id);
     expect(ids).toContain(olderFollowerId);
   });
+
+  it('still suggests a new follower when 120 mutual follows would fill the follows-you signal', async () => {
+    const viewerId = `p119-mutual-v-${suffix}`;
+    const newFollowerId = `p119-mutual-new-${suffix}`;
+    const mutualPrefix = `p119-mutual-m-${suffix}`;
+    await fixture.pool.query(
+      `INSERT INTO users (
+         id, seed_id, display_name, email, handle, role, is_public, is_test, created_at, session_epoch
+       ) VALUES
+         ($1::text, $1::text, 'Mutual Viewer', $1::text || '@example.test', 'mutual_viewer', 'user', TRUE, FALSE, NOW(), 0),
+         ($2::text, $2::text, 'New Follower', $2::text || '@example.test', 'new_follower_x', 'user', TRUE, FALSE, NOW(), 0)`,
+      [viewerId, newFollowerId],
+    );
+    await fixture.pool.query(
+      `INSERT INTO users (
+         id, seed_id, display_name, email, handle, role, is_public, is_test, created_at, session_epoch
+       )
+       SELECT $1::text || '-' || g::text, $1::text || '-' || g::text, 'Mutual ' || g::text,
+              $1::text || '-' || g::text || '@example.test', 'mutual_m_' || g::text, 'user', TRUE, FALSE, NOW(), 0
+       FROM generate_series(1, 120) AS g`,
+      [mutualPrefix],
+    );
+    await fixture.pool.query(
+      `INSERT INTO user_follows (follower_id, following_id)
+       SELECT $1::text || '-' || g::text, $2::text FROM generate_series(1, 120) AS g
+       UNION ALL
+       SELECT $2::text, $1::text || '-' || g::text FROM generate_series(1, 120) AS g`,
+      [mutualPrefix, viewerId],
+    );
+    await fixture.pool.query(`INSERT INTO user_follows (follower_id, following_id) VALUES ($1, $2)`, [
+      newFollowerId,
+      viewerId,
+    ]);
+
+    const res = await request(app).get('/api/v1/users/suggestions').set(as(viewerId));
+    expect(res.status).toBe(200);
+    const ids = res.body.data.items.map((i: any) => i.id);
+    expect(ids).toContain(newFollowerId);
+    expect(ids.some((id: string) => id.startsWith(mutualPrefix))).toBe(false);
+  });
 });
