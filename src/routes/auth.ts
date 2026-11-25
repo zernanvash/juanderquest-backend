@@ -1105,6 +1105,22 @@ router.delete(
         });
       }
 
+      const [hasVerifiedEmail, hasPassword, hasGoogle] = await Promise.all([
+        db.identityService.hasVerifiedPrimaryEmail(user.id, user.email),
+        db.identityService.hasPasswordCredential(user.id),
+        db.identityService.hasGoogleIdentity(user.id),
+      ]);
+      if (!hasVerifiedEmail || (!hasPassword && !hasGoogle)) {
+        return res.status(409).json({
+          success: false,
+          error: {
+            code: 'OTHER_SIGNIN_REQUIRED_BEFORE_WALLET_UNBIND',
+            message:
+              "Verify your email and keep a password or Google sign-in linked before unlinking your wallet so you don't lose access to your account.",
+          },
+        });
+      }
+
       const updatedUser = await db.unbindWalletAddress(req.user!.id);
       return res.status(200).json({
         success: true,
@@ -1120,6 +1136,322 @@ router.delete(
         error: { code: 'STORAGE_UNAVAILABLE', message: 'Durable user storage is unavailable. Please try again later.' },
       });
     }
+  },
+);
+
+const EMAIL_CHANGE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+router.get('/auth/email/change/eligibility', authenticateToken, async (req: AuthRequest, res: Response) => {
+  res.setHeader('Cache-Control', 'private, no-store');
+  const user = db.usersRepo.getPool() ? await db.usersRepo.findById(req.user!.id) : db.findUserById(req.user!.id);
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      error: { code: 'USER_NOT_FOUND', message: 'Traveler account not found.' },
+    });
+  }
+
+  const walletAddress = user.wallet_address?.trim() || null;
+  const [hasGoogleLinked, hasPassword, lastChangedAt] = await Promise.all([
+    db.identityService.hasGoogleIdentity(user.id),
+    db.identityService.hasPasswordCredential(user.id),
+    db.identityService.getLastEmailChangeAt(user.id),
+  ]);
+
+  let eligible = true;
+  let reason: string | null = null;
+  let cooldownUntil: string | null = null;
+
+  if (!walletAddress) {
+    eligible = false;
+    reason = 'WALLET_REQUIRED_FOR_EMAIL_CHANGE';
+  } else if (lastChangedAt) {
+    const expiresMs = lastChangedAt.getTime() + EMAIL_CHANGE_COOLDOWN_MS;
+    if (expiresMs > Date.now()) {
+      eligible = false;
+      reason = 'EMAIL_CHANGE_COOLDOWN';
+      cooldownUntil = new Date(expiresMs).toISOString();
+    }
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      eligible,
+      reason,
+      bound_wallet_address: walletAddress,
+      current_email: user.email ?? null,
+      has_google_linked: hasGoogleLinked,
+      has_password: hasPassword,
+      cooldown_until: cooldownUntil,
+    },
+  });
+});
+
+const emailChangeRequestSchema = z.object({
+  body: z.object({
+    new_email: z.string().trim().email('A valid email address is required').max(255),
+  }),
+});
+
+router.post(
+  '/auth/email/change/request',
+  rateLimit({ policyId: 'auth:email-change-request', windowMs: 60_000, max: 5 }),
+  authenticateToken,
+  validateRequest(emailChangeRequestSchema),
+  async (req: AuthRequest, res: Response) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    const user = db.usersRepo.getPool() ? await db.usersRepo.findById(req.user!.id) : db.findUserById(req.user!.id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'USER_NOT_FOUND', message: 'Traveler account not found.' },
+      });
+    }
+
+    const walletAddress = user.wallet_address?.trim() || null;
+    if (!walletAddress) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'WALLET_REQUIRED_FOR_EMAIL_CHANGE',
+          message: 'Connect a blockchain wallet before changing your email.',
+        },
+      });
+    }
+
+    const lastChangedAt = await db.identityService.getLastEmailChangeAt(user.id);
+    if (lastChangedAt) {
+      const remainingMs = lastChangedAt.getTime() + EMAIL_CHANGE_COOLDOWN_MS - Date.now();
+      if (remainingMs > 0) {
+        const retryAfterSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
+        res.setHeader('Retry-After', String(retryAfterSeconds));
+        return res.status(429).json({
+          success: false,
+          error: {
+            code: 'EMAIL_CHANGE_COOLDOWN',
+            message: 'You can only change your email once every 24 hours.',
+            retry_after_seconds: retryAfterSeconds,
+          },
+        });
+      }
+    }
+
+    const normalizedNewEmail = db.identityService.normalizeEmail(req.body.new_email);
+    const currentNormalized = db.identityService.normalizeEmail(user.email ?? '');
+    if (normalizedNewEmail === currentNormalized) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'EMAIL_UNCHANGED', message: 'Enter a different email address.' },
+      });
+    }
+
+    if (await db.identityService.isEmailClaimedByAnotherUser(user.id, normalizedNewEmail)) {
+      return res.status(409).json({
+        success: false,
+        error: { code: 'EMAIL_ALREADY_IN_USE', message: 'This email is already associated with another account.' },
+      });
+    }
+
+    const allowance = await db.mailerService.checkSendAllowance(normalizedNewEmail);
+    if (!allowance.allowed) {
+      res.setHeader('Retry-After', String(allowance.retryAfterSeconds));
+      return res.status(429).json({
+        success: false,
+        error: {
+          code: 'EMAIL_RATE_LIMITED',
+          message: 'Too many email requests. Please try again later.',
+          retry_after_seconds: allowance.retryAfterSeconds,
+        },
+      });
+    }
+
+    const siweNonce = randomUUID().replace(/-/g, '');
+    const expiresAtIso = new Date(Date.now() + 10 * 60_000).toISOString();
+    const siweMessage = [
+      'JuanDerQuest Email Migration',
+      `Account: ${user.id}`,
+      `Wallet: ${walletAddress}`,
+      `From: ${user.email ?? 'none'}`,
+      `To: ${normalizedNewEmail}`,
+      `Nonce: ${siweNonce}`,
+      `Expires: ${expiresAtIso}`,
+    ].join('\n');
+
+    const challenge = await db.challengeService.createChallenge({
+      purpose: 'email_change',
+      targetIdentifier: normalizedNewEmail,
+      boundUserId: user.id,
+      ttlSeconds: 600,
+      maxAttempts: 5,
+      metadata: {
+        old_email: user.email ?? '',
+        wallet_address: walletAddress,
+        siwe_nonce: siweNonce,
+        siwe_message: siweMessage,
+      },
+    });
+
+    await db.mailerService.queueAuthEmail({
+      id: randomUUID(),
+      recipientEmail: normalizedNewEmail,
+      templateType: 'email_change_otp',
+      code: challenge.code,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        challenge_id: challenge.challengeId,
+        new_email: normalizedNewEmail,
+        wallet_address: walletAddress,
+        siwe_message: siweMessage,
+        expires_at: challenge.expiresAt.toISOString(),
+      },
+    });
+  },
+);
+
+const emailChangeConfirmSchema = z.object({
+  body: z.object({
+    challenge_id: z.string().trim().min(1),
+    otp_code: z
+      .string()
+      .trim()
+      .regex(/^\d{6}$/, 'A 6-digit verification code is required'),
+    wallet_signature: z.string().trim().min(1),
+  }),
+});
+
+router.post(
+  '/auth/email/change/confirm',
+  rateLimit({ policyId: 'auth:email-change-confirm', windowMs: 60_000, max: 10 }),
+  authenticateToken,
+  validateRequest(emailChangeConfirmSchema),
+  async (req: AuthRequest, res: Response) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    const user = db.usersRepo.getPool() ? await db.usersRepo.findById(req.user!.id) : db.findUserById(req.user!.id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'USER_NOT_FOUND', message: 'Traveler account not found.' },
+      });
+    }
+
+    const walletAddress = user.wallet_address?.trim() || null;
+    if (!walletAddress) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'WALLET_REQUIRED_FOR_EMAIL_CHANGE',
+          message: 'Connect a blockchain wallet before changing your email.',
+        },
+      });
+    }
+
+    const activeChallenge = await db.challengeService.findActiveChallengeById(
+      req.body.challenge_id,
+      'email_change',
+      user.id,
+    );
+    const storedSiweMessage =
+      activeChallenge && activeChallenge.metadata && typeof activeChallenge.metadata.siwe_message === 'string'
+        ? activeChallenge.metadata.siwe_message
+        : null;
+    if (!activeChallenge || !storedSiweMessage) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_OR_EXPIRED_CHALLENGE', message: 'Verification challenge is invalid or expired.' },
+      });
+    }
+
+    const requireSignature = env.WALLET_AUTH_MODE === 'signature' || !env.ALLOW_INSECURE_LOCAL_WALLET_AUTH;
+    if (requireSignature) {
+      try {
+        const recovered = getAddress(verifyMessage(storedSiweMessage, req.body.wallet_signature));
+        if (recovered !== getAddress(walletAddress)) {
+          throw new Error('Wallet address mismatch');
+        }
+      } catch {
+        return res.status(401).json({
+          success: false,
+          error: { code: 'INVALID_WALLET_SIGNATURE', message: 'The wallet signature could not be verified.' },
+        });
+      }
+    }
+
+    const consumed = await db.challengeService.consumeChallengeById({
+      challengeId: req.body.challenge_id,
+      purpose: 'email_change',
+      code: req.body.otp_code,
+      boundUserId: user.id,
+    });
+    if (!consumed.valid || !consumed.targetIdentifier) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_OR_EXPIRED_CHALLENGE', message: 'Verification code is invalid or expired.' },
+      });
+    }
+
+    let migration: { oldEmail: string; newEmail: string; googleUnlinked: boolean };
+    try {
+      migration = await db.identityService.migrateEmailTransaction({
+        userId: user.id,
+        newEmail: consumed.targetIdentifier,
+        walletAddress,
+        ipAddress: req.ip ?? null,
+      });
+    } catch (err: any) {
+      if (err?.code === 'EMAIL_ALREADY_IN_USE') {
+        return res.status(409).json({
+          success: false,
+          error: { code: 'EMAIL_ALREADY_IN_USE', message: 'This email is already associated with another account.' },
+        });
+      }
+      if (err?.code === 'WALLET_REQUIRED_FOR_EMAIL_CHANGE') {
+        return res.status(403).json({
+          success: false,
+          error: {
+            code: 'WALLET_REQUIRED_FOR_EMAIL_CHANGE',
+            message: 'Connect a blockchain wallet before changing your email.',
+          },
+        });
+      }
+      throw err;
+    }
+
+    const memUser = db.users.find((u) => u.id === user.id);
+    if (memUser) memUser.email = migration.newEmail;
+
+    await db.bumpSessionEpoch(user.id);
+    invalidateSessionScopeCache(user.id);
+
+    const updatedUser =
+      (db.usersRepo.getPool() ? await db.usersRepo.findById(user.id) : db.findUserById(user.id)) ?? user;
+    const token = issueToken(updatedUser);
+    setSessionCookie(res, token, false);
+
+    if (migration.oldEmail && !db.identityService.isPlaceholderEmail(migration.oldEmail)) {
+      try {
+        await db.mailerService.queueAuthEmail({
+          id: randomUUID(),
+          recipientEmail: migration.oldEmail,
+          templateType: 'email_changed_alert',
+        });
+      } catch {
+        // Best-effort security alert; never fail or roll back a committed migration.
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        token,
+        user: updatedUser,
+        google_unlinked: migration.googleUnlinked,
+        message: 'Email updated successfully.',
+      },
+    });
   },
 );
 

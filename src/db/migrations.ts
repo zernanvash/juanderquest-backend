@@ -134,6 +134,8 @@ export const MIGRATIONS = [
   '114_user_suspension_and_risk_flags.sql',
   // Plan 119: persisted follow-suggestion dismissals and lookup indexes for people discovery.
   '115_people_suggestion_dismissals.sql',
+  // Plan 120: durable audit trail and cooldown source for wallet-gated email migrations.
+  '116_email_change_audit.sql',
   // Plan 122a: 1-to-1 merchants.spot_id uniqueness and merchant_spot_claim_requests (reserved 117; 116 is Plan 120).
   '117_merchant_spot_links.sql',
 ];
