@@ -3,6 +3,7 @@
 // (migration 110: trigram + tsvector) for search when they are available.
 import type { Pool } from 'pg';
 import type { Spot } from './store.js';
+import { emptySpotMarkerClassification, type MarkerKind, type SpotMarkerClassification } from './markerKind.js';
 
 export interface MapQuery {
   bbox: [number, number, number, number];
@@ -20,6 +21,12 @@ export interface MapMarker {
   category: string;
   tier: string | null;
   thumb: string | null;
+  marker_kind: MarkerKind;
+  is_local_partner: boolean;
+  merchant_id: string | null;
+  merchant_name: string | null;
+  active_quest_count: number;
+  active_quest_ids: string[];
 }
 
 export interface MapCluster {
@@ -34,7 +41,11 @@ const CLUSTER_BELOW_ZOOM = 11;
 
 const tierRank = (s: Spot) => (s.launch_tier === 'featured' ? 0 : s.launch_tier === 'review' ? 2 : 1);
 
-export function mapView(spots: Spot[], q: MapQuery): { markers: MapMarker[]; clusters: MapCluster[]; total: number } {
+export function mapView(
+  spots: Spot[],
+  q: MapQuery,
+  markerMeta?: Map<string, SpotMarkerClassification>,
+): { markers: MapMarker[]; clusters: MapCluster[]; total: number } {
   const [west, south, east, north] = q.bbox;
   const inView = spots.filter(
     (s) =>
@@ -47,16 +58,25 @@ export function mapView(spots: Spot[], q: MapQuery): { markers: MapMarker[]; clu
       (!q.categories?.length || q.categories.includes(s.category)) &&
       (!q.tier || s.launch_tier === q.tier),
   );
-  const toMarker = (s: Spot): MapMarker => ({
-    id: s.id,
-    slug: s.slug,
-    name: s.name,
-    lat: s.gps_lat,
-    lng: s.gps_lng,
-    category: s.category,
-    tier: s.launch_tier ?? null,
-    thumb: s.image_url || null,
-  });
+  const toMarker = (s: Spot): MapMarker => {
+    const meta = markerMeta?.get(s.id) ?? emptySpotMarkerClassification();
+    return {
+      id: s.id,
+      slug: s.slug,
+      name: s.name,
+      lat: s.gps_lat,
+      lng: s.gps_lng,
+      category: s.category,
+      tier: s.launch_tier ?? null,
+      thumb: s.image_url || null,
+      marker_kind: meta.marker_kind,
+      is_local_partner: meta.is_local_partner,
+      merchant_id: meta.merchant_id,
+      merchant_name: meta.merchant_name,
+      active_quest_count: meta.active_quest_count,
+      active_quest_ids: meta.active_quest_ids,
+    };
+  };
   if (q.zoom >= CLUSTER_BELOW_ZOOM || inView.length <= MAP_MARKER_LIMIT) {
     const markers = [...inView]
       .sort((a, b) => tierRank(a) - tierRank(b) || a.id.localeCompare(b.id))
@@ -74,7 +94,12 @@ export function mapView(spots: Spot[], q: MapQuery): { markers: MapMarker[]; clu
       c.sumLat += s.gps_lat;
       c.sumLng += s.gps_lng;
       c.n += 1;
-      c.b = [Math.min(c.b[0], s.gps_lng), Math.min(c.b[1], s.gps_lat), Math.max(c.b[2], s.gps_lng), Math.max(c.b[3], s.gps_lat)];
+      c.b = [
+        Math.min(c.b[0], s.gps_lng),
+        Math.min(c.b[1], s.gps_lat),
+        Math.max(c.b[2], s.gps_lng),
+        Math.max(c.b[3], s.gps_lat),
+      ];
     } else {
       cells.set(key, { sumLat: s.gps_lat, sumLng: s.gps_lng, n: 1, b: [s.gps_lng, s.gps_lat, s.gps_lng, s.gps_lat] });
     }
@@ -111,12 +136,7 @@ export interface SearchHit {
   thumb: string | null;
 }
 
-export const fold = (v: string) =>
-  v
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .trim();
+export const fold = (v: string) => v.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 
 /** In-memory typeahead (pg-mem, no-DB dev, or when the SQL path fails). */
 export function searchSpotsInMemory(spots: Spot[], query: string, limit: number): SearchHit[] {
@@ -182,7 +202,10 @@ export async function searchSpots(
       [query, escapeLike(fold(query)), limit, SEARCH_WORD_SIMILARITY],
     );
     const byId = new Map(spots.map((s) => [s.id, s]));
-    return rows.map((r) => byId.get(r.id)).filter((s): s is Spot => Boolean(s)).map(toHit);
+    return rows
+      .map((r) => byId.get(r.id))
+      .filter((s): s is Spot => Boolean(s))
+      .map(toHit);
   } catch {
     return searchSpotsInMemory(spots, query, limit);
   }

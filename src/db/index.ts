@@ -386,6 +386,10 @@ export interface MerchantRow {
   logo_url?: string | null;
   banner_url?: string | null;
   source_application_id?: string | null;
+  spot_id?: string | null;
+  gps_lat?: number | null;
+  gps_lng?: number | null;
+  is_test?: boolean;
   created_at: string;
 }
 
@@ -1241,6 +1245,10 @@ export class MemoryDb {
       logo_url: row.logo_url ?? null,
       banner_url: row.banner_url ?? null,
       source_application_id: row.source_application_id ?? null,
+      spot_id: row.spot_id ?? null,
+      gps_lat: row.gps_lat == null ? null : Number(row.gps_lat),
+      gps_lng: row.gps_lng == null ? null : Number(row.gps_lng),
+      is_test: Boolean(row.is_test),
       created_at: toIso(row.created_at),
     }));
     const { rows: vouchers } = await pool.query('SELECT * FROM vouchers ORDER BY id');
@@ -2885,6 +2893,19 @@ export class MemoryDb {
       ],
     );
     return merchant;
+  }
+
+  syncMerchantSpotCache(
+    merchantId: string,
+    spotId: string | null,
+    gpsLat?: number | null,
+    gpsLng?: number | null,
+  ): void {
+    const merchant = this.merchants.find((m) => m.id === merchantId);
+    if (!merchant) return;
+    merchant.spot_id = spotId;
+    if (gpsLat !== undefined) merchant.gps_lat = gpsLat;
+    if (gpsLng !== undefined) merchant.gps_lng = gpsLng;
   }
 
   listMerchantProducts(merchantId: string, includeArchived = false): MerchantProductRow[] {

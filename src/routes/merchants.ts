@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { httpUrl } from '../utils/http-url.js';
@@ -6,8 +7,104 @@ import { getPool } from '../db/pool.js';
 import { authenticateToken, optionalAuthenticateToken, AuthRequest } from '../middleware/auth.js';
 import { validateRequest } from '../middleware/validate.js';
 import { loadSukiSettings, rewardTag } from '../suki/service.js';
+import { resolveMerchantMember, WorkspaceError } from '../merchants/workspace.js';
 
 export const merchantsRouter = Router();
+
+interface HydratedLinkedSpot {
+  id: string;
+  slug: string;
+  name: string;
+  municipality: string;
+  gps_lat: number;
+  gps_lng: number;
+  image_url: string | null;
+}
+
+interface HydratedPendingClaim {
+  id: string;
+  spot_id: string;
+  spot_name: string;
+  status: string;
+  created_at: string;
+}
+
+async function hydrateMerchantLocation(
+  merchantId: string,
+  fallbackSpotId?: string | null,
+): Promise<{
+  spot_id: string | null;
+  linked_spot: HydratedLinkedSpot | null;
+  pending_claim: HydratedPendingClaim | null;
+}> {
+  const pool = getPool();
+  if (!pool) {
+    return { spot_id: fallbackSpotId ?? null, linked_spot: null, pending_claim: null };
+  }
+  const [mRes, claimRes] = await Promise.all([
+    pool
+      .query(
+        `SELECT m.spot_id,
+                s.id AS s_id, s.slug AS s_slug, s.name AS s_name, s.municipality AS s_municipality,
+                s.gps_lat AS s_lat, s.gps_lng AS s_lng, s.image_url AS s_image_url
+           FROM merchants m
+           LEFT JOIN spots s ON s.id = m.spot_id
+          WHERE m.id = $1
+          LIMIT 1`,
+        [merchantId],
+      )
+      .catch(() => ({ rows: [] as any[] })),
+    pool
+      .query(
+        `SELECT c.id, c.spot_id, s.name AS spot_name, c.status, c.created_at
+           FROM merchant_spot_claim_requests c
+           JOIN spots s ON s.id = c.spot_id
+          WHERE c.merchant_id = $1 AND c.status = 'pending'
+          ORDER BY c.created_at DESC
+          LIMIT 1`,
+        [merchantId],
+      )
+      .catch(() => ({ rows: [] as any[] })),
+  ]);
+  const row = mRes.rows[0];
+  const spotId = row?.spot_id ? String(row.spot_id) : null;
+  const linkedSpot: HydratedLinkedSpot | null =
+    spotId && row?.s_id
+      ? {
+          id: String(row.s_id),
+          slug: String(row.s_slug),
+          name: String(row.s_name),
+          municipality: String(row.s_municipality ?? ''),
+          gps_lat: Number(row.s_lat),
+          gps_lng: Number(row.s_lng),
+          image_url: row.s_image_url ? String(row.s_image_url) : null,
+        }
+      : null;
+  const c = claimRes.rows[0];
+  const pendingClaim: HydratedPendingClaim | null = c
+    ? {
+        id: String(c.id),
+        spot_id: String(c.spot_id),
+        spot_name: String(c.spot_name),
+        status: String(c.status),
+        created_at: new Date(c.created_at).toISOString(),
+      }
+    : null;
+  return { spot_id: spotId, linked_spot: linkedSpot, pending_claim: pendingClaim };
+}
+
+function handleWorkspaceError(res: Response, err: unknown) {
+  if (err instanceof WorkspaceError) {
+    return res.status(err.status).json({
+      success: false,
+      error: { code: err.code, message: err.message },
+    });
+  }
+  return res.status(503).json({
+    success: false,
+    error: { code: 'MERCHANT_UNAVAILABLE', message: 'Merchant location service is unavailable right now.' },
+  });
+}
 
 // Middleware: Require Caller to be an active owner of a merchant
 async function requireMerchantOwner(req: AuthRequest, res: Response, next: () => void) {
@@ -49,11 +146,18 @@ merchantsRouter.get('/merchant/me', authenticateToken, async (req: AuthRequest, 
     });
   }
 
+  const loc = await hydrateMerchantLocation(info.merchant.id, info.merchant.spot_id ?? null);
   return res.status(200).json({
     success: true,
     data: {
       has_merchant: true,
-      merchant: info.merchant,
+      merchant: {
+        ...info.merchant,
+        spot_id: loc.spot_id,
+        linked_spot: loc.linked_spot,
+      },
+      linked_spot: loc.linked_spot,
+      pending_claim: loc.pending_claim,
       membership: {
         role: info.membership.role,
         status: info.membership.status,
@@ -149,9 +253,15 @@ merchantsRouter.get(
   requireMerchantOwner,
   async (req: AuthRequest, res: Response) => {
     const merchant = (req as any).merchant;
+    const loc = await hydrateMerchantLocation(merchant.id, merchant.spot_id ?? null);
     return res.status(200).json({
       success: true,
-      data: merchant,
+      data: {
+        ...merchant,
+        spot_id: loc.spot_id,
+        linked_spot: loc.linked_spot,
+        pending_claim: loc.pending_claim,
+      },
     });
   },
 );
@@ -446,11 +556,15 @@ merchantsRouter.get('/merchants/:id', optionalAuthenticateToken, async (req: Aut
     const merchant = (
       await pool.query(
         `SELECT m.id, m.name, m.category, m.municipality, m.location, m.description, m.logo_url, m.banner_url,
-                m.contact_email, m.contact_phone, m.is_published, m.is_test,
+                m.contact_email, m.contact_phone, m.is_published, m.is_test, m.spot_id,
                 COALESCE(m.gps_lat, a.gps_lat) AS gps_lat, COALESCE(m.gps_lng, a.gps_lng) AS gps_lng,
+                s.id AS s_id, s.slug AS s_slug, s.name AS s_name, s.municipality AS s_municipality,
+                s.gps_lat AS s_lat, s.gps_lng AS s_lng, s.image_url AS s_image_url,
                 EXISTS (SELECT 1 FROM merchant_memberships mm
                          WHERE mm.merchant_id = m.id AND mm.user_id = $2 AND mm.status = 'active') AS is_member
-           FROM merchants m LEFT JOIN merchant_affiliate_applications a ON a.id = m.source_application_id
+           FROM merchants m
+           LEFT JOIN merchant_affiliate_applications a ON a.id = m.source_application_id
+           LEFT JOIN spots s ON s.id = m.spot_id
           WHERE m.id = $1 AND m.status = 'active'`,
         [String(req.params.id), viewerId ?? ''],
       )
@@ -492,6 +606,18 @@ merchantsRouter.get('/merchants/:id', optionalAuthenticateToken, async (req: Aut
     }
     const value = p?.reward_value == null ? null : Number(p.reward_value);
     const items = products.rows.map(publicProduct);
+    const linkedSpot: HydratedLinkedSpot | null =
+      merchant.spot_id && merchant.s_id
+        ? {
+            id: String(merchant.s_id),
+            slug: String(merchant.s_slug),
+            name: String(merchant.s_name),
+            municipality: String(merchant.s_municipality ?? ''),
+            gps_lat: Number(merchant.s_lat),
+            gps_lng: Number(merchant.s_lng),
+            image_url: merchant.s_image_url ? String(merchant.s_image_url) : null,
+          }
+        : null;
     res.setHeader('Cache-Control', 'private, no-store');
     return res.json({
       success: true,
@@ -509,6 +635,8 @@ merchantsRouter.get('/merchants/:id', optionalAuthenticateToken, async (req: Aut
           contact_phone: merchant.contact_phone || null,
           gps_lat: merchant.gps_lat == null ? null : Number(merchant.gps_lat),
           gps_lng: merchant.gps_lng == null ? null : Number(merchant.gps_lng),
+          spot_id: merchant.spot_id ? String(merchant.spot_id) : null,
+          linked_spot: linkedSpot,
           is_published: Boolean(merchant.is_published),
         },
         specialties: items.filter((i) => i.is_specialty),
@@ -539,5 +667,295 @@ merchantsRouter.get('/merchants/:id', optionalAuthenticateToken, async (req: Aut
     });
   } catch {
     return fail(res, 503, 'MERCHANT_UNAVAILABLE', 'This shop page is unavailable right now.');
+  }
+});
+
+// ============================================================================
+// Plan 122a: Merchant Hub Destination Linking & Claim Submission (owner-only)
+// ============================================================================
+
+const linkLocationSchema = z.object({
+  body: z.object({
+    spot_id: z.string().trim().min(1).max(180),
+  }),
+});
+
+const claimLocationSchema = z.object({
+  body: z.object({
+    spot_id: z.string().trim().min(1).max(180),
+    note: z.string().trim().min(10, 'Note must be between 10 and 500 characters.').max(500),
+    proof_url: photoUrl.optional().nullable(),
+  }),
+});
+
+// GET /api/v1/merchant/location/candidates (owner-only)
+merchantsRouter.get('/merchant/location/candidates', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const pool = getPool();
+  if (!pool) return fail(res, 503, 'DATABASE_REQUIRED', 'Durable storage is required for merchant locations.');
+  try {
+    const ctx = await resolveMerchantMember(pool, req.user!.id, true);
+    const [loc, authoredRes] = await Promise.all([
+      hydrateMerchantLocation(ctx.merchantId),
+      pool.query(
+        `SELECT s.id, s.slug, s.name, s.municipality, s.category, s.gps_lat, s.gps_lng, s.image_url
+           FROM spots s
+          WHERE s.created_by = $1
+            AND s.status = 'published'
+            AND s.is_test = $2
+            AND NOT EXISTS (
+              SELECT 1 FROM merchants m
+               WHERE m.spot_id = s.id
+                 AND m.id <> $3
+                 AND m.status = 'active'
+            )
+          ORDER BY s.created_at DESC, s.id ASC
+          LIMIT 100`,
+        [req.user!.id, ctx.isTest, ctx.merchantId],
+      ),
+    ]);
+    return res.status(200).json({
+      success: true,
+      data: {
+        authored_spots: authoredRes.rows.map((s: any) => ({
+          id: String(s.id),
+          slug: String(s.slug),
+          name: String(s.name),
+          municipality: String(s.municipality ?? ''),
+          category: String(s.category ?? ''),
+          gps_lat: Number(s.gps_lat),
+          gps_lng: Number(s.gps_lng),
+          image_url: s.image_url ? String(s.image_url) : null,
+        })),
+        linked_spot: loc.linked_spot,
+        pending_claim: loc.pending_claim,
+      },
+    });
+  } catch (err) {
+    return handleWorkspaceError(res, err);
+  }
+});
+
+// PUT /api/v1/merchant/location (owner-only instant link for authored published spots)
+merchantsRouter.put(
+  '/merchant/location',
+  authenticateToken,
+  validateRequest(linkLocationSchema),
+  async (req: AuthRequest, res: Response) => {
+    const pool = getPool();
+    if (!pool) return fail(res, 503, 'DATABASE_REQUIRED', 'Durable storage is required for merchant locations.');
+    try {
+      const ctx = await resolveMerchantMember(pool, req.user!.id, true);
+      const { spot_id } = req.body as { spot_id: string };
+      const spotRes = await pool.query(
+        `SELECT id, slug, name, municipality, gps_lat, gps_lng, image_url, status, created_by, is_test
+           FROM spots
+          WHERE id = $1
+          LIMIT 1`,
+        [spot_id],
+      );
+      const spot = spotRes.rows[0];
+      if (!spot || spot.status !== 'published' || Boolean(spot.is_test) !== ctx.isTest) {
+        return fail(res, 404, 'SPOT_NOT_FOUND', 'Published destination not found.');
+      }
+      if (spot.created_by !== req.user!.id) {
+        return fail(
+          res,
+          403,
+          'SPOT_AUTHORSHIP_REQUIRED',
+          'You can only link destinations you authored directly. Submit a location claim for existing places.',
+        );
+      }
+
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const conflict = await client.query(
+          `SELECT id FROM merchants WHERE spot_id = $1 AND id <> $2 AND status = 'active' LIMIT 1`,
+          [spot.id, ctx.merchantId],
+        );
+        if (conflict.rowCount) {
+          await client.query('ROLLBACK');
+          return fail(
+            res,
+            409,
+            'SPOT_ALREADY_LINKED_TO_MERCHANT',
+            'This destination is already linked to another Local Partner.',
+          );
+        }
+
+        const updatedRes = await client.query(
+          `UPDATE merchants
+              SET spot_id = $1, gps_lat = $2, gps_lng = $3
+            WHERE id = $4
+            RETURNING *`,
+          [spot.id, Number(spot.gps_lat), Number(spot.gps_lng), ctx.merchantId],
+        );
+        await client.query(
+          `UPDATE merchant_spot_claim_requests
+              SET status = 'cancelled', updated_at = NOW()
+            WHERE merchant_id = $1 AND status = 'pending'`,
+          [ctx.merchantId],
+        );
+        await client.query('COMMIT');
+
+        db.syncMerchantSpotCache(ctx.merchantId, String(spot.id), Number(spot.gps_lat), Number(spot.gps_lng));
+        const linkedSpot: HydratedLinkedSpot = {
+          id: String(spot.id),
+          slug: String(spot.slug),
+          name: String(spot.name),
+          municipality: String(spot.municipality ?? ''),
+          gps_lat: Number(spot.gps_lat),
+          gps_lng: Number(spot.gps_lng),
+          image_url: spot.image_url ? String(spot.image_url) : null,
+        };
+        return res.status(200).json({
+          success: true,
+          data: {
+            merchant: updatedRes.rows[0],
+            linked_spot: linkedSpot,
+          },
+        });
+      } catch (err: any) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        if (err?.code === '23505') {
+          return fail(
+            res,
+            409,
+            'SPOT_ALREADY_LINKED_TO_MERCHANT',
+            'This destination is already linked to another Local Partner.',
+          );
+        }
+        throw err;
+      } finally {
+        client.release();
+      }
+    } catch (err) {
+      return handleWorkspaceError(res, err);
+    }
+  },
+);
+
+// DELETE /api/v1/merchant/location (owner-only unlink)
+merchantsRouter.delete('/merchant/location', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const pool = getPool();
+  if (!pool) return fail(res, 503, 'DATABASE_REQUIRED', 'Durable storage is required for merchant locations.');
+  try {
+    const ctx = await resolveMerchantMember(pool, req.user!.id, true);
+    await pool.query(`UPDATE merchants SET spot_id = NULL WHERE id = $1`, [ctx.merchantId]);
+    db.syncMerchantSpotCache(ctx.merchantId, null);
+    return res.status(200).json({
+      success: true,
+      data: {
+        merchant_id: ctx.merchantId,
+        spot_id: null,
+        linked_spot: null,
+      },
+    });
+  } catch (err) {
+    return handleWorkspaceError(res, err);
+  }
+});
+
+// POST /api/v1/merchant/location/claim (owner-only claim for non-authored published spot)
+merchantsRouter.post(
+  '/merchant/location/claim',
+  authenticateToken,
+  validateRequest(claimLocationSchema),
+  async (req: AuthRequest, res: Response) => {
+    const pool = getPool();
+    if (!pool) return fail(res, 503, 'DATABASE_REQUIRED', 'Durable storage is required for merchant locations.');
+    try {
+      const ctx = await resolveMerchantMember(pool, req.user!.id, true);
+      const { spot_id, note, proof_url } = req.body as { spot_id: string; note: string; proof_url?: string | null };
+      const spotRes = await pool.query(`SELECT id, name, status, is_test FROM spots WHERE id = $1 LIMIT 1`, [spot_id]);
+      const spot = spotRes.rows[0];
+      if (!spot || spot.status !== 'published' || Boolean(spot.is_test) !== ctx.isTest) {
+        return fail(res, 404, 'SPOT_NOT_FOUND', 'Published destination not found.');
+      }
+
+      const [linkedRes, pendingRes] = await Promise.all([
+        pool.query(`SELECT id FROM merchants WHERE spot_id = $1 AND status = 'active' LIMIT 1`, [spot.id]),
+        pool.query(
+          `SELECT id FROM merchant_spot_claim_requests WHERE merchant_id = $1 AND status = 'pending' LIMIT 1`,
+          [ctx.merchantId],
+        ),
+      ]);
+      if (linkedRes.rowCount) {
+        return fail(
+          res,
+          409,
+          'SPOT_ALREADY_LINKED_TO_MERCHANT',
+          'This destination is already linked to a Local Partner.',
+        );
+      }
+      if (pendingRes.rowCount) {
+        return fail(res, 409, 'CLAIM_ALREADY_PENDING', 'You already have a pending location claim under review.');
+      }
+
+      const id = `msc_${randomUUID()}`;
+      const cleanProof = proof_url && proof_url.trim().length > 0 ? proof_url.trim() : null;
+      try {
+        const inserted = await pool.query(
+          `INSERT INTO merchant_spot_claim_requests
+             (id, merchant_id, spot_id, requested_by, note, proof_url, status, is_test, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, NOW(), NOW())
+           RETURNING *`,
+          [id, ctx.merchantId, spot.id, req.user!.id, note.trim(), cleanProof, ctx.isTest],
+        );
+        const row = inserted.rows[0];
+        return res.status(201).json({
+          success: true,
+          data: {
+            id: String(row.id),
+            merchant_id: String(row.merchant_id),
+            spot_id: String(row.spot_id),
+            spot_name: String(spot.name),
+            note: String(row.note),
+            proof_url: row.proof_url ? String(row.proof_url) : null,
+            status: String(row.status),
+            created_at: new Date(row.created_at).toISOString(),
+          },
+        });
+      } catch (err: any) {
+        if (err?.code === '23505') {
+          return fail(res, 409, 'CLAIM_ALREADY_PENDING', 'You already have a pending location claim under review.');
+        }
+        throw err;
+      }
+    } catch (err) {
+      return handleWorkspaceError(res, err);
+    }
+  },
+);
+
+// DELETE /api/v1/merchant/location/claim/:id (owner-only cancel own pending claim)
+merchantsRouter.delete('/merchant/location/claim/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const pool = getPool();
+  if (!pool) return fail(res, 503, 'DATABASE_REQUIRED', 'Durable storage is required for merchant locations.');
+  try {
+    const ctx = await resolveMerchantMember(pool, req.user!.id, true);
+    const updated = await pool.query(
+      `UPDATE merchant_spot_claim_requests
+          SET status = 'cancelled', updated_at = NOW()
+        WHERE id = $1 AND merchant_id = $2 AND status = 'pending'
+        RETURNING id, merchant_id, spot_id, status, updated_at`,
+      [String(req.params.id), ctx.merchantId],
+    );
+    if (!updated.rowCount) {
+      return fail(res, 404, 'CLAIM_NOT_FOUND', 'Pending location claim not found.');
+    }
+    const row = updated.rows[0];
+    return res.status(200).json({
+      success: true,
+      data: {
+        id: String(row.id),
+        merchant_id: String(row.merchant_id),
+        spot_id: String(row.spot_id),
+        status: String(row.status),
+        updated_at: new Date(row.updated_at).toISOString(),
+      },
+    });
+  } catch (err) {
+    return handleWorkspaceError(res, err);
   }
 });
