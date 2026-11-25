@@ -218,7 +218,7 @@ describe('Plan 80: ExploreRanker v2 Personalization, Home Town, Privacy & Divers
     expect(capitolIdx).toBeLessThan(manaoagIdx);
   });
 
-  it('3. Visited Novelty Decay & Saved Wishlist Boost: visited spots decay by 0.30x while saved unvisited spots boost by 1.15x', () => {
+  it('3. Visited, Saved & Liked Novelty Decay: visited spots decay by 0.30x while saved unvisited spots demote by 0.55x under R4', () => {
     spotStore.setPreferences(userBeachId, {
       categories: ['nature_outdoors'],
       tags: ['beach', 'scenic'],
@@ -231,12 +231,12 @@ describe('Plan 80: ExploreRanker v2 Personalization, Home Town, Privacy & Divers
     const beforeVisit = spotStore.list({ userId: userBeachId });
     const patarBefore = beforeVisit.find((s) => s.id === 'spot-patar')!;
 
-    // Save Patar (unvisited) -> gets 1.15x boost and "Saved in your wishlist"
+    // Save Patar (unvisited) -> gets 0.55x R4 demotion and retains "Saved in your wishlist"
     spotStore.interact(userBeachId, 'spot-patar', 'save', true);
     const afterSave = spotStore.list({ userId: userBeachId });
     const patarSaved = afterSave.find((s) => s.id === 'spot-patar')!;
-    expect(patarSaved.recommendation_score).toBeGreaterThan(patarBefore.recommendation_score);
-    expect(patarSaved.recommendation_reasons[0]).toBe('Saved in your wishlist');
+    expect(patarSaved.recommendation_score).toBeLessThan(patarBefore.recommendation_score);
+    expect(patarSaved.recommendation_reasons).toContain('Saved in your wishlist');
 
     // Now visit Patar -> gets 0.30x novelty decay so unvisited nature spots surface above it
     spotStore.interact(userBeachId, 'spot-patar', 'visit', true);

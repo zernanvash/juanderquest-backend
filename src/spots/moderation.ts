@@ -301,6 +301,9 @@ export async function recordSpotModerationEvent(input: {
     created_at: new Date().toISOString(),
   };
   inMemoryEvents.unshift(event);
+  if (input.decision === 'removed' || input.decision === 'kept_hidden') {
+    spotStore.recordUpheldReport(input.spotId, 1);
+  }
   const pool = getPool();
   if (pool) {
     await pool.query(

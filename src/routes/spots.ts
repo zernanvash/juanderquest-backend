@@ -173,12 +173,16 @@ router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, async (req
   const offset = cursorOffset ?? numeric(req.query.offset);
   const bbox = parseBbox(req.query.bbox);
   const tier = req.query.tier as string | undefined;
+  const rawRefreshSeed = req.query.refresh_seed;
+  const refreshSeed = typeof rawRefreshSeed === 'string' && rawRefreshSeed.length > 0 ? rawRefreshSeed : undefined;
+  const validRefreshSeed = refreshSeed === undefined || /^[A-Za-z0-9_-]{1,32}$/.test(refreshSeed);
   if (
     (lat !== undefined) !== (lng !== undefined) ||
     [lat, lng, radius, limit, offset].some((v) => v !== undefined && !Number.isFinite(v)) ||
     (req.query.cursor !== undefined && cursorOffset === undefined) ||
     bbox === null ||
-    (tier !== undefined && !['featured', 'standard', 'review'].includes(tier))
+    (tier !== undefined && !['featured', 'standard', 'review'].includes(tier)) ||
+    !validRefreshSeed
   ) {
     return res.status(400).json({
       success: false,
@@ -231,6 +235,7 @@ router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, async (req
     bbox: bbox ?? undefined,
     areaId: typeof req.query.area_id === 'string' && req.query.area_id ? req.query.area_id : undefined,
     tier: tier as 'featured' | 'standard' | 'review' | undefined,
+    refreshSeed,
   };
   let page: { items: typeof spotStore.spots; total: number };
   if (localPartnerOnly) {

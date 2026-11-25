@@ -1,7 +1,8 @@
-import { createHash } from 'crypto';
 import { db } from '../db/index.js';
 import { MANILA_OFFSET_MS, manilaHour } from '../social/time.js';
 import type { CrowdMetrics } from './crowd.js';
+import { computeP95LogEngagers, spotQualityScore } from './quality.js';
+import { blendExploreSlots, type BlendableSpotItem, type SlotBlendCandidate } from './slotBlender.js';
 import { distanceKm, type Spot, type SpotStore } from './store.js';
 
 export interface ExploreListQuery {
@@ -27,6 +28,7 @@ export interface ExploreListQuery {
   bbox?: [number, number, number, number];
   areaId?: string;
   tier?: 'featured' | 'standard' | 'review';
+  refreshSeed?: string;
 }
 
 // Plan 116: bounds that keep one Explore request cheap with a national catalogue.
@@ -45,9 +47,12 @@ export interface UserTasteProfile {
   hasSignals: boolean;
   categoryWeights: Map<string, number>;
   rawCategoryWeights: Map<string, number>;
+  subcategoryWeights: Map<string, number>;
+  rawSubcategoryWeights: Map<string, number>;
   tagWeights: Map<string, number>;
   municipalityWeights: Map<string, number>;
   rawMunicipalityWeights: Map<string, number>;
+  interactionCount: number;
   topCategories: string[];
   topAffinityTowns: string[];
   visitedSpotIds: Set<string>;
@@ -65,10 +70,13 @@ export function manilaDayKey(nowMs: number = Date.now()): string {
 }
 
 export function dailyExploreJitter(viewerKey: string, spotId: string, manilaDay: string): number {
-  const digest = createHash('sha256')
-    .update(`${manilaDay}:${viewerKey || 'anon'}:${spotId}`)
-    .digest();
-  return digest.readUInt32BE(0) / 0xffffffff;
+  const input = `${manilaDay}:${viewerKey || 'anon'}:${spotId}`;
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0) / 0xffffffff;
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -108,12 +116,17 @@ function addWeight(map: Map<string, number>, key: string | undefined | null, del
   map.set(key, (map.get(key) ?? 0) + delta);
 }
 
+function cmpStr(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 export function buildUserTasteProfile(
   store: SpotStore,
   userId: string | undefined,
   nowMs: number = Date.now(),
 ): UserTasteProfile {
   const rawCategoryWeights = new Map<string, number>();
+  const rawSubcategoryWeights = new Map<string, number>();
   const rawTagWeights = new Map<string, number>();
   const rawMunicipalityWeights = new Map<string, number>();
   const visitedSpotIds = new Set<string>();
@@ -125,6 +138,7 @@ export function buildUserTasteProfile(
   const friendHandlesBySpotId = new Map<string, string[]>();
   let lastActiveSpot: Spot | undefined;
   let lastActiveTs = 0;
+  let interactionCount = 0;
 
   if (!userId) {
     return {
@@ -132,9 +146,12 @@ export function buildUserTasteProfile(
       hasSignals: false,
       categoryWeights: new Map(),
       rawCategoryWeights,
+      subcategoryWeights: new Map(),
+      rawSubcategoryWeights,
       tagWeights: new Map(),
       municipalityWeights: new Map(),
       rawMunicipalityWeights,
+      interactionCount: 0,
       topCategories: [],
       topAffinityTowns: [],
       visitedSpotIds,
@@ -154,18 +171,7 @@ export function buildUserTasteProfile(
     if (s.quest_id) spotByQuestId.set(s.quest_id, s);
   }
 
-  // 1. Explicit onboarding preferences
-  const prefs = store.preferences.get(userId);
-  if (prefs) {
-    for (const cat of prefs.categories || []) {
-      addWeight(rawCategoryWeights, cat, 2.5);
-    }
-    for (const tag of [...(prefs.tags || []), ...(prefs.occasions || [])]) {
-      addWeight(rawTagWeights, tag, 2.0);
-    }
-  }
-
-  // 2. Persisted spot_interactions for viewer
+  // 1. Persisted spot_interactions for viewer with 21-day half-life decay
   const userInteractions = store.interactions.get(userId);
   if (userInteractions) {
     for (const entry of userInteractions) {
@@ -176,36 +182,62 @@ export function buildUserTasteProfile(
       const spot = spotById.get(spotId);
       if (!spot) continue;
 
+      const ts = store.interactionTimestamps.get(`${userId}:${spotId}:${type}`);
+      const ageDays = ts && Number.isFinite(ts) ? Math.max(0, (nowMs - ts) / 86_400_000) : 0;
+      const decay = Math.pow(0.5, ageDays / 21);
+
       if (type === 'visit') {
+        interactionCount++;
         visitedSpotIds.add(spot.id);
         if (spot.quest_id) completedQuestIds.add(spot.quest_id);
         positiveSpotsById.set(spot.id, spot);
-        addWeight(rawCategoryWeights, spot.category, 5.0);
-        for (const t of spot.tags) addWeight(rawTagWeights, t, 4.0);
-        addWeight(rawMunicipalityWeights, spot.municipality, 3.0);
+        addWeight(rawCategoryWeights, spot.category, 5.0 * decay);
+        if (spot.subcategory) addWeight(rawSubcategoryWeights, spot.subcategory, 5.0 * decay);
+        for (const t of spot.tags) addWeight(rawTagWeights, t, 4.0 * decay);
+        addWeight(rawMunicipalityWeights, spot.municipality, 3.0 * decay);
         if (!lastActiveSpot) lastActiveSpot = spot;
       } else if (type === 'save') {
+        interactionCount++;
         savedSpotIds.add(spot.id);
         positiveSpotsById.set(spot.id, spot);
-        addWeight(rawCategoryWeights, spot.category, 3.0);
-        for (const t of spot.tags) addWeight(rawTagWeights, t, 2.5);
-        addWeight(rawMunicipalityWeights, spot.municipality, 2.0);
+        addWeight(rawCategoryWeights, spot.category, 3.0 * decay);
+        if (spot.subcategory) addWeight(rawSubcategoryWeights, spot.subcategory, 3.0 * decay);
+        for (const t of spot.tags) addWeight(rawTagWeights, t, 2.5 * decay);
+        addWeight(rawMunicipalityWeights, spot.municipality, 2.0 * decay);
       } else if (type === 'directions') {
-        addWeight(rawCategoryWeights, spot.category, 3.0);
-        for (const t of spot.tags) addWeight(rawTagWeights, t, 2.5);
-        addWeight(rawMunicipalityWeights, spot.municipality, 2.0);
+        interactionCount++;
+        addWeight(rawCategoryWeights, spot.category, 3.0 * decay);
+        if (spot.subcategory) addWeight(rawSubcategoryWeights, spot.subcategory, 3.0 * decay);
+        for (const t of spot.tags) addWeight(rawTagWeights, t, 2.5 * decay);
+        addWeight(rawMunicipalityWeights, spot.municipality, 2.0 * decay);
         if (!lastActiveSpot) lastActiveSpot = spot;
       } else if (type === 'like' || type === 'helpful') {
+        interactionCount++;
         likedSpotIds.add(spot.id);
         positiveSpotsById.set(spot.id, spot);
-        addWeight(rawCategoryWeights, spot.category, 2.0);
-        for (const t of spot.tags) addWeight(rawTagWeights, t, 1.5);
-        addWeight(rawMunicipalityWeights, spot.municipality, 1.0);
+        addWeight(rawCategoryWeights, spot.category, 2.0 * decay);
+        if (spot.subcategory) addWeight(rawSubcategoryWeights, spot.subcategory, 2.0 * decay);
+        for (const t of spot.tags) addWeight(rawTagWeights, t, 1.5 * decay);
+        addWeight(rawMunicipalityWeights, spot.municipality, 1.0 * decay);
       } else if (type === 'view') {
-        addWeight(rawCategoryWeights, spot.category, 0.5);
-        for (const t of spot.tags) addWeight(rawTagWeights, t, 0.4);
+        addWeight(rawCategoryWeights, spot.category, 0.5 * decay);
+        if (spot.subcategory) addWeight(rawSubcategoryWeights, spot.subcategory, 0.5 * decay);
+        for (const t of spot.tags) addWeight(rawTagWeights, t, 0.4 * decay);
         if (!lastActiveSpot) lastActiveSpot = spot;
       }
+    }
+  }
+
+  // 2. Explicit onboarding preferences (2.5 when < 3 interactions, else 1.5)
+  const prefs = store.preferences.get(userId);
+  if (prefs) {
+    const prefCatWeight = interactionCount < 3 ? 2.5 : 1.5;
+    const prefTagWeight = interactionCount < 3 ? 2.0 : 1.2;
+    for (const cat of prefs.categories || []) {
+      addWeight(rawCategoryWeights, cat, prefCatWeight);
+    }
+    for (const tag of [...(prefs.tags || []), ...(prefs.occasions || [])]) {
+      addWeight(rawTagWeights, tag, prefTagWeight);
     }
   }
 
@@ -316,6 +348,7 @@ export function buildUserTasteProfile(
   }
 
   const categoryWeights = normalizeWeights(rawCategoryWeights);
+  const subcategoryWeights = normalizeWeights(rawSubcategoryWeights);
   const tagWeights = normalizeWeights(rawTagWeights);
   const municipalityWeights = normalizeWeights(rawMunicipalityWeights);
 
@@ -343,9 +376,12 @@ export function buildUserTasteProfile(
     hasSignals,
     categoryWeights,
     rawCategoryWeights,
+    subcategoryWeights,
+    rawSubcategoryWeights,
     tagWeights,
     municipalityWeights,
     rawMunicipalityWeights,
+    interactionCount,
     topCategories,
     topAffinityTowns,
     visitedSpotIds,
@@ -454,37 +490,66 @@ export interface RankedSpotItem extends Spot, CrowdMetrics {
   trend_score: number;
 }
 
-export function applyExploreDiversity(
-  items: RankedSpotItem[],
+export function applyExploreDiversity<T extends BlendableSpotItem = RankedSpotItem>(
+  items: T[],
   taste: UserTasteProfile,
   enableSerendipitySlot: boolean,
-): RankedSpotItem[] {
+  options?: { actorKey?: string; manilaDay?: string; refreshSeed?: string; preserveSlotOrder?: boolean },
+): T[] {
   if (items.length <= 2) return [...items];
 
   const pool = [...items];
-  const result: RankedSpotItem[] = [];
+  const result: T[] = [];
+  const gemSalt = `${options?.actorKey || 'anon'}:${options?.refreshSeed || ''}`;
+  const gemDay = options?.manilaDay || manilaDayKey(Date.now());
 
   while (pool.length > 0) {
     const slotIdx = result.length;
+    const prev1 = result[slotIdx - 1];
+    const prev2 = result[slotIdx - 2];
+    const prev3 = result[slotIdx - 3];
+    const prev4 = result[slotIdx - 4];
+    const a1 = prev1?.created_by;
+    const a2 = prev2?.created_by;
+    const a3 = prev3?.created_by;
+    const a4 = prev4?.created_by;
+    const hasRecentAuthor = Boolean(a1 || a2 || a3 || a4);
+    const isRecentAuthor = (author?: string | null) =>
+      Boolean(author && (author === a1 || author === a2 || author === a3 || author === a4));
 
     // 1-in-5 Serendipity / Hidden Gem slot (every 5th card: index 4, 9, 14...)
+    // Collect top 5 eligible gems and rotate deterministically via dailyExploreJitter + refreshSeed.
     if (enableSerendipitySlot && slotIdx % 5 === 4 && pool.length > 1) {
-      const prev1 = result[slotIdx - 1];
-      const prev2 = result[slotIdx - 2];
-      const gemIdx = pool.findIndex((c) => {
-        if (taste.visitedSpotIds.has(c.id)) return false;
-        if (c.crowd_status === 'estimated_busy') return false;
+      const gemIndices: number[] = [];
+      for (let idx = 0; idx < pool.length && gemIndices.length < 5; idx++) {
+        const c = pool[idx];
+        if (taste.visitedSpotIds.has(c.id)) continue;
+        if (c.crowd_status === 'estimated_busy') continue;
         if (prev1 && prev2 && prev1.municipality === c.municipality && prev2.municipality === c.municipality) {
-          return false;
+          continue;
         }
+        if (isRecentAuthor(c.created_by)) continue;
         const catWeight = taste.categoryWeights.get(c.category) ?? 0;
         const muniWeight = taste.municipalityWeights.get(c.municipality) ?? 0;
         const isUnderExplored = !taste.hasSignals || catWeight < 0.5 || muniWeight === 0;
-        return isUnderExplored && (c.crowd_status === 'quiet' || c.tags.includes('hidden_gem'));
-      });
+        if (isUnderExplored && (c.crowd_status === 'quiet' || c.tags.includes('hidden_gem'))) {
+          gemIndices.push(idx);
+        }
+      }
 
-      if (gemIdx !== -1) {
-        const [gem] = pool.splice(gemIdx, 1);
+      if (gemIndices.length > 0) {
+        let chosenGemIdx = gemIndices[0];
+        if (gemIndices.length > 1) {
+          let bestJitter = -Infinity;
+          for (const gIdx of gemIndices) {
+            const j = dailyExploreJitter(gemSalt, pool[gIdx].id, gemDay);
+            if (j > bestJitter) {
+              bestJitter = j;
+              chosenGemIdx = gIdx;
+            }
+          }
+        }
+        const [gem] = pool.splice(chosenGemIdx, 1);
         const gemReason = `Quiet Hidden Gem in ${gem.municipality}`;
         if (gem.crowd_status === 'quiet' && !gem.recommendation_reasons.includes(gemReason)) {
           gem.recommendation_reasons = [gemReason, ...gem.recommendation_reasons];
@@ -494,21 +559,41 @@ export function applyExploreDiversity(
       }
     }
 
-    const prev1 = result[slotIdx - 1];
-    const prev2 = result[slotIdx - 2];
-    const hasDifferentMuni =
-      prev1 && prev2 && prev1.municipality === prev2.municipality
-        ? pool.some((c) => c.municipality !== prev1.municipality)
-        : false;
-    const hasDifferentCat =
-      prev1 && prev2 && prev1.category === prev2.category ? pool.some((c) => c.category !== prev1.category) : false;
+    const scanLimit = Math.min(pool.length, 48);
+    let hasDifferentMuni = false;
+    if (prev1 && prev2 && prev1.municipality === prev2.municipality) {
+      for (let k = 0; k < pool.length; k++) {
+        if (pool[k].municipality !== prev1.municipality) {
+          hasDifferentMuni = true;
+          break;
+        }
+      }
+    }
+    let hasDifferentCat = false;
+    if (prev1 && prev2 && prev1.category === prev2.category) {
+      for (let k = 0; k < scanLimit; k++) {
+        if (pool[k].category !== prev1.category) {
+          hasDifferentCat = true;
+          break;
+        }
+      }
+    }
+    let hasDifferentAuthor = false;
+    if (hasRecentAuthor) {
+      for (let k = 0; k < pool.length; k++) {
+        if (!isRecentAuthor(pool[k].created_by)) {
+          hasDifferentAuthor = true;
+          break;
+        }
+      }
+    }
 
     let bestIdx = 0;
     let bestScore = -Infinity;
 
-    for (let i = 0; i < pool.length; i++) {
+    for (let i = 0; i < scanLimit; i++) {
       const cand = pool[i];
-      let adj = Math.max(0.0001, cand.recommendation_score);
+      let adj = options?.preserveSlotOrder ? 1 / (1 + i) : Math.max(0.0001, cand.recommendation_score);
 
       // Hard municipal diversity guard: never allow 3 consecutive items from the same municipality when alternatives exist
       if (
@@ -518,6 +603,11 @@ export function applyExploreDiversity(
         cand.municipality === prev1.municipality &&
         cand.municipality === prev2.municipality
       ) {
+        continue;
+      }
+
+      // R5 Author spacing guard: max 1 card per author in any 5-card window when alternatives exist
+      if (hasDifferentAuthor && isRecentAuthor(cand.created_by)) {
         continue;
       }
 
@@ -667,7 +757,12 @@ function matchesExploreFilters(s: Spot, q: ExploreListQuery): boolean {
     const [west, south, east, north] = q.bbox;
     if (s.gps_lat < south || s.gps_lat > north || s.gps_lng < west || s.gps_lng > east) return false;
   }
-  if (q.radius && q.lat !== undefined && q.lng !== undefined && distanceKm(q.lat, q.lng, s.gps_lat, s.gps_lng) > q.radius)
+  if (
+    q.radius &&
+    q.lat !== undefined &&
+    q.lng !== undefined &&
+    distanceKm(q.lat, q.lng, s.gps_lat, s.gps_lng) > q.radius
+  )
     return false;
   return true;
 }
@@ -720,6 +815,7 @@ export function rankExploreSpotsPage(store: SpotStore, q: ExploreListQuery): Ran
     bbox: q.bbox ? q.bbox.map((v) => Number(v.toFixed(3))) : null,
     areaId: q.areaId || null,
     tier: q.tier || null,
+    refreshSeed: q.refreshSeed || '',
     hourBucket: q.intent ? 'intent' : Math.floor(manilaHour(new Date(nowMs)) / 4),
   });
 
@@ -756,12 +852,14 @@ export function rankExploreSpotsPage(store: SpotStore, q: ExploreListQuery): Ran
   const likeCounts = store.likeCounts();
   const spotMerits = computeSpotMeritMap(store, nowMs);
   const bySpot = store.eventsBySpot();
-  const centroids = computeTownCentroids(store.spots);
   const currentHour = manilaHour(new Date(nowMs));
 
   // Tier 3 anchor town: users.home_municipality first; when NULL, top-affinity town
   const tier3Town = resolvedHomeTown || taste.topAffinityTowns[0] || null;
-  const tier3Centroid = tier3Town ? centroids.get(tier3Town.toLowerCase()) : undefined;
+  const tier3Centroid =
+    q.lat === undefined && !taste.lastActiveSpot && tier3Town
+      ? computeTownCentroids(store.spots).get(tier3Town.toLowerCase())
+      : undefined;
 
   // Plan 116: cheap filters run before scoring (same result, far less work).
   let eligibleSpots = store.spots.filter(
@@ -771,250 +869,422 @@ export function rankExploreSpotsPage(store: SpotStore, q: ExploreListQuery): Ran
       (q.allowTest || !s.is_test) &&
       matchesExploreFilters(s, q),
   );
+  let createdAtById: Map<string, number> | undefined;
   const total = eligibleSpots.length;
   if (eligibleSpots.length > RANK_CANDIDATE_CAP) {
+    // Step 6: 2,000-spot candidate budget = 1,200 prior/anchor + 500 unseen/under-explored + 300 newest.
     const anchor =
       q.lat !== undefined && q.lng !== undefined
         ? { lat: q.lat, lng: q.lng }
         : taste.lastActiveSpot
           ? { lat: taste.lastActiveSpot.gps_lat, lng: taste.lastActiveSpot.gps_lng }
           : tier3Centroid;
-    eligibleSpots = anchor
-      ? eligibleSpots
+
+    const priorSorted = anchor
+      ? [...eligibleSpots]
           .map((s) => ({ s, d: distanceKm(anchor.lat, anchor.lng, s.gps_lat, s.gps_lng) }))
-          .sort((a, b) => a.d - b.d || a.s.id.localeCompare(b.s.id))
-          .slice(0, RANK_CANDIDATE_CAP)
+          .sort((a, b) => a.d - b.d || cmpStr(a.s.id, b.s.id))
           .map((x) => x.s)
-      : eligibleSpots
+      : [...eligibleSpots]
           .map((s) => ({ s, p: candidatePrior(s, trends) }))
-          .sort((a, b) => b.p - a.p || a.s.id.localeCompare(b.s.id))
-          .slice(0, RANK_CANDIDATE_CAP)
+          .sort((a, b) => b.p - a.p || cmpStr(a.s.id, b.s.id))
           .map((x) => x.s);
-  }
 
-  const scored = eligibleSpots
-    .map((s): RankedSpotItem => {
-      const trendScore = trends.get(s.id) ?? 0;
-      const merit = spotMerits.get(s.id) ?? { activeLikes: 0, activeMeritPoints: 0 };
-      const crowd = store.crowd(s, nowMs, bySpot);
-      const liveDistance =
-        q.lat !== undefined && q.lng !== undefined ? distanceKm(q.lat, q.lng, s.gps_lat, s.gps_lng) : undefined;
+    const selected = new Map<string, Spot>();
+    for (const s of priorSorted.slice(0, 1200)) {
+      selected.set(s.id, s);
+    }
 
-      // 1. Taste Score [0, 1]
-      let tasteScore = 0.3;
-      const catWeight = taste.categoryWeights.get(s.category) ?? 0;
-      let maxTagWeight = 0;
-      let bestMatchedTag: string | undefined;
-      for (const t of s.tags) {
-        const tw = taste.tagWeights.get(t) ?? 0;
-        if (tw > maxTagWeight) {
-          maxTagWeight = tw;
-          bestMatchedTag = t;
-        }
-      }
-      const muniWeight = taste.municipalityWeights.get(s.municipality) ?? 0;
-      if (taste.hasSignals) {
-        tasteScore = 0.5 * catWeight + 0.35 * maxTagWeight + 0.15 * muniWeight;
-      }
-
-      // 2. 3-Tier Location Anchor Proximity Score [0, 1]
-      let proximityScore = 0.5;
-      if (liveDistance !== undefined) {
-        const radiusKm = Math.max(1, q.radius || prefs?.radius_km || 25);
-        proximityScore = Math.exp(-liveDistance / radiusKm);
-      } else if (taste.lastActiveSpot) {
-        const anchorDist = distanceKm(taste.lastActiveSpot.gps_lat, taste.lastActiveSpot.gps_lng, s.gps_lat, s.gps_lng);
-        proximityScore = Math.exp(-anchorDist / 30);
-      } else if (tier3Town) {
-        if (s.municipality.toLowerCase() === tier3Town.toLowerCase()) {
-          proximityScore = 1.0;
-        } else if (tier3Centroid) {
-          const townDist = distanceKm(tier3Centroid.lat, tier3Centroid.lng, s.gps_lat, s.gps_lng);
-          const decayed = Math.exp(-townDist / 35);
-          proximityScore = muniWeight >= 0.5 ? Math.max(0.75, decayed) : decayed;
-        } else if (muniWeight > 0) {
-          proximityScore = 0.75;
-        } else {
-          proximityScore = 0.4;
-        }
-      }
-
-      // 3. Quest & Social Score [0, 1]
-      const hasUnclaimedQuest = Boolean(s.quest_id && !taste.completedQuestIds.has(s.quest_id));
-      const friendHandles = taste.friendHandlesBySpotId.get(s.id) ?? [];
-      const similarSpot = findSimilarLikedSpot(s, taste.positiveSpots);
-
-      let questAndSocial = 0;
-      if (hasUnclaimedQuest) questAndSocial += profileUserId ? 0.45 : 0.25;
-      if (friendHandles.length > 0) questAndSocial += 0.35;
-      if (similarSpot) questAndSocial += 0.2;
-      questAndSocial = Math.min(1, questAndSocial);
-
-      // 4. Quality & Crowd Score [0, 1]
-      const trustBase =
-        {
-          lgu_verified: 0.45,
-          editorial: 0.38,
-          community: 0.3,
-          open_data: 0.22,
-        }[s.trust_level] ?? 0.1;
-      const crowdMod =
-        crowd.crowd_status === 'quiet'
-          ? 0.25
-          : crowd.crowd_status === 'moderate'
-            ? 0.15
-            : crowd.crowd_status === 'estimated_busy'
-              ? -0.2
-              : 0.1;
-      const trendNorm = Math.min(0.3, trendScore / 15);
-      const ageDays = Math.max(0, (nowMs - Date.parse(s.created_at)) / 86_400_000);
-      const freshnessBoost = ageDays <= 30 ? 0.05 * (1 - ageDays / 30) : 0;
-      const qualityAndCrowd = Math.max(0, Math.min(1, trustBase + crowdMod + trendNorm + freshnessBoost));
-
-      // 5. Intent or Time-of-Day Score [0, 1]
-      const intentQuery = (q.intent || '').trim().toLowerCase();
-      const intentMatch =
-        intentQuery.length > 0 &&
-        [s.category, s.subcategory, ...s.tags, s.name].some((v) => v.toLowerCase().includes(intentQuery));
-      const intentOrTime = intentQuery.length > 0 ? (intentMatch ? 1.0 : 0.0) : computeTimeOfDayBoost(s, currentHour);
-
-      // 6. Deterministic Daily Explore Jitter [0, 1]
-      const jitter = dailyExploreJitter(actorKey, s.id, manilaDay);
-
-      // Base score
-      let baseScore =
-        0.3 * tasteScore +
-        0.22 * proximityScore +
-        0.18 * questAndSocial +
-        0.15 * qualityAndCrowd +
-        0.1 * intentOrTime +
-        0.05 * jitter;
-
-      // Explicit intent query boost so intent searches strongly prioritize matching destinations
-      if (intentMatch) {
-        baseScore += 0.5;
-      }
-
-      // 7. Novelty, Merit Breakout & Completion Multiplier
+    let underAdded = 0;
+    for (const s of eligibleSpots) {
+      if (underAdded >= 500) break;
+      if (selected.has(s.id)) continue;
       const isVisited =
         taste.visitedSpotIds.has(s.id) || Boolean(s.quest_id && taste.completedQuestIds.has(s.quest_id));
       const isSaved = store.isSaved(q.userId || actorKey, s.id) || taste.savedSpotIds.has(s.id);
-      const isLiked = store.isLiked(q.userId || actorKey, s.id) || taste.likedSpotIds.has(s.id);
-      const views24h = taste.recentViewCounts24h.get(s.id) ?? 0;
-
-      // Community Merit Audience Expansion (subject to 14-day global exhaustion and <2 views viewer exhaustion)
-      const isViewerExhaustedForMerit = isVisited || (views24h >= 2 && !isSaved && !isLiked);
-      const hasActivePopularMerit =
-        !isViewerExhaustedForMerit && crowd.crowd_status !== 'estimated_busy' && merit.activeMeritPoints >= 4.0;
-      if (hasActivePopularMerit) {
-        const meritBreakoutBoost = Math.min(0.24, 0.08 * Math.log(1 + merit.activeMeritPoints));
-        baseScore += meritBreakoutBoost;
+      const catW = taste.categoryWeights.get(s.category) ?? 0;
+      const muniW = taste.municipalityWeights.get(s.municipality) ?? 0;
+      if (!isVisited && !isSaved && (catW < 0.35 || muniW < 0.25)) {
+        selected.set(s.id, s);
+        underAdded++;
       }
-
-      let noveltyMultiplier = 1.0;
-      if (isVisited && !q.search) {
-        noveltyMultiplier = 0.3;
-      } else if (isSaved && !isVisited) {
-        noveltyMultiplier = 1.15;
-      } else if (views24h >= 3 && !isSaved && !isLiked) {
-        noveltyMultiplier = 0.65;
-      }
-
-      const finalScore = baseScore * noveltyMultiplier;
-
-      // 8. Explainable Recommendation Reasons (truthful, prioritized)
-      const reasons: string[] = [];
-      const pushReason = (r: string) => {
-        if (r && !reasons.includes(r)) reasons.push(r);
-      };
-
-      if (intentMatch && q.intent) {
-        pushReason(`Matches ${q.intent}`);
-      }
-      if (profileUserId && isSaved && !isVisited) {
-        pushReason('Saved in your wishlist');
-      }
-      if (profileUserId && friendHandles.length > 0) {
-        pushReason(`Visited by ${friendHandles[0]}`);
-      }
-      if (profileUserId && similarSpot && !isVisited) {
-        pushReason(`Because you liked ${similarSpot.name}`);
-      }
-      if (profileUserId && catWeight >= 0.4) {
-        pushReason(`Matches your ${formatCategoryLabel(s.category)} interests`);
-      } else if (profileUserId && maxTagWeight >= 0.5 && bestMatchedTag) {
-        pushReason(`Matches your #${bestMatchedTag} interest`);
-      }
-      if (hasActivePopularMerit && merit.activeLikes >= 2) {
-        pushReason(`Popular · ${merit.activeLikes} likes`);
-      }
-      if (hasUnclaimedQuest) {
-        if (liveDistance !== undefined && liveDistance <= 15) {
-          pushReason('Unclaimed Quest nearby');
-        } else {
-          pushReason('Quest available');
-        }
-      }
-      if (!isVisited && crowd.crowd_status === 'quiet' && s.tags.includes('hidden_gem')) {
-        pushReason(`Quiet Hidden Gem in ${s.municipality}`);
-      } else if (crowd.crowd_status === 'quiet') {
-        pushReason('Quiet now');
-      }
-      if (s.trust_level === 'lgu_verified') {
-        pushReason('LGU verified');
-      }
-      if (liveDistance !== undefined) {
-        pushReason(
-          `${liveDistance < 1 ? Math.round(liveDistance * 1000) + ' m' : liveDistance.toFixed(1) + ' km'} away`,
-        );
-      }
-      if (hasActivePopularMerit || (trendScore >= 2 && merit.activeMeritPoints > 0)) {
-        pushReason(`Trending in ${s.municipality}`);
-      }
-      if (reasons.length === 0) {
-        pushReason(`Explore ${s.municipality}`);
-      }
-
-      return {
-        ...s,
-        ...crowd,
-        distance_km: liveDistance,
-        recommendation_score: Number(finalScore.toFixed(4)),
-        recommendation_reasons: reasons,
-        saved: isSaved,
-        liked: isLiked,
-        like_count: store.likeCount(s.id, q.userId || actorKey, likeCounts),
-        trend_score: trendScore,
-      };
-    });
-
-  // Initial sort
-  scored.sort((a, b) => {
-    if (sortMode === 'nearest') {
-      return (a.distance_km ?? 999) - (b.distance_km ?? 999) || a.slug.localeCompare(b.slug);
     }
-    if (sortMode === 'newest') {
-      return Date.parse(b.created_at) - Date.parse(a.created_at) || a.slug.localeCompare(b.slug);
+
+    const tsMap = new Map<string, number>();
+    for (const s of eligibleSpots) {
+      tsMap.set(s.id, Date.parse(s.created_at) || 0);
     }
-    if (sortMode === 'trending') {
-      return (
-        b.trend_score - a.trend_score || b.recommendation_score - a.recommendation_score || a.slug.localeCompare(b.slug)
-      );
+    createdAtById = tsMap;
+    const newestSorted = [...eligibleSpots].sort(
+      (a, b) => (tsMap.get(b.id) ?? 0) - (tsMap.get(a.id) ?? 0) || cmpStr(a.id, b.id),
+    );
+    let newestAdded = 0;
+    for (const s of newestSorted) {
+      if (newestAdded >= 300) break;
+      if (selected.has(s.id)) continue;
+      selected.set(s.id, s);
+      newestAdded++;
     }
-    return b.recommendation_score - a.recommendation_score || a.slug.localeCompare(b.slug);
+
+    if (selected.size < RANK_CANDIDATE_CAP) {
+      for (const s of priorSorted) {
+        if (selected.size >= RANK_CANDIDATE_CAP) break;
+        if (!selected.has(s.id)) selected.set(s.id, s);
+      }
+    }
+
+    eligibleSpots = [...selected.values()];
+  }
+
+  const engagerCounts = store.uniqueEngagerCounts();
+  const p95LogEngagers = computeP95LogEngagers(engagerCounts.values());
+  const viewerKey = q.userId || actorKey;
+  const viewerIsTest = Boolean(viewerKey && db.findUserById(viewerKey)?.is_test);
+  const viewerInteractions = store.interactions.get(viewerKey);
+  const isR4Default =
+    sortMode === 'recommended' &&
+    !q.search &&
+    !q.intent &&
+    (!q.categories || q.categories.length !== 1) &&
+    !q.municipality;
+  interface ScoredDraft extends BlendableSpotItem {
+    spot: Spot;
+    crowd: CrowdMetrics;
+    distance_km: number | undefined;
+    saved: boolean;
+    liked: boolean;
+    like_count: number;
+    trend_score: number;
+    createdAtStr: string;
+    intentMatch: boolean;
+    isVisited: boolean;
+    friendHandles: string[];
+    similarSpot: Spot | undefined;
+    catWeight: number;
+    maxTagWeight: number;
+    bestMatchedTag: string | undefined;
+    hasActivePopularMerit: boolean;
+    activeLikes: number;
+    activeMeritPoints: number;
+    hasUnclaimedQuest: boolean;
+  }
+
+  const blendCandidates: SlotBlendCandidate<ScoredDraft>[] = [];
+  const emptyCrowdCache = new Map<string, ReturnType<typeof store.crowd>>();
+
+  const scored = eligibleSpots.map((s): ScoredDraft => {
+    const trendScore = trends.get(s.id) ?? 0;
+    const merit = spotMerits.get(s.id) ?? { activeLikes: 0, activeMeritPoints: 0 };
+    const spotEvents = bySpot.get(s.id);
+    let crowd;
+    if (spotEvents && spotEvents.length > 0) {
+      crowd = store.crowd(s, nowMs, bySpot);
+    } else {
+      const band = s.crowd_capacity_band || 'medium';
+      crowd = emptyCrowdCache.get(band);
+      if (!crowd) {
+        crowd = store.crowd(s, nowMs, bySpot);
+        emptyCrowdCache.set(band, crowd);
+      }
+    }
+    const liveDistance =
+      q.lat !== undefined && q.lng !== undefined ? distanceKm(q.lat, q.lng, s.gps_lat, s.gps_lng) : undefined;
+
+    // 1. Taste Score [0, 1] (Step 2: 0.5*cat + 0.3*tag + 0.2*subcategory; no muniWeight)
+    let tasteScore = 0.3;
+    const catWeight = taste.categoryWeights.get(s.category) ?? 0;
+    const subcatWeight = s.subcategory ? (taste.subcategoryWeights.get(s.subcategory) ?? 0) : 0;
+    let maxTagWeight = 0;
+    let bestMatchedTag: string | undefined;
+    for (const t of s.tags) {
+      const tw = taste.tagWeights.get(t) ?? 0;
+      if (tw > maxTagWeight) {
+        maxTagWeight = tw;
+        bestMatchedTag = t;
+      }
+    }
+    const muniWeight = taste.municipalityWeights.get(s.municipality) ?? 0;
+    if (taste.hasSignals) {
+      tasteScore = 0.5 * catWeight + 0.3 * maxTagWeight + 0.2 * subcatWeight;
+    }
+
+    // 2. 3-Tier Location Anchor Proximity Score [0, 1]
+    let proximityScore = 0.5;
+    if (liveDistance !== undefined) {
+      const radiusKm = Math.max(1, q.radius || prefs?.radius_km || 25);
+      proximityScore = Math.exp(-liveDistance / radiusKm);
+    } else if (taste.lastActiveSpot) {
+      const anchorDist = distanceKm(taste.lastActiveSpot.gps_lat, taste.lastActiveSpot.gps_lng, s.gps_lat, s.gps_lng);
+      proximityScore = Math.exp(-anchorDist / 30);
+    } else if (tier3Town) {
+      if (s.municipality.toLowerCase() === tier3Town.toLowerCase()) {
+        proximityScore = 1.0;
+      } else if (tier3Centroid) {
+        const townDist = distanceKm(tier3Centroid.lat, tier3Centroid.lng, s.gps_lat, s.gps_lng);
+        const decayed = Math.exp(-townDist / 35);
+        proximityScore = muniWeight >= 0.5 ? Math.max(0.75, decayed) : decayed;
+      } else if (muniWeight > 0) {
+        proximityScore = 0.75;
+      } else {
+        proximityScore = 0.4;
+      }
+    }
+
+    // 3. Quest & Social Score [0, 1]
+    const hasUnclaimedQuest = Boolean(s.quest_id && !taste.completedQuestIds.has(s.quest_id));
+    const friendHandles = taste.friendHandlesBySpotId.get(s.id) ?? [];
+    const similarSpot = findSimilarLikedSpot(s, taste.positiveSpots);
+
+    let questAndSocial = 0;
+    if (hasUnclaimedQuest) questAndSocial += profileUserId ? 0.45 : 0.25;
+    if (friendHandles.length > 0) questAndSocial += 0.35;
+    if (similarSpot) questAndSocial += 0.2;
+    questAndSocial = Math.min(1, questAndSocial);
+
+    // 4. Quality & Crowd Score [0, 1] (Step 1: spotQuality replaces trustBase; no freshnessBoost)
+    const photoCount = store.photoCounts.get(s.id) ?? 0;
+    const qualityScoreVal = spotQualityScore(
+      s,
+      engagerCounts.get(s.id) ?? 0,
+      p95LogEngagers,
+      store.upheldReportCounts.get(s.id) ?? 0,
+      photoCount,
+    );
+    const crowdMod =
+      crowd.crowd_status === 'quiet'
+        ? 0.25
+        : crowd.crowd_status === 'moderate'
+          ? 0.15
+          : crowd.crowd_status === 'estimated_busy'
+            ? -0.2
+            : 0.1;
+    const trendNorm = Math.min(0.3, trendScore / 15);
+    const createdTs = createdAtById?.get(s.id) ?? Date.parse(s.created_at);
+    const ageDays = Math.max(0, (nowMs - createdTs) / 86_400_000);
+    const qualityAndCrowd = Math.max(0, Math.min(1, 0.6 * qualityScoreVal + crowdMod + trendNorm));
+
+    // 5. Intent or Time-of-Day Score [0, 1]
+    const intentQuery = (q.intent || '').trim().toLowerCase();
+    const intentMatch =
+      intentQuery.length > 0 &&
+      [s.category, s.subcategory, ...s.tags, s.name].some((v) => v.toLowerCase().includes(intentQuery));
+    const intentOrTime = intentQuery.length > 0 ? (intentMatch ? 1.0 : 0.0) : computeTimeOfDayBoost(s, currentHour);
+
+    // 6. Deterministic Daily Explore Jitter [0, 1]
+    const jitter = dailyExploreJitter(`${actorKey}:${q.refreshSeed || ''}`, s.id, manilaDay);
+
+    // Base score (Step 2: when no live GPS, proximity 0.22->0.14 and qualityAndCrowd 0.15->0.23)
+    const proxWeight = liveDistance !== undefined ? 0.22 : 0.14;
+    const qualWeight = liveDistance !== undefined ? 0.15 : 0.23;
+    let baseScore =
+      0.3 * tasteScore +
+      proxWeight * proximityScore +
+      0.18 * questAndSocial +
+      qualWeight * qualityAndCrowd +
+      0.1 * intentOrTime +
+      0.05 * jitter;
+
+    // Explicit intent query boost so intent searches strongly prioritize matching destinations
+    if (intentMatch) {
+      baseScore += 0.5;
+    }
+
+    // 7. Novelty, Merit Breakout & Completion Multiplier
+    const isVisited = taste.visitedSpotIds.has(s.id) || Boolean(s.quest_id && taste.completedQuestIds.has(s.quest_id));
+    const isSaved = Boolean(viewerInteractions?.has(`${s.id}:save`)) || taste.savedSpotIds.has(s.id);
+    const isLiked = Boolean(viewerInteractions?.has(`${s.id}:like`)) || taste.likedSpotIds.has(s.id);
+    const views24h = taste.recentViewCounts24h.get(s.id) ?? 0;
+
+    // Community Merit Audience Expansion (subject to 14-day global exhaustion and <2 views viewer exhaustion)
+    const isViewerExhaustedForMerit = isVisited || (views24h >= 2 && !isSaved && !isLiked);
+    const hasActivePopularMerit =
+      !isViewerExhaustedForMerit && crowd.crowd_status !== 'estimated_busy' && merit.activeMeritPoints >= 4.0;
+    if (hasActivePopularMerit) {
+      const meritBreakoutBoost = Math.min(0.24, 0.08 * Math.log(1 + merit.activeMeritPoints));
+      baseScore += meritBreakoutBoost;
+    }
+
+    let noveltyMultiplier = 1.0;
+    if (isVisited && !q.search) {
+      noveltyMultiplier = 0.3;
+    } else if (isR4Default && isSaved && !isVisited) {
+      noveltyMultiplier = 0.55;
+    } else if (isR4Default && isLiked && !isSaved && !isVisited) {
+      noveltyMultiplier = 0.7;
+    } else if (views24h >= 3 && !isSaved && !isLiked) {
+      noveltyMultiplier = 0.65;
+    }
+
+    const finalScore = baseScore * noveltyMultiplier;
+
+    const draft: ScoredDraft = {
+      id: s.id,
+      slug: s.slug,
+      description: s.description,
+      category: s.category,
+      municipality: s.municipality,
+      crowd_status: crowd.crowd_status,
+      created_by: s.created_by,
+      tags: s.tags,
+      recommendation_score: Math.round(finalScore * 10000) / 10000,
+      recommendation_reasons: [],
+      spot: s,
+      crowd,
+      distance_km: liveDistance,
+      saved: isSaved,
+      liked: isLiked,
+      like_count: (likeCounts.get(s.id) ?? 0) + (viewerIsTest && isLiked ? 1 : 0),
+      trend_score: trendScore,
+      createdAtStr: s.created_at,
+      intentMatch,
+      isVisited,
+      friendHandles,
+      similarSpot,
+      catWeight,
+      maxTagWeight,
+      bestMatchedTag,
+      hasActivePopularMerit,
+      activeLikes: merit.activeLikes,
+      activeMeritPoints: merit.activeMeritPoints,
+      hasUnclaimedQuest,
+    };
+    if (isR4Default) {
+      blendCandidates.push({
+        item: draft,
+        qualityScore: qualityScoreVal,
+        tasteScore,
+        ageDays,
+        hasPhoto: Boolean(s.image_url && s.image_url.trim().length > 0) || photoCount > 0,
+        isVisited,
+        isSaved,
+        isLiked,
+        views24h,
+        catWeight,
+        townAffinity: muniWeight,
+        seedJitter: jitter,
+      });
+    }
+    return draft;
   });
 
-  // Apply MMR sliding-window diversity & 1-in-5 Hidden Gem slot on default 'recommended' sort
+  // Initial sort
+  if (sortMode !== 'recommended' || !isR4Default) {
+    scored.sort((a, b) => {
+      if (sortMode === 'nearest') {
+        return (a.distance_km ?? 999) - (b.distance_km ?? 999) || cmpStr(a.slug, b.slug);
+      }
+      if (sortMode === 'newest') {
+        return Date.parse(b.createdAtStr) - Date.parse(a.createdAtStr) || cmpStr(a.slug, b.slug);
+      }
+      if (sortMode === 'trending') {
+        return (
+          b.trend_score - a.trend_score || b.recommendation_score - a.recommendation_score || cmpStr(a.slug, b.slug)
+        );
+      }
+      return b.recommendation_score - a.recommendation_score || cmpStr(a.slug, b.slug);
+    });
+  }
+
+  // Apply Slot Blending (Interest 50%, Discovery 30%, New 20%) + MMR diversity under R4
   const shouldDiversify =
     sortMode === 'recommended' && !q.search && (!q.categories || q.categories.length !== 1) && !q.municipality;
 
   const enableSerendipitySlot = shouldDiversify && !q.intent;
-  const ranked = shouldDiversify
-    ? [
-        ...applyExploreDiversity(scored.slice(0, DIVERSITY_WINDOW), taste, enableSerendipitySlot),
-        ...scored.slice(DIVERSITY_WINDOW),
-      ]
-    : scored;
+  const diversityOpts = { actorKey, manilaDay, refreshSeed: q.refreshSeed };
+  if (isR4Default) {
+    blendCandidates.sort(
+      (a, b) => b.item.recommendation_score - a.item.recommendation_score || cmpStr(a.item.slug, b.item.slug),
+    );
+  }
+  const rankedDrafts = isR4Default
+    ? blendExploreSlots({
+        candidates: blendCandidates,
+        headLimit: Math.max(DIVERSITY_WINDOW, requestedEnd),
+        taste,
+        formatCategoryLabel,
+        applyDiversity: (items) => [
+          ...applyExploreDiversity(items.slice(0, DIVERSITY_WINDOW), taste, enableSerendipitySlot, {
+            ...diversityOpts,
+            preserveSlotOrder: true,
+          }),
+          ...items.slice(DIVERSITY_WINDOW),
+        ],
+      })
+    : shouldDiversify
+      ? [
+          ...applyExploreDiversity(scored.slice(0, DIVERSITY_WINDOW), taste, enableSerendipitySlot, diversityOpts),
+          ...scored.slice(DIVERSITY_WINDOW),
+        ]
+      : scored;
+
+  // 8. Materialize RankedSpotItem & populate explainable reasons ONLY for cached head / requested window
+  const materializeLimit = Math.min(rankedDrafts.length, Math.max(CACHED_HEAD, requestedEnd));
+  const ranked: RankedSpotItem[] = new Array(materializeLimit);
+  for (let i = 0; i < materializeLimit; i++) {
+    const d = rankedDrafts[i];
+    const reasons = d.recommendation_reasons;
+    const pushReason = (r: string) => {
+      if (r && !reasons.includes(r)) reasons.push(r);
+    };
+    if (d.intentMatch && q.intent) {
+      pushReason(`Matches ${q.intent}`);
+    }
+    if (profileUserId && d.saved && !d.isVisited) {
+      pushReason('Saved in your wishlist');
+    }
+    if (profileUserId && d.friendHandles.length > 0) {
+      pushReason(`Visited by ${d.friendHandles[0]}`);
+    }
+    if (profileUserId && d.similarSpot && !d.isVisited) {
+      pushReason(`Because you liked ${d.similarSpot.name}`);
+    }
+    if (profileUserId && d.catWeight >= 0.4) {
+      pushReason(`Matches your ${formatCategoryLabel(d.category)} interests`);
+    } else if (profileUserId && d.maxTagWeight >= 0.5 && d.bestMatchedTag) {
+      pushReason(`Matches your #${d.bestMatchedTag} interest`);
+    }
+    if (d.hasActivePopularMerit && d.activeLikes >= 2) {
+      pushReason(`Popular · ${d.activeLikes} likes`);
+    }
+    if (d.hasUnclaimedQuest) {
+      if (d.distance_km !== undefined && d.distance_km <= 15) {
+        pushReason('Unclaimed Quest nearby');
+      } else {
+        pushReason('Quest available');
+      }
+    }
+    if (!d.isVisited && d.crowd_status === 'quiet' && d.tags.includes('hidden_gem')) {
+      pushReason(`Quiet Hidden Gem in ${d.municipality}`);
+    } else if (d.crowd_status === 'quiet') {
+      pushReason('Quiet now');
+    }
+    if (d.spot.trust_level === 'lgu_verified') {
+      pushReason('LGU verified');
+    }
+    if (d.distance_km !== undefined) {
+      pushReason(
+        `${d.distance_km < 1 ? Math.round(d.distance_km * 1000) + ' m' : d.distance_km.toFixed(1) + ' km'} away`,
+      );
+    }
+    if (d.hasActivePopularMerit || (d.trend_score >= 2 && d.activeMeritPoints > 0)) {
+      pushReason(`Trending in ${d.municipality}`);
+    }
+    if (reasons.length === 0) {
+      pushReason(`Explore ${d.municipality}`);
+    }
+
+    ranked[i] = {
+      ...d.spot,
+      ...d.crowd,
+      distance_km: d.distance_km,
+      recommendation_score: d.recommendation_score,
+      recommendation_reasons: reasons,
+      saved: d.saved,
+      liked: d.liked,
+      like_count: d.like_count,
+      trend_score: d.trend_score,
+    };
+  }
 
   if (exploreCache.size >= 250) {
     const oldestKey = exploreCache.keys().next().value;

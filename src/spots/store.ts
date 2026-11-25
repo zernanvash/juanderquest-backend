@@ -360,6 +360,8 @@ export class SpotStore {
   interactions = new Map<string, Set<string>>();
   interactionTimestamps = new Map<string, number>();
   activityEvents: ActivityEvent[] = [];
+  upheldReportCounts = new Map<string, number>();
+  photoCounts = new Map<string, number>();
   private pg: Pool | null = null;
 
   async hydrateFromPg(pool: Pool) {
@@ -412,6 +414,28 @@ export class SpotStore {
       is_test: Boolean(item.is_test),
       created_at: new Date(item.created_at).toISOString(),
     }));
+    try {
+      const { rows: upheldRows } = await pool.query(
+        `SELECT spot_id, COUNT(*)::int AS cnt FROM spot_moderation_events WHERE decision IN ('removed', 'kept_hidden') AND created_at >= NOW() - INTERVAL '90 days' GROUP BY spot_id`,
+      );
+      this.upheldReportCounts.clear();
+      for (const r of upheldRows) {
+        this.upheldReportCounts.set(String(r.spot_id), Number(r.cnt) || 0);
+      }
+    } catch {
+      // Partial schemas without spot_moderation_events
+    }
+    try {
+      const { rows: assetRows } = await pool.query(
+        `SELECT spot_id, COUNT(*)::int AS cnt FROM spot_assets GROUP BY spot_id`,
+      );
+      this.photoCounts.clear();
+      for (const r of assetRows) {
+        this.photoCounts.set(String(r.spot_id), Number(r.cnt) || 0);
+      }
+    } catch {
+      // Partial schemas without spot_assets
+    }
   }
 
   private async persistSpot(s: Spot) {
@@ -565,6 +589,29 @@ export class SpotStore {
   likeCount(spotId: string, actorId?: string, counts = this.likeCounts()) {
     const base = counts.get(spotId) ?? 0;
     return actorId && db.findUserById(actorId)?.is_test && this.isLiked(actorId, spotId) ? base + 1 : base;
+  }
+  recordUpheldReport(spotId: string, delta = 1) {
+    this.upheldReportCounts.set(spotId, Math.max(0, (this.upheldReportCounts.get(spotId) ?? 0) + delta));
+  }
+  /** Distinct non-test users who liked, saved, or visited each spot. */
+  uniqueEngagerCounts(): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const [userId, values] of this.interactions.entries()) {
+      if (db.findUserById(userId)?.is_test) continue;
+      const engagedSpots = new Set<string>();
+      for (const key of values) {
+        const at = key.lastIndexOf(':');
+        if (at <= 0) continue;
+        const type = key.slice(at + 1);
+        if (type === 'like' || type === 'save' || type === 'visit') {
+          engagedSpots.add(key.slice(0, at));
+        }
+      }
+      for (const spotId of engagedSpots) {
+        counts.set(spotId, (counts.get(spotId) ?? 0) + 1);
+      }
+    }
+    return counts;
   }
   trend(spotId: string) {
     return this.trendScores().get(spotId) ?? 0;

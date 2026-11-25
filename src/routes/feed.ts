@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import { optionalAuthenticateToken, checkQAAuthorization, isAuthorizedQA, AuthRequest } from '../middleware/auth.js';
+import { rankExploreSpotsPage } from '../spots/recommender.js';
 import { spotStore, Spot } from '../spots/store.js';
 import { rankedFeedPage } from '../feed-pagination.js';
 
@@ -49,6 +50,18 @@ feedRouter.get('/feed', optionalAuthenticateToken, checkQAAuthorization, (req: A
   const userId = req.user?.id;
   const actorId =
     req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
+  const rawRefreshSeed = req.query.refresh_seed;
+  const refreshSeed = typeof rawRefreshSeed === 'string' && rawRefreshSeed.length > 0 ? rawRefreshSeed : undefined;
+  if (refreshSeed !== undefined && !/^[A-Za-z0-9_-]{1,32}$/.test(refreshSeed)) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'refresh_seed must match ^[A-Za-z0-9_-]{1,32}$.',
+      },
+    });
+  }
+
   const prefs = userId ? spotStore.getPreferences(userId) : undefined;
   const hasUserPrefs =
     Boolean(prefs) &&
@@ -58,101 +71,27 @@ feedRouter.get('/feed', optionalAuthenticateToken, checkQAAuthorization, (req: A
 
   const allowQA = isAuthorizedQA(req);
 
-  // 1. Eligible Published & Non-suppressed Spots (strictly excluding synthetic test data unless authorized QA)
-  const eligibleSpots = spotStore.spots.filter(
-    (s) => s.status === 'published' && !s.recommendation_suppressed && (allowQA || !s.is_test),
-  );
-
-  // 2. Score Spots with Persisted Signals
-  const likeCounts = spotStore.likeCounts();
-  const scoredItems: FeedItem[] = eligibleSpots.map((spot) => {
-    let score = 0;
-    const reasons: string[] = [];
-
-    // Trust signal
-    if (spot.trust_level === 'lgu_verified') {
-      score += 0.25;
-      reasons.push('LGU Verified');
-    } else if (spot.trust_level === 'editorial') {
-      score += 0.2;
-      reasons.push('Editorial Pick');
-    } else if (spot.trust_level === 'open_data') {
-      score += 0.15;
-    } else {
-      score += 0.1;
-    }
-
-    // Personalization signals (only when user has declared preferences)
-    if (hasUserPrefs && prefs) {
-      const matchedCat = prefs.categories.find((c) => c === spot.category);
-      if (matchedCat) {
-        score += 0.3;
-        const formattedCat = matchedCat.replace(/_/g, ' ');
-        reasons.push(`Matches your ${formattedCat} interest`);
-      }
-
-      const matchedTag = prefs.tags.find((t) => spot.tags.includes(t));
-      if (matchedTag && reasons.length < 3) {
-        score += 0.2;
-        reasons.push(`Matches your #${matchedTag} interest`);
-      }
-    }
-
-    // Trend & Interaction signals
-    const trend = spotStore.trend(spot.id);
-    if (trend > 0) {
-      score += Math.min(0.2, trend / 10);
-      if (trend >= 2 && reasons.length < 3) {
-        reasons.push(`Trending in ${spot.municipality}`);
-      }
-    }
-
-    // Freshness
-    const ageDays = (Date.now() - Date.parse(spot.created_at)) / 86400000;
-    if (ageDays <= 30) {
-      score += 0.1;
-      if (reasons.length < 3) {
-        reasons.push('Recently added');
-      }
-    }
-
-    // Active Quest
-    if (spot.quest_id) {
-      score += 0.05;
-      if (reasons.length < 3) {
-        reasons.push('Active quest available');
-      }
-    }
-
-    // Crowd Condition
-    const crowdInfo = spotStore.crowd(spot);
-    if (crowdInfo.crowd_status === 'quiet' && reasons.length < 3) {
-      score += 0.05;
-      reasons.push('Currently quiet');
-    }
-
-    // Fallback reason for guests if none assigned
-    if (reasons.length === 0) {
-      reasons.push(`Explore ${spot.municipality}`);
-    }
-
-    return {
-      ...spot,
-      feed_score: Number(score.toFixed(4)),
-      recommendation_reasons: reasons,
-      crowd_status: crowdInfo.crowd_status,
-      crowd_confidence: crowdInfo.crowd_confidence,
-      saved: Boolean(spotStore.isSaved(actorId, spot.id)),
-      liked: Boolean(spotStore.isLiked(actorId, spot.id)),
-      like_count: spotStore.likeCount(spot.id, actorId, likeCounts),
-    };
+  // Step 7: Web parity — rank via rankExploreSpotsPage (Explore v3) and map to FeedItem shape.
+  const ranked = rankExploreSpotsPage(spotStore, {
+    sort: 'recommended',
+    userId,
+    actorId,
+    allowTest: allowQA,
+    refreshSeed,
+    offset: 0,
+    limit: 600,
   });
 
-  // 3. Initial Score Ordering (with stable slug tie-breaker)
-  scoredItems.sort((a, b) => b.feed_score - a.feed_score || a.slug.localeCompare(b.slug));
-
-  // 4. Municipal Diversity Reranking (Max 2 consecutive from same town)
-  const diversifiedItems = applyMunicipalDiversity(scoredItems, 2);
+  const diversifiedItems: FeedItem[] = ranked.items.map((item) => ({
+    ...item,
+    feed_score: item.recommendation_score,
+    recommendation_reasons: item.recommendation_reasons.slice(0, 3),
+    crowd_status: item.crowd_status,
+    crowd_confidence: item.crowd_confidence,
+    saved: item.saved,
+    liked: item.liked,
+    like_count: item.like_count,
+  }));
 
   const requestedLimit = Number(req.query.limit) || 20;
   const limit = Math.min(50, Math.max(1, Math.floor(requestedLimit)));
@@ -160,7 +99,7 @@ feedRouter.get('/feed', optionalAuthenticateToken, checkQAAuthorization, (req: A
   try {
     page = rankedFeedPage(
       diversifiedItems,
-      JSON.stringify([userId || 'guest', allowQA ? 'qa' : 'public']),
+      JSON.stringify([userId || 'guest', allowQA ? 'qa' : 'public', refreshSeed || '']),
       typeof req.query.cursor === 'string' ? req.query.cursor : undefined,
       limit,
     );
@@ -182,7 +121,7 @@ feedRouter.get('/feed', optionalAuthenticateToken, checkQAAuthorization, (req: A
     success: true,
     data: page,
     meta: {
-      ranking_version: 'feed-v2',
+      ranking_version: 'feed-v3',
       personalized: Boolean(hasUserPrefs),
       guest_mode: !userId,
     },
