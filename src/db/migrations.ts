@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import { createHash } from 'crypto';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 
 // This module intentionally does not import `config/env.ts`: migration tooling
@@ -12,7 +12,14 @@ import { join } from 'path';
 const candidateRoot = join(__dirname, '..', '..');
 const rootDir = existsSync(join(candidateRoot, 'migrations')) ? candidateRoot : join(candidateRoot, '..');
 
-export const MIGRATIONS = [
+// Plan 125d — adding a migration: just drop `migrations/<NNN>_<name>.sql` with the next free
+// number (119+, reserved on the workboard). Files 119+ are discovered and run in number order;
+// this file no longer needs editing. HISTORIC_MIGRATIONS (001..118) is frozen: its order is
+// the order production applied them (e.g. 096 before 092), so never edit or extend it.
+const FIRST_DISCOVERED_MIGRATION = 119;
+const MIGRATION_FILE = /^(\d{3})_[a-z0-9_]+\.sql$/;
+
+const HISTORIC_MIGRATIONS: readonly string[] = [
   '001_init.sql',
   '002_runtime.sql',
   '003_spot_discovery.sql',
@@ -141,6 +148,42 @@ export const MIGRATIONS = [
   // Plan 123b: per-user daily destination feed impressions for Explore fatigue (reserved 118).
   '118_spot_feed_impressions.sql',
 ];
+
+/**
+ * Plan 125d: historic list + `.sql` files numbered 119+ (sorted by number). Throws on a stray
+ * file below 119 that is not in the historic list, on two files sharing a number, or on a 119+
+ * file reusing a historic number. Pure, so tests pass a file list instead of touching disk.
+ */
+export function discoverMigrations(historic: readonly string[], files: readonly string[]): string[] {
+  const historicSet = new Set(historic);
+  const numbers = new Map<number, string>();
+  for (const file of historic) {
+    const match = MIGRATION_FILE.exec(file);
+    if (match) numbers.set(Number(match[1]), file);
+  }
+  const discovered: { num: number; file: string }[] = [];
+  for (const file of files) {
+    if (historicSet.has(file) || !file.endsWith('.sql')) continue;
+    const match = MIGRATION_FILE.exec(file);
+    if (!match) throw new Error(`[db] Migration file name must be NNN_lower_snake.sql: ${file}`);
+    const num = Number(match[1]);
+    if (num < FIRST_DISCOVERED_MIGRATION) {
+      throw new Error(`[db] Stray migration ${file}: numbers below ${FIRST_DISCOVERED_MIGRATION} are frozen`);
+    }
+    const clash = numbers.get(num);
+    if (clash) throw new Error(`[db] Duplicate migration number ${match[1]}: ${clash} and ${file}`);
+    numbers.set(num, file);
+    discovered.push({ num, file });
+  }
+  discovered.sort((a, b) => a.num - b.num);
+  return [...historic, ...discovered.map((d) => d.file)];
+}
+
+const migrationsDir = join(rootDir, 'migrations');
+export const MIGRATIONS: string[] = discoverMigrations(
+  HISTORIC_MIGRATIONS,
+  existsSync(migrationsDir) ? readdirSync(migrationsDir) : [],
+);
 
 // Plan 116+: PostgreSQL-only sections of a migration are fenced with these markers;
 // pg-mem applies the rest (plain columns and tables) and real PostgreSQL applies all.
