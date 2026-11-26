@@ -138,6 +138,8 @@ export const MIGRATIONS = [
   '116_email_change_audit.sql',
   // Plan 122a: 1-to-1 merchants.spot_id uniqueness and merchant_spot_claim_requests (reserved 117; 116 is Plan 120).
   '117_merchant_spot_links.sql',
+  // Plan 123b: per-user daily destination feed impressions for Explore fatigue (reserved 118).
+  '118_spot_feed_impressions.sql',
 ];
 
 // Plan 116+: PostgreSQL-only sections of a migration are fenced with these markers;

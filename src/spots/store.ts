@@ -362,6 +362,8 @@ export class SpotStore {
   activityEvents: ActivityEvent[] = [];
   upheldReportCounts = new Map<string, number>();
   photoCounts = new Map<string, number>();
+  feedImpressions = new Map<string, Map<string, Set<string>>>();
+  feedImpressionDaysCache = new Map<string, Map<string, number>>();
   private pg: Pool | null = null;
 
   async hydrateFromPg(pool: Pool) {
@@ -435,6 +437,20 @@ export class SpotStore {
       }
     } catch {
       // Partial schemas without spot_assets
+    }
+    this.feedImpressionDaysCache.clear();
+    try {
+      const { rows: impRows } = await pool.query<{ user_id: string; spot_id: string; manila_day: string | Date }>(
+        `SELECT user_id, spot_id, to_char(manila_day, 'YYYY-MM-DD') AS manila_day
+         FROM spot_feed_impressions
+         WHERE manila_day >= (CURRENT_DATE - INTERVAL '14 days')::date`,
+      );
+      this.feedImpressions.clear();
+      for (const r of impRows) {
+        this.recordFeedImpressions(String(r.user_id), [String(r.spot_id)], String(r.manila_day));
+      }
+    } catch {
+      // Partial schemas without spot_feed_impressions
     }
   }
 
@@ -592,6 +608,53 @@ export class SpotStore {
   }
   recordUpheldReport(spotId: string, delta = 1) {
     this.upheldReportCounts.set(spotId, Math.max(0, (this.upheldReportCounts.get(spotId) ?? 0) + delta));
+  }
+  recordFeedImpressions(userId: string, spotIds: string[], manilaDay: string) {
+    let bySpot = this.feedImpressions.get(userId);
+    if (!bySpot) {
+      bySpot = new Map<string, Set<string>>();
+      this.feedImpressions.set(userId, bySpot);
+    }
+    for (const spotId of spotIds) {
+      let days = bySpot.get(spotId);
+      if (!days) {
+        days = new Set<string>();
+        bySpot.set(spotId, days);
+      }
+      days.add(manilaDay);
+    }
+  }
+  computeFatigueDaysFromMemory(userId: string, manilaDay: string): Map<string, number> {
+    const out = new Map<string, number>();
+    const bySpot = this.feedImpressions.get(userId);
+    if (!bySpot) return out;
+    const baseMs = Date.parse(`${manilaDay}T00:00:00Z`);
+    const startDay = new Date(baseMs - 7 * 86_400_000).toISOString().slice(0, 10);
+    for (const [spotId, days] of bySpot.entries()) {
+      let count = 0;
+      for (const d of days) {
+        if (d >= startDay && d < manilaDay) count++;
+      }
+      if (count > 0) out.set(spotId, count);
+    }
+    return out;
+  }
+  getFatigueDaysForDay(userId: string, manilaDay: string): Map<string, number> {
+    const cacheKey = `${userId}|${manilaDay}`;
+    const cached = this.feedImpressionDaysCache.get(cacheKey);
+    if (cached) return cached;
+    return this.computeFatigueDaysFromMemory(userId, manilaDay);
+  }
+  pruneFeedImpressionsBefore(cutoffDay: string) {
+    for (const [userId, bySpot] of this.feedImpressions.entries()) {
+      for (const [spotId, days] of bySpot.entries()) {
+        for (const d of days) {
+          if (d < cutoffDay) days.delete(d);
+        }
+        if (days.size === 0) bySpot.delete(spotId);
+      }
+      if (bySpot.size === 0) this.feedImpressions.delete(userId);
+    }
   }
   /** Distinct non-test users who liked, saved, or visited each spot. */
   uniqueEngagerCounts(): Map<string, number> {

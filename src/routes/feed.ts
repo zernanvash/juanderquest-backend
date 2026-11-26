@@ -1,6 +1,8 @@
 import { Router, Response } from 'express';
 import { optionalAuthenticateToken, checkQAAuthorization, isAuthorizedQA, AuthRequest } from '../middleware/auth.js';
-import { rankExploreSpotsPage } from '../spots/recommender.js';
+import { getPool } from '../db/pool.js';
+import { loadUserFatigueDays } from '../spots/impressions.js';
+import { manilaDayKey, rankExploreSpotsPage } from '../spots/recommender.js';
 import { spotStore, Spot } from '../spots/store.js';
 import { rankedFeedPage } from '../feed-pagination.js';
 
@@ -46,7 +48,7 @@ export function applyMunicipalDiversity<T extends { municipality: string }>(item
   return result;
 }
 
-feedRouter.get('/feed', optionalAuthenticateToken, checkQAAuthorization, (req: AuthRequest, res: Response) => {
+feedRouter.get('/feed', optionalAuthenticateToken, checkQAAuthorization, async (req: AuthRequest, res: Response) => {
   const userId = req.user?.id;
   const actorId =
     req.user?.id || (req.headers['x-device-id'] as string) || (req.headers['x-forwarded-for'] as string) || req.ip;
@@ -70,6 +72,10 @@ feedRouter.get('/feed', optionalAuthenticateToken, checkQAAuthorization, (req: A
       (prefs?.occasions && prefs.occasions.length > 0));
 
   const allowQA = isAuthorizedQA(req);
+
+  if (userId) {
+    await loadUserFatigueDays(spotStore, getPool(), userId, manilaDayKey());
+  }
 
   // Step 7: Web parity — rank via rankExploreSpotsPage (Explore v3) and map to FeedItem shape.
   const ranked = rankExploreSpotsPage(spotStore, {

@@ -658,6 +658,7 @@ function computeStateFingerprint(
   store: SpotStore,
   userId: string | undefined,
   homeTown: string | null | undefined,
+  manilaDay: string,
 ): string {
   const userSet = userId ? store.interactions.get(userId) : undefined;
   const userInteractionsSig = userSet ? [...userSet].sort().join(',') : '';
@@ -682,8 +683,14 @@ function computeStateFingerprint(
   for (const [, set] of store.interactions.entries()) {
     globalInteractionsCount += set.size;
   }
+  const fatigueSig = userId
+    ? [...store.getFatigueDaysForDay(userId, manilaDay).entries()]
+        .sort((a, b) => cmpStr(a[0], b[0]))
+        .map(([id, d]) => `${id}:${d}`)
+        .join(',')
+    : '';
   const spotsSig = `${store.spots.length}:${store.spots.map((s) => `${s.id}:${s.status}:${store.isSuppressed(s) ? 1 : 0}:${s.recommendation_suppressed_until || ''}`).join(',')}`;
-  return `${homeTown ?? ''}|${userInteractionsSig}|${prefsSig}|${followsSig}|${subsCount}|${globalInteractionsCount}|${store.activityEvents.length}|${spotsSig}`;
+  return `${homeTown ?? ''}|${userInteractionsSig}|${prefsSig}|${followsSig}|${subsCount}|${globalInteractionsCount}|${store.activityEvents.length}|${fatigueSig}|${spotsSig}`;
 }
 
 interface SpotMeritInfo {
@@ -786,6 +793,8 @@ export function rankExploreSpotsPage(store: SpotStore, q: ExploreListQuery): Ran
     (db.findUserById(q.userId) ||
       store.preferences.has(q.userId) ||
       store.interactions.has(q.userId) ||
+      store.feedImpressions.has(q.userId) ||
+      store.feedImpressionDaysCache.has(`${q.userId}|${manilaDay}`) ||
       db.follows.some((f) => f.follower_id === q.userId) ||
       db.submissions.some((s) => s.user_id === q.userId)),
   );
@@ -820,7 +829,7 @@ export function rankExploreSpotsPage(store: SpotStore, q: ExploreListQuery): Ran
   });
 
   const cacheKey = `${actorKey}|${manilaDay}|${filterKey}`;
-  const stateFingerprint = computeStateFingerprint(store, profileUserId || q.userId, resolvedHomeTown);
+  const stateFingerprint = computeStateFingerprint(store, profileUserId || q.userId, resolvedHomeTown, manilaDay);
   const cached = exploreCache.get(cacheKey);
   const requestedOffset = Math.max(0, q.offset ?? 0);
   const requestedEnd = q.limit !== undefined ? requestedOffset + q.limit : Math.max(CACHED_HEAD, requestedOffset);
@@ -941,6 +950,36 @@ export function rankExploreSpotsPage(store: SpotStore, q: ExploreListQuery): Ran
   const viewerKey = q.userId || actorKey;
   const viewerIsTest = Boolean(viewerKey && db.findUserById(viewerKey)?.is_test);
   const viewerInteractions = store.interactions.get(viewerKey);
+  const fatigueDaysMap = profileUserId
+    ? store.getFatigueDaysForDay(profileUserId, manilaDay)
+    : new Map<string, number>();
+  const sevenDaysAgoMs = nowMs - 7 * 86_400_000;
+  const recentEngagementSpotIds = new Set<string>();
+  if (profileUserId) {
+    for (const ev of store.activityEvents) {
+      if (
+        ev.user_id === profileUserId &&
+        (ev.activity_type === 'view' || ev.activity_type === 'save') &&
+        Date.parse(ev.created_at) >= sevenDaysAgoMs
+      ) {
+        recentEngagementSpotIds.add(ev.spot_id);
+      }
+    }
+    if (viewerInteractions) {
+      for (const entry of viewerInteractions) {
+        const sep = entry.lastIndexOf(':');
+        if (sep <= 0) continue;
+        const sId = entry.slice(0, sep);
+        const type = entry.slice(sep + 1);
+        if (type === 'like' || type === 'save' || type === 'view') {
+          const ts = store.interactionTimestamps.get(`${profileUserId}:${sId}:${type}`);
+          if (ts === undefined || ts >= sevenDaysAgoMs) {
+            recentEngagementSpotIds.add(sId);
+          }
+        }
+      }
+    }
+  }
   const isR4Default =
     sortMode === 'recommended' &&
     !q.search &&
@@ -1115,7 +1154,15 @@ export function rankExploreSpotsPage(store: SpotStore, q: ExploreListQuery): Ran
       noveltyMultiplier = 0.65;
     }
 
-    const finalScore = baseScore * noveltyMultiplier;
+    let fatigueMultiplier = 1.0;
+    if (isR4Default && profileUserId) {
+      const fDays = fatigueDaysMap.get(s.id) ?? 0;
+      if (fDays > 0 && !recentEngagementSpotIds.has(s.id)) {
+        fatigueMultiplier = fDays === 1 ? 0.8 : fDays === 2 ? 0.55 : 0.3;
+      }
+    }
+
+    const finalScore = baseScore * noveltyMultiplier * fatigueMultiplier;
 
     const draft: ScoredDraft = {
       id: s.id,

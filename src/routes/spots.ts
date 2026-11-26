@@ -17,6 +17,8 @@ import { db, QuestRow } from '../db/index.js';
 import { getPool } from '../db/pool.js';
 import { randomUUID } from 'crypto';
 import { distanceKm, spotStore, taxonomy } from '../spots/store.js';
+import { loadUserFatigueDays, recordSpotFeedImpressions } from '../spots/impressions.js';
+import { manilaDayKey } from '../spots/recommender.js';
 import {
   applyAdminSpotModeration,
   buildModerationSummary,
@@ -217,6 +219,9 @@ router.get('/spots', optionalAuthenticateToken, checkQAAuthorization, async (req
     });
   }
   const homeTown = req.user?.id ? await getHomeTown(req.user.id) : null;
+  if (req.user?.id) {
+    await loadUserFatigueDays(spotStore, getPool(), req.user.id, manilaDayKey());
+  }
   const listOpts = {
     search: req.query.q as string | undefined,
     categories: csv(req.query.categories),
@@ -535,6 +540,29 @@ router.put(
   authenticateToken,
   validateRequest(preferencesSchema),
   (req: AuthRequest, res) => res.json({ success: true, data: spotStore.setPreferences(req.user!.id, req.body) }),
+);
+
+const impressionsLimiter = rateLimit({
+  policyId: 'spots:impressions',
+  windowMs: 60 * 1000,
+  max: 30,
+  keyStrategy: 'actor_or_ip',
+});
+const impressionsSchema = z.object({
+  body: z.object({
+    spot_ids: z.array(z.string().trim().min(1).max(128)).min(1).max(30),
+  }),
+});
+
+router.post(
+  '/spots/impressions',
+  authenticateToken,
+  impressionsLimiter,
+  validateRequest(impressionsSchema),
+  async (req: AuthRequest, res) => {
+    await recordSpotFeedImpressions(spotStore, getPool(), req.user!.id, req.body.spot_ids);
+    res.status(204).send();
+  },
 );
 
 router.put('/spots/:id/save', authenticateToken, (req: AuthRequest, res) => {
