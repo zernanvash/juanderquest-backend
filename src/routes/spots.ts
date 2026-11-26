@@ -2227,6 +2227,82 @@ router.post(
   },
 );
 
+// Plan 124b: the author (or a platform admin) picks the cover from approved photos on the spot:
+// uploads approved/attached to it ('attached') or licensed catalog photos ('approved').
+const spotCoverSchema = z.object({
+  body: z.object({ asset_id: z.string().trim().min(1).max(128) }).strict(),
+});
+
+router.patch(
+  '/spots/:id/cover',
+  authenticateToken,
+  uploadRateLimiter,
+  validateRequest(spotCoverSchema),
+  async (req: AuthRequest, res) => {
+    const spot = spotStore.spots.find((s) => s.id === req.params.id || s.slug === req.params.id);
+    if (!spot) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Destination not found.' } });
+    }
+    if (spot.created_by !== req.user!.id && req.user!.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Only the author can change the cover photo.' },
+      });
+    }
+    if (spot.status === 'hidden_pending_review' || spot.status === 'unpublished') {
+      return res.status(409).json({
+        success: false,
+        error: { code: 'SPOT_LOCKED_FOR_REVIEW', message: 'This destination is under review.' },
+      });
+    }
+    const pool = getPool();
+    const asset = await assetStore.resolveAssetById(req.body.asset_id, pool);
+    const eligible =
+      asset &&
+      asset.spot_id === spot.id &&
+      (asset.status === 'attached' || asset.status === 'approved') &&
+      asset.media_type !== 'video' &&
+      asset.mime_type.startsWith('image/');
+    if (!asset || !eligible) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_COVER_ASSET',
+          message: 'Only approved photos attached to this destination can be set as the cover.',
+        },
+      });
+    }
+    const imageUrl = asset.status === 'approved' && asset.variants?.w640 ? asset.variants.w640 : asset.url;
+    const updatedAt = new Date().toISOString();
+    if (pool) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        // uq_spot_assets_primary allows one primary per spot: clear it before setting the new one.
+        await client.query('UPDATE spot_assets SET is_primary = FALSE WHERE spot_id = $1 AND is_primary', [spot.id]);
+        await client.query('UPDATE spot_assets SET is_primary = TRUE WHERE id = $1', [asset.id]);
+        await client.query('UPDATE spots SET image_url = $1, updated_at = $2 WHERE id = $3', [
+          imageUrl,
+          updatedAt,
+          spot.id,
+        ]);
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+    for (const a of assetStore.assets.values()) {
+      if (a.spot_id === spot.id) a.is_primary = a.id === asset.id;
+    }
+    spot.image_url = imageUrl;
+    spot.updated_at = updatedAt;
+    return res.json({ success: true, data: { spot, cover_asset_id: asset.id, image_url: imageUrl } });
+  },
+);
+
 // GET /admin/spot-photos?status=pending|approved|rejected|all
 router.get('/admin/spot-photos', authenticateToken, requireAreaAdmin('destinations'), async (req: AuthRequest, res) => {
   const rawStatus = typeof req.query.status === 'string' ? req.query.status : 'pending';
