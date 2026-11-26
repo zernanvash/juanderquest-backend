@@ -136,7 +136,7 @@ realPg('accepted-quest idle window + funding overview (disposable PostgreSQL)', 
     );
     expect(ledger.rows[0]?.checksum).toBeTruthy();
     const kind = await fixture.pool.query(
-      "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname='user_notifications_kind_check'",
+      "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname='user_notifications_kind_check' AND connamespace = current_schema()::regnamespace",
     );
     for (const k of ['suki_reward', 'nearby_quest', 'quest_reward', 'quest_idle'])
       expect(kind.rows[0].def).toContain(k);
