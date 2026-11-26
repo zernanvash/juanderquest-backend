@@ -81,6 +81,15 @@ export async function recordSpotFeedImpressions(
  * once per (user, manilaDay) and caches on SpotStore so today's ranking and
  * state fingerprint remain stable across same-day impressions (R1).
  */
+/** Caches one user's fatigue map for `manilaDay`, dropping maps from earlier days so the cache stays bounded. */
+function cacheFatigueDays(store: SpotStore, userId: string, manilaDay: string, map: Map<string, number>): void {
+  const suffix = `|${manilaDay}`;
+  for (const key of store.feedImpressionDaysCache.keys()) {
+    if (!key.endsWith(suffix)) store.feedImpressionDaysCache.delete(key);
+  }
+  store.feedImpressionDaysCache.set(`${userId}${suffix}`, map);
+}
+
 export async function loadUserFatigueDays(
   store: SpotStore,
   pool: Pool | null,
@@ -94,7 +103,7 @@ export async function loadUserFatigueDays(
 
   if (!pool) {
     const computed = store.computeFatigueDaysFromMemory(userId, manilaDay);
-    store.feedImpressionDaysCache.set(cacheKey, computed);
+    cacheFatigueDays(store, userId, manilaDay, computed);
     return computed;
   }
 
@@ -113,11 +122,11 @@ export async function loadUserFatigueDays(
     for (const r of rows) {
       map.set(String(r.spot_id), Number(r.days) || 0);
     }
-    store.feedImpressionDaysCache.set(cacheKey, map);
+    cacheFatigueDays(store, userId, manilaDay, map);
     return map;
   } catch {
     const computed = store.computeFatigueDaysFromMemory(userId, manilaDay);
-    store.feedImpressionDaysCache.set(cacheKey, computed);
+    cacheFatigueDays(store, userId, manilaDay, computed);
     return computed;
   }
 }

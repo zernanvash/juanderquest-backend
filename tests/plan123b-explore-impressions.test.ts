@@ -4,7 +4,7 @@ import { db } from '../src/db/index.js';
 import { signSessionToken } from '../src/auth/tokens.js';
 import { createTestDb } from '../src/db/testHarness.js';
 import { setPool } from '../src/db/pool.js';
-import { pruneOldFeedImpressions, recordSpotFeedImpressions } from '../src/spots/impressions.js';
+import { loadUserFatigueDays, pruneOldFeedImpressions, recordSpotFeedImpressions } from '../src/spots/impressions.js';
 import { manilaDayKey, rankExploreSpotsPage } from '../src/spots/recommender.js';
 import { SpotStore, spotStore, type Spot } from '../src/spots/store.js';
 
@@ -101,6 +101,15 @@ describe('Plan 123b: Explore Impressions + Fatigue', () => {
     const scoreATomorrow = tomorrow.items.find((i) => i.id === sA.id)!.recommendation_score;
     const scoreBTomorrow = tomorrow.items.find((i) => i.id === sB.id)!.recommendation_score;
     expect(scoreATomorrow / scoreBTomorrow).toBeCloseTo(0.8, 1);
+  });
+
+  it('2b. The fatigue cache keeps only the current day (bounded memory)', async () => {
+    const store = new SpotStore();
+    await loadUserFatigueDays(store, null, 'user-cache-a', '2026-11-25');
+    await loadUserFatigueDays(store, null, 'user-cache-b', '2026-11-25');
+    expect(store.feedImpressionDaysCache.size).toBe(2);
+    await loadUserFatigueDays(store, null, 'user-cache-a', '2026-11-26');
+    expect([...store.feedImpressionDaysCache.keys()]).toEqual(['user-cache-a|2026-11-26']);
   });
 
   it('3. Like, save, or detail open (view) in the 7-day window cancels fatigue', () => {
