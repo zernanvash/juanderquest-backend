@@ -1,4 +1,6 @@
-import { Interface, JsonRpcProvider } from 'ethers';
+import { Interface } from 'ethers/abi';
+import type { JsonRpcProvider } from 'ethers/providers';
+import { ethersProviders } from './ethersLazy.js';
 import type { ChainSource, ObservedBlock, ObservedLog } from './indexer.js';
 import { parseRpcUrls } from './config.js';
 
@@ -53,6 +55,7 @@ export class JsonRpcChainSource implements ChainSource {
       this.timeoutMs = optionsOrUrl.timeoutMs ?? 5000;
     }
 
+    const { JsonRpcProvider } = ethersProviders();
     this.providers = this.urls.map((u) => new JsonRpcProvider(u));
   }
 

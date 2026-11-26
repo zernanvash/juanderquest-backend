@@ -12,7 +12,8 @@ import {
 } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { randomUUID } from 'crypto';
-import { getAddress, verifyMessage } from 'ethers';
+import { getAddress } from 'ethers/address';
+import { verifyMessage } from 'ethers/hash';
 import { clearSessionCookie, setSessionCookie } from '../auth/sessionCookie.js';
 import { signSessionToken } from '../auth/tokens.js';
 import { safeCosmeticsFor } from '../shop/render.js';

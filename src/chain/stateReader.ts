@@ -1,4 +1,7 @@
-import { Contract, formatEther, id, JsonRpcProvider } from 'ethers';
+import { id } from 'ethers/hash';
+import type { JsonRpcProvider } from 'ethers/providers';
+import { formatEther } from 'ethers/utils';
+import { ethersContract, ethersProviders } from './ethersLazy.js';
 
 /** AccessControl role identifiers (computed, never hard-coded). */
 export const ROLE_HASHES = {
@@ -56,6 +59,7 @@ export class JsonRpcChainStateReader implements ChainStateReader {
 
   constructor(rpcUrls: string[], chainId: number) {
     if (rpcUrls.length === 0) throw new Error('CHAIN_RPC_URLS_EMPTY');
+    const { JsonRpcProvider } = ethersProviders();
     this.providers = rpcUrls.slice(0, 2).map((url) => new JsonRpcProvider(url, chainId, { staticNetwork: true }));
   }
 
@@ -83,11 +87,13 @@ export class JsonRpcChainStateReader implements ChainStateReader {
   }
 
   hasRole(contract: string, role: string, account: string) {
-    return this.attempt((p) => new Contract(contract, ABI, p).hasRole(role, account) as Promise<boolean>);
+    return this.attempt(
+      (p) => new (ethersContract().Contract)(contract, ABI, p).hasRole(role, account) as Promise<boolean>,
+    );
   }
 
   paused(contract: string) {
-    return this.attempt((p) => new Contract(contract, ABI, p).paused() as Promise<boolean>);
+    return this.attempt((p) => new (ethersContract().Contract)(contract, ABI, p).paused() as Promise<boolean>);
   }
 }
 

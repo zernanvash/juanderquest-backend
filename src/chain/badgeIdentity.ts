@@ -1,4 +1,4 @@
-import { id } from 'ethers';
+import { id } from 'ethers/hash';
 import { env } from '../config/env.js';
 
 /**

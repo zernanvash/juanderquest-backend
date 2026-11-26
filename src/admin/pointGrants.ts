@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import type { Pool, PoolClient } from 'pg';
-import { keccak256, toUtf8Bytes } from 'ethers';
+import { keccak256 } from 'ethers/crypto';
+import { toUtf8Bytes } from 'ethers/utils';
 import { movePoints } from '../funding/ledger.js';
 import { commitGovernanceTransaction, lockGovernanceSnapshot } from '../governance/transaction.js';
 import { governanceStore } from '../routes/proposals.js';
