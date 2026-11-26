@@ -125,7 +125,7 @@ realPg('accepted-quest idle window + funding overview (disposable PostgreSQL)', 
       expect.arrayContaining(['in_progress', 'submitted', 'completed', 'abandoned', 'expired']),
     );
     const cols = await fixture.pool.query(
-      "SELECT column_name,is_nullable FROM information_schema.columns WHERE table_name='quest_attempts' AND column_name IN ('last_progress_at','expired_at') ORDER BY column_name",
+      "SELECT column_name,is_nullable FROM information_schema.columns WHERE table_schema = current_schema() AND table_name='quest_attempts' AND column_name IN ('last_progress_at','expired_at') ORDER BY column_name",
     );
     expect(cols.rows).toEqual([
       { column_name: 'expired_at', is_nullable: 'YES' },

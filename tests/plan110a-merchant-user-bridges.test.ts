@@ -117,9 +117,10 @@ realPg('Plan 110a: merchant-to-user QA fixes & architecture bridges (real PG)', 
     expect(MIGRATIONS).toContain('106_merchant_user_qa_and_bridges.sql');
     const colRes = await fixture.pool.query(
       `SELECT table_name, column_name FROM information_schema.columns
-        WHERE (table_name='quest_sponsorships' AND column_name='counter_voucher_id')
+        WHERE table_schema = current_schema()
+          AND ((table_name='quest_sponsorships' AND column_name='counter_voucher_id')
            OR (table_name='vouchers' AND column_name IN ('stock_limit','valid_days','created_at','updated_at'))
-           OR (table_name='redemptions' AND column_name='expires_at')`,
+           OR (table_name='redemptions' AND column_name='expires_at'))`,
     );
     expect(colRes.rows.length).toBe(6);
     const idxRes = await fixture.pool.query(
