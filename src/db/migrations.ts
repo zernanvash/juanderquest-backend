@@ -206,7 +206,9 @@ export async function applyMigrations(pg: Pool) {
   let lockAcquired = false;
   try {
     try {
-      await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_ADVISORY_LOCK_KEY]);
+      // Plan 125: scoped to the schema being migrated. Production migrates one schema (public),
+      // so boots stay serialized, while parallel test schemas (jdq_test_*) stop queueing.
+      await client.query('SELECT pg_advisory_lock($1, hashtext(current_schema()))', [MIGRATION_ADVISORY_LOCK_KEY]);
       lockAcquired = true;
     } catch (error) {
       // pg-mem and other limited engines do not implement advisory locks; the
@@ -580,7 +582,7 @@ export async function applyMigrations(pg: Pool) {
   } finally {
     if (lockAcquired) {
       try {
-        await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_ADVISORY_LOCK_KEY]);
+        await client.query('SELECT pg_advisory_unlock($1, hashtext(current_schema()))', [MIGRATION_ADVISORY_LOCK_KEY]);
       } catch {
         // The lock is session-scoped and is released when the client ends.
       }
