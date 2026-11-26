@@ -1,8 +1,12 @@
 import fs from 'fs';
 import path from 'path';
-import { BlobServiceClient } from '@azure/storage-blob';
+import type * as AzureStorageBlob from '@azure/storage-blob';
 import { env } from '../config/env.js';
 import { getPool, MIGRATIONS } from '../db/pool.js';
+
+// Plan 125c: @azure/storage-blob (~1 s to load) is required only when Azure storage is used.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const azureBlob = (): typeof AzureStorageBlob => require('@azure/storage-blob');
 
 export type DependencyState = 'up' | 'down' | 'degraded';
 
@@ -81,7 +85,7 @@ async function probeStorage(): Promise<void> {
     return;
   }
 
-  const blobServiceClient = BlobServiceClient.fromConnectionString(env.AZURE_STORAGE_CONNECTION_STRING);
+  const blobServiceClient = azureBlob().BlobServiceClient.fromConnectionString(env.AZURE_STORAGE_CONNECTION_STRING);
   const containerClient = blobServiceClient.getContainerClient(env.AZURE_STORAGE_CONTAINER_NAME);
   const exists = await withTimeout(containerClient.exists(), 1500, 'Azure Blob Storage readiness check');
   if (!exists) throw new Error('Azure Blob Storage container does not exist');

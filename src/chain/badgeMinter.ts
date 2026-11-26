@@ -1,7 +1,11 @@
 import { randomUUID } from 'crypto';
 import { readFileSync, statSync } from 'fs';
 import type { Pool, PoolClient } from 'pg';
-import { Contract, Interface, JsonRpcProvider, Transaction, Wallet, parseUnits } from 'ethers';
+import { Interface } from 'ethers/abi';
+import type { JsonRpcProvider } from 'ethers/providers';
+import { parseUnits } from 'ethers/utils';
+import type { Wallet } from 'ethers/wallet';
+import { ethersContract, ethersProviders, ethersTransaction, ethersWallet } from './ethersLazy.js';
 import { env } from '../config/env.js';
 import { getPool } from '../db/pool.js';
 import { getChainConfig } from './config.js';
@@ -536,8 +540,9 @@ export class EthersBadgeChain implements BadgeChain {
     private readonly badge: string,
     privateKey: string,
   ) {
+    const { JsonRpcProvider } = ethersProviders();
     this.providers = rpcUrls.map((url) => new JsonRpcProvider(url, chainId, { staticNetwork: true }));
-    this.wallet = new Wallet(privateKey);
+    this.wallet = new (ethersWallet().Wallet)(privateKey);
     this.issuer = this.wallet.address.toLowerCase();
   }
 
@@ -567,7 +572,9 @@ export class EthersBadgeChain implements BadgeChain {
   }
 
   isEntitlementUsed(entitlement: string) {
-    return this.read((p) => new Contract(this.badge, BADGE_ABI, p).usedEntitlement(entitlement) as Promise<boolean>);
+    return this.read(
+      (p) => new (ethersContract().Contract)(this.badge, BADGE_ABI, p).usedEntitlement(entitlement) as Promise<boolean>,
+    );
   }
 
   async receipt(txHash: string): Promise<BadgeReceipt | null> {
@@ -605,7 +612,7 @@ export class EthersBadgeChain implements BadgeChain {
       maxFeePerGas: maxFee,
       value: 0n,
     });
-    const hash = Transaction.from(signed).hash!;
+    const hash = ethersTransaction().Transaction.from(signed).hash!;
     // Broadcasting the same signed bytes to a second RPC is harmless (same hash).
     await this.read((p) => p.broadcastTransaction(signed));
     return hash;
@@ -629,7 +636,7 @@ export class EthersBadgeChain implements BadgeChain {
       maxFeePerGas: maxFee,
       value: 0n,
     });
-    const hash = Transaction.from(signed).hash!;
+    const hash = ethersTransaction().Transaction.from(signed).hash!;
     await this.read((p) => p.broadcastTransaction(signed));
     return hash;
   }

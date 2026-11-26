@@ -1,7 +1,14 @@
 import fs from 'fs';
-import { initializeApp, getApps, getApp, cert, App } from 'firebase-admin/app';
-import { getMessaging } from 'firebase-admin/messaging';
+import type * as FirebaseAdminApp from 'firebase-admin/app';
+import type { App } from 'firebase-admin/app';
+import type * as FirebaseAdminMessaging from 'firebase-admin/messaging';
 import { env } from '../config/env.js';
+
+// Plan 125c: firebase-admin (~0.8 s to load) is required only when push is configured.
+/* eslint-disable @typescript-eslint/no-require-imports */
+const loadFirebaseApp = (): typeof FirebaseAdminApp => require('firebase-admin/app');
+const loadFirebaseMessaging = (): typeof FirebaseAdminMessaging => require('firebase-admin/messaging');
+/* eslint-enable @typescript-eslint/no-require-imports */
 
 export interface MulticastPayload {
   title: string;
@@ -42,6 +49,7 @@ export function initFcm(): { enabled: boolean; dryRun: boolean } {
     const raw = fs.readFileSync(saPath, 'utf8');
     const serviceAccount = JSON.parse(raw);
 
+    const { initializeApp, getApps, getApp, cert } = loadFirebaseApp();
     const apps = getApps();
     if (!apps.length) {
       firebaseApp = initializeApp({
@@ -87,6 +95,7 @@ export async function sendToTokens(tokens: string[], payload: MulticastPayload):
   }
 
   try {
+    const { getMessaging } = loadFirebaseMessaging();
     const messaging = firebaseApp ? getMessaging(firebaseApp) : getMessaging();
     const response = await messaging.sendEachForMulticast({
       tokens,

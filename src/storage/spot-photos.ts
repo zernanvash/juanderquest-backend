@@ -2,9 +2,13 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import imageSize from 'image-size';
-import { BlobServiceClient } from '@azure/storage-blob';
+import type * as AzureStorageBlob from '@azure/storage-blob';
 import { env } from '../config/env.js';
 import { MediaType } from '../utils/media-mime.js';
+
+// Plan 125c: @azure/storage-blob (~1 s to load) is required only when Azure storage is used.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const azureBlob = (): typeof AzureStorageBlob => require('@azure/storage-blob');
 
 export interface SpotMediaSaveResult {
   object_key: string;
@@ -122,7 +126,7 @@ export class AzureBlobStorageProvider implements SpotPhotoStorageProvider {
     extension: string,
     mediaType: MediaType = 'image',
   ): Promise<SpotMediaSaveResult> {
-    const blobServiceClient = BlobServiceClient.fromConnectionString(this.connectionString);
+    const blobServiceClient = azureBlob().BlobServiceClient.fromConnectionString(this.connectionString);
     const containerClient = blobServiceClient.getContainerClient(this.containerName);
     await containerClient.createIfNotExists({ access: 'blob' });
 
@@ -159,7 +163,7 @@ export class AzureBlobStorageProvider implements SpotPhotoStorageProvider {
   }
 
   async deletePhoto(objectKey: string): Promise<void> {
-    const blobServiceClient = BlobServiceClient.fromConnectionString(this.connectionString);
+    const blobServiceClient = azureBlob().BlobServiceClient.fromConnectionString(this.connectionString);
     const containerClient = blobServiceClient.getContainerClient(this.containerName);
     const blockBlobClient = containerClient.getBlockBlobClient(objectKey);
     await blockBlobClient.deleteIfExists();
