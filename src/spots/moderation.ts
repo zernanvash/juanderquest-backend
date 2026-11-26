@@ -1,7 +1,6 @@
 import { randomUUID } from 'crypto';
 import { getPool } from '../db/pool.js';
 import { db } from '../db/index.js';
-import { ensureAreaCache, getCachedAreas, hasSpatialAreas, resolveSpotAreas } from '../maps/areas-service.js';
 import { textBlocked } from '../social/blocklist.js';
 import { notify } from '../social/notify.js';
 import { log } from '../utils/logger.js';
@@ -229,18 +228,8 @@ export async function evaluateSpotSubmission(params: {
     messages.push(REASON_MESSAGES.TEXT_BLOCKED);
   }
 
-  const pool = getPool();
-  await ensureAreaCache(pool);
-  const areas = getCachedAreas() ?? [];
-  const hasTownPolygons =
-    (pool ? await hasSpatialAreas(pool) : false) || areas.some((a) => a.level === 'town' && Boolean(a.geometry));
-  if (hasTownPolygons) {
-    const polygonMatch = await resolveSpotAreas(pool, params.gps_lat, params.gps_lng);
-    if (!polygonMatch.townAreaId) {
-      reasonCodes.push('OUTSIDE_BOUNDARY');
-      messages.push(REASON_MESSAGES.OUTSIDE_BOUNDARY);
-    }
-  }
+  // Owner 2026-11-26: "allow instant publish if outside pangasinan". Pins anywhere in the
+  // Philippines (route schema bounds) publish instantly; OUTSIDE_BOUNDARY stays only for old events.
 
   let bestScore = 0;
   let bestSpot: Spot | undefined;

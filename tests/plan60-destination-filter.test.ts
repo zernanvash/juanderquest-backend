@@ -226,7 +226,7 @@ realPgDescribe('Plan 60 destination auto-filter & moderation (real PostgreSQL)',
     expect(nowVisible.status).toBe(200);
   });
 
-  it('holds points outside Pangasinan boundaries and detects nearby duplicates while rejecting same-author repeats', async () => {
+  it('publishes points outside the mapped boundaries instantly and detects nearby duplicates while rejecting same-author repeats', async () => {
     const outsideRes = await request(app)
       .post('/api/v1/spots')
       .set('Authorization', `Bearer ${token(veteranId)}`)
@@ -239,8 +239,9 @@ realPgDescribe('Plan 60 destination auto-filter & moderation (real PostgreSQL)',
         }),
       );
     expect(outsideRes.status).toBe(201);
-    expect(outsideRes.body.data.status).toBe('held');
-    expect(outsideRes.body.data.moderation_reasons).toContain('OUTSIDE_BOUNDARY');
+    // Owner 2026-11-26: outside the mapped Region I boundaries is no longer a hold reason.
+    expect(outsideRes.body.data.status).toBe('published');
+    expect(outsideRes.body.data.moderation_reasons ?? []).not.toContain('OUTSIDE_BOUNDARY');
 
     // Same author exact repeat within 100m -> 409 reject
     const repeatRes = await request(app)
